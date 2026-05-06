@@ -1,0 +1,37 @@
+[package]
+name = "gmcrypto-core"
+description = "Constant-time-designed pure-Rust SM2/SM3/SM4 primitives with no_std + alloc, byte-compatible with the gmssl CLI"
+keywords = ["sm2", "sm3", "sm4", "gm", "crypto"]
+categories = ["cryptography", "no-std"]
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+crypto-bigint.workspace = true
+subtle.workspace = true
+zeroize.workspace = true
+rand_core.workspace = true
+
+[dev-dependencies]
+hex-literal.workspace = true
+rand_core = { workspace = true, features = ["getrandom"] }
+
+[features]
+default = []
+std = []   # opt-in std feature; reserved for v0.3+ wire-format file I/O
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"     # we use sm2::Sm2Curve etc.
+must_use_candidate = "allow"
