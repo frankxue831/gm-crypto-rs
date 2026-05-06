@@ -1,0 +1,15 @@
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock      # workspace policy: lib crate, do NOT commit lock file
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Tooling
+*.profraw
+flamegraph.svg
+perf.data*

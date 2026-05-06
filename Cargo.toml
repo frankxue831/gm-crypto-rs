@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = ["crates/gmcrypto-core"]
+default-members = ["crates/gmcrypto-core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/frankxue831/gm-crypto-rs"
+authors = ["Fengxiang Xue <47923440+frankxue831@users.noreply.github.com>"]
+rust-version = "1.74"
+
+[workspace.dependencies]
+crypto-bigint = { version = "0.6", default-features = false }
+subtle = { version = "2.5", default-features = false }
+zeroize = { version = "1.7", default-features = false, features = ["derive"] }
+rand_core = { version = "0.6", default-features = false }
+
+# dev-only — exempt from cargo-deny ban list
+dudect-bencher = "0.6"
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+hex-literal = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = false
