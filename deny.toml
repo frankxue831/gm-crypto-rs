@@ -1,0 +1,81 @@
+# cargo-deny configuration for gm-crypto-rs.
+#
+# Hard rule: gmcrypto-core ships only crypto-bigint, subtle, zeroize,
+# rand_core in its NORMAL + BUILD dep classes. Dev-deps (dudect-bencher,
+# criterion, hex-literal) are unrestricted because they don't reach
+# downstream consumers.
+
+[graph]
+all-features = false
+no-default-features = false
+
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+ignore = []
+
+[licenses]
+allow = ["Apache-2.0", "MIT", "BSD-3-Clause", "ISC", "Unicode-3.0", "Unicode-DFS-2016"]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+# Allowed normal+build deps in gmcrypto-core's tree. Anything else fails CI.
+allow = [
+    # The workspace's own crate.
+    { name = "gmcrypto-core" },
+
+    # Direct deps of gmcrypto-core.
+    { name = "crypto-bigint" },
+    { name = "subtle" },
+    { name = "zeroize" },
+    { name = "zeroize_derive" },
+    { name = "rand_core" },
+
+    # Transitive deps of crypto-bigint.
+    { name = "num-traits" },
+    { name = "hybrid-array" },
+    { name = "generic-array" },
+    { name = "typenum" },
+
+    # Transitive build helper of num-traits (dev-dep elevated to build via cfg).
+    { name = "autocfg" },
+
+    # Transitive deps of rand_core. The `getrandom` feature is enabled by the
+    # dev-dep configuration, but cargo's feature unification means these crates
+    # also appear in the normal-dep graph. Acceptable: getrandom is the
+    # de-facto standard for OS RNG access in the Rust ecosystem.
+    { name = "getrandom" },
+    { name = "cfg-if" },
+    { name = "libc" },
+    { name = "wasi" },                # getrandom on wasm32-wasi
+    { name = "windows-targets" },     # getrandom on windows
+    { name = "windows_aarch64_gnullvm" },
+    { name = "windows_aarch64_msvc" },
+    { name = "windows_i686_gnu" },
+    { name = "windows_i686_gnullvm" },
+    { name = "windows_i686_msvc" },
+    { name = "windows_x86_64_gnu" },
+    { name = "windows_x86_64_gnullvm" },
+    { name = "windows_x86_64_msvc" },
+
+    # Proc-macro support, transitive from zeroize_derive.
+    { name = "syn" },
+    { name = "quote" },
+    { name = "proc-macro2" },
+    { name = "unicode-ident" },
+
+    # Other transitive support that may appear depending on platform/version.
+    { name = "subtle-derive" },
+    { name = "rustc_version" },
+    { name = "semver" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
