@@ -17,6 +17,6 @@ extern crate alloc;
 extern crate std;
 
 // Module skeleton — bodies land in subsequent tasks.
-pub mod sm3;
-pub mod sm2;
 pub mod asn1;
+pub mod sm2;
+pub mod sm3;
