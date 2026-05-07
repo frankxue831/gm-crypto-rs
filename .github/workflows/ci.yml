@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'LICENSE', '.gitignore']
+  pull_request:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'LICENSE', '.gitignore']
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  build:
+    name: build & test (Rust ${{ matrix.toolchain }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, "1.74"]   # latest stable + MSRV
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust ${{ matrix.toolchain }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: rustfmt, clippy
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: cargo build
+        run: cargo build --workspace --all-targets
+      - name: cargo test
+        run: cargo test --workspace --all-targets
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  deny:
+    name: cargo-deny (no forbidden runtime deps)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny
+      - name: Run cargo-deny (excluding dev-deps)
+        run: cargo deny check --exclude-dev
