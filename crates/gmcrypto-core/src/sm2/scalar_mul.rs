@@ -51,6 +51,16 @@ pub fn mul_var(k: &Fn, p: &ProjectivePoint) -> ProjectivePoint {
     acc
 }
 
+/// Fixed-base scalar multiplication k·G. Used in signing.
+///
+/// **v0.1 implementation:** delegates to [`mul_var`] with the generator.
+/// v0.2 will replace this body with a precomputed comb table (~10-20×
+/// speedup). The public signature is stable.
+#[must_use]
+pub fn mul_g(k: &Fn) -> ProjectivePoint {
+    mul_var(k, &ProjectivePoint::generator())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,5 +127,13 @@ mod tests {
             y.retrieve(),
             U256::from_be_hex("CCEA490CE26775A52DC6EA718CC1AA600AED05FBF35E084A6632F6072DA9AD13")
         );
+    }
+
+    #[test]
+    fn mul_g_matches_mul_var_with_generator() {
+        let k = Fn::new(&U256::from_u64(0x1234_5678_9ABC_DEF0));
+        let lhs = mul_g(&k);
+        let rhs = mul_var(&k, &ProjectivePoint::generator());
+        assert!(bool::from(lhs.ct_eq(&rhs)));
     }
 }

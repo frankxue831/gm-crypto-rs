@@ -6,4 +6,4 @@ pub mod scalar_mul;
 
 pub use curve::{Fn, Fp};
 pub use point::ProjectivePoint;
-pub use scalar_mul::mul_var;
+pub use scalar_mul::{mul_g, mul_var};
