@@ -96,4 +96,26 @@ mod tests {
         let via_add = g.add(&g).add(&g).add(&g).add(&g);
         assert!(bool::from(via_mul.ct_eq(&via_add)));
     }
+
+    /// GB/T 32918.2 Appendix A.2 — sample (D, P) pair.
+    /// D = 0x3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8
+    /// P = (Px, Py) where:
+    ///   Px = 0x09F9DF311E5421A150DD7D161E4BC5C672179FAD1833FC076BB08FF356F35020
+    ///   Py = 0xCCEA490CE26775A52DC6EA718CC1AA600AED05FBF35E084A6632F6072DA9AD13
+    #[test]
+    fn gbt32918_sample_dg_yields_p() {
+        let d = Fn::new(&U256::from_be_hex(
+            "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8",
+        ));
+        let p = mul_var(&d, &ProjectivePoint::generator());
+        let (x, y) = p.to_affine().expect("D·G is not at infinity");
+        assert_eq!(
+            x.retrieve(),
+            U256::from_be_hex("09F9DF311E5421A150DD7D161E4BC5C672179FAD1833FC076BB08FF356F35020")
+        );
+        assert_eq!(
+            y.retrieve(),
+            U256::from_be_hex("CCEA490CE26775A52DC6EA718CC1AA600AED05FBF35E084A6632F6072DA9AD13")
+        );
+    }
 }
