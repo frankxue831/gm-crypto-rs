@@ -40,8 +40,7 @@ pub(crate) const GY_HEX: &str = "BC3736A2F4F6779C59BDCEE36B692153D0A9877CC62A474
 
 /// Curve param `b` as a `Fp`.
 #[must_use]
-#[allow(clippy::missing_const_for_fn)]
-pub fn b() -> Fp {
+pub const fn b() -> Fp {
     Fp::new(&U256::from_be_hex(B_HEX))
 }
 
