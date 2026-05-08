@@ -196,6 +196,39 @@ mod tests {
         assert!(bool::from(sum.is_identity()), "G + (-G) = O");
     }
 
+    /// 2G affine coordinates from the SM2 reference implementation.
+    /// Cross-validated against the Java SDK `Sm2CurveTest` and an
+    /// independent Python affine-arithmetic computation.
+    #[test]
+    fn two_g_known_affine() {
+        let g2 = ProjectivePoint::generator().double();
+        let (x, y) = g2.to_affine().expect("2G is not infinity");
+        assert_eq!(
+            x.retrieve(),
+            U256::from_be_hex("56CEFD60D7C87C000D58EF57FA73BA4D9C0DFA08C08A7331495C2E1DA3F2BD52")
+        );
+        assert_eq!(
+            y.retrieve(),
+            U256::from_be_hex("31B7E7E6CC8189F668535CE0F8EAF1BD6DE84C182F6C8E716F780D3A970A23C3")
+        );
+    }
+
+    /// 3G = 2G + G. Independent KAT over `add` (the 2G KAT only exercises `double`).
+    #[test]
+    fn three_g_known_affine() {
+        let g = ProjectivePoint::generator();
+        let g3 = g.double().add(&g);
+        let (x, y) = g3.to_affine().expect("3G is not infinity");
+        assert_eq!(
+            x.retrieve(),
+            U256::from_be_hex("A97F7CD4B3C993B4BE2DAA8CDB41E24CA13F6BD945302244E26918F1D0509EBF")
+        );
+        assert_eq!(
+            y.retrieve(),
+            U256::from_be_hex("530B5DD88C688EF5CCC5CEC08A72150F7C400EE5CD045292AAACDD037458F6E6")
+        );
+    }
+
     #[test]
     fn to_affine_round_trip_via_double() {
         let g = ProjectivePoint::generator();
