@@ -55,6 +55,7 @@ pub fn b3() -> Fp {
 mod tests {
     use super::*;
     use crypto_bigint::modular::ConstMontyParams;
+    use crypto_bigint::Invert;
 
     #[test]
     fn moduli_are_correct_size() {
@@ -73,5 +74,30 @@ mod tests {
         let b = b();
         let b3 = b3();
         assert_eq!(b3.retrieve(), (b + b + b).retrieve());
+    }
+
+    /// Sanity: Fp inverse satisfies a * a^-1 = 1 mod p, on a non-trivial input.
+    #[test]
+    fn fp_invert_round_trip() {
+        let a = Fp::new(&U256::from_u64(7));
+        let a_inv = a.invert().expect("7 is invertible mod p");
+        let one = Fp::new(&U256::ONE);
+        assert_eq!((a * a_inv).retrieve(), one.retrieve());
+    }
+
+    /// Sanity: Fn inverse on the small value 5.
+    #[test]
+    fn fn_invert_round_trip() {
+        let a = Fn::new(&U256::from_u64(5));
+        let a_inv = a.invert().expect("5 is invertible mod n");
+        let one = Fn::new(&U256::ONE);
+        assert_eq!((a * a_inv).retrieve(), one.retrieve());
+    }
+
+    /// Inversion of zero must yield `CtOption::none()` — never panics, never returns Some.
+    #[test]
+    fn invert_zero_is_none() {
+        let zero = Fp::new(&U256::ZERO);
+        assert!(bool::from(zero.invert().is_none()));
     }
 }
