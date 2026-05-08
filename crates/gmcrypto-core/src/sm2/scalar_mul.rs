@@ -8,8 +8,6 @@
 
 use crate::sm2::curve::Fn;
 use crate::sm2::point::ProjectivePoint;
-#[allow(unused_imports)]
-use crypto_bigint::Encoding;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
 /// Variable-base scalar multiplication k·P.
@@ -31,8 +29,7 @@ pub fn mul_var(k: &Fn, p: &ProjectivePoint) -> ProjectivePoint {
     let mut acc = ProjectivePoint::identity();
     let mut first = true;
 
-    #[allow(clippy::explicit_iter_loop)]
-    for byte in k_be.iter() {
+    for byte in &k_be {
         // High nibble first.
         let nibbles = [byte >> 4, byte & 0x0F];
         for &nib in &nibbles {
