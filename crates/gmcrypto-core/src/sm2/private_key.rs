@@ -6,6 +6,7 @@ use crate::sm2::scalar_mul::mul_g;
 use crypto_bigint::modular::ConstMontyParams;
 use crypto_bigint::U256;
 use subtle::{Choice, ConstantTimeEq, ConstantTimeLess, CtOption};
+use zeroize::ZeroizeOnDrop;
 
 /// SM2 private key: scalar `d ∈ [1, n-2]` together with the cached public
 /// key `d·G`.
@@ -19,13 +20,14 @@ use subtle::{Choice, ConstantTimeEq, ConstantTimeLess, CtOption};
 ///
 /// # Zeroization
 ///
-/// This type is marked for future zeroization support (no-`unsafe` Rust
-/// constraint prevents current implementation). The public key component
-/// is left intact (it is not secret).
-#[derive(Clone)]
+/// The inner scalar is zeroized when the key is dropped. The public key
+/// component is left intact (it is not secret). `ConstMontyForm` is
+/// `zeroize::DefaultIsZeroes`, which gives it a blanket `Zeroize` impl;
+/// the `ZeroizeOnDrop` derive then wires up safe-Rust drop-time wipe.
+#[derive(Clone, ZeroizeOnDrop)]
 pub struct Sm2PrivateKey {
-    #[allow(dead_code)]
     d: Fn,
+    #[zeroize(skip)]
     public: ProjectivePoint,
 }
 
