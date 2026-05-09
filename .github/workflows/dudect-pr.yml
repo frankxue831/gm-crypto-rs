@@ -1,0 +1,85 @@
+name: dudect smoke (PR gate)
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'LICENSE', '.gitignore']
+
+concurrency:
+  group: dudect-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  smoke:
+    name: timing-leak smoke (10K samples, |t|<10)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run dudect harness (smoke budget)
+        env:
+          DUDECT_SAMPLES: "10000"
+        run: |
+          set -euxo pipefail
+          cargo bench --bench timing_leaks 2>&1 | tee dudect.log
+
+      - name: Parse and gate
+        run: |
+          python3 - <<'PY'
+          # Output format from dudect-bencher 0.6 is one line per bench:
+          #   bench <name>           : n == +X.XXXM, max t = +X.XXXXX, max tau = +X.XXXXX, ...
+          # We extract the bench name and the absolute value of `max t`.
+          import re, sys, pathlib
+
+          log = pathlib.Path("dudect.log").read_text()
+          pat = re.compile(r"^bench\s+(\S+)\s*\.+\s*:.*?max t\s*=\s*([+\-]?\d+\.\d+)", re.M)
+          findings = {m.group(1): abs(float(m.group(2))) for m in pat.finditer(log)}
+
+          assert findings, f"no t-values parsed; harness output:\n{log[-1000:]}"
+
+          # Smoke gate (PR-time):
+          # - negative_control MUST flag (|t| > 10): otherwise the harness is broken.
+          # - ct_mul_g, ct_mul_var, ct_sign MUST stay below |t| < 10.
+          # ct_sign is included at the smoke budget (10K) because the diluted
+          # crypto-bigint::invert leak does not push |t| above 10 at this
+          # sample size; at the nightly 10M budget it does, and ct_sign is
+          # therefore excluded from the nightly strict gate (see
+          # dudect-nightly.yml).
+          required_high = ["negative_control"]
+          required_low  = ["ct_mul_g", "ct_mul_var", "ct_sign"]
+
+          fail = False
+          for name in required_high:
+              t = findings.get(name)
+              if t is None:
+                  print(f"FAIL: {name} not measured"); fail = True
+              elif t <= 10:
+                  print(f"FAIL: {name} |t|={t:.2f} <= 10 — harness broken")
+                  fail = True
+              else:
+                  print(f"OK:   {name} |t|={t:.2f} (must be > 10)")
+          for name in required_low:
+              t = findings.get(name)
+              if t is None:
+                  print(f"FAIL: {name} not measured"); fail = True
+              elif t > 10:
+                  print(f"FAIL: {name} |t|={t:.2f} > 10 — gross timing leak")
+                  fail = True
+              else:
+                  print(f"OK:   {name} |t|={t:.2f} (must be < 10)")
+          sys.exit(1 if fail else 0)
+          PY
+
+      - name: Upload raw log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dudect-pr-log
+          path: dudect.log
+          retention-days: 14
