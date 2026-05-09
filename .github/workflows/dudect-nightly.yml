@@ -7,7 +7,7 @@ on:
     paths:
       - 'crates/gmcrypto-core/src/**'
       - 'crates/gmcrypto-core/Cargo.toml'
-      - 'benches/**'
+      - 'crates/gmcrypto-core/benches/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/dudect-nightly.yml'
