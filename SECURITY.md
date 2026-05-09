@@ -47,26 +47,49 @@ upstream behavior — `crypto-bigint = "0.6"`'s safegcd/Bernstein-Yang inversion
 is documented as constant-time but is not constant-time across different inputs
 in practice on the observed implementation.
 
-In `sign_raw_with_id`, where the invert step (`(1+d).invert()`) is ~1-2% of
-total sign time, the diluted signal is `|tau| ≈ 0.04-0.14`, comfortably under
-the 0.20 gate. **The `ct_sign` target therefore passes the gate today.**
+There are **three** invert sites in v0.1's secret-touching code path:
 
-Two concrete consequences for v0.1 users:
+1. **`Fn::invert((1 + d) mod n)`** in `sign_raw_with_id` — operates on the
+   secret private key `d`.
+2. **`Fp::invert(Z)`** in `ProjectivePoint::to_affine()`, called from
+   `try_sign_once` *after* `mul_g(k)` — operates on `Z` derived from the
+   secret nonce `k`.
+3. **`Fp::invert(Z)`** in `to_affine()`, called from `compute_z`'s public-key
+   conversion — operates on **public** input only and reveals nothing new.
 
-1. The `Fp::invert(z)` step inside `to_affine()` (used to convert projective
-   points to affine for hashing in `compute_z`) operates on **public** point
-   coordinates. Timing variance there does not reveal secrets.
+Sites 1 and 2 are both **secret-dependent** timing surfaces in v0.1.
 
-2. The `Fn::invert((1 + d) mod n)` step inside `sign_raw_with_id` operates on
-   the secret `d`. The diluted signal is below the harness's detection
-   threshold today, but a future change to the surrounding code (e.g. a
-   different sign algorithm where invert is a larger fraction of total time,
-   or a faster underlying scalar mult that makes invert relatively more
-   significant) could push it above. v0.2 replaces this site with a
-   Fermat-style invert via `pow_bounded_exp` after first validating that the
-   `pow` path is itself constant-time.
+### Honest admission about the dudect harness's coverage
 
-This limitation is explicitly noted in `benches/timing_leaks.rs`'s module
+The in-CI `dudect-bencher` harness (`benches/timing_leaks.rs`) splits its
+`ct_sign` test classes by **private key `d`** while letting **`k` be
+fresh-random in every sample**. This design catches site (1) — the
+`(1+d).invert()` leak — diluted to `|tau| ≈ 0.04–0.14` because invert
+is ~1-2% of total sign time. The diluted signal is under the 0.20 gate,
+so `ct_sign` passes today.
+
+**The harness does not, however, detect site (2).** A nonce-dependent leak
+distributes uniformly across both classes, so it cannot show up as a
+between-class timing difference. dudect with this class assignment is
+structurally blind to nonce-only leaks. The `mul_g`/`mul_var` targets are
+class-split by scalar magnitude and so partially exercise the nonce path,
+but their `to_affine` is never called inside the timed window — so they
+also miss it.
+
+A `ct_sign` pass is therefore **not** evidence that signing is leak-free
+on the nonce path. It is evidence only that the `(1+d).invert()` leak is
+diluted under threshold at current sign-step proportions.
+
+### v0.2 plan
+
+v0.2 replaces both `Fn::invert` and `Fp::invert` at sites (1) and (2)
+with a constant-time Fermat-invert via `pow_bounded_exp` (after first
+validating the `pow` path is itself constant-time on the same harness).
+Once both sites are fixed, the harness will be reworked so that one of
+its targets is class-split by `k` (with `d` held fixed) to specifically
+exercise the nonce path that v0.1's class layout could not see.
+
+This limitation is also noted in `benches/timing_leaks.rs`'s module
 docs and tracked for the v0.2 fix.
 
 ## Other known limitations (non-goals)

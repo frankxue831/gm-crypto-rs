@@ -8,7 +8,7 @@ use crate::asn1::sig::decode_sig;
 use crate::sm2::curve::{Fn, NMod};
 use crate::sm2::public_key::Sm2PublicKey;
 use crate::sm2::scalar_mul::{mul_g, mul_var};
-use crate::sm2::sign::compute_z;
+use crate::sm2::sign::{compute_z, MAX_ID_LEN};
 use crate::sm3::Sm3;
 use crypto_bigint::modular::ConstMontyParams;
 use crypto_bigint::U256;
@@ -22,6 +22,20 @@ use subtle::ConstantTimeEq;
 #[must_use]
 #[allow(clippy::many_single_char_names)]
 pub fn verify_with_id(public: &Sm2PublicKey, id: &[u8], message: &[u8], sig_der: &[u8]) -> bool {
+    // Reject identity public key: a malicious caller could construct
+    // `Sm2PublicKey::from_point(ProjectivePoint::identity())`, and the
+    // downstream `compute_z` would then panic in `to_affine().expect(...)`.
+    // Per the function contract, "returns false on any failure mode".
+    if bool::from(public.point().is_identity()) {
+        return false;
+    }
+
+    // Per GM/T 0009 the signer ID's bit-length is encoded into a 16-bit
+    // ENTL field; ID byte-length must therefore fit in `u16 / 8 = 8191`.
+    if id.len() > MAX_ID_LEN {
+        return false;
+    }
+
     let Some((r, s)) = decode_sig(sig_der) else {
         return false;
     };
@@ -116,5 +130,36 @@ mod tests {
         // Garbage signature bytes.
         assert!(!verify_with_id(&pk, b"id", b"msg", &[0u8; 8]));
         assert!(!verify_with_id(&pk, b"id", b"msg", &[]));
+    }
+
+    /// `Sm2PublicKey::from_point` is infallible by design (point validity
+    /// is documented as the caller's responsibility), so a malicious
+    /// caller could construct a public key from `ProjectivePoint::identity()`.
+    /// The earlier code panicked inside `compute_z`'s `to_affine().expect(...)`;
+    /// `verify_with_id` now rejects identity public keys at the API
+    /// boundary, returning `false` per the documented contract.
+    #[test]
+    fn identity_public_key_rejected_no_panic() {
+        use crate::sm2::point::ProjectivePoint;
+        let pk = Sm2PublicKey::from_point(ProjectivePoint::identity());
+        // Some valid-looking DER for r=1, s=1.
+        let bogus_sig = [0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01];
+        // No panic; just `false`.
+        assert!(!verify_with_id(&pk, b"id", b"msg", &bogus_sig));
+    }
+
+    /// Verify must reject IDs whose bit-length exceeds `u16::MAX`
+    /// (i.e. byte length above `MAX_ID_LEN = 8191`). Earlier the
+    /// `ENTL_A` field silently wrapped to a non-spec value.
+    #[test]
+    fn over_long_id_rejected() {
+        let d =
+            U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
+        let key = Sm2PrivateKey::new(d).expect("valid");
+        let pk = Sm2PublicKey::from_point(key.public_key());
+        let too_long = alloc::vec![0u8; crate::sm2::sign::MAX_ID_LEN + 1];
+        // Doesn't matter what the signature is — must be rejected before
+        // ever touching it.
+        assert!(!verify_with_id(&pk, &too_long, b"msg", &[0u8; 8]));
     }
 }

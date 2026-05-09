@@ -19,15 +19,37 @@
 //!
 //! Direct measurement on this harness shows `|tau| ≈ 0.70` for
 //! `Fn::invert((1+d) mod n)` between two random non-degenerate `d`
-//! values. This is the dominant timing signal when invert is exercised
-//! in isolation. Inside `sign_raw_with_id`, where invert is ~1-2% of
-//! total sign time, the signal dilutes to `|tau| ≈ 0.04-0.14` — within
-//! the harness's `|tau| < 0.20` gate.
+//! values. This is the dominant signal when invert is exercised in
+//! isolation. Inside `sign_raw_with_id`, where invert is ~1-2% of total
+//! sign time, the signal dilutes to `|tau| ≈ 0.04-0.14` — within the
+//! harness's `|tau| < 0.20` gate, so `ct_sign` passes today.
 //!
-//! v0.2 will replace `(1+d).invert()` with a Fermat-invert via
-//! constant-time `pow_bounded_exp`, after first validating that the
-//! `pow` path is itself actually constant-time. See `SECURITY.md` for
-//! the release-notes-level statement.
+//! # Honest admission: this class-split is blind to nonce-path leaks
+//!
+//! `ct_sign` splits its two classes by private key `d` and lets the
+//! per-sample nonce `k` be fresh-random in every sample of every class.
+//! This catches the `(1+d).invert()` leak (diluted as above), but it
+//! is **structurally blind** to a nonce-only leak — for example the
+//! `Fp::invert(Z)` inside `kg.to_affine()` after `mul_g(k)`, where `Z`
+//! is derived from the secret `k`. Such a leak distributes uniformly
+//! across both classes and cannot show up as a between-class timing
+//! difference.
+//!
+//! `ct_mul_g` / `ct_mul_var` are class-split by scalar magnitude and
+//! so partially exercise the nonce path, but they don't call
+//! `to_affine` inside the timed window, so they also miss this site.
+//!
+//! A `ct_sign` pass is therefore **not** evidence that signing is
+//! leak-free on the nonce path. It is evidence only that the `(1+d)`
+//! invert leak stays under the gate at current sign-step proportions.
+//! See `SECURITY.md`'s "Known v0.1 limitation" section for the full
+//! posture.
+//!
+//! v0.2 replaces both secret-touching invert sites with a Fermat-invert
+//! via `pow_bounded_exp` (after first validating the `pow` path is
+//! itself constant-time) and reworks the harness to add a class split
+//! by `k` (with `d` held fixed) to specifically exercise the nonce
+//! path the v0.1 class layout cannot see.
 //!
 //! # Why we gate on `|tau|`, not `|t|`
 //!

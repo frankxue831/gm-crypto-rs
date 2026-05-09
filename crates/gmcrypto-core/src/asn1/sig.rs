@@ -71,8 +71,37 @@ fn read_integer(input: &[u8]) -> Option<(U256, &[u8])> {
         return None;
     }
     let (int_bytes, rest_after) = rest.split_at(int_len);
-    // Strip a single leading 0x00 if present (DER's positive-int padding).
-    let bytes = if int_bytes.first() == Some(&0x00) && int_bytes.len() > 1 {
+
+    // Strict DER canonical-encoding rules (X.690 §8.3.2 / §10.2):
+    //
+    // - Length ≥ 1 (an INTEGER cannot be empty).
+    // - For positive integers, the high bit of the first content byte
+    //   must be clear; otherwise a leading 0x00 is required to
+    //   disambiguate from a two's-complement negative.
+    // - That leading-0x00 padding is allowed *only* when needed:
+    //   if the first byte is 0x00 and the second byte's high bit
+    //   is also clear, the encoding is non-canonical (BER, not DER).
+    // - SM2 r/s are positive scalars in `[1, n-1]`, so a top-bit-set
+    //   first byte is unambiguously a malformed signature, not a
+    //   negative number we should accept.
+    //
+    // Accepting non-canonical or sign-bit-negative encodings would
+    // create signature malleability — multiple distinct DER blobs
+    // mapping to the same (r, s).
+    if int_bytes.is_empty() {
+        return None;
+    }
+    if int_bytes[0] & 0x80 != 0 {
+        // High bit set on first byte → would be negative in two's
+        // complement; SM2 has no such signatures.
+        return None;
+    }
+    let bytes = if int_bytes[0] == 0x00 {
+        // The leading 0x00 must be followed by a high-bit-set byte
+        // (otherwise it's redundant padding — non-canonical).
+        if int_bytes.len() < 2 || int_bytes[1] & 0x80 == 0 {
+            return None;
+        }
         &int_bytes[1..]
     } else {
         int_bytes
@@ -162,5 +191,42 @@ mod tests {
         assert!(decode_sig(&[0x30]).is_none()); // truncated
         assert!(decode_sig(&[0x31, 0x00]).is_none()); // wrong tag
         assert!(decode_sig(&[0x30, 0x05, 0x02, 0x01, 0x01]).is_none()); // body shorter than declared
+    }
+
+    /// Strict DER: redundant leading 0x00 (BER-style) must be rejected.
+    /// Encoding INTEGER 1 as `02 02 00 01` is non-canonical; canonical
+    /// is `02 01 01`.
+    #[test]
+    fn rejects_non_canonical_leading_zero() {
+        // SEQ { INTEGER 0x00 0x01, INTEGER 0x01 }
+        let bad = [0x30, 0x07, 0x02, 0x02, 0x00, 0x01, 0x02, 0x01, 0x01];
+        assert!(
+            decode_sig(&bad).is_none(),
+            "non-canonical 00-pad on small int must be rejected"
+        );
+    }
+
+    /// Strict DER: a sign-bit-set first byte without 0x00 padding would
+    /// represent a negative integer in two's complement. SM2 r/s are
+    /// always positive in `[1, n-1]`, so this is malformed.
+    #[test]
+    fn rejects_negative_integer_encoding() {
+        // SEQ { INTEGER 0x80, INTEGER 0x01 }
+        let bad = [0x30, 0x06, 0x02, 0x01, 0x80, 0x02, 0x01, 0x01];
+        assert!(
+            decode_sig(&bad).is_none(),
+            "high-bit-set first byte without 00 pad must be rejected"
+        );
+    }
+
+    /// Strict DER: empty INTEGER content is not a valid encoding.
+    #[test]
+    fn rejects_empty_integer() {
+        // SEQ { INTEGER (length 0), INTEGER 0x01 }
+        let bad = [0x30, 0x05, 0x02, 0x00, 0x02, 0x01, 0x01];
+        assert!(
+            decode_sig(&bad).is_none(),
+            "empty INTEGER content must be rejected"
+        );
     }
 }

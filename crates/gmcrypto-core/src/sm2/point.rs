@@ -153,7 +153,19 @@ impl ProjectivePoint {
     }
 
     /// Convert to affine (x, y) coordinates. Returns `None` for the identity
-    /// point (where Z = 0). The Z-inverse is constant-time (Bernstein-Yang).
+    /// point (where Z = 0).
+    ///
+    /// # Constant-time caveat
+    ///
+    /// The Z-inverse goes through `crypto-bigint = 0.6`'s
+    /// `ConstMontyForm::invert` (safegcd / Bernstein-Yang), which is
+    /// **documented** as constant-time but direct measurement on the
+    /// project's dudect harness shows `|tau| ≈ 0.70` between different
+    /// inputs. Callers that pass secret-derived `Z` (notably `mul_g(k)`
+    /// inside the SM2 sign retry loop, where `k` is the secret nonce)
+    /// inherit a measurable timing side-channel until v0.2 replaces the
+    /// invert site with a Fermat-style `pow_bounded_exp`.
+    /// See `SECURITY.md` for the full posture.
     #[must_use]
     pub fn to_affine(&self) -> Option<(Fp, Fp)> {
         let z_inv: subtle::CtOption<Fp> = self.z.invert();

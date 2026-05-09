@@ -47,15 +47,58 @@ the project follows [Semantic Versioning](https://semver.org/).
     round-trip.
   - 2G / 3G points cross-validated against an independent Python derivation.
 
+### Hardening (pre-release)
+
+The following issues were found and fixed during a pre-release review;
+listing them so the public history records why v0.1 ships with the
+behavior it does. Reviewer credit: external code review caught all
+five.
+
+- **Verify panicked on identity public key.** A caller could construct
+  `Sm2PublicKey::from_point(ProjectivePoint::identity())` and then
+  `verify_with_id` would panic inside `compute_z`'s `to_affine()`,
+  contradicting the documented "returns false on any failure mode"
+  contract. Fixed: `verify_with_id` rejects identity public keys at
+  the API boundary. New regression test
+  `verify::tests::identity_public_key_rejected_no_panic`.
+- **DER decoder accepted non-canonical INTEGER encodings.** The
+  previous `read_integer` stripped a leading `0x00` without checking
+  the X.690 canonical-encoding rules and did not reject sign-bit-set
+  first bytes (negative integers). This created a signature
+  malleability surface — multiple distinct DER blobs mapping to the
+  same `(r, s)`. Fixed: strict canonical check rejects redundant
+  `00`-pad, sign-bit-set first byte, and zero-length INTEGER content.
+  Three new regression tests in `asn1::sig::tests`.
+- **Signer-ID length silently wrapped at 8192 bytes.** `compute_z`
+  computed `ENTL_A` via `(id.len() as u16).wrapping_mul(8)`, so IDs
+  above 8191 bytes produced non-spec ENTL_A values; sign-with-itself
+  worked but interop broke. Fixed: `MAX_ID_LEN = 8191` const exposed;
+  `sign_with_id` returns `SignError::Failed`, `verify_with_id` returns
+  `false`. Two new regression tests.
+- **README first-screen still advertised SM4.** v0.1 ships SM2 + SM3
+  only; SM4 lands in v0.2. Fixed.
+- **Honest disclosure of the dudect harness's coverage gap.** The
+  harness can detect leaks on the secret `d` (currently diluted under
+  the gate) but not on the secret nonce `k`. Specifically the
+  `Fp::invert(Z)` inside `kg.to_affine()` after `mul_g(k)` is a
+  nonce-dependent timing surface that the v0.1 class layout cannot
+  see. Documented in `SECURITY.md`, the harness module docs, and
+  the README. v0.2 fixes both invert sites and adds a `k`-class-split
+  harness target.
+
 ### Known limitations
 
-- **`crypto-bigint::ConstMontyForm::invert` is not constant-time across inputs.**
-  Direct measurement shows `|tau| ≈ 0.70` in isolation. Inside `sign_raw_with_id`
-  the diluted signal is `|tau| ≈ 0.04-0.14`, under the 0.20 gate, so the
-  harness still passes — but this is the dominant residual leak vector. v0.2
-  replaces `(1+d).invert()` with a Fermat-invert via constant-time
-  `pow_bounded_exp`, after first validating the `pow` path. See
-  [`SECURITY.md`](SECURITY.md).
+- **`crypto-bigint::ConstMontyForm::invert` is not constant-time across
+  inputs.** Three invert sites in v0.1's secret-touching code path:
+  - `Fn::invert((1 + d) mod n)` — secret-dependent. Diluted to
+    `|tau| ≈ 0.04-0.14` in `sign_raw_with_id`; under the harness's
+    0.20 gate.
+  - `Fp::invert(Z)` in `to_affine()` after `mul_g(k)` —
+    **nonce-dependent**. Not caught by v0.1's class layout.
+  - `Fp::invert(Z)` in `to_affine()` from `compute_z`'s public-key
+    conversion — public input only.
+  v0.2 replaces the secret-touching sites with constant-time
+  Fermat-invert via `pow_bounded_exp`. See `SECURITY.md`.
 - **DER `encode_sig` is variable-time on `(r, s)` byte patterns.** `(r, s)`
   is public output, so this leak does not reveal secrets — but the harness
   target `ct_sign` deliberately goes through `sign_raw_with_id` (no DER) to

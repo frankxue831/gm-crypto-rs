@@ -1,7 +1,8 @@
 # gm-crypto-rs
 
-Constant-time-designed pure-Rust SM2 / SM3 / SM4 SDK for Chinese national
+Constant-time-designed pure-Rust SM2 / SM3 SDK for Chinese national
 cryptography. Companion to [`gm-crypto-lite-java`](https://github.com/frankxue831/gm-crypto-lite-java).
+v0.2 will add SM4 and SM2 encrypt/decrypt — see the roadmap below.
 
 [![CI](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/ci.yml)
 [![dudect smoke](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/dudect-pr.yml/badge.svg)](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/dudect-pr.yml)
@@ -13,15 +14,23 @@ or vendor.
 
 ## What this is
 
-A small, auditable, pure-Rust SM2/SM3/SM4 SDK whose central differentiating
+A small, auditable, pure-Rust SM2 + SM3 SDK whose central differentiating
 commitment is that the SM2 private-key path uses **constant-time-designed code
 paths guarded by an in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/)
-detectable-leak regression harness**.
+detectable-leak regression harness**. SM4 lands in v0.2.
 
 The harness reports timing-leak detection events. **It does not prove
 constant-time.** Low `|tau|` values mean the test could not detect a leak with
 the budget given, not that no leak exists. Language taken directly from
 `dudect-bencher`'s own docs.
+
+v0.1 has a known limitation worth surfacing here, not just in `SECURITY.md`:
+the harness's `ct_sign` target splits classes by the private key `d`, so it
+catches `(1+d).invert()` leaks (currently diluted under the gate) but is
+**structurally blind** to leaks on the per-sample nonce `k` — including
+the `Fp::invert(Z)` inside `kg.to_affine()` after `mul_g(k)`. v0.2 fixes
+both invert sites and reworks the harness to specifically exercise the
+nonce path. See [`SECURITY.md`](SECURITY.md) for the full posture.
 
 The differentiator vs. existing Rust SM2 crates (notably
 [`RustCrypto/sm2`](https://docs.rs/sm2/), which already aims for constant-time

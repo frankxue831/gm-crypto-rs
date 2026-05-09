@@ -15,20 +15,39 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 /// Default signer ID per GM/T 0009: 16 ASCII bytes "1234567812345678".
 pub const DEFAULT_SIGNER_ID: &[u8; 16] = b"1234567812345678";
 
+/// Maximum signer-ID length in bytes.
+///
+/// Per GM/T 0009, the `Z_A` computation prepends `ENTL_A`, the ID's
+/// bit-length encoded as a 16-bit big-endian field. The byte length
+/// must therefore satisfy `id.len() * 8 ≤ u16::MAX`, i.e.
+/// `id.len() ≤ 8191`. Inputs above this would silently wrap to a
+/// non-spec `ENTL_A` in earlier code paths; sign / verify now reject
+/// such inputs at the API boundary.
+pub const MAX_ID_LEN: usize = (u16::MAX as usize) / 8;
+
 /// Compute `Z_A`: `SM3(ENTL_A || ID_A || a || b || x_G || y_G || x_A || y_A)`.
 ///
 /// `ENTL_A` is the 16-bit big-endian bit-length of `ID_A`.
 ///
 /// # Panics
 ///
-/// Panics if the public key point is not finite (at infinity).
+/// Panics if the public key point is not finite (at infinity), or if
+/// `id.len() > MAX_ID_LEN` (8191 bytes — the largest length whose
+/// bit-count fits in `u16`). API-level callers (`sign_with_id`,
+/// `verify_with_id`) reject over-length IDs before reaching this
+/// function, so the assertion only fires on direct misuse.
 #[must_use]
 pub fn compute_z(public: &Sm2PublicKey, id: &[u8]) -> [u8; DIGEST_SIZE] {
+    assert!(
+        id.len() <= MAX_ID_LEN,
+        "id.len() exceeds MAX_ID_LEN — ENTL_A would silently wrap"
+    );
     let mut h = Sm3::new();
 
-    // ENTL_A: 16-bit BE bit-length of ID.
+    // ENTL_A: 16-bit BE bit-length of ID. The above assertion guarantees
+    // the multiplication does not overflow `u16`.
     #[allow(clippy::cast_possible_truncation)]
-    let entl: u16 = (id.len() as u16).wrapping_mul(8);
+    let entl: u16 = (id.len() as u16) * 8;
     h.update(&entl.to_be_bytes());
     h.update(id);
 
@@ -75,8 +94,11 @@ pub enum SignError {
 ///
 /// # Errors
 ///
-/// Returns `SignError::Failed` only if every retry produced an invalid
-/// candidate (`r == 0`, `r + k == n`, or `s == 0`).
+/// Returns `SignError::Failed` if `id.len() > MAX_ID_LEN` (the
+/// `ENTL_A` field is 16-bit) or if every retry in the budget produced
+/// an invalid candidate (`r == 0`, `r + k == n`, or `s == 0`). Failure
+/// modes are deliberately collapsed to one variant per the
+/// failure-mode-invariant policy; see `SECURITY.md`.
 pub fn sign_with_id<R: CryptoRng + RngCore>(
     key: &Sm2PrivateKey,
     id: &[u8],
@@ -112,6 +134,9 @@ pub fn sign_raw_with_id<R: CryptoRng + RngCore>(
     message: &[u8],
     rng: &mut R,
 ) -> Result<(U256, U256), SignError> {
+    if id.len() > MAX_ID_LEN {
+        return Err(SignError::Failed);
+    }
     let public = Sm2PublicKey::from_point(key.public_key());
     let z = compute_z(&public, id);
 
@@ -231,6 +256,20 @@ mod tests {
             z_hex,
             "26db4bc1839bd22e97e1dab667ec5e0a730d5e16521398b4435c576a93afd7ed"
         );
+    }
+
+    /// Sign rejects IDs above `MAX_ID_LEN`. Earlier code paths silently
+    /// wrapped the `ENTL_A` field via `wrapping_mul(8)`; the API now
+    /// rejects at the boundary.
+    #[test]
+    fn sign_over_long_id_rejected() {
+        use rand_core::OsRng;
+        let d =
+            U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
+        let key = Sm2PrivateKey::new(d).expect("valid scalar");
+        let too_long = alloc::vec![0u8; MAX_ID_LEN + 1];
+        let result = sign_with_id(&key, &too_long, b"msg", &mut OsRng);
+        assert_eq!(result, Err(SignError::Failed));
     }
 }
 
