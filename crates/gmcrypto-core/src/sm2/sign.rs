@@ -83,6 +83,35 @@ pub fn sign_with_id<R: CryptoRng + RngCore>(
     message: &[u8],
     rng: &mut R,
 ) -> Result<Vec<u8>, SignError> {
+    let (r, s) = sign_raw_with_id(key, id, message, rng)?;
+    Ok(encode_sig(&r, &s))
+}
+
+/// Sign and return the raw `(r, s)` scalar pair *without* DER encoding.
+///
+/// This is the constant-time-relevant work in [`sign_with_id`]: it runs
+/// the masked-select retry loop and produces a valid `(r, s)`. The DER
+/// encoding step in [`sign_with_id`] is variable-time on `(r, s)` (which
+/// is public output), so timing-leak detection harnesses should target
+/// this function instead of [`sign_with_id`] to test the crypto path in
+/// isolation.
+///
+/// Hidden from rustdoc; this surface is provided for the dudect harness
+/// and is not covered by the v0.1 SemVer stability promise. Use
+/// [`sign_with_id`] in application code.
+///
+/// # Errors
+///
+/// Same as [`sign_with_id`]: returns `SignError::Failed` only if every
+/// retry produced an invalid candidate (`r == 0`, `r + k == n`, or
+/// `s == 0`).
+#[doc(hidden)]
+pub fn sign_raw_with_id<R: CryptoRng + RngCore>(
+    key: &Sm2PrivateKey,
+    id: &[u8],
+    message: &[u8],
+    rng: &mut R,
+) -> Result<(U256, U256), SignError> {
     let public = Sm2PublicKey::from_point(key.public_key());
     let z = compute_z(&public, id);
 
@@ -102,7 +131,7 @@ pub fn sign_with_id<R: CryptoRng + RngCore>(
 
     let pair: Option<RsPair> = chosen.into();
     let pair = pair.ok_or(SignError::Failed)?;
-    Ok(encode_sig(&pair.r, &pair.s))
+    Ok((pair.r, pair.s))
 }
 
 #[derive(Clone, Copy, Debug, Default)]

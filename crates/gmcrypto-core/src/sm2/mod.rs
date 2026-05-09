@@ -13,5 +13,5 @@ pub use point::ProjectivePoint;
 pub use private_key::Sm2PrivateKey;
 pub use public_key::Sm2PublicKey;
 pub use scalar_mul::{mul_g, mul_var};
-pub use sign::{compute_z, sign_with_id, SignError, DEFAULT_SIGNER_ID};
+pub use sign::{compute_z, sign_raw_with_id, sign_with_id, SignError, DEFAULT_SIGNER_ID};
 pub use verify::verify_with_id;

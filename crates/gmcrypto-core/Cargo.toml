@@ -20,6 +20,12 @@ rand_core.workspace = true
 [dev-dependencies]
 hex-literal.workspace = true
 rand_core = { workspace = true, features = ["getrandom"] }
+dudect-bencher.workspace = true
+
+[[bench]]
+name = "timing_leaks"
+path = "../../benches/timing_leaks.rs"
+harness = false
 
 [features]
 default = []
