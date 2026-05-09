@@ -34,10 +34,10 @@ jobs:
           components: rustfmt, clippy
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-      - name: cargo build
+      - name: cargo build (all targets, including bench compile-only)
         run: cargo build --workspace --all-targets
-      - name: cargo test
-        run: cargo test --workspace --all-targets
+      - name: cargo test (tests + doctests; benches excluded — see dudect-pr.yml)
+        run: cargo test --workspace
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
       - name: cargo clippy
