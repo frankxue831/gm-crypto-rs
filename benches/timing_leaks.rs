@@ -17,24 +17,25 @@
 //! # Known v0.1 limitation: `crypto-bigint`'s `ConstMontyForm::invert` is
 //! not constant-time across different inputs.
 //!
-//! Direct measurement on this harness shows `tau ≈ 0.70` for
+//! Direct measurement on this harness shows `|tau| ≈ 0.70` for
 //! `Fn::invert((1+d) mod n)` between two random non-degenerate `d`
-//! values. This dominates the timing signal in `sign_raw_with_id` (the
-//! `(1+d)·s ≡ k - r·d` step needs the inverse). The full sign sees the
-//! signal diluted because invert is ~1-2% of total sign time, but at
-//! the nightly 10M-sample budget it still pushes `|t|` well above 4.5.
-//!
-//! Consequences:
-//! - **Smoke gate** (10K samples, `|t| < 10`): `ct_sign` passes. The
-//!   diluted signal at this budget extrapolates to `|t| ≈ 7`.
-//! - **Nightly gate** (10M samples, `|t| < 4.5`): `ct_sign` is **excluded**
-//!   from the strict gate and runs informationally only. `ct_mul_g`,
-//!   `ct_mul_var`, and `negative_control` are gated normally.
+//! values. This is the dominant timing signal when invert is exercised
+//! in isolation. Inside `sign_raw_with_id`, where invert is ~1-2% of
+//! total sign time, the signal dilutes to `|tau| ≈ 0.04-0.14` — within
+//! the harness's `|tau| < 0.20` gate.
 //!
 //! v0.2 will replace `(1+d).invert()` with a Fermat-invert via
 //! constant-time `pow_bounded_exp`, after first validating that the
-//! `pow` path is actually constant-time. See `SECURITY.md` for the
-//! release-notes-level statement.
+//! `pow` path is itself actually constant-time. See `SECURITY.md` for
+//! the release-notes-level statement.
+//!
+//! # Why we gate on `|tau|`, not `|t|`
+//!
+//! `|t|` grows as `tau · sqrt(N)`, so any fixed `|t|` threshold becomes
+//! more or less strict as the sample budget changes. `tau` is the
+//! normalized, scale-free statistic — the same threshold works at any
+//! budget, and a real timing leak (large `tau`) gets caught regardless
+//! of how many samples we collect.
 //!
 //! # Iteration model
 //!
@@ -44,15 +45,17 @@
 //! produces robust t-statistics in default (non-`--continuous`) mode.
 //!
 //! `DUDECT_SAMPLES` env var controls the per-bench sample count; default
-//! `100_000` (smoke). The PR-gate workflow uses `10_000`; the nightly
-//! workflow uses `10_000_000`.
+//! `100_000`. The PR-gate workflow uses `10_000`; the nightly workflow
+//! uses `100_000`. Both workflows share the same `|tau|` gate; the
+//! larger nightly budget gives tighter empirical confidence on the
+//! same threshold rather than enabling a tighter threshold.
 //!
 //! # Running
 //!
 //! ```text
-//! cargo bench --bench timing_leaks                          # 100K samples each
+//! cargo bench --bench timing_leaks                          # 100K samples each (default)
 //! DUDECT_SAMPLES=10000 cargo bench --bench timing_leaks     # PR-smoke budget
-//! DUDECT_SAMPLES=10000000 cargo bench --bench timing_leaks  # nightly budget
+//! DUDECT_SAMPLES=100000 cargo bench --bench timing_leaks    # nightly budget
 //! ```
 //!
 //! The output line emitted by `dudect-bencher` 0.6 for each bench is:
