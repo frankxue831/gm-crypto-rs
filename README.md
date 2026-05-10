@@ -3,8 +3,8 @@
 Constant-time-designed pure-Rust SM2 / SM3 / SM4 SDK for Chinese national
 cryptography (GB/T 32905 / 32918 / 32907 / GM/T 0009). Sign / verify,
 public-key encrypt / decrypt, SM4-CBC, HMAC-SM3, PBKDF2-HMAC-SM3 — all
-secret-touching paths guarded by an in-CI `dudect-bencher` detectable-
-leak regression harness.
+secret-touching paths guarded by an in-CI `dudect-bencher`
+detectable-leak regression harness.
 
 [![Crates.io](https://img.shields.io/crates/v/gmcrypto-core.svg)](https://crates.io/crates/gmcrypto-core)
 [![Documentation](https://docs.rs/gmcrypto-core/badge.svg)](https://docs.rs/gmcrypto-core)
