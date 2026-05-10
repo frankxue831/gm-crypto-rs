@@ -58,6 +58,30 @@ impl Sm2PrivateKey {
     pub const fn public_key(&self) -> ProjectivePoint {
         self.public
     }
+
+    /// Construct from a 32-byte big-endian scalar. Wraps
+    /// [`Sm2PrivateKey::new`]; the same `[1, n-2]` constant-time
+    /// range check applies. Returns `CtOption::none()` for any
+    /// out-of-range input.
+    #[must_use]
+    pub fn from_sec1_be(bytes: &[u8; 32]) -> CtOption<Self> {
+        let d = U256::from_be_slice(bytes);
+        Self::new(d)
+    }
+
+    /// Big-endian 32-byte serialization of the scalar.
+    ///
+    /// **`#[doc(hidden)]` and not SemVer-stable** (Q7.2 decision —
+    /// same posture as v0.2's `sign_raw_with_id`). Used internally
+    /// by `pkcs8::encrypted_encode` to emit the scalar into a SEC1
+    /// ECPrivateKey wrapper before PBES2 encryption. **Caller must
+    /// zeroize the returned array** before letting it leave their
+    /// stack frame; the value is the secret scalar in plaintext.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn to_sec1_be(&self) -> [u8; 32] {
+        self.d.retrieve().to_be_bytes().into()
+    }
 }
 
 impl core::fmt::Debug for Sm2PrivateKey {
@@ -101,5 +125,35 @@ mod tests {
     fn d_one_accepted() {
         let key = Sm2PrivateKey::new(U256::ONE);
         assert!(bool::from(key.is_some()));
+    }
+
+    /// `from_sec1_be` round-trips a valid scalar.
+    #[test]
+    fn from_sec1_be_round_trip() {
+        let bytes: [u8; 32] = [
+            0x39, 0x45, 0x20, 0x8F, 0x7B, 0x21, 0x44, 0xB1, 0x3F, 0x36, 0xE3, 0x8A, 0xC6, 0xD3,
+            0x9F, 0x95, 0x88, 0x93, 0x93, 0x69, 0x28, 0x60, 0xB5, 0x1A, 0x42, 0xFB, 0x81, 0xEF,
+            0x4D, 0xF7, 0xC5, 0xB8,
+        ];
+        let key = Sm2PrivateKey::from_sec1_be(&bytes).expect("valid scalar");
+        assert_eq!(key.to_sec1_be(), bytes);
+    }
+
+    /// `from_sec1_be` rejects out-of-range scalars (zero).
+    #[test]
+    fn from_sec1_be_rejects_zero() {
+        let bytes = [0u8; 32];
+        let key = Sm2PrivateKey::from_sec1_be(&bytes);
+        assert!(bool::from(key.is_none()));
+    }
+
+    /// `from_sec1_be` rejects `d == n - 1`.
+    #[test]
+    fn from_sec1_be_rejects_n_minus_one() {
+        let n = *Fn::MODULUS.as_ref();
+        let n_minus_one = n.wrapping_sub(&U256::ONE);
+        let bytes: [u8; 32] = n_minus_one.to_be_bytes().into();
+        let key = Sm2PrivateKey::from_sec1_be(&bytes);
+        assert!(bool::from(key.is_none()));
     }
 }

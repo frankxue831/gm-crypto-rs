@@ -225,8 +225,9 @@ fn all_zero_ct(buf: &[u8]) -> bool {
 /// curve could leak bits of the recipient's private key via
 /// `d_B * C1`.
 ///
-/// Visible to `sm2::decrypt`; not part of the public API.
-pub(super) fn point_on_curve(x: &Fp, y: &Fp) -> bool {
+/// Visible to the rest of the crate (W2's `spki` / `sec1` reuse it
+/// at the import boundary). Not part of the public API.
+pub(crate) fn point_on_curve(x: &Fp, y: &Fp) -> bool {
     let three = Fp::new(&U256::from_u64(3));
     let lhs = *y * *y;
     let rhs = (*x) * (*x) * (*x) - three * (*x) + b();
@@ -234,8 +235,9 @@ pub(super) fn point_on_curve(x: &Fp, y: &Fp) -> bool {
 }
 
 /// Construct a [`ProjectivePoint`] from validated affine `(x, y)`
-/// coordinates. Visible to `sm2::decrypt`; not part of the public API.
-pub(super) const fn projective_from_affine(x: Fp, y: Fp) -> ProjectivePoint {
+/// coordinates. Visible to the rest of the crate (W2's `spki` / `sec1`
+/// reuse it after `point_on_curve`); not part of the public API.
+pub(crate) const fn projective_from_affine(x: Fp, y: Fp) -> ProjectivePoint {
     ProjectivePoint {
         x,
         y,
