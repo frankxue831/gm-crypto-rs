@@ -4,9 +4,9 @@ Constant-time-designed pure-Rust SM2 / SM3 SDK for Chinese national
 cryptography. v0.2 will add SM4 and SM2 encrypt/decrypt — see the
 roadmap below.
 
-[![CI](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/ci.yml)
-[![dudect smoke](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/dudect-pr.yml/badge.svg)](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/dudect-pr.yml)
-[![dudect nightly](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/dudect-nightly.yml/badge.svg)](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/dudect-nightly.yml)
+[![Crates.io](https://img.shields.io/crates/v/gmcrypto-core.svg)](https://crates.io/crates/gmcrypto-core)
+[![Documentation](https://docs.rs/gmcrypto-core/badge.svg)](https://docs.rs/gmcrypto-core)
+[![License](https://img.shields.io/crates/l/gmcrypto-core.svg)](https://crates.io/crates/gmcrypto-core)
 
 **Personal project notice:** not affiliated with, endorsed by, sponsored by, or
 certified by any upstream cryptography project, payment gateway, standards body,
@@ -30,7 +30,7 @@ catches `(1+d).invert()` leaks (currently diluted under the gate) but is
 **structurally blind** to leaks on the per-sample nonce `k` — including
 the `Fp::invert(Z)` inside `kg.to_affine()` after `mul_g(k)`. v0.2 fixes
 both invert sites and reworks the harness to specifically exercise the
-nonce path. See [`SECURITY.md`](https://github.com/frankxue831/gm-crypto-rs/blob/main/SECURITY.md) for the full posture.
+nonce path. See [`SECURITY.md`](SECURITY.md) for the full posture.
 
 The differentiator vs. existing Rust SM2 crates (notably
 [`RustCrypto/sm2`](https://docs.rs/sm2/), which already aims for constant-time
@@ -69,7 +69,7 @@ the design intent in isolation.
   confidence) modes, plus a deliberately-leaky negative control that proves the
   harness can detect leaks.
 
-See [`SECURITY.md`](https://github.com/frankxue831/gm-crypto-rs/blob/main/SECURITY.md) for v0.1's known constant-time limitations,
+See [`SECURITY.md`](SECURITY.md) for v0.1's known constant-time limitations,
 notably the dependency on `crypto-bigint::ConstMontyForm::invert`.
 
 ## Roadmap
@@ -104,7 +104,7 @@ assert!(verify_with_id(&public, DEFAULT_SIGNER_ID, b"hello", &sig));
 
 ## Threat model
 
-See [`SECURITY.md`](https://github.com/frankxue831/gm-crypto-rs/blob/main/SECURITY.md). Briefly: server-side use, dedicated host,
+See [`SECURITY.md`](SECURITY.md). Briefly: server-side use, dedicated host,
 operator-trusted, network MITM in scope, side-channel attacks beyond what the
 dudect harness covers are NOT in scope.
 
@@ -125,7 +125,7 @@ GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
 
 ## License
 
-Apache-2.0. See [`LICENSE`](https://github.com/frankxue831/gm-crypto-rs/blob/main/LICENSE).
+Apache-2.0. See [`LICENSE`](LICENSE).
 
 Some reference outputs use the upstream [`gmssl`](https://github.com/guanzhi/GmSSL)
 tool. This project is independent of that project.
