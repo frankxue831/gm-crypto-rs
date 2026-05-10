@@ -49,10 +49,11 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ### Hardening (pre-release)
 
-The following issues were found and fixed during a pre-release review;
+The following issues were found and fixed during pre-release review;
 listing them so the public history records why v0.1 ships with the
-behavior it does. Reviewer credit: external code review caught all
-five.
+behavior it does. All of these were caught by external code review
+across two review passes — the first five in the initial pass, the
+last two in a follow-up pass.
 
 - **Verify panicked on identity public key.** A caller could construct
   `Sm2PublicKey::from_point(ProjectivePoint::identity())` and then
@@ -71,10 +72,12 @@ five.
   Three new regression tests in `asn1::sig::tests`.
 - **Signer-ID length silently wrapped at 8192 bytes.** `compute_z`
   computed `ENTL_A` via `(id.len() as u16).wrapping_mul(8)`, so IDs
-  above 8191 bytes produced non-spec ENTL_A values; sign-with-itself
-  worked but interop broke. Fixed: `MAX_ID_LEN = 8191` const exposed;
-  `sign_with_id` returns `SignError::Failed`, `verify_with_id` returns
-  `false`. Two new regression tests.
+  above 8191 bytes produced non-spec `ENTL_A` values. Two SM2
+  implementations both running this old code would agree (the wrap
+  is identical on both sides), but interop with anything outside
+  this crate would silently break. Fixed: `MAX_ID_LEN = 8191` const
+  exposed; `sign_with_id` returns `SignError::Failed`,
+  `verify_with_id` returns `false`. Two new regression tests.
 - **README first-screen still advertised SM4.** v0.1 ships SM2 + SM3
   only; SM4 lands in v0.2. Fixed.
 - **Honest disclosure of the dudect harness's coverage gap.** The
@@ -83,8 +86,24 @@ five.
   `Fp::invert(Z)` inside `kg.to_affine()` after `mul_g(k)` is a
   nonce-dependent timing surface that the v0.1 class layout cannot
   see. Documented in `SECURITY.md`, the harness module docs, and
-  the README. v0.2 fixes both invert sites and adds a `k`-class-split
-  harness target.
+  the README. v0.2 will address both invert sites and add a
+  `k`-class-split harness target.
+- **`.gitignore` rule was not actually matching `Cargo.lock`.** A
+  trailing inline comment after `Cargo.lock` was parsed as part of
+  the pattern (gitignore does not support trailing comments on a
+  pattern line), so the rule never matched the actual file. The
+  workspace's "do not commit lockfile" library policy was therefore
+  not being enforced. Fixed: split the comment to its own line.
+- **`sample_nonzero_scalar` had a modulo bias.** The previous code
+  called `Fn::new(&candidate)` — which reduces mod `n` — *before*
+  the zero check, so candidates in `[n, 2^256)` were folded into
+  `[0, 2^256 - n)` and added a slight upward bias on small scalars.
+  The bias is small (~2^-32 per draw) but real, and a constant-time-
+  designed crypto crate should not ship with it. Fixed: rejection-
+  sample on `candidate != 0 && candidate < n` *before* reduction,
+  matching NIST FIPS 186 Appendix B's standard ECDSA approach. New
+  regression test
+  `sm2::sign::tests::sample_nonzero_scalar_rejects_candidates_above_order`.
 
 ### Known limitations
 
@@ -97,8 +116,10 @@ five.
     **nonce-dependent**. Not caught by v0.1's class layout.
   - `Fp::invert(Z)` in `to_affine()` from `compute_z`'s public-key
     conversion — public input only.
-  v0.2 replaces the secret-touching sites with constant-time
-  Fermat-invert via `pow_bounded_exp`. See `SECURITY.md`.
+  v0.2 will address these sites. Candidate fixes include upgrading
+  to a `crypto-bigint` line whose `invert` measures empirically more
+  constant-time on this harness, or replacing with a Fermat-invert
+  via `pow_bounded_exp`. See `SECURITY.md`.
 - **DER `encode_sig` is variable-time on `(r, s)` byte patterns.** `(r, s)`
   is public output, so this leak does not reveal secrets — but the harness
   target `ct_sign` deliberately goes through `sign_raw_with_id` (no DER) to
