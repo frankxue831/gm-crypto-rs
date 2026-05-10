@@ -80,7 +80,7 @@
 //! DUDECT_SAMPLES=100000 cargo bench --bench timing_leaks    # nightly budget
 //! ```
 //!
-//! The output line emitted by `dudect-bencher` 0.6 for each bench is:
+//! The output line emitted by `dudect-bencher` for each bench is:
 //!
 //! ```text
 //! bench <name>           : n == +X.XXXM, max t = +X.XXXXX, max tau = ..., (5/tau)^2 = ...
@@ -90,12 +90,13 @@
 
 use crypto_bigint::U256;
 use dudect_bencher::ctbench::{run_benches_console, BenchMetadata, BenchName, BenchOpts};
-use dudect_bencher::{rand::Rng, BenchRng, Class, CtRunner};
+use dudect_bencher::{rand::RngExt, BenchRng, Class, CtRunner};
+use getrandom::SysRng;
 use gmcrypto_core::sm2::{
     mul_g, mul_var, sign_raw_with_id, Fn as Scalar, ProjectivePoint, Sm2PrivateKey,
     DEFAULT_SIGNER_ID,
 };
-use rand_core::OsRng;
+use rand_core::UnwrapErr;
 
 /// Default per-bench sample count (smoke). Overridable via `DUDECT_SAMPLES`.
 const DEFAULT_SAMPLES: usize = 100_000;
@@ -136,7 +137,7 @@ fn negative_control(runner: &mut CtRunner, rng: &mut BenchRng) {
     let mut right = [0u8; 32];
     right[0] = 1;
     for _ in 0..sample_count() {
-        let (class, input) = if rng.gen::<bool>() {
+        let (class, input) = if rng.random::<bool>() {
             (Class::Left, &left)
         } else {
             (Class::Right, &right)
@@ -154,7 +155,7 @@ fn ct_mul_g(runner: &mut CtRunner, rng: &mut BenchRng) {
         "FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFF7203DF6B21C6052B53BBF40939D5411E",
     ));
     for _ in 0..sample_count() {
-        let (class, k) = if rng.gen::<bool>() {
+        let (class, k) = if rng.random::<bool>() {
             (Class::Left, &small)
         } else {
             (Class::Right, &large)
@@ -170,7 +171,7 @@ fn ct_mul_var(runner: &mut CtRunner, rng: &mut BenchRng) {
     ));
     let g = ProjectivePoint::generator();
     for _ in 0..sample_count() {
-        let (class, k) = if rng.gen::<bool>() {
+        let (class, k) = if rng.random::<bool>() {
             (Class::Left, &small)
         } else {
             (Class::Right, &large)
@@ -193,7 +194,7 @@ fn ct_sign(runner: &mut CtRunner, rng: &mut BenchRng) {
     ))
     .expect("random D in [1, n-2]");
     for _ in 0..sample_count() {
-        let (class, key) = if rng.gen::<bool>() {
+        let (class, key) = if rng.random::<bool>() {
             (Class::Left, &key_small)
         } else {
             (Class::Right, &key_large)
@@ -208,11 +209,11 @@ fn ct_sign(runner: &mut CtRunner, rng: &mut BenchRng) {
         // `ConditionallySelectable` merge of candidate `RsPair`s — all
         // happens inside `sign_raw_with_id`.
         //
-        // `run_one` takes `Fn` (immutable closure), so we can't capture
-        // `&mut OsRng`. `OsRng` is a unit struct that delegates to
-        // `getrandom`, so constructing it inside the closure is cheap.
+        // `run_one` takes `Fn` (immutable closure), so construct the
+        // zero-sized system RNG wrapper inside the closure.
         runner.run_one(class, || {
-            sign_raw_with_id(key, DEFAULT_SIGNER_ID, b"timing target", &mut OsRng)
+            let mut rng = UnwrapErr(SysRng);
+            sign_raw_with_id(key, DEFAULT_SIGNER_ID, b"timing target", &mut rng)
         });
     }
 }
@@ -229,7 +230,7 @@ fn main() {
         .filter(|a| !matches!(a.as_str(), "--bench" | "--test"))
         .collect();
 
-    // Manual flag parsing: dudect-bencher 0.6 supports --filter <STR>,
+    // Manual flag parsing: dudect-bencher supports --filter <STR>,
     // --continuous [STR], --out <FILE>. Parse just what we need; anything
     // else is ignored.
     let mut filter: Option<String> = None;

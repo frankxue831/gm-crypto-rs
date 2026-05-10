@@ -51,7 +51,7 @@ the design intent in isolation.
 
 - SM3 hash function (`#![no_std]` + `alloc`).
 - SM2 sign / verify with custom signer ID (default `1234567812345678` per GM/T 0009).
-- Constant-time-designed `Fp` and `Fn` field arithmetic via `crypto-bigint = 0.6`.
+- Constant-time-designed `Fp` and `Fn` field arithmetic via `crypto-bigint = 0.7`.
 - Renes-Costello-Batina complete addition formulas for the SM2 curve (a=-3 specialized).
 - Fixed-base and variable-base scalar multiplication, both constant-time-designed
   with `subtle::ConditionallySelectable` linear-scan table lookup.
@@ -88,7 +88,8 @@ use gmcrypto_core::sm2::{
     sign_with_id, verify_with_id, Sm2PrivateKey, Sm2PublicKey, DEFAULT_SIGNER_ID,
 };
 use crypto_bigint::U256;
-use rand_core::OsRng;
+use getrandom::SysRng;
+use rand_core::UnwrapErr;
 
 let d = U256::from_be_hex(
     "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8",
@@ -96,7 +97,8 @@ let d = U256::from_be_hex(
 let key = Sm2PrivateKey::new(d).expect("d in [1, n-2]");
 let public = Sm2PublicKey::from_point(key.public_key());
 
-let sig = sign_with_id(&key, DEFAULT_SIGNER_ID, b"hello", &mut OsRng).unwrap();
+let mut rng = UnwrapErr(SysRng);
+let sig = sign_with_id(&key, DEFAULT_SIGNER_ID, b"hello", &mut rng).unwrap();
 assert!(verify_with_id(&public, DEFAULT_SIGNER_ID, b"hello", &sig));
 ```
 

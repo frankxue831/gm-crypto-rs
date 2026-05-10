@@ -8,17 +8,18 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/frankxue831/gm-crypto-rs"
-rust-version = "1.83"
+rust-version = "1.85"
 
 [workspace.dependencies]
-crypto-bigint = { version = "0.6", default-features = false, features = ["zeroize"] }
-subtle = { version = "2.5", default-features = false }
-zeroize = { version = "1.7", default-features = false, features = ["derive"] }
-rand_core = { version = "0.6", default-features = false }
+crypto-bigint = { version = "0.7.3", default-features = false, features = ["subtle", "zeroize"] }
+subtle = { version = "2.6.1", default-features = false }
+zeroize = { version = "1.8.2", default-features = false, features = ["derive"] }
+rand_core = { version = "0.10.1", default-features = false }
+getrandom = { version = "0.4.2", default-features = false, features = ["sys_rng"] }
 
 # dev-only — exempt from cargo-deny ban list
-dudect-bencher = "0.6"
-hex-literal = "0.4"
+dudect-bencher = "0.7.0"
+hex-literal = "1.1.0"
 
 [profile.release]
 opt-level = 3

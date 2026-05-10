@@ -5,12 +5,11 @@
 //! intentionally not distinguished — `verify_with_id` returns `bool`.
 
 use crate::asn1::sig::decode_sig;
-use crate::sm2::curve::{Fn, NMod};
+use crate::sm2::curve::Fn;
 use crate::sm2::public_key::Sm2PublicKey;
 use crate::sm2::scalar_mul::{mul_g, mul_var};
 use crate::sm2::sign::{compute_z, MAX_ID_LEN};
 use crate::sm3::Sm3;
-use crypto_bigint::modular::ConstMontyParams;
 use crypto_bigint::U256;
 use subtle::ConstantTimeEq;
 
@@ -40,7 +39,7 @@ pub fn verify_with_id(public: &Sm2PublicKey, id: &[u8], message: &[u8], sig_der:
         return false;
     };
 
-    let n = NMod::MODULUS.get();
+    let n = *Fn::MODULUS.as_ref();
     if r == U256::ZERO || s == U256::ZERO {
         return false;
     }
@@ -80,7 +79,8 @@ mod tests {
     use super::*;
     use crate::sm2::private_key::Sm2PrivateKey;
     use crate::sm2::sign::sign_with_id;
-    use rand_core::OsRng;
+    use getrandom::SysRng;
+    use rand_core::UnwrapErr;
 
     #[test]
     fn round_trip_random_message() {
@@ -90,7 +90,8 @@ mod tests {
         let pk = Sm2PublicKey::from_point(key.public_key());
         let id = b"ALICE123@YAHOO.COM";
         let msg = b"hello world";
-        let sig = sign_with_id(&key, id, msg, &mut OsRng).expect("sign");
+        let mut rng = UnwrapErr(SysRng);
+        let sig = sign_with_id(&key, id, msg, &mut rng).expect("sign");
         assert!(verify_with_id(&pk, id, msg, &sig));
     }
 
@@ -101,7 +102,8 @@ mod tests {
         let key = Sm2PrivateKey::new(d).expect("valid");
         let pk = Sm2PublicKey::from_point(key.public_key());
         let id = b"ALICE123@YAHOO.COM";
-        let sig = sign_with_id(&key, id, b"original", &mut OsRng).expect("sign");
+        let mut rng = UnwrapErr(SysRng);
+        let sig = sign_with_id(&key, id, b"original", &mut rng).expect("sign");
         assert!(!verify_with_id(&pk, id, b"tampered", &sig));
     }
 
@@ -116,7 +118,8 @@ mod tests {
         let pk_b = Sm2PublicKey::from_point(key_b.public_key());
         let id = b"ALICE123@YAHOO.COM";
         let msg = b"hello world";
-        let sig = sign_with_id(&key_a, id, msg, &mut OsRng).expect("sign");
+        let mut rng = UnwrapErr(SysRng);
+        let sig = sign_with_id(&key_a, id, msg, &mut rng).expect("sign");
         // sig is under key_a; verifying under key_b's public must fail.
         assert!(!verify_with_id(&pk_b, id, msg, &sig));
     }

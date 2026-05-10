@@ -43,7 +43,7 @@ jobs:
       - name: Parse and gate
         run: |
           python3 - <<'PY'
-          # Output format from dudect-bencher 0.6, one line per bench:
+          # Output format from dudect-bencher, one line per bench:
           #   bench <name>           : n == +X.XXXM, max t = +X.XXXXX, max tau = +X.XXXXX, ...
           # We gate on |tau| (scale-free) rather than |t| (grows with sqrt(N)).
           import re, sys, pathlib

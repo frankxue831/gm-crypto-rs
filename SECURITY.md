@@ -43,7 +43,7 @@ own docs.
 
 Direct measurement on the harness shows `|tau| ≈ 0.70` for
 `ConstMontyForm::invert` between two random non-degenerate inputs. This is
-upstream behavior — `crypto-bigint = "0.6"`'s safegcd/Bernstein-Yang inversion
+upstream behavior — `crypto-bigint = "0.7"`'s safegcd/Bernstein-Yang inversion
 is documented as constant-time but is not constant-time across different inputs
 in practice on the observed implementation.
 

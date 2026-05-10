@@ -18,7 +18,7 @@ rand_core.workspace = true
 
 [dev-dependencies]
 hex-literal.workspace = true
-rand_core = { workspace = true, features = ["getrandom"] }
+getrandom.workspace = true
 dudect-bencher.workspace = true
 
 [[bench]]
