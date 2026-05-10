@@ -16,6 +16,11 @@ subtle = { version = "2.6.1", default-features = false }
 zeroize = { version = "1.8.2", default-features = false, features = ["derive"] }
 rand_core = { version = "0.10.1", default-features = false }
 getrandom = { version = "0.4.2", default-features = false, features = ["sys_rng"] }
+# v0.3 W6 — thread-safe lazy init for the precomputed comb table.
+# Per Q7.8: no_std-compatible runtime-init primitive. `spin` is the
+# minimal-surface choice (no_std, zero deps, MIT, ~4 KB lib).
+# Loaded with `once` feature only — we don't use the spinlock paths.
+spin = { version = "0.10", default-features = false, features = ["once"] }
 
 # dev-only — exempt from cargo-deny ban list
 dudect-bencher = "0.7.0"
