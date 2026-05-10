@@ -1,161 +1,67 @@
-//! Minimal ASN.1 DER encoding for SM2 signatures.
+//! ASN.1 DER encoding for SM2 signatures.
 //!
-//! Only the shape `SEQUENCE { r INTEGER, s INTEGER }` is supported.
-//! v0.3 will introduce a reusable reader/writer that generalizes this.
+//! Shape: `SEQUENCE { r INTEGER, s INTEGER }`. v0.3 re-implements
+//! on top of [`super::reader`] / [`super::writer`]; the wire output
+//! and accept/reject behaviour are byte-identical to v0.2.
+//!
+//! Strict canonical-INTEGER discipline (rejecting empty content,
+//! sign-bit-set first byte, redundant `0x00`-pad, lengths `> 32`)
+//! lives in [`super::reader::read_integer`]; this module additionally
+//! rejects single-byte `0x00` content (canonical zero) because SM2
+//! signature scalars `r`, `s` lie in `[1, n-1]` — zero is malformed.
 
 use alloc::vec::Vec;
 use crypto_bigint::U256;
 
-/// Encode (r, s) as a DER SEQUENCE.
+use super::{reader, writer};
+
+/// Encode `(r, s)` as a DER `SEQUENCE { r INTEGER, s INTEGER }`.
 #[must_use]
 pub fn encode_sig(r: &U256, s: &U256) -> Vec<u8> {
-    let r_der = encode_integer(&r.to_be_bytes());
-    let s_der = encode_integer(&s.to_be_bytes());
-    let body_len = r_der.len() + s_der.len();
-    let mut out = Vec::with_capacity(body_len + 8);
-    out.push(0x30); // SEQUENCE tag
-    push_length(&mut out, body_len);
-    out.extend_from_slice(&r_der);
-    out.extend_from_slice(&s_der);
+    let r_be = r.to_be_bytes();
+    let s_be = s.to_be_bytes();
+    let mut body = Vec::with_capacity(72);
+    writer::write_integer(&mut body, &r_be);
+    writer::write_integer(&mut body, &s_be);
+    let mut out = Vec::with_capacity(body.len() + 4);
+    writer::write_sequence(&mut out, &body);
     out
 }
 
-/// Decode a DER SEQUENCE { r, s } into two U256s. Returns `None` for any
-/// malformed input. **No distinguishing failure modes.**
+/// Decode a DER `SEQUENCE { r, s }` into two `U256`s. Returns `None`
+/// for any malformed input. **No distinguishing failure modes**.
 #[must_use]
 pub fn decode_sig(input: &[u8]) -> Option<(U256, U256)> {
-    let (tag, rest) = input.split_first()?;
-    if *tag != 0x30 {
-        return None;
-    }
-    let (body_len, rest) = read_length(rest)?;
-    if rest.len() != body_len {
-        return None;
-    }
-    let (r, rest) = read_integer(rest)?;
-    let (s, rest) = read_integer(rest)?;
+    let (body, rest) = reader::read_sequence(input)?;
     if !rest.is_empty() {
+        return None;
+    }
+    let (r, body) = read_scalar_in_range(body)?;
+    let (s, body) = read_scalar_in_range(body)?;
+    if !body.is_empty() {
         return None;
     }
     Some((r, s))
 }
 
-fn encode_integer(value_be: &[u8]) -> Vec<u8> {
-    // Strip leading zeros, then re-add one if the high bit is set
-    // (DER INTEGER is two's-complement; positive integers need a leading
-    // 0x00 to disambiguate from negative).
-    let mut start = 0;
-    while start < value_be.len() - 1 && value_be[start] == 0 {
-        start += 1;
-    }
-    let trimmed = &value_be[start..];
-    let needs_pad = (trimmed[0] & 0x80) != 0;
-    let int_len = trimmed.len() + usize::from(needs_pad);
-    let mut out = Vec::with_capacity(int_len + 4);
-    out.push(0x02); // INTEGER tag
-    push_length(&mut out, int_len);
-    if needs_pad {
-        out.push(0x00);
-    }
-    out.extend_from_slice(trimmed);
-    out
-}
-
-fn read_integer(input: &[u8]) -> Option<(U256, &[u8])> {
-    let (tag, rest) = input.split_first()?;
-    if *tag != 0x02 {
+/// Read a DER INTEGER and decode its content as a 32-byte unsigned
+/// big-endian scalar. Rejects:
+/// - any encoding that fails the strict-canonical reader rules;
+/// - the canonical zero `02 01 00` (since SM2 `r`, `s ∈ [1, n-1]`);
+/// - content longer than 32 bytes (since SM2 scalars are 256-bit).
+fn read_scalar_in_range(input: &[u8]) -> Option<(U256, &[u8])> {
+    let (bytes, rest) = reader::read_integer(input)?;
+    // SM2 r/s ∈ [1, n-1] → zero is invalid. The reader returns
+    // `[0x00]` for canonical zero; reject that here.
+    if bytes == [0x00] {
         return None;
     }
-    let (int_len, rest) = read_length(rest)?;
-    if rest.len() < int_len {
-        return None;
-    }
-    let (int_bytes, rest_after) = rest.split_at(int_len);
-
-    // Strict DER canonical-encoding rules (X.690 §8.3.2 / §10.2):
-    //
-    // - Length ≥ 1 (an INTEGER cannot be empty).
-    // - For positive integers, the high bit of the first content byte
-    //   must be clear; otherwise a leading 0x00 is required to
-    //   disambiguate from a two's-complement negative.
-    // - That leading-0x00 padding is allowed *only* when needed:
-    //   if the first byte is 0x00 and the second byte's high bit
-    //   is also clear, the encoding is non-canonical (BER, not DER).
-    // - SM2 r/s are positive scalars in `[1, n-1]`, so a top-bit-set
-    //   first byte is unambiguously a malformed signature, not a
-    //   negative number we should accept.
-    //
-    // Accepting non-canonical or sign-bit-negative encodings would
-    // create signature malleability — multiple distinct DER blobs
-    // mapping to the same (r, s).
-    if int_bytes.is_empty() {
-        return None;
-    }
-    if int_bytes[0] & 0x80 != 0 {
-        // High bit set on first byte → would be negative in two's
-        // complement; SM2 has no such signatures.
-        return None;
-    }
-    let bytes = if int_bytes[0] == 0x00 {
-        // The leading 0x00 must be followed by a high-bit-set byte
-        // (otherwise it's redundant padding — non-canonical).
-        if int_bytes.len() < 2 || int_bytes[1] & 0x80 == 0 {
-            return None;
-        }
-        &int_bytes[1..]
-    } else {
-        int_bytes
-    };
     if bytes.len() > 32 {
         return None;
     }
     let mut padded = [0u8; 32];
     padded[32 - bytes.len()..].copy_from_slice(bytes);
-    Some((U256::from_be_slice(&padded), rest_after))
-}
-
-fn push_length(out: &mut Vec<u8>, len: usize) {
-    if len < 128 {
-        #[allow(clippy::cast_possible_truncation)]
-        out.push(len as u8);
-    } else if len < 256 {
-        out.push(0x81);
-        #[allow(clippy::cast_possible_truncation)]
-        out.push(len as u8);
-    } else if len < 65_536 {
-        #[allow(clippy::cast_possible_truncation)]
-        {
-            out.push(0x82);
-            out.push((len >> 8) as u8);
-            out.push(len as u8);
-        }
-    } else {
-        // Signatures never need this much length; the call site prevents it.
-        panic!("signature DER length overflow");
-    }
-}
-
-fn read_length(input: &[u8]) -> Option<(usize, &[u8])> {
-    let (first, rest) = input.split_first()?;
-    if *first < 0x80 {
-        Some((*first as usize, rest))
-    } else if *first == 0x81 {
-        let (b, rest) = rest.split_first()?;
-        if *b < 0x80 {
-            return None;
-        } // not minimal
-        Some((*b as usize, rest))
-    } else if *first == 0x82 {
-        let (hi, rest) = rest.split_first()?;
-        let (lo, rest) = rest.split_first()?;
-        let len = ((*hi as usize) << 8) | (*lo as usize);
-        if len < 256 {
-            return None;
-        } // not minimal
-        Some((len, rest))
-    } else {
-        None // 4-byte lengths not supported in v0.1
-    }
+    Some((U256::from_be_slice(&padded), rest))
 }
 
 #[cfg(test)]
@@ -228,5 +134,21 @@ mod tests {
             decode_sig(&bad).is_none(),
             "empty INTEGER content must be rejected"
         );
+    }
+
+    /// SM2 scalars must be non-zero. Canonical zero (`02 01 00`) on
+    /// either component must be rejected. Regression test for the
+    /// W1 port: the underlying `reader::read_integer` accepts zero
+    /// (since it's used by ciphertext.rs); sig.rs's
+    /// `read_scalar_in_range` is responsible for the post-read
+    /// zero rejection.
+    #[test]
+    fn rejects_zero_scalar() {
+        // SEQ { INTEGER 0x00, INTEGER 0x01 }
+        let bad_r = [0x30, 0x06, 0x02, 0x01, 0x00, 0x02, 0x01, 0x01];
+        assert!(decode_sig(&bad_r).is_none());
+        // SEQ { INTEGER 0x01, INTEGER 0x00 }
+        let bad_s = [0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x00];
+        assert!(decode_sig(&bad_s).is_none());
     }
 }
