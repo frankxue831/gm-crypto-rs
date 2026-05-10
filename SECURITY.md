@@ -41,6 +41,8 @@ The in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
   (W1; the key-schedule pipeline runs the S-box on secret-derived state).
 - `ct_sm4_encrypt_block` — SM4 "construct cipher + encrypt one block" timed
   under one window, class-split by master key bytes (W1).
+- `ct_hmac_sm3` — HMAC-SM3 keyed MAC, class-split by master key (W3).
+  Structurally covers PBKDF2-HMAC-SM3's (W4) inner PRF.
 
 A deliberately-leaky `negative_control` target gates `|tau| > 1.0` to confirm
 the harness wiring on every PR. **The harness detects leaks; it does not prove

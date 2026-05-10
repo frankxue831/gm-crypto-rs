@@ -42,6 +42,34 @@ the project follows [Semantic Versioning](https://semver.org/).
   allowlists extended to gate both at `|tau| < 0.20`. 100K baseline
   on `main`: `ct_sm4_key_schedule` `|tau| ≈ 0.011`,
   `ct_sm4_encrypt_block` `|tau| ≈ 0.009` — noise-level.
+- v0.2 W3 — HMAC-SM3 (`gmcrypto_core::hmac::hmac_sm3`) per RFC 2104
+  over GB/T 32905-2016 SM3. Single-shot
+  `hmac_sm3(key, message) -> [u8; 32]` API; streaming
+  `HmacSm3::new`/`update`/`finalize` deferred to v0.3 with the
+  broader `Mac`-trait generalization. Hash-first long-key path per
+  RFC 2104 §2 (key > 64 bytes → reduced via `SM3(K)` before pad).
+  4 KAT vectors cross-validated against `gmssl sm3hmac` v3.1.1.
+  Intermediate `K'`, `K' XOR ipad`, `K' XOR opad` buffers all
+  zeroized before return.
+- v0.2 W4 — PBKDF2-HMAC-SM3 (`gmcrypto_core::kdf::pbkdf2_hmac_sm3`)
+  per RFC 8018 §5.2. Caller-supplied output buffer
+  (`&mut [u8]` — output length implied by buffer length); avoids the
+  allocation-failure question entirely and matches RustCrypto's
+  pbkdf2 discipline. No iteration-count default (defaults age
+  badly). Failure modes (`iterations == 0`, `output.is_empty()`,
+  oversized output) all collapse to `None` per the failure-mode
+  invariant. 5 KAT vectors cross-validated against `gmssl pbkdf2`
+  v3.1.1. Intermediate `salt || INT(i)` scratch, `T_i` accumulator,
+  and `U_j` chain all zeroized before return.
+- v0.2 W3 — new dudect target `ct_hmac_sm3` (class-split by 32-byte
+  master key bytes; fixed message). Covers W4's PBKDF2 inner PRF
+  by structural reuse — no separate `ct_pbkdf2_hmac_sm3` target.
+  100K baseline on `main`: `ct_hmac_sm3` `|tau| ≈ 0.008` —
+  noise-level.
+- v0.2 W3+W4 — `tests/interop_gmssl.rs` extended with two gmssl
+  cross-validation tests (`hmac_sm3_matches_gmssl`,
+  `pbkdf2_hmac_sm3_matches_gmssl`) gated on `GMCRYPTO_GMSSL=1`.
+  Each runs against multiple input cases at commit time.
 
 ### Changed
 
