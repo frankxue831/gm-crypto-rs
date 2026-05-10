@@ -57,7 +57,7 @@ GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
 
 ## Dudect harness gate
 
-Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. Ten targets:
+Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. Eleven targets:
 
 | Target | Gate | Meaning |
 |---|---|---|
@@ -71,6 +71,7 @@ Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. Ten targets:
 | `ct_sm4_key_schedule` | `\|tau\| < 0.20` | SM4 key schedule, class-split by master key bytes (W1). |
 | `ct_sm4_encrypt_block` | `\|tau\| < 0.20` | SM4 "construct cipher + encrypt one block" timed under one window, class-split by master key bytes (W1). |
 | `ct_hmac_sm3` | `\|tau\| < 0.20` | HMAC-SM3 keyed MAC, class-split by master key (W3). Structurally covers PBKDF2-HMAC-SM3's (W4) inner PRF. |
+| `ct_sm2_decrypt` | `\|tau\| < 0.20` | SM2 decrypt, class-split by recipient `d_B`, fixed ciphertext encrypted to a third party so both classes fail at MAC via identical control flow (Phase 3). |
 
 Gate on **`|tau|`** (scale-free), not `|t|` (grows as `tau · sqrt(N)` so any
 fixed `|t|` threshold is budget-dependent). Same gate at every sample budget;
@@ -119,6 +120,8 @@ crates/gmcrypto-core/
       public_key.rs         # Sm2PublicKey
       sign.rs               # sign_with_id, sign_raw_with_id, compute_z, MAX_ID_LEN
       verify.rs             # verify_with_id (returns bool, rejects identity pubkey + over-long ID)
+      encrypt.rs            # v0.2 Phase 3 — encrypt() + KDF (counter-mode SM3, GB/T 32918.4 §5.4.3) + on-curve guard
+      decrypt.rs            # v0.2 Phase 3 — decrypt() with constant-time MAC compare, zeroize on fail
     sm4/                    # v0.2 W1
       cipher.rs             # Sm4Cipher (block cipher) + subtle linear-scan S-box
       mode_cbc.rs           # encrypt/decrypt with PKCS#7 padding; caller-supplied unpredictable IV
@@ -126,6 +129,7 @@ crates/gmcrypto-core/
     kdf.rs                  # v0.2 W4 — PBKDF2-HMAC-SM3 (caller-supplied output buffer)
     asn1/
       sig.rs                # SEQUENCE { r, s } with strict canonical INTEGER
+      ciphertext.rs         # v0.2 Phase 3 — GM/T 0009 SM2 ciphertext SEQUENCE
   benches/timing_leaks.rs   # dudect harness (custom main; --bench is filtered out)
   tests/                    # integration tests (incl. gated gmssl interop)
 
@@ -177,3 +181,15 @@ longer ships `getrandom` integration in the same crate.
 - Don't make `hmac_sm3` a streaming `HmacSm3::new`/`update`/`finalize` shape
   in v0.2. Streaming `Mac` trait wiring lands in v0.3 alongside the broader
   trait generalization.
+- Don't ship raw `C1||C3||C2` (or legacy `C1||C2||C3`) byte concatenation
+  helpers for SM2 ciphertext in v0.2. DER only — the GM/T 0009 SEQUENCE
+  is the v0.2 wire format. Raw helpers + legacy decrypt-only path are v0.3.
+- Don't make `sm2::decrypt` distinguish failure modes (malformed DER,
+  off-curve C1, all-zero KDF, MAC mismatch). Single `Failed` variant.
+  Distinguishing them is a padding-oracle / invalid-curve attack vector.
+- Don't drop the `point_on_curve` check on `C1` in `sm2::decrypt`. The
+  invalid-curve attack leaks `d_B` bits via a small-order rogue subgroup;
+  the check is the standard ECC defense.
+- Don't expose the SM2 `kdf` (in `sm2::encrypt`) or `point_on_curve`
+  helpers in the public API. They're `pub(super)` for `sm2::decrypt`'s
+  use only. The top-level `kdf.rs` is reserved for PBKDF2.

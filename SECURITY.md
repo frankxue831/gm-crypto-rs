@@ -43,6 +43,9 @@ The in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
   under one window, class-split by master key bytes (W1).
 - `ct_hmac_sm3` — HMAC-SM3 keyed MAC, class-split by master key (W3).
   Structurally covers PBKDF2-HMAC-SM3's (W4) inner PRF.
+- `ct_sm2_decrypt` — SM2 decrypt, class-split by recipient `d_B`,
+  fixed ciphertext encrypted to a third party so both classes fail
+  at the MAC check via identical control flow (Phase 3).
 
 A deliberately-leaky `negative_control` target gates `|tau| > 1.0` to confirm
 the harness wiring on every PR. **The harness detects leaks; it does not prove
@@ -134,10 +137,33 @@ padding-oracle attack on the plaintext. v0.2 `mode_cbc::decrypt`
 implements PKCS#7 strip via a `subtle::ConditionallySelectable`
 constant-time scan (the amount of work is independent of `pad_len`),
 but the final `Option<Vec<u8>>` signals validity — one bit. Callers
-needing integrity **MUST** pair CBC with HMAC-SM3 in encrypt-then-MAC:
-serialize `(IV || ciphertext)`, compute the MAC over that, send
-`IV || ciphertext || tag`, verify the MAC before invoking `decrypt`.
-HMAC-SM3 lands in v0.2 W3.
+needing integrity **MUST** pair CBC with HMAC-SM3 (`gmcrypto_core::hmac`)
+in encrypt-then-MAC: serialize `(IV || ciphertext)`, compute the MAC
+over that, send `IV || ciphertext || tag`, verify the MAC before
+invoking `decrypt`.
+
+### SM2 envelope encryption (Phase 3)
+
+**Invalid-curve attack defense.** `sm2::decrypt` validates the
+received `C1 = (x, y)` lies on the SM2 curve before computing
+`d_B * C1`. Without this check, an attacker submitting `C1` on a
+twist or other curve sharing the same `x` coordinate could leak
+bits of `d_B` via the small-order subgroup of the rogue curve.
+
+**Failure-mode invariant.** `decrypt` returns
+`Result<Vec<u8>, DecryptError>` with a single `Failed` variant
+collapsing every failure mode (malformed DER, off-curve `C1`,
+identity `C1`, all-zero KDF, MAC mismatch). MAC compare uses
+`subtle::ConstantTimeEq` on the 32-byte digest; on failure the
+already-XOR'd plaintext buffer is zeroized before return.
+
+**Wire format.** v0.2 ships GM/T 0009-2012 §6 DER **only**. Raw
+byte concatenation (`C1||C3||C2` modern, `C1||C2||C3` legacy
+gmssl) is out of scope until v0.3. gmssl `sm2encrypt`/`sm2decrypt`
+cross-validation is also v0.3 — gmssl's CLI requires
+PEM/PKCS#8/SPKI key wrapping, which v0.2 does not ship. v0.2 SM2
+envelope encryption is KAT-validated via internal round-trip + a
+fixed-`k` smoke test.
 
 ## Other known limitations (non-goals)
 

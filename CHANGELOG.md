@@ -70,6 +70,41 @@ the project follows [Semantic Versioning](https://semver.org/).
   cross-validation tests (`hmac_sm3_matches_gmssl`,
   `pbkdf2_hmac_sm3_matches_gmssl`) gated on `GMCRYPTO_GMSSL=1`.
   Each runs against multiple input cases at commit time.
+- v0.2 Phase 3 — GM/T 0009 SM2 ciphertext DER (`asn1::ciphertext`).
+  `Sm2Ciphertext { x, y, hash, ciphertext }` with `encode`/`decode`
+  per the SEQUENCE shape `{ XCoordinate INTEGER, YCoordinate INTEGER,
+  HASH OCTET STRING, CipherText OCTET STRING }`. Strict X.690
+  canonical INTEGER rules kept identical to `asn1::sig` (redundant
+  `00`-pad rejected, sign-bit-set first byte rejected, empty INTEGER
+  rejected) — prevents ciphertext malleability. Length encoding
+  supports up to ~16 MB ciphertext (3-byte 0x83 length); larger
+  payloads panic on encode (callers should chunk via SM4-CBC + an
+  outer SM2 wrap). Raw byte concatenation (`C1||C3||C2` modern,
+  `C1||C2||C3` legacy gmssl) is OUT OF SCOPE for v0.2 — DER only.
+- v0.2 Phase 3 — SM2 public-key encryption
+  (`gmcrypto_core::sm2::encrypt`) per GB/T 32918.4-2017 §6, returning
+  GM/T 0009 DER. Single-shot `encrypt(public, plaintext, rng)` →
+  `Result<Vec<u8>, EncryptError>` with single `Failed` variant.
+  Includes the SM3 counter-mode KDF (§5.4.3) inline; `kdf.rs` is
+  reserved for PBKDF2.
+- v0.2 Phase 3 — SM2 public-key decryption
+  (`gmcrypto_core::sm2::decrypt`) per GB/T 32918.4-2017 §7. Single-
+  shot `decrypt(private, ciphertext_der)` →
+  `Result<Vec<u8>, DecryptError>` with single `Failed` variant
+  collapsing every failure mode (malformed DER, off-curve `C1`,
+  identity `C1`, all-zero KDF, MAC mismatch). Defends against
+  invalid-curve attacks via an explicit `point_on_curve` check on
+  `C1`. MAC compare via `subtle::ConstantTimeEq`. Plaintext on the
+  failure branch is zeroized before return.
+- v0.2 Phase 3 — `ct_sm2_decrypt` dudect target. Class-split by
+  recipient `d_B`; fixed ciphertext encrypted to a third party so
+  both classes fail at the MAC check via identical control flow.
+  Workflow allowlists extended; 100K baseline `|tau| ≈ 0.010` —
+  noise-level.
+- **SM2 encrypt/decrypt cross-validation against gmssl is OUT OF
+  SCOPE for v0.2.** gmssl CLI requires PEM/PKCS#8/SPKI key wrapping,
+  which is v0.3 work. v0.2 SM2 envelope encryption is KAT-validated
+  via internal round-trip + a fixed-`k` smoke test only.
 
 ### Changed
 
