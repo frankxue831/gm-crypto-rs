@@ -89,12 +89,12 @@
 //! CI workflows parse this with a regex pinned to `^bench\s+(\S+)\s*:.*?max t = ([+-]\d+\.\d+)`.
 
 use crypto_bigint::U256;
-use dudect_bencher::ctbench::{run_benches_console, BenchMetadata, BenchName, BenchOpts};
-use dudect_bencher::{rand::RngExt, BenchRng, Class, CtRunner};
+use dudect_bencher::ctbench::{BenchMetadata, BenchName, BenchOpts, run_benches_console};
+use dudect_bencher::{BenchRng, Class, CtRunner, rand::RngExt};
 use getrandom::SysRng;
 use gmcrypto_core::sm2::{
-    mul_g, mul_var, sign_raw_with_id, Fn as Scalar, ProjectivePoint, Sm2PrivateKey,
-    DEFAULT_SIGNER_ID,
+    DEFAULT_SIGNER_ID, Fn as Scalar, ProjectivePoint, Sm2PrivateKey, mul_g, mul_var,
+    sign_raw_with_id,
 };
 use rand_core::UnwrapErr;
 

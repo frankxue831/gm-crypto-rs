@@ -4,7 +4,7 @@
 //! Cofactor 1, prime order n. Note `a ≡ -3 (mod p)`, which enables
 //! Renes-Costello-Batina's a=-3 specialized complete-addition formulas.
 
-use crypto_bigint::{const_monty_params, U256};
+use crypto_bigint::{U256, const_monty_params};
 
 // p = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF 00000000 FFFFFFFF FFFFFFFF
 const_monty_params!(

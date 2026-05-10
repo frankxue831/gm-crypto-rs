@@ -1,11 +1,11 @@
 //! SM2 sign and verify (GB/T 32918.2-2017).
 
 use crate::asn1::sig::encode_sig;
-use crate::sm2::curve::{b, Fn, Fp, GX_HEX, GY_HEX};
+use crate::sm2::curve::{Fn, Fp, GX_HEX, GY_HEX, b};
 use crate::sm2::private_key::Sm2PrivateKey;
 use crate::sm2::public_key::Sm2PublicKey;
 use crate::sm2::scalar_mul::mul_g;
-use crate::sm3::{Sm3, DIGEST_SIZE};
+use crate::sm3::{DIGEST_SIZE, Sm3};
 use alloc::vec::Vec;
 use crypto_bigint::U256;
 use rand_core::{CryptoRng, Rng};

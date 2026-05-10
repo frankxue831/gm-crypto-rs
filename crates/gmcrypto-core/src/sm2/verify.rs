@@ -8,7 +8,7 @@ use crate::asn1::sig::decode_sig;
 use crate::sm2::curve::Fn;
 use crate::sm2::public_key::Sm2PublicKey;
 use crate::sm2::scalar_mul::{mul_g, mul_var};
-use crate::sm2::sign::{compute_z, MAX_ID_LEN};
+use crate::sm2::sign::{MAX_ID_LEN, compute_z};
 use crate::sm3::Sm3;
 use crypto_bigint::U256;
 use subtle::ConstantTimeEq;

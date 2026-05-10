@@ -5,7 +5,7 @@
 //! No early-out branches; the point at infinity is represented as `Z = 0`
 //! and is folded into the formulas via projective representation.
 
-use crate::sm2::curve::{b, Fp, GX_HEX, GY_HEX};
+use crate::sm2::curve::{Fp, GX_HEX, GY_HEX, b};
 use crypto_bigint::U256;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
