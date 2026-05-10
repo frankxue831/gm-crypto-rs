@@ -106,6 +106,31 @@ the project follows [Semantic Versioning](https://semver.org/).
   which is v0.3 work. v0.2 SM2 envelope encryption is KAT-validated
   via internal round-trip + a fixed-`k` smoke test only.
 
+### Fixed
+
+- SM2 ciphertext DER decoder now accepts the canonical encoding of
+  zero (`02 01 00`) on `C1.x` / `C1.y` and rejects 32-byte coordinates
+  `≥ p` (the SM2 field modulus). The v0.2 release-readiness review
+  flagged that the previous decoder copied the signature INTEGER rule
+  intended for `r, s ∈ [1, n-1]` — under those rules the canonical
+  zero encoding was rejected (`(0, y)` is a valid C1) and 32-byte
+  values above `p` slipped through to `Fp::new`, which silently
+  reduced them, admitting two distinct DER blobs for the same field
+  element (a malleability primitive on the ciphertext path). Decoder
+  rules are now documented inline as the SM2-specific deltas vs.
+  `asn1::sig`, and three regression tests pin the round-trip and
+  rejection behavior. Asymmetrically affects the encode-then-decode
+  round trip on `(0, _)` and `(_, 0)` C1 points, but the encrypt
+  path never produced such ciphertexts (encrypt rejects the identity
+  point and the deterministic-`k` test vectors used non-zero
+  coordinates), so no released encrypt blob is mis-decoded.
+- HMAC-SM3 long-key path (`key.len() > 64`) now zeroizes the SM3
+  digest stack buffer after copying it into `K'`. The codex review
+  surfaced that for long keys `SM3(key)` is the *effective* RFC 2104
+  HMAC key (per `HMAC(K, m) == HMAC(SM3(K), m)`), not merely a
+  key-derived value, so leaving it unwiped weakened the documented
+  zeroization guarantee.
+
 ### Changed
 
 - `crypto-bigint` workspace dep raised from 0.6 to 0.7.3 (commits
