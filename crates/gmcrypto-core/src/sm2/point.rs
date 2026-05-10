@@ -157,15 +157,23 @@ impl ProjectivePoint {
     ///
     /// # Constant-time caveat
     ///
-    /// The Z-inverse goes through `crypto-bigint = 0.7`'s
-    /// `ConstMontyForm::invert` (safegcd / Bernstein-Yang), which is
-    /// **documented** as constant-time but direct measurement on the
-    /// project's dudect harness shows `|tau| ≈ 0.70` between different
-    /// inputs. Callers that pass secret-derived `Z` (notably `mul_g(k)`
-    /// inside the SM2 sign retry loop, where `k` is the secret nonce)
-    /// inherit a measurable timing side-channel until v0.2 replaces the
-    /// invert site with a Fermat-style `pow_bounded_exp`.
-    /// See `SECURITY.md` for the full posture.
+    /// The Z-inverse goes through `crypto-bigint`'s `ConstMontyForm::invert`
+    /// (safegcd / Bernstein-Yang), which is **documented** as constant-time.
+    /// On `crypto-bigint = 0.6` (what published v0.1.0 ships against), direct
+    /// measurement on the project's dudect harness showed `|tau| ≈ 0.70`
+    /// between random non-degenerate inputs — a real leak. Main has since
+    /// upgraded to `crypto-bigint = 0.7.3`, on which the same isolated
+    /// measurement shows `|tau| ≈ 0.006–0.010` at 100K samples (well under
+    /// the 0.20 gate).
+    ///
+    /// Callers that pass secret-derived `Z` (notably `mul_g(k)` inside the
+    /// SM2 sign retry loop, where `k` is the secret nonce) inherited a
+    /// measurable timing side-channel on the `0.6` posture; on `0.7.3` the
+    /// upstream leak is below the harness's detection threshold. The
+    /// `0.7.3` `ct_sign` target also clears the gate at `|tau| ≈ 0.01–0.03`
+    /// at 100K. See `SECURITY.md` for the full posture and v0.2 plan
+    /// (which still adds a `k`-class-split harness target since the
+    /// existing `d`-class layout is structurally blind to nonce-path leaks).
     #[must_use]
     pub fn to_affine(&self) -> Option<(Fp, Fp)> {
         let z_inv: subtle::CtOption<Fp> = self.z.invert().into();

@@ -5,6 +5,35 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Rebaselined dudect `|tau|` figures on `crypto-bigint = 0.7.3`.** Main
+  upgraded to `crypto-bigint = 0.7.3` post-publish (`a670ce3` /
+  `89abfb9` / `22b77a2`); the timing-leak narrative had still been citing
+  the `0.6`-era empirical numbers. New measurements at 100K samples on
+  the project harness:
+  - Isolated `Fn::invert` between two random non-degenerate scalars:
+    `|tau| ≈ 0.006–0.010` (vs `≈ 0.70` on `0.6` — ~70–100× improvement).
+  - `ct_sign` (full sign path through `sign_raw_with_id`):
+    `|tau| ≈ 0.01–0.03` (vs the `0.6`-era diluted `≈ 0.04–0.14`).
+  - `ct_mul_g`, `ct_mul_var`: `|tau| ≤ 0.011` at 100K.
+  - `negative_control`: `|tau| ≈ 60–80` (unchanged — proves harness wiring).
+
+  The `0.6`-era figures are preserved in `SECURITY.md`,
+  `point.rs::to_affine()`'s doc comment, and `timing_leaks.rs`'s
+  module-doc as the historical record of what published v0.1.0
+  measured. The new figures are added alongside as the current main
+  posture.
+
+- **v0.2 plan updated.** The Fermat-invert via `pow_bounded_exp`
+  workstream is no longer load-bearing on `0.7.3` (the upstream invert
+  leak is below the harness's detection threshold) and is downgraded to
+  optional defense-in-depth. The `k`-class-split harness target is still
+  required for v0.2 — the existing `d`-class layout is structurally
+  blind to nonce-only leaks regardless of `crypto-bigint` version, so
+  site (2) (`Fp::invert(Z)` after `mul_g(k)`) cannot be validated under
+  the current harness either way.
+
 ## [0.1.0] — 2026-05-10
 
 ### Added

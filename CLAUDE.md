@@ -70,29 +70,38 @@ Gate on **`|tau|`** (scale-free), not `|t|` (grows as `tau · sqrt(N)` so any
 fixed `|t|` threshold is budget-dependent). Same gate at every sample budget;
 more samples = tighter empirical confidence on the same threshold.
 
-## Known v0.1 timing-leak narrative — partially obsolete after 0.7 upgrade
+## Known timing-leak narrative
 
-The v0.1 timing-leak narrative was written against `crypto-bigint = 0.6`,
-where `ConstMontyForm::invert` measured `|tau| ≈ 0.70` between non-degenerate
-inputs. Main is now on `0.7.3`; an earlier one-off diagnostic measured
-`|tau| ≈ 0.006` on 0.7 — a ~100× improvement, not yet re-baked into the
-harness or the docs. Until a fresh measurement lands, treat `SECURITY.md`'s
-"Known v0.1 limitation" section, `point.rs`'s `to_affine()` caveat, and
-`benches/timing_leaks.rs`'s module-doc admission as describing the
-**published 0.1.0** posture, not main's current posture.
+Two postures, both documented:
 
-The three secret-touching `invert` sites are still:
+- **Published v0.1.0 (on `crypto-bigint = 0.6`):** isolated
+  `ConstMontyForm::invert` measured `|tau| ≈ 0.70` between random
+  non-degenerate inputs; diluted to `|tau| ≈ 0.04–0.14` inside `ct_sign`,
+  passing the 0.20 gate. This is the historical record of what shipped on
+  crates.io and is preserved in `SECURITY.md`, `point.rs::to_affine()`'s
+  doc comment, and `timing_leaks.rs`'s module-doc.
+- **Main (on `crypto-bigint = 0.7.3`):** re-measured at 100K samples on
+  the project harness. Isolated `Fn::invert` is `|tau| ≈ 0.006–0.010`
+  (~70-100× improvement); `ct_sign` is `|tau| ≈ 0.01–0.03`. Both
+  comfortably under the 0.20 gate.
+
+The three secret-touching `invert` sites are unchanged structurally:
 
 1. `Fn::invert((1+d) mod n)` in `sign_raw_with_id` — secret-dependent.
+   No longer detectable above noise on 0.7.3.
 2. `Fp::invert(Z)` in `to_affine()` after `mul_g(k)` — **nonce-dependent**.
-   The current dudect class-split (by `d`) is structurally blind to this site.
+   The current dudect class-split (by `d`) is structurally blind to this
+   site regardless of `crypto-bigint` version.
 3. `Fp::invert(Z)` in `to_affine()` from `compute_z` — public input, harmless.
 
-**v0.2 plan:** re-measure on 0.7 first. If the gate is comfortably under 0.20
-across both the existing `d`-class targets and a new `k`-class target, the
-Fermat-invert rewrite may not be needed. If it is needed, ship the
-`pow_bounded_exp` replacement AND the `k`-class harness target **together** —
-don't ship a partial fix without the matching harness change.
+**v0.2 plan:** the Fermat-invert via `pow_bounded_exp` workstream that was
+load-bearing under the 0.6 measurement is now optional defense-in-depth —
+0.7.3's isolated invert is already under the harness's detection threshold.
+The `k`-class-split harness target is still required: the existing
+`d`-class layout is structurally blind to site (2) regardless of which
+`crypto-bigint` version is in use. Add the `k`-class target first; only
+ship Fermat-invert if direct measurement under that target reveals a real
+nonce-path leak.
 
 ## Architecture map
 

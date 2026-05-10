@@ -14,42 +14,53 @@
 //! Low `|t|` means the test could not detect a leak within the budget given,
 //! **not** that no leak exists.
 //!
-//! # Known v0.1 limitation: `crypto-bigint`'s `ConstMontyForm::invert` is
-//! not constant-time across different inputs.
+//! # `ConstMontyForm::invert` posture across `crypto-bigint` versions
 //!
-//! Direct measurement on this harness shows `|tau| ≈ 0.70` for
+//! Published v0.1.0 ships against `crypto-bigint = 0.6`, where direct
+//! measurement on this harness showed `|tau| ≈ 0.70` for
 //! `Fn::invert((1+d) mod n)` between two random non-degenerate `d`
-//! values. This is the dominant signal when invert is exercised in
-//! isolation. Inside `sign_raw_with_id`, where invert is ~1-2% of total
-//! sign time, the signal dilutes to `|tau| ≈ 0.04-0.14` — within the
-//! harness's `|tau| < 0.20` gate, so `ct_sign` passes today.
+//! values. Inside `sign_raw_with_id`, where invert is ~1-2% of total
+//! sign time, that signal diluted to `|tau| ≈ 0.04-0.14` — under the
+//! 0.20 gate, so `ct_sign` passed.
+//!
+//! Main has since upgraded to `crypto-bigint = 0.7.3`. Re-measurement
+//! at 100K samples shows isolated `Fn::invert` at `|tau| ≈ 0.006-0.010`
+//! and `ct_sign` at `|tau| ≈ 0.01-0.03` — both comfortably under the
+//! 0.20 gate, with the upstream isolated invert leak now below the
+//! harness's detection threshold.
 //!
 //! # Honest admission: this class-split is blind to nonce-path leaks
 //!
+//! This is independent of which `crypto-bigint` version is in use —
+//! it is a property of how `ct_sign` splits its test classes.
+//!
 //! `ct_sign` splits its two classes by private key `d` and lets the
 //! per-sample nonce `k` be fresh-random in every sample of every class.
-//! This catches the `(1+d).invert()` leak (diluted as above), but it
-//! is **structurally blind** to a nonce-only leak — for example the
-//! `Fp::invert(Z)` inside `kg.to_affine()` after `mul_g(k)`, where `Z`
-//! is derived from the secret `k`. Such a leak distributes uniformly
-//! across both classes and cannot show up as a between-class timing
-//! difference.
+//! This catches the `(1+d).invert()` leak (diluted on 0.6, no longer
+//! detectable on 0.7.3), but it is **structurally blind** to a
+//! nonce-only leak — for example the `Fp::invert(Z)` inside
+//! `kg.to_affine()` after `mul_g(k)`, where `Z` is derived from the
+//! secret `k`. Such a leak distributes uniformly across both classes
+//! and cannot show up as a between-class timing difference.
 //!
 //! `ct_mul_g` / `ct_mul_var` are class-split by scalar magnitude and
 //! so partially exercise the nonce path, but they don't call
 //! `to_affine` inside the timed window, so they also miss this site.
 //!
 //! A `ct_sign` pass is therefore **not** evidence that signing is
-//! leak-free on the nonce path. It is evidence only that the `(1+d)`
-//! invert leak stays under the gate at current sign-step proportions.
-//! See `SECURITY.md`'s "Known v0.1 limitation" section for the full
-//! posture.
+//! leak-free on the nonce path. With 0.6 it meant the `(1+d)` invert
+//! leak stayed under the gate at current sign-step proportions; with
+//! 0.7.3 it means the same leak has gone below noise. In neither case
+//! does it speak to a `k`-only leak. See `SECURITY.md`'s
+//! "`ConstMontyForm::invert` posture" section for the full picture.
 //!
-//! v0.2 replaces both secret-touching invert sites with a Fermat-invert
-//! via `pow_bounded_exp` (after first validating the `pow` path is
-//! itself constant-time) and reworks the harness to add a class split
-//! by `k` (with `d` held fixed) to specifically exercise the nonce
-//! path the v0.1 class layout cannot see.
+//! v0.2 reworks the harness to add a class split by `k` (with `d`
+//! held fixed) to specifically exercise the nonce path the existing
+//! class layout cannot see. The original v0.2 plan to also replace
+//! both invert sites with a Fermat-invert via `pow_bounded_exp` is no
+//! longer load-bearing on 0.7.3, but may still ship as
+//! defense-in-depth once the `k`-class target validates whether
+//! site (2) actually leaks under direct measurement.
 //!
 //! # Why we gate on `|tau|`, not `|t|`
 //!

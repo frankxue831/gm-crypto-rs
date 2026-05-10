@@ -39,15 +39,9 @@ constant-time.** Low `|tau|` values mean the test could not detect a leak with
 the budget given, not that no leak exists. Language is from `dudect-bencher`'s
 own docs.
 
-### Known v0.1 limitation: `crypto-bigint::ConstMontyForm::invert`
+### `crypto-bigint::ConstMontyForm::invert` posture
 
-Direct measurement on the harness shows `|tau| ≈ 0.70` for
-`ConstMontyForm::invert` between two random non-degenerate inputs. This is
-upstream behavior — `crypto-bigint = "0.7"`'s safegcd/Bernstein-Yang inversion
-is documented as constant-time but is not constant-time across different inputs
-in practice on the observed implementation.
-
-There are **three** invert sites in v0.1's secret-touching code path:
+There are **three** invert sites in the secret-touching code path:
 
 1. **`Fn::invert((1 + d) mod n)`** in `sign_raw_with_id` — operates on the
    secret private key `d`.
@@ -57,16 +51,43 @@ There are **three** invert sites in v0.1's secret-touching code path:
 3. **`Fp::invert(Z)`** in `to_affine()`, called from `compute_z`'s public-key
    conversion — operates on **public** input only and reveals nothing new.
 
-Sites 1 and 2 are both **secret-dependent** timing surfaces in v0.1.
+Sites (1) and (2) are both **secret-dependent** timing surfaces.
+
+#### Published v0.1.0 — on `crypto-bigint = 0.6`
+
+Direct measurement on the harness against `crypto-bigint = 0.6` showed
+`|tau| ≈ 0.70` for `ConstMontyForm::invert` between two random non-degenerate
+inputs. Inside `sign_raw_with_id`, where invert is ~1-2% of total sign time,
+the signal diluted to `|tau| ≈ 0.04–0.14` for `ct_sign`. Diluted is under
+the 0.20 gate, so v0.1.0's `ct_sign` target passed — but the underlying
+isolated invert was a real leak. The published 0.1.0 tarball still lives
+on this `0.6` posture.
+
+#### Main — on `crypto-bigint = 0.7.3`
+
+Main upgraded to `crypto-bigint = 0.7.3` post-publish. Re-measurement on the
+same harness shows the upstream invert leak is essentially gone: at 100K
+samples, isolated `Fn::invert` between two random non-degenerate inputs
+measures `|tau| ≈ 0.006–0.010`, a ~70–100× improvement over the `0.6`-era
+figure. `ct_sign` (full-path, dilution-bounded) measures `|tau| ≈ 0.01–0.03`
+at 100K. Both are **comfortably under** the 0.20 gate.
+
+This is **upstream behavior** — `crypto-bigint`'s safegcd/Bernstein-Yang
+inversion is documented as constant-time, and on `0.7.3` it now also
+measures essentially constant-time on this harness. No claim is made about
+other `0.7.x` patch releases or other architectures; the numbers above are
+this project's harness on the maintainer's hardware.
 
 ### Honest admission about the dudect harness's coverage
+
+This admission is **independent of which `crypto-bigint` version is in use**
+— it is a property of how the harness splits its test classes.
 
 The in-CI `dudect-bencher` harness (`benches/timing_leaks.rs`) splits its
 `ct_sign` test classes by **private key `d`** while letting **`k` be
 fresh-random in every sample**. This design catches site (1) — the
-`(1+d).invert()` leak — diluted to `|tau| ≈ 0.04–0.14` because invert
-is ~1-2% of total sign time. The diluted signal is under the 0.20 gate,
-so `ct_sign` passes today.
+`(1+d).invert()` leak. On `0.6` that leak diluted to `|tau| ≈ 0.04–0.14`;
+on `0.7.3` it is no longer detectable above noise.
 
 **The harness does not, however, detect site (2).** A nonce-dependent leak
 distributes uniformly across both classes, so it cannot show up as a
@@ -77,20 +98,28 @@ but their `to_affine` is never called inside the timed window — so they
 also miss it.
 
 A `ct_sign` pass is therefore **not** evidence that signing is leak-free
-on the nonce path. It is evidence only that the `(1+d).invert()` leak is
-diluted under threshold at current sign-step proportions.
+on the nonce path. With `0.6` it was evidence that the `(1+d).invert()`
+leak stayed diluted under threshold; with `0.7.3` it is evidence that the
+`(1+d).invert()` leak has gone below the noise floor; in neither case
+does it speak to site (2).
 
 ### v0.2 plan
 
-v0.2 replaces both `Fn::invert` and `Fp::invert` at sites (1) and (2)
-with a constant-time Fermat-invert via `pow_bounded_exp` (after first
-validating the `pow` path is itself constant-time on the same harness).
-Once both sites are fixed, the harness will be reworked so that one of
-its targets is class-split by `k` (with `d` held fixed) to specifically
-exercise the nonce path that v0.1's class layout could not see.
+The harness's structural blindness to nonce-only leaks remains an open
+gap regardless of `crypto-bigint` version. v0.2 will add a `ct_sign`-style
+target that holds `d` fixed and class-splits by `k`, specifically to
+exercise site (2) — the `Fp::invert(Z)` after `mul_g(k)`.
+
+The original v0.2 plan to also replace both `Fn::invert` and `Fp::invert`
+sites with a constant-time Fermat-invert via `pow_bounded_exp` was
+motivated by the `0.6`-era leak. With `0.7.3`'s isolated invert measuring
+`|tau| ≈ 0.006–0.010`, that workstream is **no longer load-bearing**;
+it may still ship in v0.2 as defense-in-depth, but only after the new
+`k`-class harness target validates whether site (2) actually leaks under
+direct measurement.
 
 This limitation is also noted in `benches/timing_leaks.rs`'s module
-docs and tracked for the v0.2 fix.
+docs and tracked for v0.2.
 
 ## Other known limitations (non-goals)
 
