@@ -84,7 +84,9 @@
 //! bench <name>           : n == +X.XXXM, max t = +X.XXXXX, max tau = ..., (5/tau)^2 = ...
 //! ```
 //!
-//! CI workflows parse this with a regex pinned to `^bench\s+(\S+)\s*:.*?max t = ([+-]\d+\.\d+)`.
+//! CI workflows parse this with a regex pinned to `max tau` (NOT `max t` — the
+//! gate is on the scale-free `tau`, not the budget-dependent `t`):
+//! `^bench\s+(\S+)\s*\.+\s*:.*?max tau\s*=\s*([+\-]?\d+\.\d+)`.
 
 use core::convert::Infallible;
 use crypto_bigint::U256;
@@ -146,9 +148,10 @@ fn negative_control(runner: &mut CtRunner, rng: &mut BenchRng) {
 }
 
 fn ct_mul_g(runner: &mut CtRunner, rng: &mut BenchRng) {
-    // Small scalar (k=1) vs large scalar (k=n-1). Both are valid private-key
-    // scalars; a constant-time fixed-window scalar mult should produce
-    // indistinguishable timing distributions.
+    // Small scalar (k=1) vs near-n large scalar (k = n-5; the SM2 curve order
+    // ends in `...39D54123`). Both are valid private-key scalars; a
+    // constant-time fixed-window scalar mult should produce indistinguishable
+    // timing distributions.
     let small = Scalar::new(&U256::ONE);
     let large = Scalar::new(&U256::from_be_hex(
         "FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFF7203DF6B21C6052B53BBF40939D5411E",
@@ -164,6 +167,7 @@ fn ct_mul_g(runner: &mut CtRunner, rng: &mut BenchRng) {
 }
 
 fn ct_mul_var(runner: &mut CtRunner, rng: &mut BenchRng) {
+    // Same small (k=1) vs near-n (k = n-5) class split as `ct_mul_g`.
     let small = Scalar::new(&U256::ONE);
     let large = Scalar::new(&U256::from_be_hex(
         "FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFF7203DF6B21C6052B53BBF40939D5411E",
@@ -245,7 +249,9 @@ impl ClassKRng {
         }
     }
 
-    /// Two large nonces: n-1 and n-3. Both pass `candidate < n`.
+    /// Two large nonces: `n-5` and `n-7` (the SM2 curve order ends in
+    /// `...39D54123`). Both well within `[1, n-1]` and so accepted by
+    /// `sample_nonzero_scalar`'s `candidate < n` check on first try.
     const fn new_right() -> Self {
         Self {
             pair: [

@@ -57,14 +57,17 @@ GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
 
 ## Dudect harness gate
 
-Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. Four targets:
+Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. Seven targets:
 
 | Target | Gate | Meaning |
 |---|---|---|
 | `negative_control` | `\|tau\| > 1.0` | MUST fire — proves harness wiring. |
 | `ct_mul_g` | `\|tau\| < 0.20` | Fixed-base scalar mult. |
 | `ct_mul_var` | `\|tau\| < 0.20` | Variable-base scalar mult. |
-| `ct_sign` | `\|tau\| < 0.20` | `sign_raw_with_id` (NOT `sign_with_id` — DER is variable-time on public output). |
+| `ct_sign` | `\|tau\| < 0.20` | `sign_raw_with_id`, class-split by private key `d` (NOT `sign_with_id` — DER is variable-time on public output). |
+| `ct_sign_k_class` | `\|tau\| < 0.20` | `sign_raw_with_id`, class-split by nonce `k` magnitude with `d` held fixed (W0; both retry nonces class-tied). |
+| `ct_fn_invert` | `\|tau\| < 0.20` | Direct `Fn::invert((1+d) mod n)` diagnostic (W0). |
+| `ct_fp_invert` | `\|tau\| < 0.20` | Direct `Fp::invert(Z)` diagnostic (W0). |
 
 Gate on **`|tau|`** (scale-free), not `|t|` (grows as `tau · sqrt(N)` so any
 fixed `|t|` threshold is budget-dependent). Same gate at every sample budget;

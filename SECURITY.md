@@ -29,9 +29,14 @@ regardless of which (if any) candidate is valid.
 The in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
 (`benches/timing_leaks.rs`) gates on `|tau| < 0.20` for the real targets:
 
-- `ct_mul_g`   — fixed-base scalar multiplication `k·G`.
-- `ct_mul_var` — variable-base scalar multiplication `k·P`.
-- `ct_sign`    — full SM2 sign through `sign_raw_with_id`.
+- `ct_mul_g`         — fixed-base scalar multiplication `k·G`.
+- `ct_mul_var`       — variable-base scalar multiplication `k·P`.
+- `ct_sign`          — full SM2 sign through `sign_raw_with_id`, class-split by
+  private key `d`.
+- `ct_sign_k_class`  — same, class-split by nonce `k` magnitude with `d` held
+  fixed (W0; closes the v0.1 structural blind spot to nonce-only leaks).
+- `ct_fn_invert`     — direct `Fn::invert((1+d) mod n)` diagnostic (W0).
+- `ct_fp_invert`     — direct `Fp::invert(Z)` diagnostic (W0).
 
 A deliberately-leaky `negative_control` target gates `|tau| > 1.0` to confirm
 the harness wiring on every PR. **The harness detects leaks; it does not prove
