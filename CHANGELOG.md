@@ -130,6 +130,31 @@ the project follows [Semantic Versioning](https://semver.org/).
   HMAC key (per `HMAC(K, m) == HMAC(SM3(K), m)`), not merely a
   key-derived value, so leaving it unwiped weakened the documented
   zeroization guarantee.
+- SM2 decrypt's KDF-zero rejection is now non-branching. The
+  second-pass codex review flagged that an early-return on
+  `all_zero(KDF) → Err(Failed)` exposed a chosen-ciphertext timing
+  oracle: for short `C2` the per-attempt KDF-zero probability is
+  `2^(-8·|C2|)` (e.g. `1/256` for a 1-byte `C2`), and the early-return
+  branch skipped the XOR / SM3 / MAC work — observably faster than a
+  normal MAC failure. Decrypt now folds the all-zero detection into a
+  `subtle::Choice`, computes the SM3 MAC unconditionally, and combines
+  `(mac_ok & !kdf_zero)` into one validity bit. Both failure classes
+  collapse to identical control flow per the failure-mode invariant.
+  Empty `C2` continues to suppress the KDF-zero check via a `nonempty`
+  Choice mask. Two regression tests added: `rejects_forged_short_ciphertext`
+  exercises the new branchless path on 1-byte ciphertexts; the
+  existing `round_trip_boundary_lengths` covers the empty-suppression
+  behaviour and a new `round_trip_empty_plaintext` pins it
+  independently.
+- SM2 encrypt's `ENCRYPT_RETRY_BUDGET` raised from `4` to `64`. The
+  second-pass codex review noted that the per-iteration KDF-zero
+  probability is length-dependent (`2^(-8·|M|)`, not the asymptotic
+  `2^-256` figure the original budget assumed). At budget=4 a 1-byte
+  plaintext fails ~`2^-32` of encryptions even with a uniform CSPRNG
+  — observable in production. At budget=64 the cumulative-failure
+  probability is `≤ 2^-512` for any plaintext length. GB/T 32918.4
+  specifies the retry as indefinite; the 64-step bound is a
+  defense-in-depth ceiling, never reached in practice.
 
 ### Changed
 

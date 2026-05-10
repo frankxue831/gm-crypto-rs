@@ -36,6 +36,15 @@
 //! - KDF (counter-mode SM3): SM3 itself is data-independent in timing.
 //! - `M = C2 XOR t`: byte-wise XOR loop, branchless.
 //! - MAC compare: `subtle::ConstantTimeEq` on the 32-byte digest.
+//! - **All-zero KDF detection: non-branching.** A naïve early-return
+//!   on KDF-zero would gift a chosen-ciphertext attacker a timing
+//!   oracle for short C2: P(KDF zero) ≈ 2^(-8·|C2|), so a 1-byte C2
+//!   trips the branch ~1/256 of the time, and the early-return path
+//!   skips the XOR/SM3/MAC work — observably faster than a
+//!   normal MAC failure. The implementation folds the all-zero
+//!   detection into a `subtle::Choice` and combines it with the
+//!   `mac_ok` result via `&` so both classes of failure collapse to
+//!   identical control flow.
 //!
 //! v0.2 adds [`crate::sm4::Sm4Cipher`] for envelope encryption (use
 //! SM2 to wrap an SM4 key, then SM4-CBC with HMAC-SM3 for bulk data
@@ -58,7 +67,7 @@ use crate::sm2::private_key::Sm2PrivateKey;
 use crate::sm2::scalar_mul::mul_var;
 use crate::sm3::Sm3;
 use alloc::vec::Vec;
-use subtle::ConstantTimeEq;
+use subtle::{Choice, ConstantTimeEq};
 use zeroize::Zeroize;
 
 /// Decrypt failure — single uninformative variant per the project's
@@ -108,34 +117,43 @@ pub fn decrypt(private: &Sm2PrivateKey, ciphertext_der: &[u8]) -> Result<Vec<u8>
     let mut t = alloc::vec![0u8; parsed.ciphertext.len()];
     kdf(&z, &mut t);
 
-    // 5. KDF-zero check (vacuously satisfied for empty C2).
-    if !parsed.ciphertext.is_empty() && all_zero(&t) {
-        z.zeroize();
-        t.zeroize();
-        return Err(DecryptError::Failed);
-    }
+    // 5. KDF-zero detection — *non-branching*. We MUST NOT early-return
+    //    here: a chosen-ciphertext attacker who can submit a short C2
+    //    (e.g. 1 byte) hits an all-zero KDF output with probability
+    //    `≈ 2^(-8 * |C2|)`, and an early-return that skips the
+    //    XOR/SM3/MAC work would distinguish the secret-derived
+    //    predicate "d_B*C1 produced all-zero KDF" from an ordinary
+    //    MAC failure. Both outcomes must collapse to identical control
+    //    flow per the failure-mode invariant. The empty-C2 case is
+    //    explicitly excluded (vacuous all-zero on an empty buffer).
+    let nonempty: Choice = u8::from(!parsed.ciphertext.is_empty()).into();
+    let kdf_zero = nonempty & ct_all_zero(&t);
 
     // 6. M = C2 XOR t (in place — t becomes M).
     for (i, byte) in parsed.ciphertext.iter().enumerate() {
         t[i] ^= byte;
     }
-    // Rename for clarity: the buffer now holds plaintext.
+    // Rename for clarity: the buffer now holds (would-be) plaintext.
     let mut plaintext = t;
 
-    // 7. u = SM3(x2 || M || y2)
+    // 7. u = SM3(x2 || M || y2) — computed unconditionally regardless
+    //    of `kdf_zero` so timing is identical on both branches.
     let mut h = Sm3::new();
     h.update(&z[..32]);
     h.update(&plaintext);
     h.update(&z[32..]);
     let u = h.finalize();
 
-    // 8. Constant-time MAC compare.
+    // 8. Combine the constant-time KDF-zero detection with the MAC
+    //    compare into a single `Choice`. Using `&` on `Choice` (defined
+    //    via `BitAnd<Choice>`) preserves the constant-time contract.
     let mac_ok = u.ct_eq(&parsed.hash);
+    let valid = mac_ok & !kdf_zero;
 
     // Wipe the secret-derived (x2 || y2) buffer regardless of outcome.
     z.zeroize();
 
-    if !bool::from(mac_ok) {
+    if !bool::from(valid) {
         // Wipe the would-be plaintext — the caller never sees it.
         plaintext.zeroize();
         return Err(DecryptError::Failed);
@@ -144,14 +162,16 @@ pub fn decrypt(private: &Sm2PrivateKey, ciphertext_der: &[u8]) -> Result<Vec<u8>
     Ok(plaintext)
 }
 
-/// Constant-time all-zero scan. Same shape as the encrypt-side helper
-/// but local to keep the module self-contained.
-fn all_zero(buf: &[u8]) -> bool {
+/// Constant-time all-zero scan returning a [`Choice`]. The bitwise OR
+/// fold gives a single 8-bit summary value that reveals only whether
+/// the buffer is all-zero — itself the mandated KDF-zero predicate
+/// — and never short-circuits.
+fn ct_all_zero(buf: &[u8]) -> Choice {
     let mut acc: u8 = 0;
     for b in buf {
         acc |= b;
     }
-    bool::from(acc.ct_eq(&0u8))
+    acc.ct_eq(&0u8)
 }
 
 #[cfg(test)]
@@ -290,5 +310,66 @@ mod tests {
         parsed.ciphertext[0] ^= 0xff;
         let tampered = encode(&parsed);
         assert_eq!(decrypt(&key, &tampered), Err(DecryptError::Failed));
+    }
+
+    /// Functional regression test for the constant-time KDF-zero
+    /// handling. Forge a ciphertext where `C2` is `[0x00; n]` for
+    /// small `n`; on decryption the random-looking `KDF(d_B*C1, n)`
+    /// won't be all-zero (the attacker can't choose `KDF` output
+    /// without knowing `d_B*C1`), so the path must collapse to
+    /// `Failed` via the MAC-mismatch arm rather than via an
+    /// early-return KDF-zero branch. The pre-fix decoder would have
+    /// taken the early return whenever the KDF *did* hit all-zero
+    /// (~1/256 of attempts for a 1-byte C2), exposing a chosen-
+    /// ciphertext timing oracle. We can't reliably hit the
+    /// all-zero KDF output here without grinding `C1`, but this
+    /// test does verify the rewrite still rejects forged short
+    /// ciphertexts cleanly across many attempts and that no panic
+    /// or `Ok` result slips through.
+    ///
+    /// Companion: see `crates/gmcrypto-core/src/sm2/decrypt.rs`
+    /// step 5 comment for the timing-oracle rationale.
+    #[test]
+    fn rejects_forged_short_ciphertext() {
+        let d =
+            U256::from_be_hex("1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0");
+        let key = Sm2PrivateKey::new(d).expect("valid d");
+        let pk = Sm2PublicKey::from_point(key.public_key());
+        let mut rng = UnwrapErr(SysRng);
+
+        // Encrypt many distinct 1-byte messages so we exercise lots
+        // of `(C1, KDF)` pairs, then for each tamper `C3` to force
+        // the path through the new branchless KDF-zero detection +
+        // MAC compare. None should panic or return `Ok`.
+        for round in 0..32u8 {
+            let plaintext = [round];
+            let der = encrypt(&pk, &plaintext, &mut rng).expect("encrypt 1-byte");
+            let mut parsed = decode(&der).expect("decode our own DER");
+            parsed.hash[0] ^= 0x01;
+            let tampered = encode(&parsed);
+            assert_eq!(
+                decrypt(&key, &tampered),
+                Err(DecryptError::Failed),
+                "forged 1-byte ciphertext on round {round} must fail"
+            );
+        }
+    }
+
+    /// Empty plaintext round-trip is supported: `KDF(_, 0)` writes
+    /// zero bytes, the all-zero check is vacuously suppressed via
+    /// the `nonempty` Choice mask, and `SM3(x2 || empty || y2)`
+    /// is the MAC. Companion to `round_trip_boundary_lengths` —
+    /// kept independent so a regression on the empty-suppression
+    /// behavior surfaces here distinctly.
+    #[test]
+    fn round_trip_empty_plaintext() {
+        let d =
+            U256::from_be_hex("1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0");
+        let key = Sm2PrivateKey::new(d).expect("valid d");
+        let pk = Sm2PublicKey::from_point(key.public_key());
+        let mut rng = UnwrapErr(SysRng);
+        let der = encrypt(&pk, b"", &mut rng).expect("encrypt empty");
+        let recovered = decrypt(&key, &der).expect("decrypt empty");
+        assert!(recovered.is_empty(), "empty plaintext round-trip");
     }
 }

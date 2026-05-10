@@ -37,8 +37,10 @@
 //! [`encrypt`] returns `Result<Vec<u8>, EncryptError>` with a single
 //! `Failed` variant — collapses every retry-budget-exhausted, identity-
 //! point, or KDF-zero outcome to one uninformative shape. With a
-//! [`CryptoRng`], failure has probability `≈ 2^-512` per call (i.e.
-//! never observed in practice).
+//! [`CryptoRng`], the cumulative-failure probability is `≤ 2^-512` per
+//! call across all plaintext lengths (1-byte through arbitrary), per
+//! the [`ENCRYPT_RETRY_BUDGET`] table — i.e. never observed in
+//! practice.
 //!
 //! # Constant-time stance
 //!
@@ -63,10 +65,27 @@ use rand_core::{CryptoRng, Rng};
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
-/// Retry budget for the KDF-zero rejection step. With a uniform CSPRNG
-/// the rejection probability per iteration is ≈ 2⁻²⁵⁶; four retries
-/// makes the cumulative-failure probability ≈ 2⁻¹⁰²⁴ — i.e. never.
-const ENCRYPT_RETRY_BUDGET: usize = 4;
+/// Retry budget for the KDF-zero rejection step.
+///
+/// **Per-iteration KDF-zero probability is length-dependent**, not the
+/// asymptotic `2^-256` figure that v0.2's first cut assumed. For a
+/// plaintext of `L` bytes the KDF output is `L` bytes long and
+/// `P(all-zero) = 2^(-8·L)`. For very short plaintexts the per-call
+/// probability is non-negligible:
+///
+/// | `|M|` (bytes) | per-iteration P(zero) | budget=4 P(fail) | budget=64 P(fail) |
+/// |---:|---:|---:|---:|
+/// | 1  | `2^-8`   | `2^-32`  | `2^-512`  |
+/// | 2  | `2^-16`  | `2^-64`  | `2^-1024` |
+/// | 4  | `2^-32`  | `2^-128` | `2^-2048` |
+/// | 32 | `2^-256` | `2^-1024`| `2^-16384`|
+///
+/// A budget of 64 makes the cumulative failure probability negligible
+/// at any plaintext length while keeping the loop bounded for liveness
+/// under degenerate RNGs. GB/T 32918.4 specifies the retry as
+/// indefinite; the 64-step bound is a defense-in-depth ceiling, never
+/// reached in practice with a uniform CSPRNG.
+const ENCRYPT_RETRY_BUDGET: usize = 64;
 
 /// Encrypt failure — single uninformative variant per the project's
 /// failure-mode invariant.
@@ -81,8 +100,9 @@ pub enum EncryptError {
 /// Encrypt `plaintext` to recipient `public`, returning a GM/T 0009
 /// DER-encoded ciphertext.
 ///
-/// `rng` must be a [`CryptoRng`]. With a CSPRNG, encrypt failure has
-/// probability negligible (~2⁻¹⁰²⁴ from the KDF-zero retry chain).
+/// `rng` must be a [`CryptoRng`]. With a CSPRNG, encrypt failure
+/// probability is `≤ 2^-512` for any plaintext length — see the
+/// [`ENCRYPT_RETRY_BUDGET`] table for the per-length math.
 ///
 /// # Errors
 ///
