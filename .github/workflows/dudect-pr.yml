@@ -77,6 +77,11 @@ jobs:
               "ct_sign_k_class": 0.20,
               "ct_fn_invert": 0.20,
               "ct_fp_invert": 0.20,
+              # v0.2 W1 — SM4 timing surfaces. Key schedule and encrypt
+              # share an S-box-and-linear-transform pipeline; both run on
+              # secret-derived state.
+              "ct_sm4_key_schedule": 0.20,
+              "ct_sm4_encrypt_block": 0.20,
           }
 
           fail = False

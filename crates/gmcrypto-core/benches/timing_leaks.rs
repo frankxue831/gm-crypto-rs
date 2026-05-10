@@ -97,6 +97,7 @@ use gmcrypto_core::sm2::{
     DEFAULT_SIGNER_ID, Fn as Scalar, Fp, ProjectivePoint, Sm2PrivateKey, mul_g, mul_var,
     sign_raw_with_id,
 };
+use gmcrypto_core::sm4::Sm4Cipher;
 use rand_core::{TryCryptoRng, TryRng, UnwrapErr};
 
 /// Default per-bench sample count (smoke). Overridable via `DUDECT_SAMPLES`.
@@ -372,6 +373,59 @@ fn ct_fp_invert(runner: &mut CtRunner, rng: &mut BenchRng) {
     }
 }
 
+/// SM4 key schedule diagnostic. The 32-round key schedule runs the same
+/// S-box-and-linear-transform pipeline as the round function on
+/// secret-derived material — `ct_sm4_encrypt_block` would partially
+/// cover this, but a dedicated target prevents an encryption-only
+/// regression from masking a key-schedule leak.
+fn ct_sm4_key_schedule(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let key_left: [u8; 16] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
+        0x10,
+    ];
+    let key_right: [u8; 16] = [
+        0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
+        0xef,
+    ];
+    for _ in 0..sample_count() {
+        let (class, key) = if rng.random::<bool>() {
+            (Class::Left, &key_left)
+        } else {
+            (Class::Right, &key_right)
+        };
+        runner.run_one(class, || Sm4Cipher::new(key));
+    }
+}
+
+/// SM4 encrypt-block diagnostic. Times "construct cipher from key +
+/// encrypt one block" under a single window; a leak in either the key
+/// schedule or the round function fires this target. Plaintext is
+/// fixed; class split is on the master key bytes.
+fn ct_sm4_encrypt_block(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let key_left: [u8; 16] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
+        0x10,
+    ];
+    let key_right: [u8; 16] = [
+        0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
+        0xef,
+    ];
+    let plaintext: [u8; 16] = [0u8; 16];
+    for _ in 0..sample_count() {
+        let (class, key) = if rng.random::<bool>() {
+            (Class::Left, &key_left)
+        } else {
+            (Class::Right, &key_right)
+        };
+        runner.run_one(class, || {
+            let cipher = Sm4Cipher::new(key);
+            let mut block = plaintext;
+            cipher.encrypt_block(&mut block);
+            block
+        });
+    }
+}
+
 /// Custom `main` (instead of `ctbench_main!`) so we can pre-filter `--bench`
 /// from argv. `cargo bench` injects `--bench` as the first arg by libtest
 /// convention; dudect-bencher's clap parser doesn't recognize it and would
@@ -447,6 +501,16 @@ fn main() {
             name: BenchName("ct_fp_invert"),
             seed: None,
             benchfn: ct_fp_invert,
+        },
+        BenchMetadata {
+            name: BenchName("ct_sm4_key_schedule"),
+            seed: None,
+            benchfn: ct_sm4_key_schedule,
+        },
+        BenchMetadata {
+            name: BenchName("ct_sm4_encrypt_block"),
+            seed: None,
+            benchfn: ct_sm4_encrypt_block,
         },
     ];
 
