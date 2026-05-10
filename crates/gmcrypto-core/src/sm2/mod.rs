@@ -1,5 +1,6 @@
 //! SM2 elliptic curve cryptography (GB/T 32918-2017).
 
+pub(crate) mod comb_table;
 pub mod curve;
 pub mod decrypt;
 pub mod encrypt;

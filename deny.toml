@@ -35,6 +35,12 @@ allow = [
     { name = "zeroize" },
     { name = "zeroize_derive" },
     { name = "rand_core" },
+    # v0.3 W6 — `spin::Once` for the comb-table runtime init. Per
+    # Q7.8 in docs/v0.3-scope.md, this is the no_std-compatible
+    # runtime-init primitive selected over `std::sync::LazyLock`
+    # (forbidden in no_std) and `once_cell::race::OnceBox`. Loaded
+    # with the `once` feature only — no spinlock/mutex paths.
+    { name = "spin" },
 
     # Transitive deps of crypto-bigint.
     { name = "cpubits" },

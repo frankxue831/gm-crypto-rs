@@ -3,9 +3,12 @@
 //! Two paths:
 //! - [`mul_var`] — variable-base k·P. 4-bit fixed-window, constant-time
 //!   linear-scan table lookup via `subtle`.
-//! - [`mul_g`] — fixed-base k·G. In v0.1 this delegates to [`mul_var`] with
-//!   the curve generator; a precomputed comb table is deferred to v0.2.
+//! - [`mul_g`] — fixed-base k·G. v0.3 uses a precomputed comb table
+//!   (see [`crate::sm2::comb_table`]) for ~5× speedup over v0.2's
+//!   delegate-to-`mul_var` path. Constant-time-designed lookup
+//!   preserved.
 
+use crate::sm2::comb_table::{NUM_WINDOWS, WINDOW_BITS, comb_table};
 use crate::sm2::curve::Fn;
 use crate::sm2::point::ProjectivePoint;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
@@ -53,12 +56,50 @@ pub fn mul_var(k: &Fn, p: &ProjectivePoint) -> ProjectivePoint {
 
 /// Fixed-base scalar multiplication k·G. Used in signing.
 ///
-/// **v0.1 implementation:** delegates to [`mul_var`] with the generator.
-/// v0.2 will replace this body with a precomputed comb table (~10-20×
-/// speedup). The public signature is stable.
+/// v0.3 walks a precomputed comb table (64 sub-tables of 16 entries
+/// each, lazily built once per process per [`crate::sm2::comb_table`]).
+/// Each window's lookup runs a constant-time linear scan over the
+/// 16-entry sub-table; the accumulation across windows uses
+/// projective point addition. Total work per call: 64 sub-table
+/// scans + 64 point additions, vs. v0.2's 256 doublings + 64
+/// additions via [`mul_var`].
+///
+/// Constant-time-designed: every sub-table entry is touched on
+/// every call regardless of the nibble value, and the scan output
+/// is selected via [`subtle::ConditionallySelectable`]. Public
+/// signature is unchanged from v0.2.
 #[must_use]
 pub fn mul_g(k: &Fn) -> ProjectivePoint {
-    mul_var(k, &ProjectivePoint::generator())
+    let table = comb_table();
+    let k_be = k.retrieve().to_be_bytes();
+
+    // Walk windows from LSB to MSB. The scalar is 256 bits, encoded as
+    // 32 bytes big-endian. Window i (0..NUM_WINDOWS) covers bits
+    // [4i, 4i+4). For each window, look up T[i][nibble_i] via
+    // constant-time scan and add to the accumulator.
+    let mut acc = ProjectivePoint::identity();
+    for i in 0..NUM_WINDOWS {
+        // Bit position from LSB: bits [4i, 4i+4).
+        // Byte index from MSB: 31 - i/2; nibble: (i & 1) == 0 → low nibble.
+        let bit = i * WINDOW_BITS;
+        let byte_idx = 31 - bit / 8;
+        let nibble = if i % 2 == 0 {
+            k_be.as_ref()[byte_idx] & 0x0F
+        } else {
+            (k_be.as_ref()[byte_idx] >> 4) & 0x0F
+        };
+
+        // Constant-time linear scan over T[i][0..16].
+        let mut chosen = ProjectivePoint::identity();
+        let sub = &table.sub_tables[i];
+        for (j, entry) in sub.iter().enumerate() {
+            #[allow(clippy::cast_possible_truncation)]
+            let take: Choice = (j as u8).ct_eq(&nibble);
+            chosen = ProjectivePoint::conditional_select(&chosen, entry, take);
+        }
+        acc = acc.add(&chosen);
+    }
+    acc
 }
 
 #[cfg(test)]
@@ -135,5 +176,79 @@ mod tests {
         let lhs = mul_g(&k);
         let rhs = mul_var(&k, &ProjectivePoint::generator());
         assert!(bool::from(lhs.ct_eq(&rhs)));
+    }
+
+    /// Battery test: `mul_g(k)` and `mul_var(k, &G)` agree on a wide
+    /// range of scalars, including small, large, and pathological
+    /// values (W6 equivalence regression). The comb-table walk is a
+    /// distinct code path from `mul_var`'s 4-bit windowed mul; the
+    /// two MUST produce identical points for every scalar.
+    #[test]
+    fn mul_g_matches_mul_var_battery() {
+        let g = ProjectivePoint::generator();
+        let n = *Fn::MODULUS.as_ref();
+        let n_minus_one = n.wrapping_sub(&U256::ONE);
+        let n_minus_two = n_minus_one.wrapping_sub(&U256::ONE);
+
+        // Small + boundary values.
+        let small_scalars: alloc::vec::Vec<U256> = [
+            U256::ZERO,
+            U256::ONE,
+            U256::from_u64(2),
+            U256::from_u64(15),
+            U256::from_u64(16),
+            U256::from_u64(255),
+            U256::from_u64(256),
+            U256::from_u64(0xFFFF_FFFF_FFFF_FFFF),
+            n_minus_two,
+            n_minus_one,
+        ]
+        .into_iter()
+        .collect();
+
+        // Some larger pseudo-random scalars (deterministic, so test is
+        // reproducible).
+        let randoms: alloc::vec::Vec<U256> = [
+            "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8",
+            "1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0",
+            "B9E5B7C12E48BAB7CC0E91A57F8A48E8C8F87DDD25EBF52F2A75E612CB1A9E4F",
+            "00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF",
+            "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE",
+            "8000000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000001",
+            "00000000000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE",
+        ]
+        .iter()
+        .map(|s| U256::from_be_hex(s))
+        .collect();
+
+        for k_u in small_scalars.iter().chain(randoms.iter()) {
+            let k = Fn::new(k_u);
+            let lhs = mul_g(&k);
+            let rhs = mul_var(&k, &g);
+            assert!(
+                bool::from(lhs.ct_eq(&rhs)),
+                "mul_g != mul_var for k = {k_u:#X}"
+            );
+        }
+    }
+
+    /// GB/T 32918.2 sample D: the comb-table `mul_g` must produce the
+    /// same public point as the spec.
+    #[test]
+    fn mul_g_gbt32918_sample() {
+        let d = Fn::new(&U256::from_be_hex(
+            "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8",
+        ));
+        let p = mul_g(&d);
+        let (x, y) = p.to_affine().expect("D·G is not at infinity");
+        assert_eq!(
+            x.retrieve(),
+            U256::from_be_hex("09F9DF311E5421A150DD7D161E4BC5C672179FAD1833FC076BB08FF356F35020")
+        );
+        assert_eq!(
+            y.retrieve(),
+            U256::from_be_hex("CCEA490CE26775A52DC6EA718CC1AA600AED05FBF35E084A6632F6072DA9AD13")
+        );
     }
 }
