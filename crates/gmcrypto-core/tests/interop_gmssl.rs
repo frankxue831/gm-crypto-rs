@@ -3,24 +3,23 @@
 //! Skipped silently when `GMCRYPTO_GMSSL=1` is not set; CI sets it
 //! on one matrix slot when gmssl is available on the runner.
 //!
-//! # v0.1 scope reduction
+//! # v0.3 scope (W3)
 //!
-//! The headline goal — bidirectional Rust↔gmssl signature interop —
-//! requires either:
+//! Full bidirectional cross-validation now that v0.3 W2 ships the
+//! PEM / PKCS#8 / SPKI codecs:
 //!
-//! 1. Rust loading gmssl's PKCS#8 (encoded EC private key), or
-//! 2. gmssl loading Rust's raw EC public key (which needs X.509 SPKI
-//!    wrapping).
+//! - **HMAC-SM3** (v0.2): one-direction, gmssl→us digest comparison.
+//! - **PBKDF2-HMAC-SM3** (v0.2): same, gmssl→us.
+//! - **SM2 sign/verify** (v0.3 W3): bidirectional. gmssl signs / we
+//!   verify. We sign / gmssl verifies.
+//! - **SM2 encrypt/decrypt** (v0.3 W3): bidirectional. gmssl encrypts
+//!   / we decrypt. We encrypt / gmssl decrypts. GM/T 0009 DER on the
+//!   wire.
+//! - **SM4-CBC** (v0.3 W3): bidirectional, caller-supplied IV.
 //!
-//! Both routes need the ASN.1 wrappers that land in v0.3. So v0.1's
-//! interop test is reduced to **binary reachability**: assert that
-//! `gmssl version` produces non-empty output. This confirms the test
-//! plumbing (env var gate, subprocess invocation, CI installation
-//! recipe) is wired correctly so v0.3 can drop in the real interop
-//! checks without scaffolding work.
-//!
-//! Bidirectional signature interop is tracked as a v0.3 deliverable.
-//! See the v0.1 release notes for the full rationale.
+//! v0.1 used a binary-reachability stub here while the wire-format
+//! work was still pending; v0.3 is the version where the headline
+//! interop bar finally clears.
 //!
 //! # Running
 //!
@@ -30,11 +29,14 @@
 //! ```
 
 use std::env;
+use std::fs;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use gmcrypto_core::hmac::hmac_sm3;
 use gmcrypto_core::kdf::pbkdf2_hmac_sm3;
+use gmcrypto_core::{pem, pkcs8, sm2, sm4};
 
 fn enabled() -> bool {
     env::var("GMCRYPTO_GMSSL").as_deref() == Ok("1")
@@ -213,4 +215,323 @@ fn pbkdf2_hmac_sm3_matches_gmssl() {
             "PBKDF2-HMAC-SM3 disagreement on (pass={password:?}, salt={salt:?}, iter={iter}, outlen={outlen}):\n  ours:  {our_hex}\n  gmssl: {gmssl_hex}"
         );
     }
+}
+
+// ---------- v0.3 W3: bidirectional SM2 / SM4-CBC / PEM-PKCS8 ----------
+//
+// All tests below load the v0.3 W2 KAT fixtures committed at
+// `tests/data/v0_3-sm2-pkcs8-encrypted.pem` (gmssl-emitted encrypted
+// PKCS#8) and `tests/data/v0_3-sm2-spki.pem` (the matched SPKI public
+// key). gmssl can load both with `-key priv.pem -pass passw0rd` and
+// `-pubkey pub.pem`; gmcrypto-core can decrypt the former via
+// `pkcs8::decrypt(blob, b"passw0rd")` and decode the latter via
+// `spki::decode`.
+
+const W3_PRIV_PEM: &str = include_str!("data/v0_3-sm2-pkcs8-encrypted.pem");
+const W3_PUB_PEM: &str = include_str!("data/v0_3-sm2-spki.pem");
+const W3_PASSWORD: &[u8] = b"passw0rd";
+const W3_PASSWORD_STR: &str = "passw0rd";
+
+/// Test scratch directory under `target/`. Created on first test
+/// run; reused thereafter. Cleared at test entry to avoid stale
+/// fixtures from a prior `cargo test` invocation.
+fn scratch_dir(name: &str) -> PathBuf {
+    let mut p = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    p.push(name);
+    let _ = fs::remove_dir_all(&p);
+    fs::create_dir_all(&p).expect("create scratch dir");
+    p
+}
+
+fn write_priv_pem(dir: &Path) -> PathBuf {
+    let path = dir.join("priv.pem");
+    fs::write(&path, W3_PRIV_PEM).expect("write priv.pem");
+    path
+}
+
+fn write_pub_pem(dir: &Path) -> PathBuf {
+    let path = dir.join("pub.pem");
+    fs::write(&path, W3_PUB_PEM).expect("write pub.pem");
+    path
+}
+
+/// Load the W2 KAT fixture private key into an `Sm2PrivateKey`.
+fn load_w3_private() -> sm2::Sm2PrivateKey {
+    let der = pem::decode(W3_PRIV_PEM, "ENCRYPTED PRIVATE KEY").expect("PEM decode W3 fixture");
+    pkcs8::decrypt(&der, W3_PASSWORD).expect("PKCS#8 decrypt W3 fixture")
+}
+
+/// SM2 sign: gmssl signs, gmcrypto-core verifies.
+///
+/// Confirms that `verify_with_id(default_id="1234567812345678", message,
+/// gmssl-emitted (r,s))` accepts the signature.
+#[test]
+fn gmssl_sm2_sign_them_verify_us() {
+    if !enabled() {
+        eprintln!("skipping: GMCRYPTO_GMSSL != 1");
+        return;
+    }
+    assert!(gmssl_present(), "GMCRYPTO_GMSSL=1 but no gmssl on PATH");
+
+    let dir = scratch_dir("w3_sm2_sign_them");
+    let priv_path = write_priv_pem(&dir);
+    let msg_path = dir.join("msg.txt");
+    let sig_path = dir.join("sig.bin");
+    let message = b"v0.3 W3 SM2 sign cross-validation";
+    fs::write(&msg_path, message).expect("write message");
+
+    let output = Command::new("gmssl")
+        .args([
+            "sm2sign",
+            "-key",
+            priv_path.to_str().unwrap(),
+            "-pass",
+            W3_PASSWORD_STR,
+            "-in",
+            msg_path.to_str().unwrap(),
+            "-out",
+            sig_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn gmssl sm2sign");
+    assert!(
+        output.status.success(),
+        "gmssl sm2sign failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let der_sig = fs::read(&sig_path).expect("read sig");
+    let priv_key = load_w3_private();
+    let pub_key = sm2::Sm2PublicKey::from_point(priv_key.public_key());
+    let ok = sm2::verify_with_id(&pub_key, sm2::DEFAULT_SIGNER_ID, message, &der_sig);
+    assert!(
+        ok,
+        "gmssl-emitted SM2 signature must verify under our verify_with_id"
+    );
+}
+
+/// SM2 sign: gmcrypto-core signs, gmssl verifies.
+///
+/// Confirms that `sm2::sign_with_id(default_id, message)` produces a
+/// signature gmssl accepts under the same SPKI public key.
+#[test]
+fn gmssl_sm2_sign_us_verify_them() {
+    if !enabled() {
+        eprintln!("skipping: GMCRYPTO_GMSSL != 1");
+        return;
+    }
+    assert!(gmssl_present(), "GMCRYPTO_GMSSL=1 but no gmssl on PATH");
+
+    let dir = scratch_dir("w3_sm2_sign_us");
+    let pub_path = write_pub_pem(&dir);
+    let msg_path = dir.join("msg.txt");
+    let sig_path = dir.join("sig.bin");
+    let message = b"v0.3 W3 SM2 sign-us cross-validation";
+    fs::write(&msg_path, message).expect("write message");
+
+    let priv_key = load_w3_private();
+    let mut rng = rand_core::UnwrapErr(getrandom::SysRng);
+    let sig =
+        sm2::sign_with_id(&priv_key, sm2::DEFAULT_SIGNER_ID, message, &mut rng).expect("sign");
+    fs::write(&sig_path, &sig).expect("write sig");
+
+    let output = Command::new("gmssl")
+        .args([
+            "sm2verify",
+            "-pubkey",
+            pub_path.to_str().unwrap(),
+            "-in",
+            msg_path.to_str().unwrap(),
+            "-sig",
+            sig_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn gmssl sm2verify");
+    assert!(
+        output.status.success(),
+        "gmssl sm2verify rejected our signature: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// SM2 encrypt: gmssl encrypts to our pubkey, gmcrypto-core decrypts.
+///
+/// Confirms that `sm2::decrypt` accepts gmssl-emitted GM/T 0009 SM2
+/// ciphertext and recovers the plaintext.
+#[test]
+fn gmssl_sm2_encrypt_them_decrypt_us() {
+    if !enabled() {
+        eprintln!("skipping: GMCRYPTO_GMSSL != 1");
+        return;
+    }
+    assert!(gmssl_present(), "GMCRYPTO_GMSSL=1 but no gmssl on PATH");
+
+    let dir = scratch_dir("w3_sm2_encrypt_them");
+    let pub_path = write_pub_pem(&dir);
+    let msg_path = dir.join("msg.txt");
+    let ct_path = dir.join("ct.bin");
+    let plaintext: &[u8] = b"v0.3 W3 SM2 encrypt cross-validation";
+    fs::write(&msg_path, plaintext).expect("write plaintext");
+
+    let output = Command::new("gmssl")
+        .args([
+            "sm2encrypt",
+            "-pubkey",
+            pub_path.to_str().unwrap(),
+            "-in",
+            msg_path.to_str().unwrap(),
+            "-out",
+            ct_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn gmssl sm2encrypt");
+    assert!(
+        output.status.success(),
+        "gmssl sm2encrypt failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let ct = fs::read(&ct_path).expect("read ct");
+    let priv_key = load_w3_private();
+    let recovered = sm2::decrypt(&priv_key, &ct).expect("decrypt gmssl-emitted ciphertext");
+    assert_eq!(recovered, plaintext);
+}
+
+/// SM2 encrypt: gmcrypto-core encrypts, gmssl decrypts.
+///
+/// Confirms that `sm2::encrypt` produces gmssl-acceptable GM/T 0009
+/// SM2 ciphertext.
+#[test]
+fn gmssl_sm2_encrypt_us_decrypt_them() {
+    if !enabled() {
+        eprintln!("skipping: GMCRYPTO_GMSSL != 1");
+        return;
+    }
+    assert!(gmssl_present(), "GMCRYPTO_GMSSL=1 but no gmssl on PATH");
+
+    let dir = scratch_dir("w3_sm2_encrypt_us");
+    let priv_path = write_priv_pem(&dir);
+    let ct_path = dir.join("ct.bin");
+    let recovered_path = dir.join("recovered.bin");
+    let plaintext: &[u8] = b"v0.3 W3 SM2 encrypt-us cross-validation";
+
+    let priv_key = load_w3_private();
+    let pub_key = sm2::Sm2PublicKey::from_point(priv_key.public_key());
+    let mut rng = rand_core::UnwrapErr(getrandom::SysRng);
+    let ct = sm2::encrypt(&pub_key, plaintext, &mut rng).expect("encrypt");
+    fs::write(&ct_path, &ct).expect("write ct");
+
+    let output = Command::new("gmssl")
+        .args([
+            "sm2decrypt",
+            "-key",
+            priv_path.to_str().unwrap(),
+            "-pass",
+            W3_PASSWORD_STR,
+            "-in",
+            ct_path.to_str().unwrap(),
+            "-out",
+            recovered_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn gmssl sm2decrypt");
+    assert!(
+        output.status.success(),
+        "gmssl sm2decrypt rejected our ciphertext: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let recovered = fs::read(&recovered_path).expect("read recovered");
+    assert_eq!(recovered, plaintext);
+}
+
+/// SM4-CBC: gmssl encrypts, gmcrypto-core decrypts.
+#[test]
+fn gmssl_sm4_cbc_encrypt_them_decrypt_us() {
+    if !enabled() {
+        eprintln!("skipping: GMCRYPTO_GMSSL != 1");
+        return;
+    }
+    assert!(gmssl_present(), "GMCRYPTO_GMSSL=1 but no gmssl on PATH");
+
+    let dir = scratch_dir("w3_sm4_cbc_them");
+    let key = [0xAB; 16];
+    let iv = [0xCD; 16];
+    let plaintext: &[u8] = b"v0.3 W3 SM4-CBC cross-validation message";
+
+    let pt_path = dir.join("pt.bin");
+    let ct_path = dir.join("ct.bin");
+    fs::write(&pt_path, plaintext).expect("write pt");
+
+    // gmssl sm4 -cbc -encrypt -key <hex> -iv <hex> -in pt -out ct
+    let output = Command::new("gmssl")
+        .args([
+            "sm4",
+            "-cbc",
+            "-encrypt",
+            "-key",
+            &hex(&key),
+            "-iv",
+            &hex(&iv),
+            "-in",
+            pt_path.to_str().unwrap(),
+            "-out",
+            ct_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn gmssl sm4");
+    assert!(
+        output.status.success(),
+        "gmssl sm4 -cbc -encrypt failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let ct = fs::read(&ct_path).expect("read ct");
+    let recovered = sm4::mode_cbc::decrypt(&key, &iv, &ct).expect("our decrypt");
+    assert_eq!(recovered, plaintext);
+}
+
+/// SM4-CBC: gmcrypto-core encrypts, gmssl decrypts.
+#[test]
+fn gmssl_sm4_cbc_encrypt_us_decrypt_them() {
+    if !enabled() {
+        eprintln!("skipping: GMCRYPTO_GMSSL != 1");
+        return;
+    }
+    assert!(gmssl_present(), "GMCRYPTO_GMSSL=1 but no gmssl on PATH");
+
+    let dir = scratch_dir("w3_sm4_cbc_us");
+    let key = [0xAB; 16];
+    let iv = [0xCD; 16];
+    let plaintext: &[u8] = b"v0.3 W3 SM4-CBC encrypt-us cross-validation";
+
+    let ct_path = dir.join("ct.bin");
+    let recovered_path = dir.join("recovered.bin");
+    let ct = sm4::mode_cbc::encrypt(&key, &iv, plaintext);
+    fs::write(&ct_path, &ct).expect("write ct");
+
+    let output = Command::new("gmssl")
+        .args([
+            "sm4",
+            "-cbc",
+            "-decrypt",
+            "-key",
+            &hex(&key),
+            "-iv",
+            &hex(&iv),
+            "-in",
+            ct_path.to_str().unwrap(),
+            "-out",
+            recovered_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn gmssl sm4");
+    assert!(
+        output.status.success(),
+        "gmssl sm4 -cbc -decrypt rejected our ciphertext: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let recovered = fs::read(&recovered_path).expect("read recovered");
+    assert_eq!(recovered, plaintext);
 }

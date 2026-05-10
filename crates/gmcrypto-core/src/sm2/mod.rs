@@ -6,6 +6,7 @@ pub mod encrypt;
 pub mod point;
 pub mod private_key;
 pub mod public_key;
+pub mod raw_ciphertext;
 pub mod scalar_mul;
 pub mod sign;
 pub mod verify;
