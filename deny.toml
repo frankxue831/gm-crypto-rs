@@ -2,8 +2,7 @@
 #
 # Hard rule: gmcrypto-core ships only crypto-bigint, subtle, zeroize,
 # rand_core in its NORMAL + BUILD dep classes. Dev-deps (dudect-bencher,
-# criterion, hex-literal) are unrestricted because they don't reach
-# downstream consumers.
+# hex-literal) are unrestricted because they don't reach downstream consumers.
 
 [graph]
 all-features = false
