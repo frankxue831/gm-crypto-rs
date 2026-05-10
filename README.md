@@ -1,12 +1,14 @@
 # gm-crypto-rs
 
-Constant-time-designed pure-Rust SM2 / SM3 SDK for Chinese national
-cryptography. v0.2 will add SM4 and SM2 encrypt/decrypt — see the
-roadmap below.
+Constant-time-designed pure-Rust SM2 / SM3 / SM4 SDK for Chinese national
+cryptography (GB/T 32905 / 32918 / 32907 / GM/T 0009). Sign / verify,
+public-key encrypt / decrypt, SM4-CBC, HMAC-SM3, PBKDF2-HMAC-SM3 — all
+secret-touching paths guarded by an in-CI `dudect-bencher`
+detectable-leak regression harness.
 
-[![CI](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/ci.yml)
-[![dudect smoke](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/dudect-pr.yml/badge.svg)](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/dudect-pr.yml)
-[![dudect nightly](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/dudect-nightly.yml/badge.svg)](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/dudect-nightly.yml)
+[![Crates.io](https://img.shields.io/crates/v/gmcrypto-core.svg)](https://crates.io/crates/gmcrypto-core)
+[![Documentation](https://docs.rs/gmcrypto-core/badge.svg)](https://docs.rs/gmcrypto-core)
+[![License](https://img.shields.io/crates/l/gmcrypto-core.svg)](https://crates.io/crates/gmcrypto-core)
 
 **Personal project notice:** not affiliated with, endorsed by, sponsored by, or
 certified by any upstream cryptography project, payment gateway, standards body,
@@ -14,23 +16,27 @@ or vendor.
 
 ## What this is
 
-A small, auditable, pure-Rust SM2 + SM3 SDK whose central differentiating
-commitment is that the SM2 private-key path uses **constant-time-designed code
-paths guarded by an in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/)
-detectable-leak regression harness**. SM4 lands in v0.2.
+A small, auditable, pure-Rust SM2 / SM3 / SM4 SDK whose central
+differentiating commitment is that secret-touching code paths are
+**constant-time-designed and guarded by an in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/)
+detectable-leak regression harness** with 11 gates at `|tau| < 0.20`.
 
 The harness reports timing-leak detection events. **It does not prove
 constant-time.** Low `|tau|` values mean the test could not detect a leak with
 the budget given, not that no leak exists. Language taken directly from
 `dudect-bencher`'s own docs.
 
-v0.1 has a known limitation worth surfacing here, not just in `SECURITY.md`:
-the harness's `ct_sign` target splits classes by the private key `d`, so it
-catches `(1+d).invert()` leaks (currently diluted under the gate) but is
-**structurally blind** to leaks on the per-sample nonce `k` — including
-the `Fp::invert(Z)` inside `kg.to_affine()` after `mul_g(k)`. v0.2 fixes
-both invert sites and reworks the harness to specifically exercise the
-nonce path. See [`SECURITY.md`](https://github.com/frankxue831/gm-crypto-rs/blob/main/SECURITY.md) for the full posture.
+v0.2's harness covers 11 secret-touching code paths: SM2 sign (split by
+both private key `d` and nonce `k` magnitude, with both retry nonces
+class-tied), SM2 decrypt (split by recipient `d_B`), SM4 key schedule
+and encrypt (split by master key), HMAC-SM3 (split by key), plus direct
+`Fn::invert` and `Fp::invert` diagnostics. The `ct_sign_k_class` target
+closes v0.1's structural blind spot to nonce-only leaks. The
+`crypto-bigint 0.6 → 0.7.3` upgrade resolved the v0.6-era
+`ConstMontyForm::invert` leak directly: at 100K samples on 0.7.3 both
+direct invert diagnostics measure under `|tau| ≈ 0.01`, two orders of
+magnitude below the gate. See [`SECURITY.md`](SECURITY.md) for the
+full posture.
 
 The differentiator vs. existing Rust SM2 crates (notably
 [`RustCrypto/sm2`](https://docs.rs/sm2/), which already aims for constant-time
@@ -47,38 +53,65 @@ the design intent in isolation.
   x86, some embedded).
 - Not a comprehensive SM-crypto library yet — see the milestone roadmap.
 
-## v0.1 scope
+## v0.2 scope
 
 - SM3 hash function (`#![no_std]` + `alloc`).
 - SM2 sign / verify with custom signer ID (default `1234567812345678` per GM/T 0009).
-- Constant-time-designed `Fp` and `Fn` field arithmetic via `crypto-bigint = 0.7`.
+- SM2 public-key encrypt / decrypt with GM/T 0009-2012 ciphertext DER
+  (`SEQUENCE { x, y, hash, ciphertext }`). Invalid-curve attack defense
+  via on-curve check on `C1` before scalar mult; non-branching
+  KDF-zero detection so a chosen-ciphertext attacker cannot distinguish
+  it from a normal MAC failure.
+- SM4 block cipher (GB/T 32907-2016) and SM4-CBC (PKCS#7 padding,
+  caller-supplied unpredictable IV per NIST SP 800-38A Appendix C).
+  Constant-time-designed `subtle` linear-scan S-box (~1-2M blocks/s);
+  bitsliced fast-path deferred to v0.4. PKCS#7 strip uses a
+  constant-time scan over the final block; `decrypt` collapses every
+  failure mode to a single `None` against padding-oracle attacks.
+- HMAC-SM3 per RFC 2104 (single-shot), gmssl-cross-validated KAT
+  vectors. Hash-first long-key path.
+- PBKDF2-HMAC-SM3 per RFC 8018 §5.2. Caller-supplied output buffer
+  (no internal allocation, no iteration-count default).
+- Constant-time-designed `Fp` and `Fn` field arithmetic via
+  `crypto-bigint = 0.7.3`.
 - Renes-Costello-Batina complete addition formulas for the SM2 curve (a=-3 specialized).
 - Fixed-base and variable-base scalar multiplication, both constant-time-designed
   with `subtle::ConditionallySelectable` linear-scan table lookup.
 - Fixed-K masked-select signing retry: the retry loop runs `K=2` iterations
-  unconditionally, regardless of which (if any) iteration produced a valid
-  signature. The constant-time contract holds for any RNG that respects
-  `CryptoRng`; pathological RNGs cannot leak the secret via observable retry
-  count.
-- Minimal ASN.1 DER for `SEQUENCE { r, s }`.
-- KAT vectors from GB/T 32905-2016 (SM3) and GB/T 32918.2-2017 (SM2).
-- `gmssl` CLI reachability check (full bidirectional interop deferred to v0.3
-  when PKCS#8 + X.509 SPKI ship).
-- `dudect-bencher` harness with PR-smoke (10⁴ samples, `|tau|<0.20`) and nightly
-  (10⁵ samples, same `|tau|<0.20` gate, more samples = tighter empirical
-  confidence) modes, plus a deliberately-leaky negative control that proves the
-  harness can detect leaks.
-
-See [`SECURITY.md`](https://github.com/frankxue831/gm-crypto-rs/blob/main/SECURITY.md) for v0.1's known constant-time limitations,
-notably the dependency on `crypto-bigint::ConstMontyForm::invert`.
+  unconditionally, regardless of which iteration produced a valid signature.
+  The constant-time contract holds for any RNG that respects `CryptoRng`;
+  pathological RNGs cannot leak the secret via observable retry count.
+- Minimal ASN.1 DER for `SEQUENCE { r, s }` (signatures) and the
+  GM/T 0009 SM2 ciphertext SEQUENCE. Strict canonical INTEGER rules
+  reject non-canonical leading-zero padding, sign-bit-set first bytes,
+  empty content, and (for ciphertext coordinates) values `≥ p`.
+- KAT vectors from GB/T 32905-2016 (SM3), GB/T 32918.2-2017 / .5-2017
+  (SM2), GB/T 32907-2016 Appendix A.1 (SM4 single-block + 1M-round),
+  GM/T 0042-2015 (HMAC-SM3), GM/T 0091-2020 (PBKDF2-HMAC-SM3).
+- `gmssl` CLI cross-validation tests for SM4, HMAC-SM3,
+  PBKDF2-HMAC-SM3 (gated on `GMCRYPTO_GMSSL=1`). SM2 encrypt/decrypt
+  cross-validation deferred to v0.3 (gmssl CLI requires PEM/PKCS#8/SPKI
+  key wrapping).
+- `dudect-bencher` harness with **11 targets** at `|tau| < 0.20` —
+  PR-smoke 10⁴ samples; nightly 10⁵ samples (more samples = tighter
+  empirical confidence at the same threshold). Plus a deliberately-
+  leaky negative control that proves the harness can detect leaks.
+- Failure-mode invariant: error types collapse to single uninformative
+  variants (`SignError::Failed`, `DecryptError::Failed`,
+  `EncryptError::Failed`); `verify_with_id` returns `bool`; DER decode
+  returns `Option`. Defense against padding-oracle, malleability, and
+  invalid-curve attacks.
+- Zeroization on private keys, SM4 round keys, HMAC `K'` /
+  `K' XOR ipad` / `K' XOR opad`, PBKDF2 intermediates, and SM2 KDF
+  buffers.
 
 ## Roadmap
 
 | Version | Scope |
 |---|---|
-| v0.2 | SM4 + SM4-CBC (constant-time-designed `subtle` linear-scan S-box; ~1-2M blocks/sec); HMAC-SM3 (RFC 2104, gmssl-cross-validated); PBKDF2-HMAC-SM3 (RFC 8018, caller-supplied output buffer); SM2 encrypt/decrypt + GM/T 0009 ciphertext DER. (Fermat-invert via `pow_bounded_exp` was the original v0.2 headline; dropped after the `crypto-bigint 0.7.3` upgrade resolved the v0.6-era invert leak directly — see `CHANGELOG.md` `[Unreleased]`.) |
-| v0.3 | Full ASN.1, PEM, encrypted PKCS#8, X.509 SPKI extractor; full bidirectional gmssl interop |
-| v0.4 | C ABI (`gmcrypto-c`), `wasm32-unknown-unknown` build target |
+| v0.2 (shipped) | SM4 + SM4-CBC, HMAC-SM3, PBKDF2-HMAC-SM3, SM2 encrypt/decrypt + GM/T 0009 ciphertext DER, dudect harness expansion to 11 targets. See [`CHANGELOG.md`](CHANGELOG.md) `[0.2.0]`. |
+| v0.3 | Full ASN.1 reader/writer subset; PEM, encrypted PKCS#8, X.509 SPKI; full bidirectional gmssl interop (incl. SM2 encrypt/decrypt with PEM-wrapped keys); raw byte-concat ciphertext helpers (`C1\|\|C3\|\|C2` modern + legacy `C1\|\|C2\|\|C3` decrypt); streaming `Mac` / `Hash` / `BlockCipher` traits; comb-table `mul_g` optimization. |
+| v0.4 | C ABI (`gmcrypto-c`), `wasm32-unknown-unknown` build target, bitsliced SM4 S-box (faster constant-time fast-path). |
 | v1.0 | API stabilization |
 
 ## Quick-start
@@ -104,7 +137,7 @@ assert!(verify_with_id(&public, DEFAULT_SIGNER_ID, b"hello", &sig));
 
 ## Threat model
 
-See [`SECURITY.md`](https://github.com/frankxue831/gm-crypto-rs/blob/main/SECURITY.md). Briefly: server-side use, dedicated host,
+See [`SECURITY.md`](SECURITY.md). Briefly: server-side use, dedicated host,
 operator-trusted, network MITM in scope, side-channel attacks beyond what the
 dudect harness covers are NOT in scope.
 
@@ -125,7 +158,7 @@ GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
 
 ## License
 
-Apache-2.0. See [`LICENSE`](https://github.com/frankxue831/gm-crypto-rs/blob/main/LICENSE).
+Apache-2.0. See [`LICENSE`](LICENSE).
 
 Some reference outputs use the upstream [`gmssl`](https://github.com/guanzhi/GmSSL)
 tool. This project is independent of that project.
