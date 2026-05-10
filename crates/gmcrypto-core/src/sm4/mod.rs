@@ -9,5 +9,6 @@
 //! cost, and KAT sources.
 
 pub mod cipher;
+pub mod mode_cbc;
 
 pub use cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
