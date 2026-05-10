@@ -147,6 +147,47 @@ impl Sm4Cipher {
     }
 }
 
+impl crate::traits::BlockCipher for Sm4Cipher {
+    const BLOCK_SIZE: usize = BLOCK_SIZE;
+
+    /// Construct from a key slice. `key.len()` must equal
+    /// [`KEY_SIZE`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `key.len() != KEY_SIZE`.
+    fn new(key: &[u8]) -> Self {
+        let key: &[u8; KEY_SIZE] = key
+            .try_into()
+            .expect("Sm4Cipher::new: key must be exactly 16 bytes");
+        Self::new(key)
+    }
+
+    /// Encrypt one 16-byte block in place.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `block.len() != BLOCK_SIZE`.
+    fn encrypt_block(&self, block: &mut [u8]) {
+        let block: &mut [u8; BLOCK_SIZE] = block
+            .try_into()
+            .expect("Sm4Cipher::encrypt_block: block must be exactly 16 bytes");
+        Self::encrypt_block(self, block);
+    }
+
+    /// Decrypt one 16-byte block in place.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `block.len() != BLOCK_SIZE`.
+    fn decrypt_block(&self, block: &mut [u8]) {
+        let block: &mut [u8; BLOCK_SIZE] = block
+            .try_into()
+            .expect("Sm4Cipher::decrypt_block: block must be exactly 16 bytes");
+        Self::decrypt_block(self, block);
+    }
+}
+
 /// Run the 32-round Feistel-like SM4 transform in place. `reverse`
 /// flips the round-key index direction — encrypt and decrypt share
 /// the same data path under SM4's key-reversal property.

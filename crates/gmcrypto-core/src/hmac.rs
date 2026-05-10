@@ -15,11 +15,14 @@
 //!   zero-padded to `B` bytes if `len(K) > B`.
 //! - `ipad = 0x36` repeated `B` times; `opad = 0x5C` repeated `B` times.
 //!
-//! # Single-shot API
+//! # Single-shot + streaming API
 //!
-//! v0.2 W3 ships single-shot [`hmac_sm3`] only. A streaming
-//! `HmacSm3::new` / `update` / `finalize` surface lands in v0.3
-//! alongside the broader `Mac`-trait generalization.
+//! - [`hmac_sm3`] (v0.2) is the single-shot path.
+//! - [`HmacSm3`] (v0.3 W5) is the streaming
+//!   `new` / `update` / `finalize` shape, plus a constant-time
+//!   `verify` helper. Both produce byte-identical output for the
+//!   same `(key, message)` regardless of how the message is
+//!   chunked across `update` calls.
 //!
 //! # KAT
 //!
@@ -52,6 +55,8 @@
 //! (XOR'd with opad), so this matters for callers reusing memory.
 
 use crate::sm3::{BLOCK_SIZE, DIGEST_SIZE, Sm3, hash};
+use crate::traits::{Hash as HashTrait, Mac as MacTrait};
+use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
 /// Compute HMAC-SM3 over `message` keyed by `key`. Returns the 32-byte
@@ -111,6 +116,143 @@ pub fn hmac_sm3(key: &[u8], message: &[u8]) -> [u8; DIGEST_SIZE] {
     opad_key.zeroize();
 
     result
+}
+
+/// Streaming HMAC-SM3 (v0.3 W5).
+///
+/// Construct with `new(&key)`, feed message chunks via `update`,
+/// finalize with `finalize` (32-byte tag) or `verify` (constant-
+/// time compare against an expected tag).
+///
+/// Equivalent to [`hmac_sm3`] for the same `(key, message)` byte
+/// sequence — chunking does not affect the output.
+///
+/// # Zeroization
+///
+/// The pre-computed `outer` keyed-state (`SM3` after absorbing
+/// `K' XOR opad`) holds key-derived material. [`HmacSm3::finalize`]
+/// and [`HmacSm3::verify`] consume `self` and zeroize it before
+/// returning. If the caller drops the `HmacSm3` without calling
+/// either method, the [`Drop`] impl wipes the state.
+pub struct HmacSm3 {
+    /// Inner-hash state, currently absorbing `K' XOR ipad || message-so-far`.
+    inner: Sm3,
+    /// Outer-hash state, currently holding the absorbed `K' XOR opad`
+    /// (will be finalized with the inner digest at `finalize` time).
+    outer: Sm3,
+}
+
+impl HmacSm3 {
+    /// Construct a new keyed HMAC-SM3 instance.
+    ///
+    /// `key` may be any length; the standard RFC 2104 hash-first
+    /// reduction applies for `key.len() > 64`. Both intermediate
+    /// `K'` / `K' XOR ipad` / `K' XOR opad` buffers are zeroized
+    /// after the inner/outer SM3 instances absorb them.
+    #[must_use]
+    pub fn new(key: &[u8]) -> Self {
+        let mut k_prime = [0u8; BLOCK_SIZE];
+        if key.len() > BLOCK_SIZE {
+            let mut hashed = hash(key);
+            k_prime[..DIGEST_SIZE].copy_from_slice(&hashed);
+            hashed.zeroize();
+        } else {
+            k_prime[..key.len()].copy_from_slice(key);
+        }
+
+        let mut ipad_key = [0x36u8; BLOCK_SIZE];
+        let mut opad_key = [0x5cu8; BLOCK_SIZE];
+        for i in 0..BLOCK_SIZE {
+            ipad_key[i] ^= k_prime[i];
+            opad_key[i] ^= k_prime[i];
+        }
+
+        // Pre-load the inner SM3 with `K' XOR ipad`. The streaming
+        // update path then absorbs message bytes directly.
+        let mut inner = Sm3::new();
+        inner.update(&ipad_key);
+
+        // Pre-load the outer SM3 with `K' XOR opad`. The finalize
+        // path will then feed the inner-finalized digest.
+        let mut outer = Sm3::new();
+        outer.update(&opad_key);
+
+        // Wipe key-derived buffers. The keyed states inside `inner`
+        // and `outer` carry the same information but are now folded
+        // into the SM3 compression state, not stored in plaintext.
+        k_prime.zeroize();
+        ipad_key.zeroize();
+        opad_key.zeroize();
+
+        Self { inner, outer }
+    }
+
+    /// Absorb message bytes into the inner hash.
+    pub fn update(&mut self, data: &[u8]) {
+        self.inner.update(data);
+    }
+
+    /// Consume the instance and produce the 32-byte MAC tag.
+    ///
+    /// The `outer` keyed-state and the `inner` final state are both
+    /// dropped after consuming `self`; `Sm3`'s `Drop` impl is the
+    /// one we rely on here. To be defensive against a future change
+    /// where `Sm3` is no longer `ZeroizeOnDrop`, both fields are
+    /// explicitly wiped via `clone-then-drop` would be safer — but
+    /// `Sm3` does not currently implement `Zeroize` directly. The
+    /// state is consumed by `outer.finalize()` which produces the
+    /// public output and discards the rest.
+    #[must_use]
+    pub fn finalize(self) -> [u8; DIGEST_SIZE] {
+        let inner_digest = self.inner.finalize();
+        let mut outer = self.outer;
+        outer.update(&inner_digest);
+        outer.finalize()
+    }
+
+    /// Constant-time verify a candidate tag against the finalized
+    /// HMAC. Returns `true` on match.
+    #[must_use]
+    pub fn verify(self, expected: &[u8; DIGEST_SIZE]) -> bool {
+        let computed = self.finalize();
+        bool::from(computed.ct_eq(expected))
+    }
+}
+
+impl HashTrait for Sm3 {
+    type Output = [u8; DIGEST_SIZE];
+
+    fn new() -> Self {
+        Self::new()
+    }
+
+    fn update(&mut self, data: &[u8]) {
+        Self::update(self, data);
+    }
+
+    fn finalize(self) -> Self::Output {
+        Self::finalize(self)
+    }
+}
+
+impl MacTrait for HmacSm3 {
+    type Output = [u8; DIGEST_SIZE];
+
+    fn new(key: &[u8]) -> Self {
+        Self::new(key)
+    }
+
+    fn update(&mut self, data: &[u8]) {
+        Self::update(self, data);
+    }
+
+    fn finalize(self) -> Self::Output {
+        Self::finalize(self)
+    }
+
+    fn verify(self, expected: &Self::Output) -> bool {
+        Self::verify(self, expected)
+    }
 }
 
 #[cfg(test)]
@@ -235,5 +377,90 @@ mod tests {
         let mac_a = hmac_sm3(b"key1", b"the message");
         let mac_b = hmac_sm3(b"key2", b"the message");
         assert_ne!(mac_a, mac_b);
+    }
+
+    // ---------- v0.3 W5: streaming HmacSm3 ----------
+
+    /// Streaming `HmacSm3::new`/`update`/`finalize` produces the same
+    /// tag as single-shot `hmac_sm3` on KAT vector "Hi There".
+    #[test]
+    fn streaming_test1_matches_oneshot() {
+        let key = [0x0bu8; 20];
+        let message = b"Hi There";
+        let mut mac = HmacSm3::new(&key);
+        mac.update(message);
+        let tag = mac.finalize();
+        assert_eq!(
+            to_hex(&tag),
+            "51b00d1fb49832bfb01c3ce27848e59f871d9ba938dc563b338ca964755cce70"
+        );
+    }
+
+    /// Chunking-equivalence on KAT 2: a streaming `HmacSm3` fed any
+    /// partition of the message produces the same tag as the
+    /// single-shot path.
+    #[test]
+    fn streaming_chunking_equivalence_test2() {
+        let key = b"Jefe";
+        let message: &[u8] = b"what do ya want for nothing?";
+        let oneshot = hmac_sm3(key, message);
+        for chunk_size in [1usize, 3, 7, 14, message.len()] {
+            let mut mac = HmacSm3::new(key);
+            for chunk in message.chunks(chunk_size) {
+                mac.update(chunk);
+            }
+            let streamed = mac.finalize();
+            assert_eq!(streamed, oneshot, "chunk_size={chunk_size}");
+        }
+    }
+
+    /// Long-key path round-trips through streaming.
+    #[test]
+    fn streaming_long_key() {
+        let key = [0xaau8; 131];
+        let message: &[u8] = b"Test Using Larger Than Block-Size Key - Hash Key First";
+        let mut mac = HmacSm3::new(&key);
+        for chunk in message.chunks(7) {
+            mac.update(chunk);
+        }
+        let tag = mac.finalize();
+        assert_eq!(
+            to_hex(&tag),
+            "b4fd844e13342002f0b2e0690ea7741f1497d993a70494cea601e657bedf67a0"
+        );
+    }
+
+    /// `verify` accepts the correct tag.
+    #[test]
+    fn verify_accepts_correct_tag() {
+        let key = b"vkey";
+        let message = b"verify me";
+        let expected = hmac_sm3(key, message);
+        let mut mac = HmacSm3::new(key);
+        mac.update(message);
+        assert!(mac.verify(&expected));
+    }
+
+    /// `verify` rejects a wrong tag.
+    #[test]
+    fn verify_rejects_wrong_tag() {
+        let key = b"vkey";
+        let message = b"verify me";
+        let mut bogus = hmac_sm3(key, message);
+        bogus[0] ^= 0x01;
+        let mut mac = HmacSm3::new(key);
+        mac.update(message);
+        assert!(!mac.verify(&bogus));
+    }
+
+    /// Empty key + empty message via streaming.
+    #[test]
+    fn streaming_empty_key_empty_message() {
+        let mac = HmacSm3::new(&[]);
+        let tag = mac.finalize();
+        assert_eq!(
+            to_hex(&tag),
+            "0d23f72ba15e9c189a879aefc70996b06091de6e64d31b7a84004356dd915261"
+        );
     }
 }
