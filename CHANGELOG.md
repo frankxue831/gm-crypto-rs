@@ -15,6 +15,33 @@ the project follows [Semantic Versioning](https://semver.org/).
   `required_low` allowlists extended to gate all three at `|tau| < 0.20`.
   Closes the v0.1 structural blind spot to nonce-only leaks (documented
   in published 0.1.0's SECURITY.md and CHANGELOG).
+- v0.2 W1 — SM4 block cipher (`gmcrypto_core::sm4::Sm4Cipher`) per
+  GB/T 32907-2016. Constant-time-designed: `subtle`-style linear-scan
+  S-box (option b per the v0.2 scope plan). KAT vectors from
+  GB/T 32907 Appendix A.1: single-block KAT and the 1,000,000-round KAT
+  (the latter `#[ignore]`d by default; run with
+  `cargo test --release -- --ignored` before release). Throughput
+  trade documented in module-doc + this CHANGELOG: ~1-2M blocks/sec
+  vs. ~150M for an LUT impl. Bitsliced S-box deferred to v0.4.
+  `Sm4Cipher` zeroizes round-key buffer on drop via
+  `#[derive(Zeroize, ZeroizeOnDrop)]`; key-schedule intermediates
+  explicitly wiped before return.
+- v0.2 W1 — SM4-CBC (`gmcrypto_core::sm4::mode_cbc::{encrypt, decrypt}`)
+  with PKCS#7 padding (RFC 5652 §6.3). IV contract per NIST SP 800-38A
+  Appendix C: caller-supplied, **unpredictable** (CSPRNG-derived),
+  never reused under the same key. Padding-oracle caveat documented:
+  raw CBC is unauthenticated; pair with HMAC-SM3 (W3, upcoming) in
+  encrypt-then-MAC for integrity. PKCS#7 strip uses
+  `subtle::ConditionallySelectable` constant-time scan over the final
+  block; `decrypt` collapses every failure mode to a single `None`
+  per the failure-mode invariant.
+- v0.2 W1 — two new dudect harness targets: `ct_sm4_key_schedule`
+  (class-split by master key bytes; key-schedule path) and
+  `ct_sm4_encrypt_block` (class-split by master key bytes; "construct
+  cipher + encrypt one block" timed under one window). Workflow
+  allowlists extended to gate both at `|tau| < 0.20`. 100K baseline
+  on `main`: `ct_sm4_key_schedule` `|tau| ≈ 0.011`,
+  `ct_sm4_encrypt_block` `|tau| ≈ 0.009` — noise-level.
 
 ### Changed
 

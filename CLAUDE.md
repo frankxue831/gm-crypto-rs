@@ -57,7 +57,7 @@ GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
 
 ## Dudect harness gate
 
-Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. Seven targets:
+Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. Nine targets:
 
 | Target | Gate | Meaning |
 |---|---|---|
@@ -68,6 +68,8 @@ Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. Seven targets:
 | `ct_sign_k_class` | `\|tau\| < 0.20` | `sign_raw_with_id`, class-split by nonce `k` magnitude with `d` held fixed (W0; both retry nonces class-tied). |
 | `ct_fn_invert` | `\|tau\| < 0.20` | Direct `Fn::invert((1+d) mod n)` diagnostic (W0). |
 | `ct_fp_invert` | `\|tau\| < 0.20` | Direct `Fp::invert(Z)` diagnostic (W0). |
+| `ct_sm4_key_schedule` | `\|tau\| < 0.20` | SM4 key schedule, class-split by master key bytes (W1). |
+| `ct_sm4_encrypt_block` | `\|tau\| < 0.20` | SM4 "construct cipher + encrypt one block" timed under one window, class-split by master key bytes (W1). |
 
 Gate on **`|tau|`** (scale-free), not `|t|` (grows as `tau · sqrt(N)` so any
 fixed `|t|` threshold is budget-dependent). Same gate at every sample budget;
@@ -116,6 +118,9 @@ crates/gmcrypto-core/
       public_key.rs         # Sm2PublicKey
       sign.rs               # sign_with_id, sign_raw_with_id, compute_z, MAX_ID_LEN
       verify.rs             # verify_with_id (returns bool, rejects identity pubkey + over-long ID)
+    sm4/                    # v0.2 W1
+      cipher.rs             # Sm4Cipher (block cipher) + subtle linear-scan S-box
+      mode_cbc.rs           # encrypt/decrypt with PKCS#7 padding; caller-supplied unpredictable IV
     asn1/
       sig.rs                # SEQUENCE { r, s } with strict canonical INTEGER
   benches/timing_leaks.rs   # dudect harness (custom main; --bench is filtered out)
@@ -150,3 +155,13 @@ longer ships `getrandom` integration in the same crate.
   candidate. Fixed-K masked-select is the constant-time invariant.
 - Don't reference any external "Java prototype" / `gm-crypto-lite-java` repo.
   The Rust repo is standalone; that prototype was personal scaffolding.
+- Don't replace the SM4 `subtle`-style linear-scan S-box with a direct LUT
+  ("just for performance"). The throughput trade is documented as deliberate;
+  bitsliced S-box is the v0.4 fast-path workstream — not v0.2.
+- Don't generate the SM4-CBC IV inside `mode_cbc::encrypt`. Per NIST SP 800-38A
+  Appendix C, CBC IVs must be **unpredictable** and caller-supplied; smuggling
+  an `OsRng` into the API hides the contract from callers and conflates
+  primitive-level concerns with RNG selection.
+- Don't make `mode_cbc::decrypt` distinguish between failure modes (length
+  not multiple of 16, bad pad_len, inconsistent padding bytes). Single `None`
+  per the failure-mode invariant — anything else is a padding-oracle vector.

@@ -76,7 +76,7 @@ notably the dependency on `crypto-bigint::ConstMontyForm::invert`.
 
 | Version | Scope |
 |---|---|
-| v0.2 | Fermat-invert via `pow_bounded_exp` (replaces non-CT `crypto-bigint::invert`); SM2 encrypt/decrypt; GM/T 0009 ciphertext DER; SM4, SM4-CBC; HMAC-SM3; PBKDF2-HMAC-SM3 |
+| v0.2 | SM4 + SM4-CBC (constant-time-designed `subtle` linear-scan S-box; ~1-2M blocks/sec); SM2 encrypt/decrypt + GM/T 0009 ciphertext DER; HMAC-SM3; PBKDF2-HMAC-SM3. (Fermat-invert via `pow_bounded_exp` was the original v0.2 headline; dropped after the `crypto-bigint 0.7.3` upgrade resolved the v0.6-era invert leak directly — see `CHANGELOG.md` `[Unreleased]`.) |
 | v0.3 | Full ASN.1, PEM, encrypted PKCS#8, X.509 SPKI extractor; full bidirectional gmssl interop |
 | v0.4 | C ABI (`gmcrypto-c`), `wasm32-unknown-unknown` build target |
 | v1.0 | API stabilization |
