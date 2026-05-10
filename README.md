@@ -1,8 +1,8 @@
 # gm-crypto-rs
 
 Constant-time-designed pure-Rust SM2 / SM3 SDK for Chinese national
-cryptography. Companion to [`gm-crypto-lite-java`](https://github.com/frankxue831/gm-crypto-lite-java).
-v0.2 will add SM4 and SM2 encrypt/decrypt — see the roadmap below.
+cryptography. v0.2 will add SM4 and SM2 encrypt/decrypt — see the
+roadmap below.
 
 [![CI](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/ci.yml)
 [![dudect smoke](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/dudect-pr.yml/badge.svg)](https://github.com/frankxue831/gm-crypto-rs/actions/workflows/dudect-pr.yml)
@@ -78,7 +78,7 @@ notably the dependency on `crypto-bigint::ConstMontyForm::invert`.
 |---|---|
 | v0.2 | Fermat-invert via `pow_bounded_exp` (replaces non-CT `crypto-bigint::invert`); SM2 encrypt/decrypt; GM/T 0009 ciphertext DER; SM4, SM4-CBC; HMAC-SM3; PBKDF2-HMAC-SM3 |
 | v0.3 | Full ASN.1, PEM, encrypted PKCS#8, X.509 SPKI extractor; full bidirectional gmssl interop |
-| v0.4 | `gmcrypto-partner` crate (gateway-side merchant payment SDK, byte-compat with the Java SDK) |
+| v0.4 | `gmcrypto-partner` crate (gateway-side merchant payment SDK) |
 | v0.5 | C ABI (`gmcrypto-c`), `wasm32-unknown-unknown` build target |
 | v1.0 | API stabilization, crates.io publish |
 

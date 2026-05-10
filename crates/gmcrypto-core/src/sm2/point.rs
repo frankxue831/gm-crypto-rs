@@ -208,9 +208,9 @@ mod tests {
         assert!(bool::from(sum.is_identity()), "G + (-G) = O");
     }
 
-    /// 2G affine coordinates from the SM2 reference implementation.
-    /// Cross-validated against the Java SDK `Sm2CurveTest` and an
-    /// independent Python affine-arithmetic computation.
+    /// 2G affine coordinates from the SM2 reference implementation,
+    /// cross-validated against an independent Python affine-arithmetic
+    /// computation.
     #[test]
     fn two_g_known_affine() {
         let g2 = ProjectivePoint::generator().double();

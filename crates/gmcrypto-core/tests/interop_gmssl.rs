@@ -1,8 +1,7 @@
 //! Cross-validation against the gmssl v3.1.1 CLI.
 //!
-//! Mirrors the Java SDK's `UpstreamCliCrossValidationTest`. Skipped
-//! silently when `GMCRYPTO_GMSSL=1` is not set; CI sets it on one
-//! matrix slot.
+//! Skipped silently when `GMCRYPTO_GMSSL=1` is not set; CI sets it
+//! on one matrix slot when gmssl is available on the runner.
 //!
 //! # v0.1 scope reduction
 //!
