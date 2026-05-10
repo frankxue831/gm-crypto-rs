@@ -106,6 +106,64 @@ the project follows [Semantic Versioning](https://semver.org/).
   which is v0.3 work. v0.2 SM2 envelope encryption is KAT-validated
   via internal round-trip + a fixed-`k` smoke test only.
 
+### Fixed
+
+- SM2 ciphertext DER decoder now accepts the canonical encoding of
+  zero (`02 01 00`) on `C1.x` / `C1.y` and rejects 32-byte coordinates
+  `≥ p` (the SM2 field modulus). The v0.2 release-readiness review
+  flagged that the previous decoder copied the signature INTEGER rule
+  intended for `r, s ∈ [1, n-1]` — under those rules the canonical
+  zero encoding was rejected (`(0, y)` is a valid C1) and 32-byte
+  values above `p` slipped through to `Fp::new`, which silently
+  reduced them, admitting two distinct DER blobs for the same field
+  element (a malleability primitive on the ciphertext path). Decoder
+  rules are now documented inline as the SM2-specific deltas vs.
+  `asn1::sig`, and three regression tests pin the round-trip and
+  rejection behavior. Asymmetrically affects the encode-then-decode
+  round trip on `(0, _)` and `(_, 0)` C1 points: v0.1.0 did not ship
+  SM2 envelope encryption at all (it lands in v0.2 Phase 3), so no
+  *released* encrypt blob can be mis-decoded by the pre-fix
+  decoder regardless. For v0.2's encrypt path, a uniform CSPRNG
+  produces a coordinate whose top byte is zero with probability
+  `≈ 2^-8`, the full coordinate is zero with probability `≈ 2^-256`
+  (cryptographically negligible but **not** zero — the encrypt path
+  rejects only the identity point, not zero coordinates per se), and
+  the deterministic-`k` smoke test vectors used non-zero `k` so they
+  do not exercise the boundary. The fix unblocks v0.3 callers who
+  construct `Sm2Ciphertext` directly with `(0, _)` or `(_, 0)`
+  coordinates without going through `encrypt`.
+- HMAC-SM3 long-key path (`key.len() > 64`) now zeroizes the SM3
+  digest stack buffer after copying it into `K'`. The codex review
+  surfaced that for long keys `SM3(key)` is the *effective* RFC 2104
+  HMAC key (per `HMAC(K, m) == HMAC(SM3(K), m)`), not merely a
+  key-derived value, so leaving it unwiped weakened the documented
+  zeroization guarantee.
+- SM2 decrypt's KDF-zero rejection is now non-branching. The
+  second-pass codex review flagged that an early-return on
+  `all_zero(KDF) → Err(Failed)` exposed a chosen-ciphertext timing
+  oracle: for short `C2` the per-attempt KDF-zero probability is
+  `2^(-8·|C2|)` (e.g. `1/256` for a 1-byte `C2`), and the early-return
+  branch skipped the XOR / SM3 / MAC work — observably faster than a
+  normal MAC failure. Decrypt now folds the all-zero detection into a
+  `subtle::Choice`, computes the SM3 MAC unconditionally, and combines
+  `(mac_ok & !kdf_zero)` into one validity bit. Both failure classes
+  collapse to identical control flow per the failure-mode invariant.
+  Empty `C2` continues to suppress the KDF-zero check via a `nonempty`
+  Choice mask. Two regression tests added: `rejects_forged_short_ciphertext`
+  exercises the new branchless path on 1-byte ciphertexts; the
+  existing `round_trip_boundary_lengths` covers the empty-suppression
+  behaviour and a new `round_trip_empty_plaintext` pins it
+  independently.
+- SM2 encrypt's `ENCRYPT_RETRY_BUDGET` raised from `4` to `64`. The
+  second-pass codex review noted that the per-iteration KDF-zero
+  probability is length-dependent (`2^(-8·|M|)`, not the asymptotic
+  `2^-256` figure the original budget assumed). At budget=4 a 1-byte
+  plaintext fails ~`2^-32` of encryptions even with a uniform CSPRNG
+  — observable in production. At budget=64 the cumulative-failure
+  probability is `≤ 2^-512` for any plaintext length. GB/T 32918.4
+  specifies the retry as indefinite; the 64-step bound is a
+  defense-in-depth ceiling, never reached in practice.
+
 ### Changed
 
 - `crypto-bigint` workspace dep raised from 0.6 to 0.7.3 (commits

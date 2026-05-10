@@ -68,12 +68,17 @@ use zeroize::Zeroize;
 pub fn hmac_sm3(key: &[u8], message: &[u8]) -> [u8; DIGEST_SIZE] {
     let mut k_prime = [0u8; BLOCK_SIZE];
     if key.len() > BLOCK_SIZE {
-        let hashed = hash(key);
+        // Per RFC 2104, when `key.len() > B` the effective HMAC key is
+        // `K' = SM3(key)` zero-padded to `B`. `hashed` is therefore the
+        // *actual key material* used by the inner and outer hashes —
+        // not merely "key-derived" — so it must be wiped in lockstep
+        // with `k_prime`, `ipad_key`, and `opad_key`. The
+        // `Zeroize::zeroize` call below is a `core::ptr::write_volatile`
+        // sequence that the optimizer is required to emit, closing the
+        // long-key zeroization gap surfaced in the v0.2 codex review.
+        let mut hashed = hash(key);
         k_prime[..DIGEST_SIZE].copy_from_slice(&hashed);
-        // `hashed` is a stack-local byte array; let it drop normally.
-        // (Its bytes are derived from the key but are not the key
-        // itself; further zeroization is defense-in-depth at compiler-
-        // optimizer mercy.)
+        hashed.zeroize();
     } else {
         k_prime[..key.len()].copy_from_slice(key);
     }

@@ -15,13 +15,19 @@
 //! formats (`C1 || C3 || C2` modern, `C1 || C2 || C3` legacy gmssl) are
 //! out of scope until v0.3 — see `SECURITY.md` and `CLAUDE.md`.
 //!
-//! INTEGER decoding follows the same strict X.690 canonical-encoding
-//! rules as [`crate::asn1::sig::decode_sig`]: the leading `0x00` pad is
-//! allowed only when needed for sign disambiguation; sign-bit-set first
-//! bytes (would be negative in two's complement) are rejected; empty
-//! INTEGER content is rejected. Accepting non-canonical encodings would
-//! create ciphertext malleability — multiple distinct DER blobs mapping
-//! to the same `(C1, C3, C2)`.
+//! INTEGER decoding follows strict X.690 canonical-encoding rules,
+//! adapted for the field-element range that C1 coordinates inhabit:
+//! the leading `0x00` pad is allowed only when needed for sign
+//! disambiguation; sign-bit-set first bytes (would be negative in
+//! two's complement) are rejected; empty INTEGER content is rejected;
+//! the canonical single-byte encoding of zero (`02 01 00`) is
+//! accepted; and 32-byte coordinates `≥ p` are rejected so that
+//! `Fp::new` cannot silently reduce a non-canonical encoding modulo
+//! the field prime. The two SM2-specific deltas vs. the
+//! [`crate::asn1::sig::decode_sig`] rules (which target `r, s ∈
+//! [1, n-1]`) are documented inline in [`read_integer`]. Accepting
+//! non-canonical encodings would create ciphertext malleability —
+//! multiple distinct DER blobs mapping to the same `(C1, C3, C2)`.
 //!
 //! OCTET STRING decoding accepts any tag-length-value with a
 //! non-indefinite length, since OCTET STRING values have no canonical-
@@ -33,6 +39,9 @@
 
 use alloc::vec::Vec;
 use crypto_bigint::U256;
+use subtle::ConstantTimeLess;
+
+use crate::sm2::curve::Fp;
 
 /// SM3 digest size — fixed at 32 bytes; the spec mandates it.
 const HASH_LEN: usize = 32;
@@ -145,16 +154,25 @@ fn read_integer(input: &[u8]) -> Option<(U256, &[u8])> {
     }
     let (int_bytes, rest_after) = rest.split_at(int_len);
 
-    // Strict X.690 canonical rules — kept identical to `asn1::sig::read_integer`:
+    // Strict X.690 canonical rules adapted for ciphertext coordinates.
+    // The shape is similar to `asn1::sig::read_integer` but **differs in
+    // two places** because C1 coordinates inhabit `[0, p-1]` (a field
+    // element range) while signature `r`/`s` inhabit `[1, n-1]`:
     //
     // - Length ≥ 1 (an INTEGER cannot be empty).
     // - For positive integers, the high bit of the first content byte
     //   must be clear; otherwise a leading 0x00 is required to
     //   disambiguate from a two's-complement negative.
     // - That leading-0x00 padding is allowed only when needed.
-    // - SM2 C1 coordinates are positive scalars in `[0, p-1]`; a
-    //   top-bit-set first byte is unambiguously malformed for our use
-    //   case, not a negative integer to accept.
+    // - **Zero is admissible.** The canonical DER encoding of zero is
+    //   `02 01 00` (a single content byte 0x00), and a `(0, y)` point
+    //   on the SM2 curve is a perfectly valid C1 — the signature path
+    //   does not see this case because zero is excluded from `[1, n-1]`.
+    // - **Coordinates ≥ p are rejected.** Without this bound, a
+    //   32-byte INTEGER above `p` passes the canonical-encoding check,
+    //   then `Fp::new` silently reduces it modulo `p`, admitting a
+    //   second wire encoding for the same field element — a malleability
+    //   primitive on the ciphertext path.
     if int_bytes.is_empty() {
         return None;
     }
@@ -162,10 +180,16 @@ fn read_integer(input: &[u8]) -> Option<(U256, &[u8])> {
         return None;
     }
     let bytes = if int_bytes[0] == 0x00 {
-        if int_bytes.len() < 2 || int_bytes[1] & 0x80 == 0 {
+        if int_bytes.len() == 1 {
+            // Canonical encoding of zero: `02 01 00`.
+            int_bytes
+        } else if int_bytes[1] & 0x80 == 0 {
+            // Leading 0x00 followed by a high-bit-clear byte is
+            // redundant padding (BER, not DER).
             return None;
+        } else {
+            &int_bytes[1..]
         }
-        &int_bytes[1..]
     } else {
         int_bytes
     };
@@ -174,7 +198,15 @@ fn read_integer(input: &[u8]) -> Option<(U256, &[u8])> {
     }
     let mut padded = [0u8; 32];
     padded[32 - bytes.len()..].copy_from_slice(bytes);
-    Some((U256::from_be_slice(&padded), rest_after))
+    let value = U256::from_be_slice(&padded);
+    // Reject coordinates ≥ p. C1 coordinates are public, so a
+    // non-constant-time comparison is acceptable here; using
+    // `ConstantTimeLess` matches the rest of the crate's idiom.
+    let in_field: bool = value.ct_lt(Fp::MODULUS.as_ref()).into();
+    if !in_field {
+        return None;
+    }
+    Some((value, rest_after))
 }
 
 fn encode_octet_string(value: &[u8]) -> Vec<u8> {
@@ -408,6 +440,73 @@ mod tests {
         let mut der = encode(&ct);
         der.push(0xff); // trailing garbage
         assert!(decode(&der).is_none());
+    }
+
+    /// Canonical DER encoding of zero (`02 01 00`) on `x` round-trips.
+    /// `(0, y)` is a valid affine C1 if it lies on the curve; the wire
+    /// format must accept the field element 0. Regression test for the
+    /// previous decoder copying the signature INTEGER rule that
+    /// rejected single-byte zero content.
+    #[test]
+    fn round_trip_x_zero() {
+        let mut ct = make_ct(b"z".to_vec());
+        ct.x = U256::ZERO;
+        let der = encode(&ct);
+        let decoded = decode(&der).expect("decode round-trip with x = 0");
+        assert_eq!(decoded.x, U256::ZERO);
+        assert_eq!(decoded.y, ct.y);
+    }
+
+    /// Strict canonical INTEGER: a 32-byte coordinate ≥ p is rejected.
+    /// Without this bound, `Fp::new` silently reduces the value modulo
+    /// `p`, admitting a second DER blob for the same field element —
+    /// ciphertext malleability. Regression test for the v0.2 review
+    /// finding from the codex pre-publish review.
+    #[test]
+    fn rejects_x_at_or_above_p() {
+        // Build a SEQUENCE with x = p (the SM2 prime). After Fp::new
+        // reduction this would be 0; without the field-bound check the
+        // wire-format admits this.
+        let p = *Fp::MODULUS.as_ref();
+        let p_bytes = p.to_be_bytes();
+        let mut body = Vec::new();
+        body.extend_from_slice(&encode_integer(&p_bytes));
+        body.extend_from_slice(&encode_integer(&[0x01]));
+        body.extend_from_slice(&encode_octet_string(&[0u8; 32]));
+        body.extend_from_slice(&encode_octet_string(b""));
+        let mut der = Vec::new();
+        der.push(0x30);
+        push_length(&mut der, body.len());
+        der.extend_from_slice(&body);
+        assert!(
+            decode(&der).is_none(),
+            "x = p is not a field element and must be rejected"
+        );
+
+        // Also verify `2^256 - 1` is rejected (well above p).
+        let max_bytes = [0xffu8; 32];
+        let mut body = Vec::new();
+        body.extend_from_slice(&encode_integer(&max_bytes));
+        body.extend_from_slice(&encode_integer(&[0x01]));
+        body.extend_from_slice(&encode_octet_string(&[0u8; 32]));
+        body.extend_from_slice(&encode_octet_string(b""));
+        let mut der = Vec::new();
+        der.push(0x30);
+        push_length(&mut der, body.len());
+        der.extend_from_slice(&body);
+        assert!(decode(&der).is_none(), "x = 2^256 - 1 must be rejected");
+    }
+
+    /// Companion check: `p - 1` is the largest valid coordinate and
+    /// must round-trip cleanly.
+    #[test]
+    fn round_trip_x_p_minus_one() {
+        let p_minus_one = Fp::MODULUS.as_ref().wrapping_sub(&U256::ONE);
+        let mut ct = make_ct(b"q".to_vec());
+        ct.x = p_minus_one;
+        let der = encode(&ct);
+        let decoded = decode(&der).expect("decode round-trip with x = p - 1");
+        assert_eq!(decoded.x, p_minus_one);
     }
 
     /// The 0x83 length encoding boundary: a ciphertext payload exactly
