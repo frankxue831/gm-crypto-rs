@@ -1,6 +1,6 @@
 //! `dudect-bencher` detectable-leak regression harness.
 //!
-//! Ten targets, listed in the order the harness sorts them (alphabetical):
+//! Eleven targets, listed in the order the harness sorts them (alphabetical):
 //!
 //! - `ct_fn_invert`         — direct `Fn::invert((1+d) mod n)` diagnostic (W0).
 //! - `ct_fp_invert`         — direct `Fp::invert(Z)` diagnostic (W0).
@@ -10,6 +10,9 @@
 //! - `ct_sign`              — `sign_raw_with_id`, class-split by private key `d`.
 //! - `ct_sign_k_class`      — `sign_raw_with_id`, class-split by nonce `k`
 //!   magnitude (`d` held fixed, both retry nonces class-tied via [`ClassKRng`]).
+//! - `ct_sm2_decrypt`       — SM2 decrypt, class-split by recipient `d_B`,
+//!   fixed ciphertext (encrypted to a third party so both classes fail at
+//!   the MAC check via identical control flow; W2).
 //! - `ct_sm4_encrypt_block` — SM4 "construct cipher + encrypt one block",
 //!   class-split by master key bytes (W1).
 //! - `ct_sm4_key_schedule`  — SM4 key schedule, class-split by master key (W1).
@@ -99,8 +102,8 @@ use dudect_bencher::{BenchRng, Class, CtRunner, rand::RngExt};
 use getrandom::SysRng;
 use gmcrypto_core::hmac::hmac_sm3;
 use gmcrypto_core::sm2::{
-    DEFAULT_SIGNER_ID, Fn as Scalar, Fp, ProjectivePoint, Sm2PrivateKey, mul_g, mul_var,
-    sign_raw_with_id,
+    DEFAULT_SIGNER_ID, Fn as Scalar, Fp, ProjectivePoint, Sm2PrivateKey, Sm2PublicKey, decrypt,
+    encrypt, mul_g, mul_var, sign_raw_with_id,
 };
 use gmcrypto_core::sm4::Sm4Cipher;
 use rand_core::{TryCryptoRng, TryRng, UnwrapErr};
@@ -452,6 +455,43 @@ fn ct_hmac_sm3(runner: &mut CtRunner, rng: &mut BenchRng) {
     }
 }
 
+/// SM2 decrypt diagnostic. Class-split by recipient private key `d_B`;
+/// fixed ciphertext (encrypted to a **third** key's public key, so both
+/// classes fail decryption at the MAC check via the same code path).
+/// Timing differential is purely on `d_B`'s bits — the secret-touching
+/// scalar mult `mul_var(d_B, C1)` plus `to_affine`'s `Fp::invert` are
+/// the dominant constant-time-relevant work.
+fn ct_sm2_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let key_left = Sm2PrivateKey::new(U256::from_be_hex(
+        "1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0",
+    ))
+    .expect("valid d for class Left");
+    let key_right = Sm2PrivateKey::new(U256::from_be_hex(
+        "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8",
+    ))
+    .expect("valid d for class Right");
+    // Encrypt to a THIRD party so that both classes fail at the MAC
+    // check via identical control flow. The class label then identifies
+    // only `d_B`; nothing else.
+    let recipient_priv = Sm2PrivateKey::new(U256::from_be_hex(
+        "B9E5B7C12E48BAB7CC0E91A57F8A48E8C8F87DDD25EBF52F2A75E612CB1A9E4F",
+    ))
+    .expect("valid d for recipient");
+    let recipient_pk = Sm2PublicKey::from_point(recipient_priv.public_key());
+    let mut sys_rng = UnwrapErr(SysRng);
+    let ciphertext =
+        encrypt(&recipient_pk, b"timing target", &mut sys_rng).expect("encrypt to recipient");
+
+    for _ in 0..sample_count() {
+        let (class, key) = if rng.random::<bool>() {
+            (Class::Left, &key_left)
+        } else {
+            (Class::Right, &key_right)
+        };
+        runner.run_one(class, || decrypt(key, &ciphertext));
+    }
+}
+
 /// Custom `main` (instead of `ctbench_main!`) so we can pre-filter `--bench`
 /// from argv. `cargo bench` injects `--bench` as the first arg by libtest
 /// convention; dudect-bencher's clap parser doesn't recognize it and would
@@ -542,6 +582,11 @@ fn main() {
             name: BenchName("ct_hmac_sm3"),
             seed: None,
             benchfn: ct_hmac_sm3,
+        },
+        BenchMetadata {
+            name: BenchName("ct_sm2_decrypt"),
+            seed: None,
+            benchfn: ct_sm2_decrypt,
         },
     ];
 

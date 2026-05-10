@@ -85,6 +85,11 @@ jobs:
               # v0.2 W3 — HMAC-SM3 keyed MAC. Covers the inner PRF for
               # PBKDF2-HMAC-SM3 (W4); no separate W4 target.
               "ct_hmac_sm3": 0.20,
+              # v0.2 W2 — SM2 decrypt, class-split by recipient d_B.
+              # Ciphertext is encrypted to a third party so both classes
+              # fail at the MAC check via identical control flow; only
+              # d_B's bits drive any timing differential.
+              "ct_sm2_decrypt": 0.20,
           }
 
           fail = False
