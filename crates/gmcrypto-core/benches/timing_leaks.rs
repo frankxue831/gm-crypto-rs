@@ -1,18 +1,22 @@
 //! `dudect-bencher` detectable-leak regression harness.
 //!
-//! Eleven targets, listed in the order the harness sorts them (alphabetical):
+//! Twelve targets, listed in the order the harness sorts them
+//! (alphabetical):
 //!
 //! - `ct_fn_invert`         — direct `Fn::invert((1+d) mod n)` diagnostic (W0).
 //! - `ct_fp_invert`         — direct `Fp::invert(Z)` diagnostic (W0).
 //! - `ct_hmac_sm3`          — HMAC-SM3, class-split by key (W3).
 //! - `ct_mul_g`             — fixed-base scalar multiplication `k·G`.
 //! - `ct_mul_var`           — variable-base scalar multiplication `k·P`.
+//! - `ct_pkcs8_decrypt`     — encrypted-PKCS#8 decrypt + parse, class-split
+//!   by password bytes; both classes' blobs are valid for their class's
+//!   password so both succeed via identical control flow (v0.3 W2).
 //! - `ct_sign`              — `sign_raw_with_id`, class-split by private key `d`.
 //! - `ct_sign_k_class`      — `sign_raw_with_id`, class-split by nonce `k`
 //!   magnitude (`d` held fixed, both retry nonces class-tied via [`ClassKRng`]).
 //! - `ct_sm2_decrypt`       — SM2 decrypt, class-split by recipient `d_B`,
 //!   fixed ciphertext (encrypted to a third party so both classes fail at
-//!   the MAC check via identical control flow; W2).
+//!   the MAC check via identical control flow; v0.2 Phase 3).
 //! - `ct_sm4_encrypt_block` — SM4 "construct cipher + encrypt one block",
 //!   class-split by master key bytes (W1).
 //! - `ct_sm4_key_schedule`  — SM4 key schedule, class-split by master key (W1).
@@ -101,6 +105,7 @@ use dudect_bencher::ctbench::{BenchMetadata, BenchName, BenchOpts, run_benches_c
 use dudect_bencher::{BenchRng, Class, CtRunner, rand::RngExt};
 use getrandom::SysRng;
 use gmcrypto_core::hmac::hmac_sm3;
+use gmcrypto_core::pkcs8;
 use gmcrypto_core::sm2::{
     DEFAULT_SIGNER_ID, Fn as Scalar, Fp, ProjectivePoint, Sm2PrivateKey, Sm2PublicKey, decrypt,
     encrypt, mul_g, mul_var, sign_raw_with_id,
@@ -492,6 +497,53 @@ fn ct_sm2_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
     }
 }
 
+/// PKCS#8 decrypt diagnostic. Class-split by **password bytes**; both
+/// classes use a **valid** encrypted blob (each class's blob was
+/// produced under that class's password), so both sides succeed at
+/// PBES2 + decode + scalar reconstruction via identical control flow.
+/// The new W2 surface this target adds defense-in-depth on:
+///
+/// 1. PBKDF2-HMAC-SM3 over caller-supplied password (already
+///    structurally covered by `ct_hmac_sm3`).
+/// 2. SM4-CBC decrypt + PKCS#7 strip (already covered structurally
+///    by `ct_sm4_*` + `mode_cbc::decrypt`'s subtle PKCS#7 strip).
+/// 3. **New:** `ECPrivateKey` ASN.1 parse over derived plaintext bytes,
+///    feeding into `Sm2PrivateKey::new`'s constant-time range check.
+///
+/// Iteration count is held at 1024 — low enough to keep the per-sample
+/// cost manageable, high enough that PBKDF2 dominates the timed
+/// window (matches `kdf::pbkdf2_hmac_sm3` smoke test budgets).
+fn ct_pkcs8_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let key = Sm2PrivateKey::new(U256::from_be_hex(
+        "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8",
+    ))
+    .expect("valid d");
+
+    let salt: [u8; 16] = [0xAB; 16];
+    let iv: [u8; 16] = [0xCD; 16];
+    let iterations = 1024u32;
+
+    let pw_left: [u8; 16] = [0x42; 16];
+    let pw_right: [u8; 16] = [0xA5; 16];
+    let blob_left = pkcs8::encrypt(&key, &pw_left, &salt, iterations, &iv).expect("encrypt left");
+    let blob_right =
+        pkcs8::encrypt(&key, &pw_right, &salt, iterations, &iv).expect("encrypt right");
+
+    for _ in 0..sample_count() {
+        let (class, pw, blob) = if rng.random::<bool>() {
+            (Class::Left, &pw_left, &blob_left)
+        } else {
+            (Class::Right, &pw_right, &blob_right)
+        };
+        runner.run_one(class, || {
+            // Both classes succeed; the only timing differential is in
+            // the secret-touching PBKDF2 + SM4-CBC paths and the ASN.1
+            // parse over the derived plaintext.
+            pkcs8::decrypt(blob, pw)
+        });
+    }
+}
+
 /// Custom `main` (instead of `ctbench_main!`) so we can pre-filter `--bench`
 /// from argv. `cargo bench` injects `--bench` as the first arg by libtest
 /// convention; dudect-bencher's clap parser doesn't recognize it and would
@@ -587,6 +639,11 @@ fn main() {
             name: BenchName("ct_sm2_decrypt"),
             seed: None,
             benchfn: ct_sm2_decrypt,
+        },
+        BenchMetadata {
+            name: BenchName("ct_pkcs8_decrypt"),
+            seed: None,
+            benchfn: ct_pkcs8_decrypt,
         },
     ];
 
