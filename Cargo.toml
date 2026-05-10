@@ -9,7 +9,7 @@ edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/frankxue831/gm-crypto-rs"
 authors = ["Fengxiang Xue <47923440+frankxue831@users.noreply.github.com>"]
-rust-version = "1.74"
+rust-version = "1.83"
 
 [workspace.dependencies]
 crypto-bigint = { version = "0.6", default-features = false, features = ["zeroize"] }

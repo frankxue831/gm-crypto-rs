@@ -1,7 +1,8 @@
 # Rust
 target/
 **/*.rs.bk
-Cargo.lock      # workspace policy: lib crate, do NOT commit lock file
+# Workspace policy: lib crate, do NOT commit lock file.
+Cargo.lock
 
 # Editor / OS
 .idea/

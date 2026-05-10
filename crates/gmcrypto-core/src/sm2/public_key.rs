@@ -10,8 +10,9 @@ pub struct Sm2PublicKey {
 
 impl Sm2PublicKey {
     /// Wrap a curve point as a public key. Caller is responsible for
-    /// having checked the point is on-curve and not at infinity (Task 18
-    /// adds those checks where they matter — Z-component verification).
+    /// having checked the point is on-curve and not at infinity. API entry
+    /// points that need stronger failure guarantees perform their own
+    /// boundary checks.
     #[must_use]
     pub const fn from_point(point: ProjectivePoint) -> Self {
         Self { point }

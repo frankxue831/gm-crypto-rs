@@ -5,7 +5,7 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.1.0] — TBD
+## [0.1.0] — 2026-05-10
 
 ### Added
 
