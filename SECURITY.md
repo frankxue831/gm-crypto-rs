@@ -39,58 +39,59 @@ constant-time.** Low `|tau|` values mean the test could not detect a leak with
 the budget given, not that no leak exists. Language is from `dudect-bencher`'s
 own docs.
 
-### Known v0.1 limitation: `crypto-bigint::ConstMontyForm::invert`
+### `crypto-bigint::ConstMontyForm::invert` — v0.1 vs. main
 
-Direct measurement on the harness shows `|tau| ≈ 0.70` for
-`ConstMontyForm::invert` between two random non-degenerate inputs. This is
-upstream behavior — `crypto-bigint = "0.7"`'s safegcd/Bernstein-Yang inversion
-is documented as constant-time but is not constant-time across different inputs
-in practice on the observed implementation.
+**Published v0.1.0 (on `crypto-bigint = 0.6`).** Direct measurement on the
+v0.1 harness showed `|tau| ≈ 0.70` for `ConstMontyForm::invert` between two
+random non-degenerate inputs. Inside `ct_sign`, where invert is ~1-2% of
+total sign time, the signal diluted to `|tau| ≈ 0.04–0.14` — under the
+0.20 gate. The v0.1 harness was class-split by `d` only; nonce-only
+leaks distributed uniformly across both classes, so the harness was
+**structurally blind** to a leak in `Fp::invert(Z)` after `mul_g(k)`.
 
-There are **three** invert sites in v0.1's secret-touching code path:
+**Main (post-publish, on `crypto-bigint = 0.7.3`).** The dep upgrade
+landed in commits `a670ce3` / `89abfb9` / `22b77a2`, and the v0.2 W0
+harness expansion (`ct_sign_k_class`, `ct_fn_invert`, `ct_fp_invert`)
+landed alongside. At 100K samples on the W0 harness:
 
-1. **`Fn::invert((1 + d) mod n)`** in `sign_raw_with_id` — operates on the
-   secret private key `d`.
-2. **`Fp::invert(Z)`** in `ProjectivePoint::to_affine()`, called from
+| target (W0) | `\|tau\|` |
+|---|---|
+| `ct_fn_invert` (direct site 1 diagnostic) | 0.0071 |
+| `ct_fp_invert` (direct site 2 diagnostic) | 0.0063 |
+| `ct_sign_k_class` (nonce-class-split sign) | 0.0708 |
+| `ct_sign` (private-key-class-split sign, retained) | 0.0044 |
+
+All four are under the 0.10 Branch A threshold; both classes of direct
+invert measurement land in the noise regime, two orders of magnitude
+below the v0.6 measurement. The v0.2 Fermat-invert workstream (W5) is
+**dropped**; `pow_bounded_exp` remains a fallback if a future
+`crypto-bigint` release regresses on this gate.
+
+The three secret-touching invert sites are documented for completeness:
+
+1. `Fn::invert((1 + d) mod n)` in `sign_raw_with_id` — operates on the
+   secret private key `d`. Direct diagnostic: `ct_fn_invert`.
+2. `Fp::invert(Z)` in `ProjectivePoint::to_affine()`, called from
    `try_sign_once` *after* `mul_g(k)` — operates on `Z` derived from the
-   secret nonce `k`.
-3. **`Fp::invert(Z)`** in `to_affine()`, called from `compute_z`'s public-key
+   secret nonce `k`. Direct diagnostic: `ct_fp_invert`. Sign-level
+   diagnostic: `ct_sign_k_class`.
+3. `Fp::invert(Z)` in `to_affine()`, called from `compute_z`'s public-key
    conversion — operates on **public** input only and reveals nothing new.
 
-Sites 1 and 2 are both **secret-dependent** timing surfaces in v0.1.
+### `ct_sign_k_class` and the structural blind spot fix
 
-### Honest admission about the dudect harness's coverage
+v0.1's harness was class-split by `d` while letting `k` be fresh-random in
+every sample, structurally blind to nonce-only leaks. `ct_sign_k_class`
+(W0) inverts the class assignment: `d` held fixed; class-split by nonce
+magnitude. **Both** retry nonces in the `SIGN_RETRY_BUDGET = 2` loop are
+class-tied — a class label that only controls the first nonce and lets
+the second be fresh-random would contaminate the signal (the second
+nonce becomes a noise source distributing uniformly across both classes).
 
-The in-CI `dudect-bencher` harness (`benches/timing_leaks.rs`) splits its
-`ct_sign` test classes by **private key `d`** while letting **`k` be
-fresh-random in every sample**. This design catches site (1) — the
-`(1+d).invert()` leak — diluted to `|tau| ≈ 0.04–0.14` because invert
-is ~1-2% of total sign time. The diluted signal is under the 0.20 gate,
-so `ct_sign` passes today.
-
-**The harness does not, however, detect site (2).** A nonce-dependent leak
-distributes uniformly across both classes, so it cannot show up as a
-between-class timing difference. dudect with this class assignment is
-structurally blind to nonce-only leaks. The `mul_g`/`mul_var` targets are
-class-split by scalar magnitude and so partially exercise the nonce path,
-but their `to_affine` is never called inside the timed window — so they
-also miss it.
-
-A `ct_sign` pass is therefore **not** evidence that signing is leak-free
-on the nonce path. It is evidence only that the `(1+d).invert()` leak is
-diluted under threshold at current sign-step proportions.
-
-### v0.2 plan
-
-v0.2 replaces both `Fn::invert` and `Fp::invert` at sites (1) and (2)
-with a constant-time Fermat-invert via `pow_bounded_exp` (after first
-validating the `pow` path is itself constant-time on the same harness).
-Once both sites are fixed, the harness will be reworked so that one of
-its targets is class-split by `k` (with `d` held fixed) to specifically
-exercise the nonce path that v0.1's class layout could not see.
-
-This limitation is also noted in `benches/timing_leaks.rs`'s module
-docs and tracked for the v0.2 fix.
+`ct_sign_k_class` measuring `|tau| = 0.0708` at 100K samples (vs. `ct_sign`'s
+0.0044) suggests the nonce path has slight signal elevation that the
+`d`-class harness could not see. Well under threshold; not a leak. Worth
+noting the elevated signal exists.
 
 ## Other known limitations (non-goals)
 

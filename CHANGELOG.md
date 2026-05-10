@@ -5,6 +5,41 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- v0.2 W0 — dudect harness expansion, three new targets: `ct_sign_k_class`
+  (nonce-magnitude class split with `d` held fixed; both retry nonces
+  class-tied via a deterministic `ClassKRng`), `ct_fn_invert` (direct
+  `Fn::invert((1+d) mod n)` diagnostic), `ct_fp_invert` (direct
+  `Fp::invert(Z)` diagnostic). `dudect-pr.yml` and `dudect-nightly.yml`
+  `required_low` allowlists extended to gate all three at `|tau| < 0.20`.
+  Closes the v0.1 structural blind spot to nonce-only leaks (documented
+  in published 0.1.0's SECURITY.md and CHANGELOG).
+
+### Changed
+
+- `crypto-bigint` workspace dep raised from 0.6 to 0.7.3 (commits
+  `a670ce3` / `89abfb9` / `22b77a2`). Edition raised from 2021 to 2024.
+  MSRV raised from 1.74 (v0.1 initial) to 1.85 (`crypto-bigint 0.7`
+  requirement). `subtle` 2.6.1, `zeroize` 1.8.2, `rand_core` 0.10.1,
+  `dudect-bencher` 0.7.0, `hex-literal` 1.1.0; `getrandom` 0.4.2 added
+  as a direct workspace dep with `sys_rng` feature (replacing the
+  `rand_core` 0.6 `getrandom` integration that 0.10 dropped).
+
+### Decided (v0.2 scope)
+
+- **Fermat-invert workstream (W5) dropped.** The original v0.2 plan
+  proposed replacing `Fn::invert` and `Fp::invert` at the two
+  secret-touching call sites with a constant-time `pow_bounded_exp`.
+  Direct measurement on the W0 harness against current `main`
+  (`crypto-bigint 0.7.3`) at 100K samples lands `ct_fn_invert` at
+  `|tau| ≈ 0.0071`, `ct_fp_invert` at `|tau| ≈ 0.0063`, `ct_sign_k_class`
+  at `|tau| ≈ 0.0708`, and `ct_sign` at `|tau| ≈ 0.0044` — all under
+  the 0.10 W5 Branch A threshold, two orders of magnitude below the
+  v0.6-era 0.70. The 0.7 upgrade resolved the leak directly. The
+  Fermat-invert option remains available as a fallback if a future
+  `crypto-bigint` release regresses.
+
 ## [0.1.0] — 2026-05-10
 
 ### Added

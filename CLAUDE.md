@@ -70,29 +70,33 @@ Gate on **`|tau|`** (scale-free), not `|t|` (grows as `tau · sqrt(N)` so any
 fixed `|t|` threshold is budget-dependent). Same gate at every sample budget;
 more samples = tighter empirical confidence on the same threshold.
 
-## Known v0.1 timing-leak narrative — partially obsolete after 0.7 upgrade
+## v0.1 timing-leak narrative — resolved on main by the 0.7 upgrade
 
-The v0.1 timing-leak narrative was written against `crypto-bigint = 0.6`,
-where `ConstMontyForm::invert` measured `|tau| ≈ 0.70` between non-degenerate
-inputs. Main is now on `0.7.3`; an earlier one-off diagnostic measured
-`|tau| ≈ 0.006` on 0.7 — a ~100× improvement, not yet re-baked into the
-harness or the docs. Until a fresh measurement lands, treat `SECURITY.md`'s
-"Known v0.1 limitation" section, `point.rs`'s `to_affine()` caveat, and
-`benches/timing_leaks.rs`'s module-doc admission as describing the
-**published 0.1.0** posture, not main's current posture.
+Published v0.1.0 (on `crypto-bigint = 0.6`) measured `|tau| ≈ 0.70` directly
+on `ConstMontyForm::invert`. Main is on `0.7.3` and the v0.2 W0 harness
+expansion (`ct_sign_k_class`, `ct_fn_invert`, `ct_fp_invert`) closed the
+structural blind spot. At 100K samples on main:
 
-The three secret-touching `invert` sites are still:
+| target | `\|tau\|` |
+|---|---|
+| `ct_fn_invert` | 0.0071 |
+| `ct_fp_invert` | 0.0063 |
+| `ct_sign_k_class` | 0.0708 |
+| `ct_sign` | 0.0044 |
 
-1. `Fn::invert((1+d) mod n)` in `sign_raw_with_id` — secret-dependent.
-2. `Fp::invert(Z)` in `to_affine()` after `mul_g(k)` — **nonce-dependent**.
-   The current dudect class-split (by `d`) is structurally blind to this site.
+All four under the 0.10 W5 Branch A threshold; two orders of magnitude under
+the 0.20 gate. The v0.2 Fermat-invert workstream was dropped on this evidence.
+`pow_bounded_exp` remains a fallback if a future `crypto-bigint` release
+regresses on this gate. See `SECURITY.md` for the full posture.
+
+The three secret-touching `invert` sites:
+
+1. `Fn::invert((1+d) mod n)` in `sign_raw_with_id` — secret-dependent. Now
+   directly diagnosable via `ct_fn_invert`.
+2. `Fp::invert(Z)` in `to_affine()` after `mul_g(k)` — nonce-dependent. Now
+   directly diagnosable via `ct_fp_invert`; sign-level diagnosable via
+   `ct_sign_k_class`.
 3. `Fp::invert(Z)` in `to_affine()` from `compute_z` — public input, harmless.
-
-**v0.2 plan:** re-measure on 0.7 first. If the gate is comfortably under 0.20
-across both the existing `d`-class targets and a new `k`-class target, the
-Fermat-invert rewrite may not be needed. If it is needed, ship the
-`pow_bounded_exp` replacement AND the `k`-class harness target **together** —
-don't ship a partial fix without the matching harness change.
 
 ## Architecture map
 

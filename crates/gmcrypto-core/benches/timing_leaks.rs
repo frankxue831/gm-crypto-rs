@@ -1,10 +1,14 @@
 //! `dudect-bencher` detectable-leak regression harness.
 //!
-//! Four targets, listed in the order the harness sorts them (alphabetical):
+//! Seven targets, listed in the order the harness sorts them (alphabetical):
 //!
+//! - `ct_fn_invert`     — direct `Fn::invert((1+d) mod n)` diagnostic.
+//! - `ct_fp_invert`     — direct `Fp::invert(Z)` diagnostic.
 //! - `ct_mul_g`         — fixed-base scalar multiplication `k·G`.
 //! - `ct_mul_var`       — variable-base scalar multiplication `k·P`.
-//! - `ct_sign`          — `sign_raw_with_id` (sign without DER encoding).
+//! - `ct_sign`          — `sign_raw_with_id`, class-split by private key `d`.
+//! - `ct_sign_k_class`  — `sign_raw_with_id`, class-split by nonce `k` magnitude
+//!   (`d` held fixed, both retry nonces class-tied via [`ClassKRng`]).
 //! - `negative_control` — deliberately-leaky function. The harness MUST flag
 //!   this — if it doesn't, the harness wiring is broken.
 //!
@@ -14,42 +18,36 @@
 //! Low `|t|` means the test could not detect a leak within the budget given,
 //! **not** that no leak exists.
 //!
-//! # Known v0.1 limitation: `crypto-bigint`'s `ConstMontyForm::invert` is
-//! not constant-time across different inputs.
+//! # `crypto-bigint::ConstMontyForm::invert` — v0.1 vs. main
 //!
-//! Direct measurement on this harness shows `|tau| ≈ 0.70` for
-//! `Fn::invert((1+d) mod n)` between two random non-degenerate `d`
-//! values. This is the dominant signal when invert is exercised in
-//! isolation. Inside `sign_raw_with_id`, where invert is ~1-2% of total
-//! sign time, the signal dilutes to `|tau| ≈ 0.04-0.14` — within the
-//! harness's `|tau| < 0.20` gate, so `ct_sign` passes today.
+//! v0.1.0 shipped on `crypto-bigint = 0.6`, where direct measurement on
+//! `Fn::invert((1+d) mod n)` between two random non-degenerate `d` values
+//! showed `|tau| ≈ 0.70`. Inside `sign_raw_with_id`, where invert is ~1-2%
+//! of total sign time, the signal diluted to `|tau| ≈ 0.04-0.14` — under
+//! the 0.20 gate, so `ct_sign` passed.
 //!
-//! # Honest admission: this class-split is blind to nonce-path leaks
+//! Main (post-publish, on `crypto-bigint = 0.7.3`) measures `|tau| ≈ 0.006`
+//! on `ct_fn_invert` and `|tau| ≈ 0.006` on `ct_fp_invert` at 100K samples —
+//! two orders of magnitude under the 0.20 gate, in the noise regime.
+//! `ct_sign_k_class` measures `|tau| ≈ 0.07` (vs. `ct_sign`'s 0.004),
+//! suggesting the nonce path has a slight signal that `ct_sign`'s
+//! `d`-class split could not see; well under threshold, not a leak.
 //!
-//! `ct_sign` splits its two classes by private key `d` and lets the
-//! per-sample nonce `k` be fresh-random in every sample of every class.
-//! This catches the `(1+d).invert()` leak (diluted as above), but it
-//! is **structurally blind** to a nonce-only leak — for example the
-//! `Fp::invert(Z)` inside `kg.to_affine()` after `mul_g(k)`, where `Z`
-//! is derived from the secret `k`. Such a leak distributes uniformly
-//! across both classes and cannot show up as a between-class timing
-//! difference.
+//! The v0.2 Fermat-invert workstream is dropped on this evidence;
+//! `pow_bounded_exp` remains a fallback if a future `crypto-bigint`
+//! release regresses on this gate.
 //!
-//! `ct_mul_g` / `ct_mul_var` are class-split by scalar magnitude and
-//! so partially exercise the nonce path, but they don't call
-//! `to_affine` inside the timed window, so they also miss this site.
+//! # `ct_sign_k_class` — closing v0.1's structural blind spot
 //!
-//! A `ct_sign` pass is therefore **not** evidence that signing is
-//! leak-free on the nonce path. It is evidence only that the `(1+d)`
-//! invert leak stays under the gate at current sign-step proportions.
-//! See `SECURITY.md`'s "Known v0.1 limitation" section for the full
-//! posture.
-//!
-//! v0.2 replaces both secret-touching invert sites with a Fermat-invert
-//! via `pow_bounded_exp` (after first validating the `pow` path is
-//! itself constant-time) and reworks the harness to add a class split
-//! by `k` (with `d` held fixed) to specifically exercise the nonce
-//! path the v0.1 class layout cannot see.
+//! v0.1's `ct_sign` was class-split by `d` while letting `k` be fresh-random
+//! in every sample. A nonce-dependent leak distributes uniformly across
+//! both classes and is **structurally undetectable** under that scheme.
+//! `ct_sign_k_class` inverts the assignment: `d` held fixed, class-split
+//! by nonce magnitude. **Both** retry nonces in the `SIGN_RETRY_BUDGET = 2`
+//! loop are class-tied via [`ClassKRng`] — a class label that only
+//! controls the first nonce and lets the second be fresh-random would
+//! contaminate the signal (the second nonce becomes a noise source
+//! distributing uniformly across both classes).
 //!
 //! # Why we gate on `|tau|`, not `|t|`
 //!
@@ -88,15 +86,16 @@
 //!
 //! CI workflows parse this with a regex pinned to `^bench\s+(\S+)\s*:.*?max t = ([+-]\d+\.\d+)`.
 
+use core::convert::Infallible;
 use crypto_bigint::U256;
 use dudect_bencher::ctbench::{BenchMetadata, BenchName, BenchOpts, run_benches_console};
 use dudect_bencher::{BenchRng, Class, CtRunner, rand::RngExt};
 use getrandom::SysRng;
 use gmcrypto_core::sm2::{
-    DEFAULT_SIGNER_ID, Fn as Scalar, ProjectivePoint, Sm2PrivateKey, mul_g, mul_var,
+    DEFAULT_SIGNER_ID, Fn as Scalar, Fp, ProjectivePoint, Sm2PrivateKey, mul_g, mul_var,
     sign_raw_with_id,
 };
-use rand_core::UnwrapErr;
+use rand_core::{TryCryptoRng, TryRng, UnwrapErr};
 
 /// Default per-bench sample count (smoke). Overridable via `DUDECT_SAMPLES`.
 const DEFAULT_SAMPLES: usize = 100_000;
@@ -218,6 +217,155 @@ fn ct_sign(runner: &mut CtRunner, rng: &mut BenchRng) {
     }
 }
 
+/// Deterministic per-class RNG that emits a class-tied **pair** of `k`
+/// values across two `fill_bytes(&mut [u8; 32])` calls.
+///
+/// `sign_raw_with_id` runs `SIGN_RETRY_BUDGET = 2` iterations, each
+/// drawing a fresh nonce via `sample_nonzero_scalar`. A class label that
+/// only controls the first `k` and lets the second be fresh-random
+/// contaminates the harness — the second nonce becomes a noise source
+/// that distributes uniformly across both classes. See W0 in the
+/// v0.2 scope document.
+///
+/// Both pair elements are chosen so that the validity check inside
+/// `sample_nonzero_scalar` (`candidate != 0 && candidate < n`) accepts
+/// in one shot, so the bench's loop count is deterministic and the
+/// timed window doesn't pick up rejection-sampling jitter.
+struct ClassKRng {
+    pair: [U256; 2],
+    cursor: usize,
+}
+
+impl ClassKRng {
+    /// Two small nonces: 1 and 3.
+    const fn new_left() -> Self {
+        Self {
+            pair: [U256::from_u64(1), U256::from_u64(3)],
+            cursor: 0,
+        }
+    }
+
+    /// Two large nonces: n-1 and n-3. Both pass `candidate < n`.
+    const fn new_right() -> Self {
+        Self {
+            pair: [
+                U256::from_be_hex(
+                    "FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFF7203DF6B21C6052B53BBF40939D5411E",
+                ),
+                U256::from_be_hex(
+                    "FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFF7203DF6B21C6052B53BBF40939D5411C",
+                ),
+            ],
+            cursor: 0,
+        }
+    }
+}
+
+impl TryRng for ClassKRng {
+    type Error = Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        Ok(0)
+    }
+
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        Ok(0)
+    }
+
+    fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
+        assert_eq!(
+            dst.len(),
+            32,
+            "ClassKRng services exactly 32-byte fills (the SM2 nonce path)"
+        );
+        let value = self.pair[self.cursor % 2];
+        self.cursor += 1;
+        dst.copy_from_slice(&value.to_be_bytes());
+        Ok(())
+    }
+}
+
+impl TryCryptoRng for ClassKRng {}
+
+/// Class-split by **nonce magnitude**, with a fixed private key `d`.
+///
+/// The W0 target that `ct_sign` cannot see: a nonce-only timing leak
+/// distributes uniformly across `ct_sign`'s `d`-class split, so it is
+/// structurally undetectable there. This target inverts the class
+/// assignment.
+fn ct_sign_k_class(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let key = Sm2PrivateKey::new(U256::from_be_hex(
+        "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8",
+    ))
+    .expect("fixed sample D in [1, n-2]");
+    for _ in 0..sample_count() {
+        let class = if rng.random::<bool>() {
+            Class::Left
+        } else {
+            Class::Right
+        };
+        let is_left = matches!(class, Class::Left);
+        runner.run_one(class, || {
+            let mut k_rng = if is_left {
+                UnwrapErr(ClassKRng::new_left())
+            } else {
+                UnwrapErr(ClassKRng::new_right())
+            };
+            sign_raw_with_id(&key, DEFAULT_SIGNER_ID, b"timing target", &mut k_rng)
+        });
+    }
+}
+
+/// Direct diagnostic for `Fn::invert((1+d) mod n)` — site (1) of
+/// `SECURITY.md`'s invert enumeration.
+///
+/// Pre-computes `(1 + d_class) mod n` outside the timed window so the
+/// timing differential we measure is `invert` itself, not the field
+/// addition. Sign-level dudect dilutes invert by ~50× because invert is
+/// ~1-2% of total sign time; this target sees invert directly and
+/// drives the W5 (Fermat-invert) decision tree.
+fn ct_fn_invert(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let one = Scalar::new(&U256::ONE);
+    let d_small = Scalar::new(&U256::from_be_hex(
+        "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8",
+    ));
+    let d_large = Scalar::new(&U256::from_be_hex(
+        "B9E5B7C12E48BAB7CC0E91A57F8A48E8C8F87DDD25EBF52F2A75E612CB1A9E4F",
+    ));
+    let one_plus_d_small = one + d_small;
+    let one_plus_d_large = one + d_large;
+    for _ in 0..sample_count() {
+        let (class, x) = if rng.random::<bool>() {
+            (Class::Left, &one_plus_d_small)
+        } else {
+            (Class::Right, &one_plus_d_large)
+        };
+        runner.run_one(class, || x.invert());
+    }
+}
+
+/// Direct diagnostic for `Fp::invert(Z)` — site (2) of `SECURITY.md`'s
+/// invert enumeration.
+///
+/// Two arbitrary non-degenerate `Fp` values; the diagnostic interest is
+/// whether the invert primitive itself is constant-time, not whether a
+/// specific Z is realistic post-`mul_g(k)`. (Realism would not change
+/// what we measure — `Fp::invert` is input-only-dependent.)
+fn ct_fp_invert(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let z_small = Fp::new(&U256::from_u64(0x1234));
+    let z_large = Fp::new(&U256::from_be_hex(
+        "FEDCBA9876543210FEDCBA9876543210FEDCBA9876543210FEDCBA9876543210",
+    ));
+    for _ in 0..sample_count() {
+        let (class, x) = if rng.random::<bool>() {
+            (Class::Left, &z_small)
+        } else {
+            (Class::Right, &z_large)
+        };
+        runner.run_one(class, || x.invert());
+    }
+}
+
 /// Custom `main` (instead of `ctbench_main!`) so we can pre-filter `--bench`
 /// from argv. `cargo bench` injects `--bench` as the first arg by libtest
 /// convention; dudect-bencher's clap parser doesn't recognize it and would
@@ -278,6 +426,21 @@ fn main() {
             name: BenchName("ct_sign"),
             seed: None,
             benchfn: ct_sign,
+        },
+        BenchMetadata {
+            name: BenchName("ct_sign_k_class"),
+            seed: None,
+            benchfn: ct_sign_k_class,
+        },
+        BenchMetadata {
+            name: BenchName("ct_fn_invert"),
+            seed: None,
+            benchfn: ct_fn_invert,
+        },
+        BenchMetadata {
+            name: BenchName("ct_fp_invert"),
+            seed: None,
+            benchfn: ct_fp_invert,
         },
     ];
 

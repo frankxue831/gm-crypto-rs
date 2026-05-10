@@ -61,7 +61,18 @@ jobs:
           required_high = {"negative_control": 1.0}
           # 0.20 chosen empirically (matches the smoke gate). See the
           # PR-smoke workflow for the calibration rationale.
-          required_low  = {"ct_mul_g": 0.20, "ct_mul_var": 0.20, "ct_sign": 0.20}
+          required_low  = {
+              # v0.1 baseline targets.
+              "ct_mul_g": 0.20,
+              "ct_mul_var": 0.20,
+              "ct_sign": 0.20,
+              # v0.2 W0 — nonce-class split (closes the v0.1 structural blind spot)
+              # plus direct invert diagnostics (drives the W5 Fermat-invert
+              # decision tree; sign-level dudect dilutes invert by ~50x).
+              "ct_sign_k_class": 0.20,
+              "ct_fn_invert": 0.20,
+              "ct_fp_invert": 0.20,
+          }
 
           fail = False
           for name, lower_bound in required_high.items():

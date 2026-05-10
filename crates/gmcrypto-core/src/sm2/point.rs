@@ -157,14 +157,16 @@ impl ProjectivePoint {
     ///
     /// # Constant-time caveat
     ///
-    /// The Z-inverse goes through `crypto-bigint = 0.7`'s
-    /// `ConstMontyForm::invert` (safegcd / Bernstein-Yang), which is
-    /// **documented** as constant-time but direct measurement on the
-    /// project's dudect harness shows `|tau| ≈ 0.70` between different
-    /// inputs. Callers that pass secret-derived `Z` (notably `mul_g(k)`
-    /// inside the SM2 sign retry loop, where `k` is the secret nonce)
-    /// inherit a measurable timing side-channel until v0.2 replaces the
-    /// invert site with a Fermat-style `pow_bounded_exp`.
+    /// The Z-inverse goes through `crypto-bigint = 0.7.3`'s
+    /// `ConstMontyForm::invert` (safegcd / Bernstein-Yang). v0.1.0 shipped
+    /// on `crypto-bigint = 0.6` where direct measurement on the dudect
+    /// harness showed `|tau| ≈ 0.70` between different inputs — a
+    /// nonce-dependent timing side-channel for callers passing
+    /// secret-derived `Z`. Main (post-publish, on 0.7.3) measures
+    /// `|tau| ≈ 0.006` directly via the W0 `ct_fp_invert` target at 100K
+    /// samples — two orders of magnitude under the 0.20 gate. The v0.2
+    /// Fermat-invert workstream is dropped; `pow_bounded_exp` remains a
+    /// fallback if a future `crypto-bigint` release regresses.
     /// See `SECURITY.md` for the full posture.
     #[must_use]
     pub fn to_affine(&self) -> Option<(Fp, Fp)> {
