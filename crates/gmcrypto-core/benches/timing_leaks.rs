@@ -1,15 +1,19 @@
 //! `dudect-bencher` detectable-leak regression harness.
 //!
-//! Seven targets, listed in the order the harness sorts them (alphabetical):
+//! Ten targets, listed in the order the harness sorts them (alphabetical):
 //!
-//! - `ct_fn_invert`     — direct `Fn::invert((1+d) mod n)` diagnostic.
-//! - `ct_fp_invert`     — direct `Fp::invert(Z)` diagnostic.
-//! - `ct_mul_g`         — fixed-base scalar multiplication `k·G`.
-//! - `ct_mul_var`       — variable-base scalar multiplication `k·P`.
-//! - `ct_sign`          — `sign_raw_with_id`, class-split by private key `d`.
-//! - `ct_sign_k_class`  — `sign_raw_with_id`, class-split by nonce `k` magnitude
-//!   (`d` held fixed, both retry nonces class-tied via [`ClassKRng`]).
-//! - `negative_control` — deliberately-leaky function. The harness MUST flag
+//! - `ct_fn_invert`         — direct `Fn::invert((1+d) mod n)` diagnostic (W0).
+//! - `ct_fp_invert`         — direct `Fp::invert(Z)` diagnostic (W0).
+//! - `ct_hmac_sm3`          — HMAC-SM3, class-split by key (W3).
+//! - `ct_mul_g`             — fixed-base scalar multiplication `k·G`.
+//! - `ct_mul_var`           — variable-base scalar multiplication `k·P`.
+//! - `ct_sign`              — `sign_raw_with_id`, class-split by private key `d`.
+//! - `ct_sign_k_class`      — `sign_raw_with_id`, class-split by nonce `k`
+//!   magnitude (`d` held fixed, both retry nonces class-tied via [`ClassKRng`]).
+//! - `ct_sm4_encrypt_block` — SM4 "construct cipher + encrypt one block",
+//!   class-split by master key bytes (W1).
+//! - `ct_sm4_key_schedule`  — SM4 key schedule, class-split by master key (W1).
+//! - `negative_control`     — deliberately-leaky function. The harness MUST flag
 //!   this — if it doesn't, the harness wiring is broken.
 //!
 //! # Honest framing
@@ -93,6 +97,7 @@ use crypto_bigint::U256;
 use dudect_bencher::ctbench::{BenchMetadata, BenchName, BenchOpts, run_benches_console};
 use dudect_bencher::{BenchRng, Class, CtRunner, rand::RngExt};
 use getrandom::SysRng;
+use gmcrypto_core::hmac::hmac_sm3;
 use gmcrypto_core::sm2::{
     DEFAULT_SIGNER_ID, Fn as Scalar, Fp, ProjectivePoint, Sm2PrivateKey, mul_g, mul_var,
     sign_raw_with_id,
@@ -426,6 +431,27 @@ fn ct_sm4_encrypt_block(runner: &mut CtRunner, rng: &mut BenchRng) {
     }
 }
 
+/// HMAC-SM3 diagnostic. Class-split by key bytes; fixed message.
+/// HMAC moves the secret key into both inner and outer SM3 hash
+/// invocations (`K' XOR ipad` and `K' XOR opad`), so a key-dependent
+/// timing leak shows up here. PBKDF2-HMAC-SM3 (W4) is covered by this
+/// target's inner PRF — no separate `ct_pbkdf2_hmac_sm3` target.
+fn ct_hmac_sm3(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let key_left: [u8; 32] = [0x42u8; 32];
+    let key_right: [u8; 32] = [0xa5u8; 32];
+    // Fixed 64-byte message — exercises one full SM3 block of HMAC's
+    // inner-hash input plus the per-block padding.
+    let message: [u8; 64] = [0u8; 64];
+    for _ in 0..sample_count() {
+        let (class, key) = if rng.random::<bool>() {
+            (Class::Left, &key_left)
+        } else {
+            (Class::Right, &key_right)
+        };
+        runner.run_one(class, || hmac_sm3(key, &message));
+    }
+}
+
 /// Custom `main` (instead of `ctbench_main!`) so we can pre-filter `--bench`
 /// from argv. `cargo bench` injects `--bench` as the first arg by libtest
 /// convention; dudect-bencher's clap parser doesn't recognize it and would
@@ -511,6 +537,11 @@ fn main() {
             name: BenchName("ct_sm4_encrypt_block"),
             seed: None,
             benchfn: ct_sm4_encrypt_block,
+        },
+        BenchMetadata {
+            name: BenchName("ct_hmac_sm3"),
+            seed: None,
+            benchfn: ct_hmac_sm3,
         },
     ];
 

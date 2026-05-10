@@ -82,6 +82,9 @@ jobs:
               # secret-derived state.
               "ct_sm4_key_schedule": 0.20,
               "ct_sm4_encrypt_block": 0.20,
+              # v0.2 W3 — HMAC-SM3 keyed MAC. Covers the inner PRF for
+              # PBKDF2-HMAC-SM3 (W4); no separate W4 target.
+              "ct_hmac_sm3": 0.20,
           }
 
           fail = False
