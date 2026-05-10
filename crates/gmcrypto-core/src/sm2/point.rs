@@ -5,8 +5,8 @@
 //! No early-out branches; the point at infinity is represented as `Z = 0`
 //! and is folded into the formulas via projective representation.
 
-use crate::sm2::curve::{b, Fp, GX_HEX, GY_HEX};
-use crypto_bigint::{Invert, U256};
+use crate::sm2::curve::{Fp, GX_HEX, GY_HEX, b};
+use crypto_bigint::U256;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
 /// A point on the SM2 curve in projective coordinates (X:Y:Z).
@@ -157,7 +157,7 @@ impl ProjectivePoint {
     ///
     /// # Constant-time caveat
     ///
-    /// The Z-inverse goes through `crypto-bigint = 0.6`'s
+    /// The Z-inverse goes through `crypto-bigint = 0.7`'s
     /// `ConstMontyForm::invert` (safegcd / Bernstein-Yang), which is
     /// **documented** as constant-time but direct measurement on the
     /// project's dudect harness shows `|tau| ≈ 0.70` between different
@@ -168,7 +168,7 @@ impl ProjectivePoint {
     /// See `SECURITY.md` for the full posture.
     #[must_use]
     pub fn to_affine(&self) -> Option<(Fp, Fp)> {
-        let z_inv: subtle::CtOption<Fp> = self.z.invert();
+        let z_inv: subtle::CtOption<Fp> = self.z.invert().into();
         let z_inv: Option<Fp> = z_inv.into();
         let z_inv = z_inv?;
         Some((self.x * z_inv, self.y * z_inv))

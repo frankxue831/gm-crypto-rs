@@ -2,8 +2,8 @@
 #
 # Hard rule: gmcrypto-core ships only crypto-bigint, subtle, zeroize,
 # rand_core in its NORMAL + BUILD dep classes. Dev-deps (dudect-bencher,
-# criterion, hex-literal) are unrestricted because they don't reach
-# downstream consumers.
+# getrandom, hex-literal) are unrestricted because they don't reach downstream
+# consumers.
 
 [graph]
 all-features = false
@@ -37,6 +37,9 @@ allow = [
     { name = "rand_core" },
 
     # Transitive deps of crypto-bigint.
+    { name = "cpubits" },
+    { name = "ctutils" },
+    { name = "cmov" },
     { name = "num-traits" },
     { name = "hybrid-array" },
     { name = "generic-array" },
@@ -44,24 +47,6 @@ allow = [
 
     # Transitive build helper of num-traits (dev-dep elevated to build via cfg).
     { name = "autocfg" },
-
-    # Transitive deps of rand_core. The `getrandom` feature is enabled by the
-    # dev-dep configuration, but cargo's feature unification means these crates
-    # also appear in the normal-dep graph. Acceptable: getrandom is the
-    # de-facto standard for OS RNG access in the Rust ecosystem.
-    { name = "getrandom" },
-    { name = "cfg-if" },
-    { name = "libc" },
-    { name = "wasi" },                # getrandom on wasm32-wasi
-    { name = "windows-targets" },     # getrandom on windows
-    { name = "windows_aarch64_gnullvm" },
-    { name = "windows_aarch64_msvc" },
-    { name = "windows_i686_gnu" },
-    { name = "windows_i686_gnullvm" },
-    { name = "windows_i686_msvc" },
-    { name = "windows_x86_64_gnu" },
-    { name = "windows_x86_64_gnullvm" },
-    { name = "windows_x86_64_msvc" },
 
     # Proc-macro support, transitive from zeroize_derive.
     { name = "syn" },

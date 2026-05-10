@@ -4,17 +4,17 @@
 //! Cofactor 1, prime order n. Note `a ≡ -3 (mod p)`, which enables
 //! Renes-Costello-Batina's a=-3 specialized complete-addition formulas.
 
-use crypto_bigint::{impl_modulus, U256};
+use crypto_bigint::{U256, const_monty_params};
 
 // p = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF 00000000 FFFFFFFF FFFFFFFF
-impl_modulus!(
+const_monty_params!(
     PMod,
     U256,
     "FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000FFFFFFFFFFFFFFFF"
 );
 
 // n = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF 7203DF6B 21C6052B 53BBF409 39D54123
-impl_modulus!(
+const_monty_params!(
     NMod,
     U256,
     "FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFF7203DF6B21C6052B53BBF40939D54123"
@@ -54,13 +54,10 @@ pub fn b3() -> Fp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crypto_bigint::modular::ConstMontyParams;
-    use crypto_bigint::Invert;
-
     #[test]
     fn moduli_are_correct_size() {
-        assert_eq!(PMod::MODULUS.bits(), 256);
-        assert_eq!(NMod::MODULUS.bits(), 256);
+        assert_eq!(Fp::MODULUS.as_ref().bits(), 256);
+        assert_eq!(Fn::MODULUS.as_ref().bits(), 256);
     }
 
     #[test]

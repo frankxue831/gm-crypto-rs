@@ -12,7 +12,7 @@ the project follows [Semantic Versioning](https://semver.org/).
 - Initial release of `gmcrypto-core` (`#![no_std]` + `alloc`).
 - SM3 hash function with KAT vectors from GB/T 32905-2016 (empty, "abc",
   16× "abcd", 63 zero bytes, plus a streaming-vs-one-shot equivalence test).
-- `Fp` and `Fn` field arithmetic over `crypto-bigint = 0.6` `ConstMontyForm`,
+- `Fp` and `Fn` field arithmetic over `crypto-bigint = 0.7` `ConstMontyForm`,
   including `Fp::invert` / `Fn::invert` round-trip KATs.
 - SM2 curve (GB/T 32918.5-2017) with Renes-Costello-Batina complete addition
   formulas (a=-3 specialized).

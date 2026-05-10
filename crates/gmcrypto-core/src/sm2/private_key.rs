@@ -1,9 +1,8 @@
 //! SM2 private keys.
 
-use crate::sm2::curve::{Fn, NMod};
+use crate::sm2::curve::Fn;
 use crate::sm2::point::ProjectivePoint;
 use crate::sm2::scalar_mul::mul_g;
-use crypto_bigint::modular::ConstMontyParams;
 use crypto_bigint::U256;
 use subtle::{Choice, ConstantTimeEq, ConstantTimeLess, CtOption};
 use zeroize::ZeroizeOnDrop;
@@ -36,7 +35,7 @@ impl Sm2PrivateKey {
     /// is outside `[1, n-2]`. Constant-time.
     #[must_use]
     pub fn new(d: U256) -> CtOption<Self> {
-        let n = NMod::MODULUS.get();
+        let n = *Fn::MODULUS.as_ref();
         let n_minus_one = n.wrapping_sub(&U256::ONE);
         let in_range_low: Choice = !d.ct_eq(&U256::ZERO);
         let in_range_high: Choice = d.ct_lt(&n_minus_one);
@@ -92,7 +91,7 @@ mod tests {
 
     #[test]
     fn d_n_minus_one_rejected() {
-        let n = NMod::MODULUS.get();
+        let n = *Fn::MODULUS.as_ref();
         let n_minus_one = n.wrapping_sub(&U256::ONE);
         let key = Sm2PrivateKey::new(n_minus_one);
         assert!(bool::from(key.is_none()));

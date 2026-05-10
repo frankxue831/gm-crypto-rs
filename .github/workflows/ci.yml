@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: [stable, "1.83"]   # latest stable + MSRV
+        toolchain: [stable, "1.85"]   # latest stable + MSRV
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust ${{ matrix.toolchain }}

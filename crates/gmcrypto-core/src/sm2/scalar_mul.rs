@@ -29,7 +29,7 @@ pub fn mul_var(k: &Fn, p: &ProjectivePoint) -> ProjectivePoint {
     let mut acc = ProjectivePoint::identity();
     let mut first = true;
 
-    for byte in &k_be {
+    for byte in k_be.as_ref() {
         // High nibble first.
         let nibbles = [byte >> 4, byte & 0x0F];
         for &nib in &nibbles {

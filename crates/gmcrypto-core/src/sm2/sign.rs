@@ -1,15 +1,14 @@
 //! SM2 sign and verify (GB/T 32918.2-2017).
 
 use crate::asn1::sig::encode_sig;
-use crate::sm2::curve::{b, Fn, NMod, PMod, GX_HEX, GY_HEX};
+use crate::sm2::curve::{Fn, Fp, GX_HEX, GY_HEX, b};
 use crate::sm2::private_key::Sm2PrivateKey;
 use crate::sm2::public_key::Sm2PublicKey;
 use crate::sm2::scalar_mul::mul_g;
-use crate::sm3::{Sm3, DIGEST_SIZE};
+use crate::sm3::{DIGEST_SIZE, Sm3};
 use alloc::vec::Vec;
-use crypto_bigint::modular::ConstMontyParams;
-use crypto_bigint::{Invert, U256};
-use rand_core::{CryptoRng, RngCore};
+use crypto_bigint::U256;
+use rand_core::{CryptoRng, Rng};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, ConstantTimeLess, CtOption};
 
 /// Default signer ID per GM/T 0009: 16 ASCII bytes "1234567812345678".
@@ -53,7 +52,7 @@ pub fn compute_z(public: &Sm2PublicKey, id: &[u8]) -> [u8; DIGEST_SIZE] {
 
     // a ≡ -3 (mod p), encoded as 32 BE bytes of (p - 3).
     let three = U256::from_u64(3);
-    let p_minus_three = PMod::MODULUS.get().wrapping_sub(&three);
+    let p_minus_three = Fp::MODULUS.as_ref().wrapping_sub(&three);
     h.update(&p_minus_three.to_be_bytes());
 
     // b
@@ -99,7 +98,7 @@ pub enum SignError {
 /// an invalid candidate (`r == 0`, `r + k == n`, or `s == 0`). Failure
 /// modes are deliberately collapsed to one variant per the
 /// failure-mode-invariant policy; see `SECURITY.md`.
-pub fn sign_with_id<R: CryptoRng + RngCore>(
+pub fn sign_with_id<R: CryptoRng + Rng>(
     key: &Sm2PrivateKey,
     id: &[u8],
     message: &[u8],
@@ -128,7 +127,7 @@ pub fn sign_with_id<R: CryptoRng + RngCore>(
 /// retry produced an invalid candidate (`r == 0`, `r + k == n`, or
 /// `s == 0`).
 #[doc(hidden)]
-pub fn sign_raw_with_id<R: CryptoRng + RngCore>(
+pub fn sign_raw_with_id<R: CryptoRng + Rng>(
     key: &Sm2PrivateKey,
     id: &[u8],
     message: &[u8],
@@ -175,11 +174,7 @@ impl ConditionallySelectable for RsPair {
 }
 
 #[allow(clippy::similar_names, clippy::many_single_char_names)]
-fn try_sign_once<R: CryptoRng + RngCore>(
-    key: &Sm2PrivateKey,
-    e: &Fn,
-    rng: &mut R,
-) -> CtOption<RsPair> {
+fn try_sign_once<R: CryptoRng + Rng>(key: &Sm2PrivateKey, e: &Fn, rng: &mut R) -> CtOption<RsPair> {
     let k = sample_nonzero_scalar(rng);
     let kg = mul_g(&k);
     let (x1, _y1) = kg.to_affine().expect("k·G is finite for k != 0");
@@ -201,7 +196,7 @@ fn try_sign_once<R: CryptoRng + RngCore>(
     let k_minus_rd = k - rd;
 
     let inv_unwrapped: Fn = one_plus_d_inv.unwrap_or(Fn::new(&U256::ONE));
-    let inv_ok: Choice = one_plus_d_inv.is_some();
+    let inv_ok: Choice = one_plus_d_inv.is_some().into();
 
     let s = inv_unwrapped * k_minus_rd;
     let s_u = s.retrieve();
@@ -211,8 +206,8 @@ fn try_sign_once<R: CryptoRng + RngCore>(
     CtOption::new(RsPair { r: r_u, s: s_u }, valid)
 }
 
-fn sample_nonzero_scalar<R: CryptoRng + RngCore>(rng: &mut R) -> Fn {
-    let n = NMod::MODULUS.get();
+fn sample_nonzero_scalar<R: CryptoRng + Rng>(rng: &mut R) -> Fn {
+    let n = *Fn::MODULUS.as_ref();
     loop {
         let mut buf = [0u8; 32];
         rng.fill_bytes(&mut buf);
@@ -238,37 +233,36 @@ fn ct_or_else<T: ConditionallySelectable + Default>(a: CtOption<T>, b: CtOption<
 mod tests {
     use super::*;
     use crate::sm2::private_key::Sm2PrivateKey;
-    use crypto_bigint::modular::ConstMontyParams;
-    use rand_core::Error;
+    use core::convert::Infallible;
+    use getrandom::SysRng;
+    use rand_core::{TryCryptoRng, TryRng, UnwrapErr};
 
     struct SequenceRng {
         values: [U256; 2],
         index: usize,
     }
 
-    impl RngCore for SequenceRng {
-        fn next_u32(&mut self) -> u32 {
-            0
+    impl TryRng for SequenceRng {
+        type Error = Infallible;
+
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+            Ok(0)
         }
 
-        fn next_u64(&mut self) -> u64 {
-            0
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+            Ok(0)
         }
 
-        fn fill_bytes(&mut self, dst: &mut [u8]) {
+        fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
             assert_eq!(dst.len(), 32);
             let value = self.values[self.index];
             self.index += 1;
             dst.copy_from_slice(&value.to_be_bytes());
-        }
-
-        fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Error> {
-            self.fill_bytes(dst);
             Ok(())
         }
     }
 
-    impl CryptoRng for SequenceRng {}
+    impl TryCryptoRng for SequenceRng {}
 
     /// GB/T 32918.2 Appendix A.2: `Z_A` for ID="ALICE123@YAHOO.COM" and the
     /// sample private key D. Expected:
@@ -295,18 +289,18 @@ mod tests {
     /// rejects at the boundary.
     #[test]
     fn sign_over_long_id_rejected() {
-        use rand_core::OsRng;
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
         let key = Sm2PrivateKey::new(d).expect("valid scalar");
         let too_long = alloc::vec![0u8; MAX_ID_LEN + 1];
-        let result = sign_with_id(&key, &too_long, b"msg", &mut OsRng);
+        let mut rng = UnwrapErr(SysRng);
+        let result = sign_with_id(&key, &too_long, b"msg", &mut rng);
         assert_eq!(result, Err(SignError::Failed));
     }
 
     #[test]
     fn sample_nonzero_scalar_rejects_candidates_above_order() {
-        let n_plus_one = NMod::MODULUS.get().wrapping_add(&U256::ONE);
+        let n_plus_one = Fn::MODULUS.as_ref().wrapping_add(&U256::ONE);
         let mut rng = SequenceRng {
             values: [n_plus_one, U256::from_u64(2)],
             index: 0,
@@ -322,7 +316,8 @@ mod tests {
 #[cfg(test)]
 mod sign_tests {
     use super::*;
-    use rand_core::Error;
+    use core::convert::Infallible;
+    use rand_core::{TryCryptoRng, TryRng};
 
     /// Test-only RNG that always returns the same fixed scalar `k` from
     /// `fill_bytes`. The KAT only depends on the FIRST `fill_bytes` call.
@@ -333,27 +328,29 @@ mod sign_tests {
         fn new(k_hex: &str) -> Self {
             let k = U256::from_be_hex(k_hex);
             Self {
-                k_bytes: k.to_be_bytes(),
+                k_bytes: k.to_be_bytes().into(),
             }
         }
     }
-    impl RngCore for FixedScalarRng {
-        fn next_u32(&mut self) -> u32 {
-            0
+    impl TryRng for FixedScalarRng {
+        type Error = Infallible;
+
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+            Ok(0)
         }
-        fn next_u64(&mut self) -> u64 {
-            0
+
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+            Ok(0)
         }
-        fn fill_bytes(&mut self, dst: &mut [u8]) {
+
+        fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
             assert_eq!(dst.len(), 32);
             dst.copy_from_slice(&self.k_bytes);
-        }
-        fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Error> {
-            self.fill_bytes(dst);
             Ok(())
         }
     }
-    impl CryptoRng for FixedScalarRng {}
+
+    impl TryCryptoRng for FixedScalarRng {}
 
     /// GB/T 32918.2 Appendix A.2 — fixed-k vector.
     /// D = 0x3945208F7B...
