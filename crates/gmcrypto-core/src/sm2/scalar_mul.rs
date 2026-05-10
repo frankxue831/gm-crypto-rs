@@ -3,8 +3,8 @@
 //! Two paths:
 //! - [`mul_var`] — variable-base k·P. 4-bit fixed-window, constant-time
 //!   linear-scan table lookup via `subtle`.
-//! - `mul_g` — fixed-base k·G. Comb table built once at first use
-//!   (lands in Task 13).
+//! - [`mul_g`] — fixed-base k·G. In v0.1 this delegates to [`mul_var`] with
+//!   the curve generator; a precomputed comb table is deferred to v0.2.
 
 use crate::sm2::curve::Fn;
 use crate::sm2::point::ProjectivePoint;

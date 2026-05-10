@@ -1,7 +1,7 @@
 //! SM2 sign and verify (GB/T 32918.2-2017).
 
 use crate::asn1::sig::encode_sig;
-use crate::sm2::curve::{b, Fn, PMod, GX_HEX, GY_HEX};
+use crate::sm2::curve::{b, Fn, NMod, PMod, GX_HEX, GY_HEX};
 use crate::sm2::private_key::Sm2PrivateKey;
 use crate::sm2::public_key::Sm2PublicKey;
 use crate::sm2::scalar_mul::mul_g;
@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use crypto_bigint::modular::ConstMontyParams;
 use crypto_bigint::{Invert, U256};
 use rand_core::{CryptoRng, RngCore};
-use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, ConstantTimeLess, CtOption};
 
 /// Default signer ID per GM/T 0009: 16 ASCII bytes "1234567812345678".
 pub const DEFAULT_SIGNER_ID: &[u8; 16] = b"1234567812345678";
@@ -212,13 +212,14 @@ fn try_sign_once<R: CryptoRng + RngCore>(
 }
 
 fn sample_nonzero_scalar<R: CryptoRng + RngCore>(rng: &mut R) -> Fn {
+    let n = NMod::MODULUS.get();
     loop {
         let mut buf = [0u8; 32];
         rng.fill_bytes(&mut buf);
         let candidate = U256::from_be_slice(&buf);
-        let reduced = Fn::new(&candidate);
-        if !bool::from(reduced.retrieve().ct_eq(&U256::ZERO)) {
-            return reduced;
+        let valid = !candidate.ct_eq(&U256::ZERO) & candidate.ct_lt(&n);
+        if bool::from(valid) {
+            return Fn::new(&candidate);
         }
     }
 }
@@ -237,6 +238,37 @@ fn ct_or_else<T: ConditionallySelectable + Default>(a: CtOption<T>, b: CtOption<
 mod tests {
     use super::*;
     use crate::sm2::private_key::Sm2PrivateKey;
+    use crypto_bigint::modular::ConstMontyParams;
+    use rand_core::Error;
+
+    struct SequenceRng {
+        values: [U256; 2],
+        index: usize,
+    }
+
+    impl RngCore for SequenceRng {
+        fn next_u32(&mut self) -> u32 {
+            0
+        }
+
+        fn next_u64(&mut self) -> u64 {
+            0
+        }
+
+        fn fill_bytes(&mut self, dst: &mut [u8]) {
+            assert_eq!(dst.len(), 32);
+            let value = self.values[self.index];
+            self.index += 1;
+            dst.copy_from_slice(&value.to_be_bytes());
+        }
+
+        fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Error> {
+            self.fill_bytes(dst);
+            Ok(())
+        }
+    }
+
+    impl CryptoRng for SequenceRng {}
 
     /// GB/T 32918.2 Appendix A.2: `Z_A` for ID="ALICE123@YAHOO.COM" and the
     /// sample private key D. Expected:
@@ -270,6 +302,20 @@ mod tests {
         let too_long = alloc::vec![0u8; MAX_ID_LEN + 1];
         let result = sign_with_id(&key, &too_long, b"msg", &mut OsRng);
         assert_eq!(result, Err(SignError::Failed));
+    }
+
+    #[test]
+    fn sample_nonzero_scalar_rejects_candidates_above_order() {
+        let n_plus_one = NMod::MODULUS.get().wrapping_add(&U256::ONE);
+        let mut rng = SequenceRng {
+            values: [n_plus_one, U256::from_u64(2)],
+            index: 0,
+        };
+
+        let sampled = sample_nonzero_scalar(&mut rng).retrieve();
+
+        assert_eq!(sampled, U256::from_u64(2));
+        assert_eq!(rng.index, 2);
     }
 }
 
