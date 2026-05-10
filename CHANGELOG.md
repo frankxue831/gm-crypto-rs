@@ -120,10 +120,18 @@ the project follows [Semantic Versioning](https://semver.org/).
   rules are now documented inline as the SM2-specific deltas vs.
   `asn1::sig`, and three regression tests pin the round-trip and
   rejection behavior. Asymmetrically affects the encode-then-decode
-  round trip on `(0, _)` and `(_, 0)` C1 points, but the encrypt
-  path never produced such ciphertexts (encrypt rejects the identity
-  point and the deterministic-`k` test vectors used non-zero
-  coordinates), so no released encrypt blob is mis-decoded.
+  round trip on `(0, _)` and `(_, 0)` C1 points: v0.1.0 did not ship
+  SM2 envelope encryption at all (it lands in v0.2 Phase 3), so no
+  *released* encrypt blob can be mis-decoded by the pre-fix
+  decoder regardless. For v0.2's encrypt path, a uniform CSPRNG
+  produces a coordinate whose top byte is zero with probability
+  `≈ 2^-8`, the full coordinate is zero with probability `≈ 2^-256`
+  (cryptographically negligible but **not** zero — the encrypt path
+  rejects only the identity point, not zero coordinates per se), and
+  the deterministic-`k` smoke test vectors used non-zero `k` so they
+  do not exercise the boundary. The fix unblocks v0.3 callers who
+  construct `Sm2Ciphertext` directly with `(0, _)` or `(_, 0)`
+  coordinates without going through `encrypt`.
 - HMAC-SM3 long-key path (`key.len() > 64`) now zeroizes the SM3
   digest stack buffer after copying it into `K'`. The codex review
   surfaced that for long keys `SM3(key)` is the *effective* RFC 2104
