@@ -17,3 +17,6 @@ perf.data*
 
 # CCD / Claude Code session metadata (worktrees, etc.)
 .claude/
+
+# RepoLens scan output (derived data: packs, session state, wiki index)
+.repolens/
