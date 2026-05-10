@@ -19,24 +19,26 @@ or vendor.
 A small, auditable, pure-Rust SM2 / SM3 / SM4 SDK whose central
 differentiating commitment is that secret-touching code paths are
 **constant-time-designed and guarded by an in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/)
-detectable-leak regression harness** with 11 gates at `|tau| < 0.20`.
+detectable-leak regression harness** with 12 gates at `|tau| < 0.20`.
 
 The harness reports timing-leak detection events. **It does not prove
 constant-time.** Low `|tau|` values mean the test could not detect a leak with
 the budget given, not that no leak exists. Language taken directly from
 `dudect-bencher`'s own docs.
 
-v0.2's harness covers 11 secret-touching code paths: SM2 sign (split by
+v0.3's harness covers 12 secret-touching code paths: SM2 sign (split by
 both private key `d` and nonce `k` magnitude, with both retry nonces
 class-tied), SM2 decrypt (split by recipient `d_B`), SM4 key schedule
-and encrypt (split by master key), HMAC-SM3 (split by key), plus direct
-`Fn::invert` and `Fp::invert` diagnostics. The `ct_sign_k_class` target
-closes v0.1's structural blind spot to nonce-only leaks. The
-`crypto-bigint 0.6 → 0.7.3` upgrade resolved the v0.6-era
-`ConstMontyForm::invert` leak directly: at 100K samples on 0.7.3 both
-direct invert diagnostics measure under `|tau| ≈ 0.01`, two orders of
-magnitude below the gate. See [`SECURITY.md`](SECURITY.md) for the
-full posture.
+and encrypt (split by master key), HMAC-SM3 (split by key), the new
+v0.3 `ct_pkcs8_decrypt` (split by password bytes — both classes' blobs
+valid for their class's password so both succeed via identical control
+flow), plus direct `Fn::invert` and `Fp::invert` diagnostics. The
+`ct_sign_k_class` target closes v0.1's structural blind spot to
+nonce-only leaks. The `crypto-bigint 0.6 → 0.7.3` upgrade resolved the
+v0.6-era `ConstMontyForm::invert` leak directly: at 100K samples on
+0.7.3 both direct invert diagnostics measure under `|tau| ≈ 0.01`, two
+orders of magnitude below the gate. See [`SECURITY.md`](SECURITY.md)
+for the full posture.
 
 The differentiator vs. existing Rust SM2 crates (notably
 [`RustCrypto/sm2`](https://docs.rs/sm2/), which already aims for constant-time
@@ -53,7 +55,40 @@ the design intent in isolation.
   x86, some embedded).
 - Not a comprehensive SM-crypto library yet — see the milestone roadmap.
 
-## v0.2 scope
+## v0.3 scope (shipped)
+
+Builds on v0.2 (SM4 + SM4-CBC + HMAC-SM3 + PBKDF2-HMAC-SM3 + SM2
+encrypt/decrypt + dudect harness expansion to 11 targets). v0.3 adds
+the wire-format / interop / streaming / performance work that v0.2
+deliberately deferred:
+
+- **Reusable strict-canonical DER reader / writer** subset
+  (`gmcrypto_core::asn1::{reader, writer, oid}`) — W1. `asn1::sig` and
+  `asn1::ciphertext` ported on top; wire output and accept/reject
+  behavior byte-identical to v0.2.
+- **PEM + encrypted PKCS#8 + X.509 SPKI + SEC1** codecs
+  (`gmcrypto_core::{pem, pkcs8, spki, sec1}`) — W2. Hand-rolled,
+  no_std, zero-runtime-deps. PBES2 with PBKDF2-HMAC-SM3 + SM4-CBC
+  for encrypted PKCS#8.
+- **Full bidirectional gmssl interop** — W3. SM2 sign / verify, SM2
+  encrypt / decrypt (GM/T 0009 DER), and SM4-CBC all cross-validated
+  in both directions against gmssl 3.1.1 (gated on
+  `GMCRYPTO_GMSSL=1`).
+- **Raw byte-concat SM2 ciphertext helpers**
+  (`gmcrypto_core::sm2::raw_ciphertext`) — W4. Modern
+  `C1 || C3 || C2` emit + decode; legacy `C1 || C2 || C3`
+  decrypt-only.
+- **Streaming `HmacSm3` + `Sm4Cbc{En,De}cryptor`** — W5. In-crate
+  `Hash` / `Mac` / `BlockCipher` trait surface
+  (`gmcrypto_core::traits`). RustCrypto trait fit deferred to v0.4
+  behind an opt-in feature flag.
+- **Comb-table `mul_g` optimization** (~5× sign-side speedup) — W6.
+  64 sub-tables of 16 entries each, lazily built once per process
+  via `spin::Once`. `mul_g`'s public signature is unchanged;
+  constant-time-designed lookup preserved. Adds one runtime dep
+  (`spin = "0.10"`, no_std, ~4 KB lib).
+
+Everything v0.2 shipped is unchanged:
 
 - SM3 hash function (`#![no_std]` + `alloc`).
 - SM2 sign / verify with custom signer ID (default `1234567812345678` per GM/T 0009).
@@ -68,50 +103,53 @@ the design intent in isolation.
   bitsliced fast-path deferred to v0.4. PKCS#7 strip uses a
   constant-time scan over the final block; `decrypt` collapses every
   failure mode to a single `None` against padding-oracle attacks.
-- HMAC-SM3 per RFC 2104 (single-shot), gmssl-cross-validated KAT
-  vectors. Hash-first long-key path.
+- HMAC-SM3 per RFC 2104, gmssl-cross-validated KAT vectors. Hash-first
+  long-key path. v0.3 adds the streaming `HmacSm3` shape alongside
+  single-shot `hmac_sm3`.
 - PBKDF2-HMAC-SM3 per RFC 8018 §5.2. Caller-supplied output buffer
   (no internal allocation, no iteration-count default).
 - Constant-time-designed `Fp` and `Fn` field arithmetic via
   `crypto-bigint = 0.7.3`.
 - Renes-Costello-Batina complete addition formulas for the SM2 curve (a=-3 specialized).
-- Fixed-base and variable-base scalar multiplication, both constant-time-designed
-  with `subtle::ConditionallySelectable` linear-scan table lookup.
+- Fixed-base (v0.3 comb-table) and variable-base scalar multiplication,
+  both constant-time-designed with `subtle::ConditionallySelectable`
+  linear-scan table lookup.
 - Fixed-K masked-select signing retry: the retry loop runs `K=2` iterations
   unconditionally, regardless of which iteration produced a valid signature.
   The constant-time contract holds for any RNG that respects `CryptoRng`;
   pathological RNGs cannot leak the secret via observable retry count.
-- Minimal ASN.1 DER for `SEQUENCE { r, s }` (signatures) and the
-  GM/T 0009 SM2 ciphertext SEQUENCE. Strict canonical INTEGER rules
-  reject non-canonical leading-zero padding, sign-bit-set first bytes,
-  empty content, and (for ciphertext coordinates) values `≥ p`.
+- Strict canonical ASN.1 DER for `SEQUENCE { r, s }` (signatures), the
+  GM/T 0009 SM2 ciphertext SEQUENCE, and all v0.3 PEM / PKCS#8 / SPKI
+  / SEC1 wire formats. Rejects non-canonical leading-zero padding,
+  sign-bit-set first bytes, empty content, and (for ciphertext
+  coordinates) values `≥ p`.
 - KAT vectors from GB/T 32905-2016 (SM3), GB/T 32918.2-2017 / .5-2017
   (SM2), GB/T 32907-2016 Appendix A.1 (SM4 single-block + 1M-round),
   GM/T 0042-2015 (HMAC-SM3), GM/T 0091-2020 (PBKDF2-HMAC-SM3).
-- `gmssl` CLI cross-validation tests for SM4, HMAC-SM3,
-  PBKDF2-HMAC-SM3 (gated on `GMCRYPTO_GMSSL=1`). SM2 encrypt/decrypt
-  cross-validation deferred to v0.3 (gmssl CLI requires PEM/PKCS#8/SPKI
-  key wrapping).
-- `dudect-bencher` harness with **11 targets** at `|tau| < 0.20` —
+- `gmssl` CLI cross-validation for HMAC-SM3, PBKDF2-HMAC-SM3, and
+  (new in v0.3) SM2 sign/verify, SM2 encrypt/decrypt, and SM4-CBC
+  in both directions. Gated on `GMCRYPTO_GMSSL=1`.
+- `dudect-bencher` harness with **12 targets** at `|tau| < 0.20` —
   PR-smoke 10⁴ samples; nightly 10⁵ samples (more samples = tighter
   empirical confidence at the same threshold). Plus a deliberately-
   leaky negative control that proves the harness can detect leaks.
 - Failure-mode invariant: error types collapse to single uninformative
   variants (`SignError::Failed`, `DecryptError::Failed`,
-  `EncryptError::Failed`); `verify_with_id` returns `bool`; DER decode
-  returns `Option`. Defense against padding-oracle, malleability, and
-  invalid-curve attacks.
+  `EncryptError::Failed`, `pem::Error::Failed`, `pkcs8::Error::Failed`);
+  `verify_with_id` returns `bool`; DER decode returns `Option`.
+  Defense against padding-oracle, malleability, and invalid-curve
+  attacks.
 - Zeroization on private keys, SM4 round keys, HMAC `K'` /
-  `K' XOR ipad` / `K' XOR opad`, PBKDF2 intermediates, and SM2 KDF
-  buffers.
+  `K' XOR ipad` / `K' XOR opad`, PBKDF2 intermediates, SM2 KDF
+  buffers, and PKCS#8 inner-key scratch.
 
 ## Roadmap
 
 | Version | Scope |
 |---|---|
 | v0.2 (shipped) | SM4 + SM4-CBC, HMAC-SM3, PBKDF2-HMAC-SM3, SM2 encrypt/decrypt + GM/T 0009 ciphertext DER, dudect harness expansion to 11 targets. See [`CHANGELOG.md`](CHANGELOG.md) `[0.2.0]`. |
-| v0.3 | Full ASN.1 reader/writer subset; PEM, encrypted PKCS#8, X.509 SPKI; full bidirectional gmssl interop (incl. SM2 encrypt/decrypt with PEM-wrapped keys); raw byte-concat ciphertext helpers (`C1\|\|C3\|\|C2` modern + legacy `C1\|\|C2\|\|C3` decrypt); streaming `Mac` / `Hash` / `BlockCipher` traits; comb-table `mul_g` optimization. |
-| v0.4 | C ABI (`gmcrypto-c`), `wasm32-unknown-unknown` build target, bitsliced SM4 S-box (faster constant-time fast-path). |
+| v0.3 (shipped) | Reusable ASN.1 reader/writer subset; PEM, encrypted PKCS#8, X.509 SPKI, SEC1; full bidirectional gmssl interop (incl. SM2 sign/verify + SM2 encrypt/decrypt with PEM-wrapped keys + SM4-CBC); raw byte-concat ciphertext helpers (`C1\|\|C3\|\|C2` modern + legacy `C1\|\|C2\|\|C3` decrypt); streaming `HmacSm3` / `Sm4CbcEncryptor` / `Sm4CbcDecryptor` + in-crate `Hash`/`Mac`/`BlockCipher` traits; comb-table `mul_g` (~5× sign-side speedup); dudect harness expanded to 12 targets. See [`CHANGELOG.md`](CHANGELOG.md) `[0.3.0]`. |
+| v0.4 | C ABI (`gmcrypto-c`), `wasm32-unknown-unknown` build target, bitsliced SM4 S-box (faster constant-time fast-path), RustCrypto-trait fit (`digest::Digest` / `digest::Mac` / `cipher::BlockMode`) behind opt-in feature flags. |
 | v1.0 | API stabilization |
 
 ## Quick-start

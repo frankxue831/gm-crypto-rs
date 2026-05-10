@@ -1,9 +1,11 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3 SDK. **v0.1.0 published to crates.io 2026-05-10** (on
-`crypto-bigint 0.6`). `main` is now on `0.7.3` for v0.2 prep — the version
-landed in `a670ce3` / `89abfb9` / `22b77a2` post-publish; the published 0.1.0
-tarball is unchanged. Single-crate workspace: `crates/gmcrypto-core/`.
+Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0 published to crates.io 2026-05-10**;
+**v0.2.0 published 2026-05-10**; **v0.3.0 prep on `main` 2026-05-11**
+(W1 reusable ASN.1 reader/writer, W2 PEM/PKCS#8/SPKI/SEC1, W3 full
+bidirectional gmssl interop, W4 raw byte-concat ciphertext, W5
+streaming traits + HmacSm3 + Sm4Cbc{En,De}cryptor, W6 comb-table
+`mul_g`). Single-crate workspace: `crates/gmcrypto-core/`.
 
 Read `README.md`, `SECURITY.md`, `CONTRIBUTING.md` for the user-facing posture.
 This file lists the constraints a coding agent will violate by default.
@@ -12,7 +14,8 @@ This file lists the constraints a coding agent will violate by default.
 
 - `unsafe_code = "forbid"` workspace-wide. Don't add `unsafe`.
 - `#![no_std]` + `alloc` only inside `crates/gmcrypto-core/src/`. No `std::` paths.
-  The `std` feature exists but is reserved for v0.3+ wire-format I/O.
+  The `std` feature exists but is reserved for future file-I/O wire-format
+  helpers (v0.4+).
 - **Constant-time discipline on secrets.** Never `==` / `if` / Rust `bool` on a
   secret-derived value. Use `subtle::{Choice, ConditionallySelectable,
   ConstantTimeEq, ConstantTimeLess, CtOption}`. The SM2 sign retry loop runs
@@ -57,21 +60,23 @@ GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
 
 ## Dudect harness gate
 
-Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. Eleven targets:
+Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. **Twelve
+targets** (v0.3 added `ct_pkcs8_decrypt`):
 
 | Target | Gate | Meaning |
 |---|---|---|
 | `negative_control` | `\|tau\| > 1.0` | MUST fire — proves harness wiring. |
-| `ct_mul_g` | `\|tau\| < 0.20` | Fixed-base scalar mult. |
+| `ct_mul_g` | `\|tau\| < 0.20` | Fixed-base scalar mult. v0.3 W6 replaced the body with a comb-table walk; constant-time-designed lookup preserved. 10K-sample smoke after W6: `\|tau\| ≈ 0.04`. |
 | `ct_mul_var` | `\|tau\| < 0.20` | Variable-base scalar mult. |
 | `ct_sign` | `\|tau\| < 0.20` | `sign_raw_with_id`, class-split by private key `d` (NOT `sign_with_id` — DER is variable-time on public output). |
 | `ct_sign_k_class` | `\|tau\| < 0.20` | `sign_raw_with_id`, class-split by nonce `k` magnitude with `d` held fixed (W0; both retry nonces class-tied). |
 | `ct_fn_invert` | `\|tau\| < 0.20` | Direct `Fn::invert((1+d) mod n)` diagnostic (W0). |
 | `ct_fp_invert` | `\|tau\| < 0.20` | Direct `Fp::invert(Z)` diagnostic (W0). |
-| `ct_sm4_key_schedule` | `\|tau\| < 0.20` | SM4 key schedule, class-split by master key bytes (W1). |
-| `ct_sm4_encrypt_block` | `\|tau\| < 0.20` | SM4 "construct cipher + encrypt one block" timed under one window, class-split by master key bytes (W1). |
-| `ct_hmac_sm3` | `\|tau\| < 0.20` | HMAC-SM3 keyed MAC, class-split by master key (W3). Structurally covers PBKDF2-HMAC-SM3's (W4) inner PRF. |
-| `ct_sm2_decrypt` | `\|tau\| < 0.20` | SM2 decrypt, class-split by recipient `d_B`, fixed ciphertext encrypted to a third party so both classes fail at MAC via identical control flow (Phase 3). |
+| `ct_sm4_key_schedule` | `\|tau\| < 0.20` | SM4 key schedule, class-split by master key bytes (v0.2 W1). |
+| `ct_sm4_encrypt_block` | `\|tau\| < 0.20` | SM4 "construct cipher + encrypt one block" timed under one window, class-split by master key bytes (v0.2 W1). |
+| `ct_hmac_sm3` | `\|tau\| < 0.20` | HMAC-SM3 keyed MAC, class-split by master key (v0.2 W3). Structurally covers PBKDF2-HMAC-SM3's (v0.2 W4) inner PRF, the v0.3 W5 streaming `HmacSm3` (Q7.6 deliberately skipped a separate target), and the PBKDF2 sub-path of v0.3 W2's encrypted PKCS#8 path. |
+| `ct_sm2_decrypt` | `\|tau\| < 0.20` | SM2 decrypt, class-split by recipient `d_B`, fixed ciphertext encrypted to a third party so both classes fail at MAC via identical control flow (v0.2 Phase 3). |
+| `ct_pkcs8_decrypt` | `\|tau\| < 0.20` | Encrypted-PKCS#8 decrypt + parse, class-split by password bytes; both classes' blobs are valid for their class's password so both succeed via identical control flow (v0.3 W2). 10K-sample smoke: `\|tau\| ≈ 0.04`. |
 
 Gate on **`|tau|`** (scale-free), not `|t|` (grows as `tau · sqrt(N)` so any
 fixed `|t|` threshold is budget-dependent). Same gate at every sample budget;
@@ -111,39 +116,61 @@ The three secret-touching `invert` sites:
 crates/gmcrypto-core/
   src/
     lib.rs
-    sm3.rs                  # single-file SM3 hash
+    sm3.rs                  # single-file SM3 hash (impls v0.3 W5 Hash trait)
     sm2/
       curve.rs              # Fp, Fn (ConstMontyForm wrappers), curve constants
       point.rs              # ProjectivePoint + RCB add/double (eprint 2015/1060)
-      scalar_mul.rs         # mul_g (fixed-base, delegates to mul_var in v0.1) + mul_var
-      private_key.rs        # Sm2PrivateKey + ZeroizeOnDrop
-      public_key.rs         # Sm2PublicKey
+      scalar_mul.rs         # mul_g (v0.3 W6: comb-table walk) + mul_var
+      comb_table.rs         # v0.3 W6 — precomputed 64×16 table for k·G, spin::Once lazy init
+      private_key.rs        # Sm2PrivateKey + ZeroizeOnDrop; v0.3 W2 adds from_sec1_be / to_sec1_be (#[doc(hidden)], not-SemVer)
+      public_key.rs         # Sm2PublicKey; v0.3 W2 adds from_sec1_bytes / to_sec1_uncompressed + ConstantTimeEq
       sign.rs               # sign_with_id, sign_raw_with_id, compute_z, MAX_ID_LEN
       verify.rs             # verify_with_id (returns bool, rejects identity pubkey + over-long ID)
-      encrypt.rs            # v0.2 Phase 3 — encrypt() + KDF (counter-mode SM3, GB/T 32918.4 §5.4.3) + on-curve guard
+      encrypt.rs            # v0.2 Phase 3 — encrypt() + KDF + point_on_curve (pub(crate) for W2/W4)
       decrypt.rs            # v0.2 Phase 3 — decrypt() with constant-time MAC compare, zeroize on fail
+      raw_ciphertext.rs     # v0.3 W4 — encode_c1c3c2 / decode_c1c3c2 / decode_c1c2c3_legacy
     sm4/                    # v0.2 W1
-      cipher.rs             # Sm4Cipher (block cipher) + subtle linear-scan S-box
+      cipher.rs             # Sm4Cipher (block cipher) + subtle linear-scan S-box; v0.3 W5 impls BlockCipher trait
       mode_cbc.rs           # encrypt/decrypt with PKCS#7 padding; caller-supplied unpredictable IV
-    hmac.rs                 # v0.2 W3 — HMAC-SM3 (single-shot, RFC 2104, gmssl-cross-validated)
+      cbc_streaming.rs      # v0.3 W5 — Sm4CbcEncryptor / Sm4CbcDecryptor (buffer-back-by-one on decrypt)
+    hmac.rs                 # v0.2 W3 — single-shot hmac_sm3; v0.3 W5 — streaming HmacSm3 (impls Mac trait)
     kdf.rs                  # v0.2 W4 — PBKDF2-HMAC-SM3 (caller-supplied output buffer)
     asn1/
-      sig.rs                # SEQUENCE { r, s } with strict canonical INTEGER
-      ciphertext.rs         # v0.2 Phase 3 — GM/T 0009 SM2 ciphertext SEQUENCE
-  benches/timing_leaks.rs   # dudect harness (custom main; --bench is filtered out)
-  tests/                    # integration tests (incl. gated gmssl interop)
+      reader.rs             # v0.3 W1 — strict-canonical DER reader primitives
+      writer.rs             # v0.3 W1 — DER writer primitives (16 MiB ceiling)
+      oid.rs                # v0.3 W1 — const-fn OID encoder + 7 algorithm-identifier OIDs
+      sig.rs                # SEQUENCE { r, s } — ports over W1 reader/writer in v0.3
+      ciphertext.rs         # GM/T 0009 SM2 ciphertext SEQUENCE — ports over W1 in v0.3
+    pem.rs                  # v0.3 W2 — RFC 7468 PEM + embedded base64 (hand-rolled, no_std)
+    spki.rs                 # v0.3 W2 — RFC 5280 SubjectPublicKeyInfo for SM2
+    sec1.rs                 # v0.3 W2 — RFC 5915 ECPrivateKey + SEC1 uncompressed point (04||X||Y)
+    pkcs8.rs                # v0.3 W2 — RFC 5958 OneAsymmetricKey + RFC 8018 PBES2 (PBKDF2-HMAC-SM3 + SM4-CBC)
+    traits.rs               # v0.3 W5 — in-crate Hash / Mac / BlockCipher traits (RustCrypto fit deferred to v0.4)
+  benches/timing_leaks.rs   # dudect harness — 12 targets (v0.3 added ct_pkcs8_decrypt)
+  tests/                    # integration tests
+    interop_gmssl.rs        # v0.2 HMAC/PBKDF2 + v0.3 W3 bidirectional SM2 sign/verify, SM2 encrypt/decrypt, SM4-CBC
+    v0_3_pkcs8_kat.rs       # v0.3 W2 — gmssl 3.1.1 PKCS#8/SPKI fixture round-trip
+    data/                   # v0.3 W2 binary KAT fixtures + regen recipe (Q7.9 decision)
 
 .github/workflows/
   ci.yml                    # build/test on stable + 1.85 MSRV; deny --exclude-dev
   dudect-pr.yml             # 10K samples, |tau| gate, path-allowlisted
   dudect-nightly.yml        # 100K samples, same gate, 30-day artifact retention
 
-docs/v0.1.0-release-review.md  # pre-publish reviewer checklist (template for v0.2)
+docs/
+  v0.1.0-release-review.md  # pre-publish reviewer checklist (template)
+  v0.3-scope.md             # v0.3 scope doc + Q7.1–Q7.10 sign-off decisions
 ```
 
 `getrandom` is a direct workspace dep (`0.4.2`, `sys_rng` feature) — added
 alongside the `rand_core 0.10` upgrade in `a670ce3` because `rand_core` no
 longer ships `getrandom` integration in the same crate.
+
+`spin = "0.10"` (with `default-features = false, features = ["once"]`) is
+a v0.3 W6 runtime dep — the only no_std-compatible, no-unsafe primitive
+for the comb-table lazy init. Per Q7.8 it's the explicit alternative to
+`std::sync::LazyLock` (forbidden in `no_std`) and `once_cell::race::OnceBox`.
+Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
 
 ## Workflow notes
 
@@ -153,7 +180,7 @@ longer ships `getrandom` integration in the same crate.
 - Tags are SSH-signed (`gpg.format = ssh`). Verify locally with
   `git tag -v vX.Y.Z` after configuring `gpg.ssh.allowedSignersFile`.
 - `cargo publish` is the irreversible step. Use `docs/v0.1.0-release-review.md`
-  as the template before publishing v0.2.
+  as the template before publishing v0.3.
 
 ## Don't
 
@@ -178,12 +205,22 @@ longer ships `getrandom` integration in the same crate.
 - Don't make `pbkdf2_hmac_sm3` allocate the output buffer. The
   caller-supplied `&mut [u8]` is the API contract — it kills the
   allocation-failure question and matches RustCrypto's pbkdf2 discipline.
-- Don't make `hmac_sm3` a streaming `HmacSm3::new`/`update`/`finalize` shape
-  in v0.2. Streaming `Mac` trait wiring lands in v0.3 alongside the broader
-  trait generalization.
-- Don't ship raw `C1||C3||C2` (or legacy `C1||C2||C3`) byte concatenation
-  helpers for SM2 ciphertext in v0.2. DER only — the GM/T 0009 SEQUENCE
-  is the v0.2 wire format. Raw helpers + legacy decrypt-only path are v0.3.
+- Streaming `HmacSm3` lands in v0.3 W5 alongside the in-crate `Mac` trait.
+  v0.3+ keeps the single-shot `hmac_sm3` function for backward compat; do
+  not remove it.
+- Don't ship `encode_c1c2c3_legacy` in any version. The legacy byte
+  concatenation `C1||C2||C3` is **decrypt-only** in v0.3 W4
+  (`decode_c1c2c3_legacy`); adding an emit path would propagate the
+  legacy ordering forever.
+- Don't change `mul_g`'s public signature when working on `comb_table.rs`.
+  The W6 invariant is "comb-table walk under an unchanged
+  `pub fn mul_g(k: &Fn) -> ProjectivePoint`".
+- Don't drop the W6 `spin::Once` lazy-init primitive for "just unsafe and
+  faster". `unsafe_code = forbid` is non-negotiable; the comb-table init
+  needs thread-safe one-time init, and `spin::Once` is the smallest crate
+  that provides it. `std::sync::LazyLock` and `std::sync::OnceLock` are
+  both `std` — forbidden in `no_std`. Hand-rolled init requires `unsafe`
+  (raw pointer deref of `static mut` or `AtomicPtr`).
 - Don't make `sm2::decrypt` distinguish failure modes (malformed DER,
   off-curve C1, all-zero KDF, MAC mismatch). Single `Failed` variant.
   Distinguishing them is a padding-oracle / invalid-curve attack vector.
@@ -191,5 +228,16 @@ longer ships `getrandom` integration in the same crate.
   invalid-curve attack leaks `d_B` bits via a small-order rogue subgroup;
   the check is the standard ECC defense.
 - Don't expose the SM2 `kdf` (in `sm2::encrypt`) or `point_on_curve`
-  helpers in the public API. They're `pub(super)` for `sm2::decrypt`'s
-  use only. The top-level `kdf.rs` is reserved for PBKDF2.
+  helpers in the public API. `kdf` is `pub(super)` for `sm2::decrypt`'s
+  use only; `point_on_curve` and `projective_from_affine` are
+  `pub(crate)` (widened by W2 so `spki`/`sec1`/`raw_ciphertext` can
+  reuse them at the import boundary). The top-level `kdf.rs` is reserved
+  for PBKDF2.
+- Don't make `pkcs8::decrypt` distinguish wrong-password from malformed-
+  PEM from valid-PEM-but-bad-inner-ECPrivateKey. Single `Failed`
+  variant per the failure-mode invariant — anything else is a
+  password-oracle / inner-ASN.1 distinguishing-attack vector.
+- Don't expose v0.3 W2's `Sm2PrivateKey::to_sec1_be` publicly without
+  the `#[doc(hidden)]` marker. Per Q7.2 it's **not SemVer-stable** —
+  same posture as `sign_raw_with_id`. Callers must zeroize the
+  returned `[u8; 32]` themselves; document the contract on the method.

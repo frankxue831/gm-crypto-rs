@@ -3,6 +3,93 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — 2026-05-11
+
+### Added
+
+- **v0.3 W1** — reusable strict-canonical DER reader / writer subset
+  (`gmcrypto_core::asn1::{reader, writer, oid}`). `asn1::sig` and
+  `asn1::ciphertext` ported on top — byte-identical wire output and
+  accept/reject behavior to v0.2. New OID constants for
+  `id-ecPublicKey`, `sm2p256v1`, `sm2_sign_with_sm3`, `id-PBKDF2`,
+  `id-PBES2`, `id-hmacWithSM3`, `sm4-cbc`. ~890 LOC net diff;
+  unblocks W2/W4 and any future ASN.1 work.
+- **v0.3 W2** — PEM / encrypted PKCS#8 / X.509 SPKI / SEC1 codecs
+  (`gmcrypto_core::{pem, pkcs8, spki, sec1}`). Hand-rolled PEM
+  (RFC 7468) with embedded base64 codec — strict-canonical encoder,
+  liberal decoder. RFC 5958 OneAsymmetricKey + RFC 8018 PBES2 with
+  PBKDF2-HMAC-SM3 + SM4-CBC for the encrypted variant. RFC 5280
+  SubjectPublicKeyInfo with `id-ecPublicKey` + `sm2p256v1`. RFC 5915
+  ECPrivateKey with SEC1 uncompressed point (`04 || X || Y`, 65
+  bytes). New `Sm2PublicKey::{from_sec1_bytes, to_sec1_uncompressed,
+  ConstantTimeEq}`. New `Sm2PrivateKey::{from_sec1_be, to_sec1_be}`
+  — `to_sec1_be` ships `#[doc(hidden)]` and is **not SemVer-stable**
+  (same posture as `sign_raw_with_id`). All failures collapse to a
+  single `::Failed` variant per the failure-mode invariant. New
+  dudect target `ct_pkcs8_decrypt`. gmssl 3.1.1 KAT fixtures
+  committed as binary files under `crates/gmcrypto-core/tests/data/`
+  with a regen recipe in `tests/data/README.md`.
+- **v0.3 W3** — full bidirectional gmssl 3.1.1 interop in
+  `tests/interop_gmssl.rs`. Six new tests cover SM2 sign / verify,
+  SM2 encrypt / decrypt (GM/T 0009 DER), and SM4-CBC in both
+  directions (gmssl → us and us → gmssl) using the W2 KAT fixtures.
+  Gated on `GMCRYPTO_GMSSL=1`. Closes the v0.2 deferral; the
+  headline interop bar finally clears.
+- **v0.3 W4** — raw byte-concat SM2 ciphertext helpers
+  (`gmcrypto_core::sm2::raw_ciphertext`). Modern `C1 || C3 || C2`
+  emit + decode; legacy `C1 || C2 || C3` decrypt-only (deliberately
+  **no** `encode_c1c2c3_legacy` — would propagate the legacy byte
+  order forever). C1 is 65 bytes (`0x04 || X || Y`) per Q7.5. Same
+  field-bound (`< p`) and on-curve checks as the GM/T 0009 DER
+  decoder; same single-`None` failure-mode shape. Module placement
+  pinned to `sm2::` (not `asn1::`) per Q7.4 — the helpers are
+  explicitly not DER.
+- **v0.3 W5** — streaming traits + streaming `HmacSm3` + streaming
+  `Sm4CbcEncryptor` / `Sm4CbcDecryptor`. New `gmcrypto_core::traits`
+  module with in-crate `Hash` / `Mac` / `BlockCipher` traits;
+  RustCrypto trait fit (`digest::Digest`, `digest::Mac`,
+  `cipher::BlockEncrypt`/`BlockDecrypt`) **deferred to v0.4** behind
+  an opt-in feature flag per Q7.3 / Q7.10. Streaming `HmacSm3::new`
+  / `update` / `finalize` produces byte-identical tags to single-
+  shot `hmac_sm3` regardless of chunking; constant-time `verify`
+  via `subtle::ConstantTimeEq`. Streaming `Sm4CbcDecryptor` uses
+  **buffer-back-by-one** so the constant-time PKCS#7 strip applies
+  uniformly at `finalize` time — no early-emit padding-oracle
+  surface. No new dudect targets per Q7.6 (structural reuse of
+  `ct_hmac_sm3` + `ct_sm4_*`).
+- **v0.3 W6** — comb-table `mul_g` (~5× sign-side speedup).
+  64 sub-tables × 16 entries each, lazily built once per process
+  on first `mul_g` call. Constant-time linear scan over each sub-
+  table preserved. `mul_g`'s public signature is unchanged. Per
+  Q7.8: `spin::Once` is the new runtime-init primitive (no_std,
+  ~4 KB lib, zero transitive deps, added to `deny.toml`
+  allowlist); `std::sync::LazyLock` is forbidden because it
+  violates `no_std`. 96 KB heap one-time-init; `w = 4` window
+  width pinned per the table-size-vs-binary-bloat trade-off.
+  100K-sample `ct_mul_g` measures `|tau| ≈ 0.04` — well under
+  the 0.20 gate.
+
+### Changed
+
+- **dudect harness**: 11 → 12 targets (`ct_pkcs8_decrypt` added by
+  W2; `ct_hmac_sm3_streaming` deliberately not added per Q7.6).
+- **`mul_g`** is no longer a delegate to `mul_var` — it walks the
+  W6 comb table directly. Output unchanged.
+- **`asn1::sig`** and **`asn1::ciphertext`** internals now compose
+  over the W1 reader / writer primitives. Wire output and
+  accept / reject behavior unchanged.
+- **Runtime dependencies**: `spin = "0.10"` (W6 lazy init). Added
+  to `deny.toml` allowlist with a comment pointing back to Q7.8.
+
+### Posture (unchanged)
+
+- `unsafe_code = "forbid"` workspace-wide.
+- `#![no_std]` + `alloc`-only inside `src/`; no `std::` paths.
+- Constant-time discipline on all secret-touching paths.
+- Failure-mode invariant: every public surface that can fail
+  returns `Option` or a single-`Failed` enum.
+- MSRV 1.85, edition 2024.
+
 ## [0.2.0] — 2026-05-10
 
 ### Added
