@@ -206,7 +206,7 @@ fn try_sign_once<R: CryptoRng + Rng>(key: &Sm2PrivateKey, e: &Fn, rng: &mut R) -
     CtOption::new(RsPair { r: r_u, s: s_u }, valid)
 }
 
-fn sample_nonzero_scalar<R: CryptoRng + Rng>(rng: &mut R) -> Fn {
+pub(crate) fn sample_nonzero_scalar<R: CryptoRng + Rng>(rng: &mut R) -> Fn {
     let n = *Fn::MODULUS.as_ref();
     loop {
         let mut buf = [0u8; 32];
