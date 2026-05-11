@@ -45,12 +45,20 @@ jobs:
       # builds when both flags are on).
       - name: cargo test --features digest-traits,cipher-traits
         run: cargo test -p gmcrypto-core --features digest-traits,cipher-traits
+      # v0.4 W3 — bitsliced SM4 S-box (Q4.9 / Q4.11 in docs/v0.4-scope.md).
+      # Default-features build is unchanged; this exercises the opt-in
+      # bitsliced path including the exhaustive-vs-table equivalence test
+      # in `sm4::sbox_bitsliced::tests::bitsliced_matches_table`.
+      - name: cargo test --features sm4-bitsliced
+        run: cargo test -p gmcrypto-core --features sm4-bitsliced
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: cargo clippy --features digest-traits,cipher-traits
         run: cargo clippy -p gmcrypto-core --features digest-traits,cipher-traits --all-targets -- -D warnings
+      - name: cargo clippy --features sm4-bitsliced
+        run: cargo clippy -p gmcrypto-core --features sm4-bitsliced --all-targets -- -D warnings
 
   deny:
     name: cargo-deny (no forbidden runtime deps)

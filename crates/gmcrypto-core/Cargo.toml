@@ -46,6 +46,14 @@ std = []   # opt-in std feature; reserved for v0.3+ wire-format file I/O
 # build is unchanged.
 digest-traits = ["dep:digest"]
 cipher-traits = ["dep:cipher"]
+# v0.4 W3 — bitsliced (table-less, gate-only) SM4 S-box. Boyar-Peralta-
+# style Itoh-Tsujii inversion in GF(2^8) plus two affine
+# transformations. Default-off (Q4.9 in docs/v0.4-scope.md); callers
+# opt in. Byte-identical output to the default linear-scan S-box;
+# constant-time by construction (no table lookups, no branches on
+# secret bits). Single-block only for v0.4; multi-block SIMD-packed
+# bitslicing deferred to v0.5+ per Q4.11.
+sm4-bitsliced = []
 
 [lints.rust]
 unsafe_code = "forbid"

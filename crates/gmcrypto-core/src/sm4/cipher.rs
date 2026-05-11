@@ -36,6 +36,7 @@
 //! linear-scan-S-box speeds it takes minutes. Run with
 //! `cargo test --release -- --ignored` before any release.
 
+#[cfg(not(feature = "sm4-bitsliced"))]
 use subtle::{ConditionallySelectable, ConstantTimeEq};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -46,8 +47,19 @@ pub const BLOCK_SIZE: usize = 16;
 pub const KEY_SIZE: usize = 16;
 
 /// SM4 S-box (GB/T 32907-2016 §6.2).
+///
+/// `pub(crate)` so the `sm4::sbox_bitsliced` module (v0.4 W3) can
+/// reference it for the exhaustive bitsliced-vs-table equivalence
+/// test. Not part of the public API.
+///
+/// Under `--features sm4-bitsliced` the runtime path doesn't touch
+/// `S_BOX` (the bitsliced S-box is table-less); only the bitsliced-
+/// equivalence test in `sm4::sbox_bitsliced::tests` keeps a
+/// reference. `#[allow(dead_code)]` suppresses the dead-code warning
+/// on the non-test feature-on build path.
+#[cfg_attr(feature = "sm4-bitsliced", allow(dead_code))]
 #[rustfmt::skip]
-const S_BOX: [u8; 256] = [
+pub(crate) const S_BOX: [u8; 256] = [
     0xd6, 0x90, 0xe9, 0xfe, 0xcc, 0xe1, 0x3d, 0xb7, 0x16, 0xb6, 0x14, 0xc2, 0x28, 0xfb, 0x2c, 0x05,
     0x2b, 0x67, 0x9a, 0x76, 0x2a, 0xbe, 0x04, 0xc3, 0xaa, 0x44, 0x13, 0x26, 0x49, 0x86, 0x06, 0x99,
     0x9c, 0x42, 0x50, 0xf4, 0x91, 0xef, 0x98, 0x7a, 0x33, 0x54, 0x0b, 0x43, 0xed, 0xcf, 0xac, 0x62,
@@ -311,6 +323,12 @@ fn crypt(block: &mut [u8; BLOCK_SIZE], rk: &[u32; 32], reverse: bool) {
 /// constant-time equality check and a constant-time conditional
 /// assignment. Roughly 256× slower than a direct LUT lookup but
 /// uniform over the input — see module-doc.
+///
+/// Default-features build uses this path. Under
+/// `--features sm4-bitsliced` (v0.4 W3) [`tau`] swaps to the
+/// table-less Itoh-Tsujii bitsliced implementation; this function
+/// remains compiled but unused on the bitsliced path.
+#[cfg(not(feature = "sm4-bitsliced"))]
 #[inline]
 fn sbox_ct(x: u8) -> u8 {
     let mut result: u8 = 0;
@@ -325,14 +343,32 @@ fn sbox_ct(x: u8) -> u8 {
 
 /// Apply the S-box to all four bytes of a `u32` (the τ transform,
 /// GB/T 32907-2016 §6.3.1).
+///
+/// Default-features path uses the linear-scan [`sbox_ct`]. Under
+/// `--features sm4-bitsliced` (v0.4 W3) this dispatches to the
+/// table-less Itoh-Tsujii bitsliced S-box in
+/// [`crate::sm4::sbox_bitsliced`].
+// Under `sm4-bitsliced` the bitsliced S-box is `const fn`, which
+// would let `tau` be const too — but the default linear-scan path
+// uses runtime `subtle` ops that aren't const-eligible. Suppress the
+// clippy lint that only fires on one feature config.
+#[allow(clippy::missing_const_for_fn)]
 #[inline]
 fn tau(a: u32) -> u32 {
     let a_bytes = a.to_be_bytes();
+    #[cfg(not(feature = "sm4-bitsliced"))]
     let b = [
         sbox_ct(a_bytes[0]),
         sbox_ct(a_bytes[1]),
         sbox_ct(a_bytes[2]),
         sbox_ct(a_bytes[3]),
+    ];
+    #[cfg(feature = "sm4-bitsliced")]
+    let b = [
+        crate::sm4::sbox_bitsliced::sbox(a_bytes[0]),
+        crate::sm4::sbox_bitsliced::sbox(a_bytes[1]),
+        crate::sm4::sbox_bitsliced::sbox(a_bytes[2]),
+        crate::sm4::sbox_bitsliced::sbox(a_bytes[3]),
     ];
     u32::from_be_bytes(b)
 }
@@ -449,6 +485,12 @@ mod tests {
     /// `sbox_ct` is the constant-time reformulation of `S_BOX[x]` and
     /// must agree with it for every `x` (otherwise we ship a broken
     /// cipher).
+    ///
+    /// Gated `cfg(not(feature = "sm4-bitsliced"))` because `sbox_ct`
+    /// itself is gated off the bitsliced path; v0.4 W3's bitsliced
+    /// impl has its own exhaustive-vs-S_BOX equivalence test in
+    /// [`crate::sm4::sbox_bitsliced::tests::bitsliced_matches_table`].
+    #[cfg(not(feature = "sm4-bitsliced"))]
     #[test]
     fn sbox_ct_matches_lut() {
         for x in 0..=255u8 {
