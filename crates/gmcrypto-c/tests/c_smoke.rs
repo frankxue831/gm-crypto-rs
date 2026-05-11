@@ -25,7 +25,8 @@ use gmcrypto_c::{
     GMCRYPTO_ERR, GMCRYPTO_OK, GMCRYPTO_SM2_SCALAR_SIZE, GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE,
     gmcrypto_hmac_sm3, gmcrypto_hmac_sm3_finalize, gmcrypto_hmac_sm3_new, gmcrypto_hmac_sm3_t,
     gmcrypto_hmac_sm3_update, gmcrypto_hmac_sm3_verify, gmcrypto_pbkdf2_hmac_sm3,
-    gmcrypto_sm2_decrypt, gmcrypto_sm2_encrypt, gmcrypto_sm2_privkey_free,
+    gmcrypto_sm2_decrypt, gmcrypto_sm2_decrypt_c1c2c3_legacy, gmcrypto_sm2_decrypt_c1c3c2,
+    gmcrypto_sm2_encrypt, gmcrypto_sm2_encrypt_c1c3c2, gmcrypto_sm2_privkey_free,
     gmcrypto_sm2_privkey_from_pkcs8, gmcrypto_sm2_privkey_new, gmcrypto_sm2_privkey_t,
     gmcrypto_sm2_privkey_to_pkcs8, gmcrypto_sm2_privkey_to_sec1_be, gmcrypto_sm2_pubkey_free,
     gmcrypto_sm2_pubkey_new, gmcrypto_sm2_pubkey_t, gmcrypto_sm2_pubkey_to_sec1_uncompressed,
@@ -448,6 +449,200 @@ fn sm2_encrypt_decrypt_round_trip_via_ffi() {
     assert_eq!(r, GMCRYPTO_OK);
     pt_back.truncate(pt_len);
     assert_eq!(pt_back.as_slice(), pt.as_slice());
+
+    unsafe {
+        gmcrypto_sm2_privkey_free(priv_ptr);
+        gmcrypto_sm2_pubkey_free(pub_ptr);
+    }
+}
+
+// ============================================================
+// SM2 raw byte-concat ciphertext (v0.5 W2)
+// ============================================================
+
+#[test]
+fn sm2_encrypt_c1c3c2_round_trip_via_ffi() {
+    let (priv_ptr, pub_ptr) = fresh_sm2_keys();
+    let pt = b"hello SM2 raw bytes";
+    // Output is exactly 65 + 32 + pt.len() bytes.
+    let expected_len = 65 + 32 + pt.len();
+    let mut ct = vec![0u8; 256];
+    let mut ct_len = 0usize;
+    let r = unsafe {
+        gmcrypto_sm2_encrypt_c1c3c2(
+            pub_ptr,
+            pt.as_ptr(),
+            pt.len(),
+            ct.as_mut_ptr(),
+            ct.len(),
+            &mut ct_len,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert_eq!(ct_len, expected_len, "raw c1c3c2 size is 65+32+msg_len");
+    ct.truncate(ct_len);
+
+    // First byte of C1 is the SEC1 uncompressed tag.
+    assert_eq!(ct[0], 0x04);
+
+    let mut pt_back = vec![0u8; 256];
+    let mut pt_len = 0usize;
+    let r = unsafe {
+        gmcrypto_sm2_decrypt_c1c3c2(
+            priv_ptr,
+            ct.as_ptr(),
+            ct.len(),
+            pt_back.as_mut_ptr(),
+            pt_back.len(),
+            &mut pt_len,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    pt_back.truncate(pt_len);
+    assert_eq!(pt_back.as_slice(), pt.as_slice());
+
+    unsafe {
+        gmcrypto_sm2_privkey_free(priv_ptr);
+        gmcrypto_sm2_pubkey_free(pub_ptr);
+    }
+}
+
+#[test]
+fn sm2_decrypt_c1c2c3_legacy_via_ffi() {
+    // Construct a legacy C1||C2||C3 ciphertext via the gmcrypto-core
+    // surface (no encode-legacy emit fn — by design).
+    use crypto_bigint::U256;
+    use gmcrypto_core::asn1::ciphertext::decode as der_decode;
+    use gmcrypto_core::sm2::raw_ciphertext::{C1_LEN, C3_LEN, encode_c1c3c2};
+    use gmcrypto_core::sm2::{Sm2PrivateKey, Sm2PublicKey, encrypt as core_encrypt};
+
+    let d = U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
+    let key = Sm2PrivateKey::new(d).expect("valid d");
+    let pub_key = Sm2PublicKey::from_point(key.public_key());
+
+    let pt = b"legacy ordering";
+    let mut rng = rand_core::UnwrapErr(getrandom::SysRng);
+    let der_ct = core_encrypt(&pub_key, pt, &mut rng).expect("encrypt ok");
+    let parsed = der_decode(&der_ct).expect("DER decode ok");
+
+    // First emit the modern C1||C3||C2 byte ordering, then rearrange
+    // to the legacy C1||C2||C3 ordering: same C1 (65 bytes) then C2
+    // (variable, equals encrypted plaintext length) then C3 (32 bytes).
+    let modern = encode_c1c3c2(&parsed);
+    assert_eq!(modern.len(), C1_LEN + C3_LEN + pt.len());
+    let c1 = &modern[..C1_LEN];
+    let c3 = &modern[C1_LEN..C1_LEN + C3_LEN];
+    let c2 = &modern[C1_LEN + C3_LEN..];
+    let mut legacy = Vec::new();
+    legacy.extend_from_slice(c1);
+    legacy.extend_from_slice(c2);
+    legacy.extend_from_slice(c3);
+
+    // Pass key into the FFI through SEC1 import.
+    let scalar_bytes: [u8; 32] = key.to_sec1_be();
+    let priv_ptr = unsafe { gmcrypto_sm2_privkey_new(scalar_bytes.as_ptr()) };
+    assert!(!priv_ptr.is_null());
+
+    let mut pt_back = vec![0u8; 256];
+    let mut pt_len = 0usize;
+    let r = unsafe {
+        gmcrypto_sm2_decrypt_c1c2c3_legacy(
+            priv_ptr,
+            legacy.as_ptr(),
+            legacy.len(),
+            pt_back.as_mut_ptr(),
+            pt_back.len(),
+            &mut pt_len,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK, "legacy decrypt of constructed legacy ct");
+    pt_back.truncate(pt_len);
+    assert_eq!(pt_back.as_slice(), pt.as_slice());
+
+    // And confirm that the legacy entry point REJECTS modern ordering
+    // — no auto-detection, per the W2 cbindgen-header doc.
+    let mut pt_back2 = vec![0u8; 256];
+    let mut pt_len2 = 0usize;
+    let r2 = unsafe {
+        gmcrypto_sm2_decrypt_c1c2c3_legacy(
+            priv_ptr,
+            modern.as_ptr(),
+            modern.len(),
+            pt_back2.as_mut_ptr(),
+            pt_back2.len(),
+            &mut pt_len2,
+        )
+    };
+    assert_eq!(
+        r2, GMCRYPTO_ERR,
+        "modern ordering through legacy fn must fail"
+    );
+
+    unsafe { gmcrypto_sm2_privkey_free(priv_ptr) };
+}
+
+#[test]
+fn sm2_decrypt_c1c3c2_rejects_modern_wrong_format() {
+    // Modern ct fed to a corrupted prefix → MAC mismatch.
+    let (priv_ptr, pub_ptr) = fresh_sm2_keys();
+    let pt = b"modern";
+    let mut ct = vec![0u8; 256];
+    let mut ct_len = 0usize;
+    let r = unsafe {
+        gmcrypto_sm2_encrypt_c1c3c2(
+            pub_ptr,
+            pt.as_ptr(),
+            pt.len(),
+            ct.as_mut_ptr(),
+            ct.len(),
+            &mut ct_len,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    ct.truncate(ct_len);
+
+    // Flip a byte inside C3 (the MAC) — must collapse to GMCRYPTO_ERR
+    // without leaking plaintext.
+    ct[65 + 5] ^= 0x80;
+
+    let mut pt_back = vec![0u8; 256];
+    let mut pt_len_back = 0usize;
+    let r = unsafe {
+        gmcrypto_sm2_decrypt_c1c3c2(
+            priv_ptr,
+            ct.as_ptr(),
+            ct.len(),
+            pt_back.as_mut_ptr(),
+            pt_back.len(),
+            &mut pt_len_back,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_ERR);
+
+    unsafe {
+        gmcrypto_sm2_privkey_free(priv_ptr);
+        gmcrypto_sm2_pubkey_free(pub_ptr);
+    }
+}
+
+#[test]
+fn sm2_decrypt_c1c3c2_rejects_truncated() {
+    let (priv_ptr, pub_ptr) = fresh_sm2_keys();
+    // < C1 + C3 = 97 bytes, so decode_c1c3c2 rejects at parse time.
+    let bogus = [0u8; 96];
+    let mut pt_back = vec![0u8; 256];
+    let mut pt_len = 0usize;
+    let r = unsafe {
+        gmcrypto_sm2_decrypt_c1c3c2(
+            priv_ptr,
+            bogus.as_ptr(),
+            bogus.len(),
+            pt_back.as_mut_ptr(),
+            pt_back.len(),
+            &mut pt_len,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_ERR, "too-short input must collapse to ERR");
 
     unsafe {
         gmcrypto_sm2_privkey_free(priv_ptr);

@@ -75,8 +75,12 @@ use core::ffi::{c_char, c_int};
 use core::ptr;
 use core::slice;
 
+use gmcrypto_core::asn1::ciphertext::{
+    decode as ciphertext_der_decode, encode as ciphertext_der_encode,
+};
 use gmcrypto_core::hmac::{HmacSm3 as InnerHmacSm3, hmac_sm3};
 use gmcrypto_core::kdf::pbkdf2_hmac_sm3;
+use gmcrypto_core::sm2::raw_ciphertext::{decode_c1c2c3_legacy, decode_c1c3c2, encode_c1c3c2};
 use gmcrypto_core::sm2::{
     DEFAULT_SIGNER_ID, Sm2PrivateKey, Sm2PublicKey, decrypt as sm2_decrypt, encrypt as sm2_encrypt,
     sign_with_id, verify_with_id,
@@ -1005,6 +1009,171 @@ pub unsafe extern "C" fn gmcrypto_sm2_decrypt(
         };
         let k = unsafe { &*key };
         match sm2_decrypt(&k.inner, c) {
+            Ok(pt) => unsafe { write_output(&pt, out_pt, out_capacity, out_actual_len) },
+            Err(_) => GMCRYPTO_ERR,
+        }
+    })
+}
+
+// ============================================================
+// SM2 — raw byte-concat ciphertext (v0.5 W2).
+//
+// Wraps `gmcrypto_core::sm2::raw_ciphertext::{encode_c1c3c2,
+// decode_c1c3c2, decode_c1c2c3_legacy}`. The DER `gmcrypto_sm2_encrypt`
+// / `gmcrypto_sm2_decrypt` above remain the recommended path; these
+// raw-byte entry points exist for interop with legacy Chinese-standard
+// libraries (older gmssl, certain HSM drivers) that expect raw byte
+// ordering rather than GM/T 0009 DER.
+//
+// **No `gmcrypto_sm2_encrypt_c1c2c3_legacy`** — same posture as the
+// Rust crate (`encode_c1c2c3_legacy` deliberately doesn't exist).
+// The legacy `C1 || C2 || C3` ordering is **decrypt-only**; emitting
+// it would propagate the legacy ordering forever (per CLAUDE.md
+// "Don't" entry).
+//
+// Implementation note: encryption goes
+//   sm2::encrypt -> DER bytes -> asn1::ciphertext::decode ->
+//     Sm2Ciphertext -> encode_c1c3c2 -> raw bytes
+// and decryption goes
+//   raw bytes -> decode_c1c3c2 (or decode_c1c2c3_legacy) ->
+//     Sm2Ciphertext -> asn1::ciphertext::encode -> DER bytes ->
+//     sm2::decrypt
+// The internal DER round-trip is a few hundred extra nanoseconds vs.
+// adding new `_ciphertext`-shaped Rust API entry points. The SM2
+// scalar-multiplication / KDF / SM3-MAC work dominates the cost by
+// 3+ orders of magnitude, so the round-trip is invisible at the
+// caller. Avoiding the round-trip requires public-API additions on
+// gmcrypto-core; deferred to v0.6 if a real workload measures the
+// difference.
+// ============================================================
+
+/// SM2 public-key encrypt; output in the modern raw byte-concat
+/// `C1 || C3 || C2` format. `C1` is the 65-byte SEC1-uncompressed
+/// point (`0x04 || X || Y`); `C3` is the 32-byte SM3 MAC; `C2` is
+/// `msg_len` bytes of XOR-ed ciphertext. Output length is exactly
+/// `65 + 32 + msg_len`.
+///
+/// RNG is sourced from `getrandom::SysRng` internally (same as
+/// [`gmcrypto_sm2_encrypt`]). The W3 RNG-callback variant lands as a
+/// separate workstream.
+///
+/// Same failure-mode posture as [`gmcrypto_sm2_encrypt`]: single
+/// [`GMCRYPTO_ERR`] on any failure mode (identity public key, KDF-
+/// zero retries exhausted).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_encrypt_c1c3c2(
+    key: *const gmcrypto_sm2_pubkey_t,
+    pt: *const u8,
+    pt_len: usize,
+    out_raw_ct: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if key.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let p = match unsafe { try_slice(pt, pt_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: key non-null per check above.
+        let k = unsafe { &*key };
+        let mut rng = rand_core::UnwrapErr(getrandom::SysRng);
+        let der_bytes = match sm2_encrypt(&k.inner, p, &mut rng) {
+            Ok(b) => b,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        // DER → Sm2Ciphertext → raw bytes.
+        let parsed = match ciphertext_der_decode(&der_bytes) {
+            Some(ct) => ct,
+            None => return GMCRYPTO_ERR,
+        };
+        let raw_bytes = encode_c1c3c2(&parsed);
+        unsafe { write_output(&raw_bytes, out_raw_ct, out_capacity, out_actual_len) }
+    })
+}
+
+/// SM2 private-key decrypt of a modern raw byte-concat
+/// `C1 || C3 || C2` ciphertext. Input length must be at least
+/// `65 + 32 + 1 = 98` bytes (C1 + C3 + at least one C2 byte).
+///
+/// Same failure-mode posture as [`gmcrypto_sm2_decrypt`]: single
+/// [`GMCRYPTO_ERR`] on any failure mode (malformed input, off-curve
+/// C1, identity C1, MAC mismatch, or KDF-zero detection). Caller
+/// cannot distinguish wrong-key from corrupt-ciphertext via timing
+/// or return code.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_decrypt_c1c3c2(
+    key: *const gmcrypto_sm2_privkey_t,
+    raw_ct: *const u8,
+    raw_ct_len: usize,
+    out_pt: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if key.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let c = match unsafe { try_slice(raw_ct, raw_ct_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // Raw bytes → Sm2Ciphertext → DER bytes → sm2::decrypt.
+        let parsed = match decode_c1c3c2(c) {
+            Some(ct) => ct,
+            None => return GMCRYPTO_ERR,
+        };
+        let der_bytes = ciphertext_der_encode(&parsed);
+        // SAFETY: key non-null per check above.
+        let k = unsafe { &*key };
+        match sm2_decrypt(&k.inner, &der_bytes) {
+            Ok(pt) => unsafe { write_output(&pt, out_pt, out_capacity, out_actual_len) },
+            Err(_) => GMCRYPTO_ERR,
+        }
+    })
+}
+
+/// SM2 private-key decrypt of a **legacy** raw byte-concat
+/// `C1 || C2 || C3` ciphertext. Decrypt-only — there is no emit path
+/// for the legacy ordering, and there will not be one in any v0.5+
+/// version (per `CLAUDE.md` "Don't" entry).
+///
+/// The two raw byte-concat orderings (`C1 || C3 || C2` modern vs
+/// `C1 || C2 || C3` legacy) are NOT auto-detected. The caller MUST
+/// know which format their wire-data follows. Mis-feeding modern
+/// ciphertext to this entry point or vice-versa will fail at the MAC
+/// check (`GMCRYPTO_ERR`); the failure-mode invariant precludes the
+/// caller from distinguishing wrong-format from wrong-key.
+///
+/// Same failure-mode posture as [`gmcrypto_sm2_decrypt_c1c3c2`]:
+/// single [`GMCRYPTO_ERR`] on any failure.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_decrypt_c1c2c3_legacy(
+    key: *const gmcrypto_sm2_privkey_t,
+    raw_ct: *const u8,
+    raw_ct_len: usize,
+    out_pt: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if key.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let c = match unsafe { try_slice(raw_ct, raw_ct_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let parsed = match decode_c1c2c3_legacy(c) {
+            Some(ct) => ct,
+            None => return GMCRYPTO_ERR,
+        };
+        let der_bytes = ciphertext_der_encode(&parsed);
+        // SAFETY: key non-null per check above.
+        let k = unsafe { &*key };
+        match sm2_decrypt(&k.inner, &der_bytes) {
             Ok(pt) => unsafe { write_output(&pt, out_pt, out_capacity, out_actual_len) },
             Err(_) => GMCRYPTO_ERR,
         }
