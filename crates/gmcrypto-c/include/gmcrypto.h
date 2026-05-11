@@ -104,6 +104,13 @@ typedef struct gmcrypto_sm4_cbc_encryptor_t gmcrypto_sm4_cbc_encryptor_t;
 typedef struct gmcrypto_sm4_t gmcrypto_sm4_t;
 
 /*
+ C ABI function pointer for caller-supplied RNG. Returns `0` on
+ success and non-zero on failure. See module-level docs for the
+ full contract.
+ */
+typedef int (*gmcrypto_rng_callback)(void *context, uint8_t *buf, uintptr_t buf_len);
+
+/*
  Returns a NUL-terminated string with the `gmcrypto-c` version
  (e.g. `"0.4.0"`). The returned pointer is to a static `&'static
  CStr` and must NOT be freed by the caller.
@@ -548,6 +555,60 @@ int gmcrypto_sm2_decrypt_c1c2c3_legacy(const gmcrypto_sm2_privkey_t *key,
                                        uint8_t *out_pt,
                                        uintptr_t out_capacity,
                                        uintptr_t *out_actual_len)
+;
+
+/*
+ `_with_rng` variant of [`gmcrypto_sm2_sign`]. Identical contract
+ except RNG bytes come from the caller's `rng_callback` rather
+ than `getrandom::SysRng`.
+
+ Returns [`GMCRYPTO_OK`] on success; [`GMCRYPTO_ERR`] on any
+ failure including:
+ - null `key` pointer
+ - null `rng_callback` pointer
+ - callback returned non-zero on any draw
+ - signing produced no valid signature within the retry budget
+
+ Per the failure-mode invariant, the caller cannot distinguish
+ callback-error from signing-failure via return code or timing.
+ */
+
+int gmcrypto_sm2_sign_with_rng(const gmcrypto_sm2_privkey_t *key,
+                               const uint8_t *signer_id,
+                               uintptr_t signer_id_len,
+                               const uint8_t *msg,
+                               uintptr_t msg_len,
+                               gmcrypto_rng_callback rng_callback,
+                               void *rng_context,
+                               uint8_t *out_der_sig,
+                               uintptr_t out_capacity,
+                               uintptr_t *out_actual_len)
+;
+
+/*
+ `_with_rng` variant of [`gmcrypto_sm2_encrypt`]. Identical
+ contract except RNG bytes come from the caller's `rng_callback`
+ rather than `getrandom::SysRng`.
+
+ Output is GM/T 0009-2012 DER (same as `gmcrypto_sm2_encrypt`).
+ For raw byte-concat output (`C1 || C3 || C2`), use
+ `gmcrypto_sm2_encrypt_c1c3c2` — v0.5 doesn't ship a
+ `_c1c3c2_with_rng` combined variant; if needed, callers can
+ re-encode the DER output via gmcrypto-core's
+ `asn1::ciphertext::decode` + `raw_ciphertext::encode_c1c3c2`.
+
+ Same `GMCRYPTO_ERR`-on-any-failure posture as
+ `gmcrypto_sm2_sign_with_rng`.
+ */
+
+int gmcrypto_sm2_encrypt_with_rng(const gmcrypto_sm2_pubkey_t *key,
+                                  const uint8_t *pt,
+                                  uintptr_t pt_len,
+                                  gmcrypto_rng_callback rng_callback,
+                                  void *rng_context,
+                                  uint8_t *out_der_ct,
+                                  uintptr_t out_capacity,
+                                  uintptr_t *out_actual_len)
 ;
 
 #endif  /* GMCRYPTO_H_ */
