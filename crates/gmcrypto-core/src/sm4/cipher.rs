@@ -188,6 +188,97 @@ impl crate::traits::BlockCipher for Sm4Cipher {
     }
 }
 
+#[cfg(feature = "cipher-traits")]
+mod cipher_impl {
+    //! `cipher::BlockEncrypt` / `cipher::BlockDecrypt`-compatible impl
+    //! for [`Sm4Cipher`] (v0.4 W2; Q4.3).
+    //!
+    //! Behind the `cipher-traits` feature flag. The cipher 0.4 trait
+    //! surface uses a rank-2 backend pattern: callers invoke
+    //! `encrypt_with_backend` / `decrypt_with_backend` with a
+    //! `BlockClosure`, and the impl calls the closure with a
+    //! `BlockBackend`. Following the `aes` crate's pattern.
+    //!
+    //! Block size = 16 bytes; key size = 16 bytes. Output is byte-
+    //! identical to the inherent
+    //! [`Sm4Cipher::encrypt_block`] / [`Sm4Cipher::decrypt_block`].
+
+    use super::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
+    use cipher::consts::{U1, U16};
+    use cipher::crypto_common::{Key, KeyInit, KeySizeUser, ParBlocksSizeUser};
+    use cipher::inout::InOut;
+    use cipher::{
+        BlockBackend, BlockCipher, BlockClosure, BlockDecrypt, BlockEncrypt, BlockSizeUser,
+    };
+
+    const _: () = assert!(BLOCK_SIZE == 16, "cipher trait fit assumes U16 block");
+    const _: () = assert!(KEY_SIZE == 16, "cipher trait fit assumes U16 key");
+
+    impl BlockSizeUser for Sm4Cipher {
+        type BlockSize = U16;
+    }
+
+    impl KeySizeUser for Sm4Cipher {
+        type KeySize = U16;
+    }
+
+    impl KeyInit for Sm4Cipher {
+        fn new(key: &Key<Self>) -> Self {
+            let key: &[u8; KEY_SIZE] = key.as_ref();
+            Self::new(key)
+        }
+    }
+
+    impl BlockCipher for Sm4Cipher {}
+
+    struct Sm4Backend<'a> {
+        cipher: &'a Sm4Cipher,
+        decrypt: bool,
+    }
+
+    impl BlockSizeUser for Sm4Backend<'_> {
+        type BlockSize = U16;
+    }
+
+    impl ParBlocksSizeUser for Sm4Backend<'_> {
+        type ParBlocksSize = U1;
+    }
+
+    impl BlockBackend for Sm4Backend<'_> {
+        #[inline]
+        fn proc_block(&mut self, mut block: InOut<'_, '_, cipher::Block<Self>>) {
+            let mut buf = [0u8; BLOCK_SIZE];
+            buf.copy_from_slice(block.get_in().as_slice());
+            if self.decrypt {
+                self.cipher.decrypt_block(&mut buf);
+            } else {
+                self.cipher.encrypt_block(&mut buf);
+            }
+            block.get_out().copy_from_slice(&buf);
+        }
+        // ParBlocksSize = U1, so the default `proc_par_blocks` falls back
+        // to `proc_block` for each block. No override needed.
+    }
+
+    impl BlockEncrypt for Sm4Cipher {
+        fn encrypt_with_backend(&self, f: impl BlockClosure<BlockSize = Self::BlockSize>) {
+            f.call(&mut Sm4Backend {
+                cipher: self,
+                decrypt: false,
+            });
+        }
+    }
+
+    impl BlockDecrypt for Sm4Cipher {
+        fn decrypt_with_backend(&self, f: impl BlockClosure<BlockSize = Self::BlockSize>) {
+            f.call(&mut Sm4Backend {
+                cipher: self,
+                decrypt: true,
+            });
+        }
+    }
+}
+
 /// Run the 32-round Feistel-like SM4 transform in place. `reverse`
 /// flips the round-key index direction — encrypt and decrypt share
 /// the same data path under SM4's key-reversal property.

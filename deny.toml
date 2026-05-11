@@ -42,6 +42,22 @@ allow = [
     # with the `once` feature only — no spinlock/mutex paths.
     { name = "spin" },
 
+    # v0.4 W2 — opt-in RustCrypto-trait fit. Per Q4.4 / Q4.5 in
+    # docs/v0.4-scope.md, these are pulled ONLY when the
+    # `digest-traits` / `cipher-traits` feature flags are enabled by
+    # the consumer; default-features build pulls none of them in.
+    # CI runs `cargo deny check --exclude-dev` (default features) AND
+    # `cargo deny check --all-features --exclude-dev` (this path).
+    # Pin major+minor; future 0.11 / 0.5 lines are a v0.5+ candidate.
+    { name = "digest" },
+    { name = "cipher" },
+    # Transitive deps shared by digest / cipher via crypto_common.
+    { name = "crypto-common" },
+    { name = "inout" },
+    # Build-time helper of generic-array (the digest/cipher path picks
+    # it up in addition to crypto-bigint's tree).
+    { name = "version_check" },
+
     # Transitive deps of crypto-bigint.
     { name = "cpubits" },
     { name = "ctutils" },

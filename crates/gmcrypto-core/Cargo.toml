@@ -16,6 +16,12 @@ subtle.workspace = true
 zeroize.workspace = true
 rand_core.workspace = true
 spin.workspace = true
+# v0.4 W2 — optional RustCrypto-trait fit. Default-features-off build
+# does NOT pull these in. Pinned at major+minor per Q4.4
+# (docs/v0.4-scope.md) — digest 0.10.x and cipher 0.4.x are the
+# current stable lines; future major-bumps are a v0.5 candidate.
+digest = { version = "0.10", default-features = false, features = ["mac"], optional = true }
+cipher = { version = "0.4", default-features = false, optional = true }
 
 [dev-dependencies]
 hex-literal.workspace = true
@@ -27,9 +33,19 @@ name = "timing_leaks"
 path = "benches/timing_leaks.rs"
 harness = false
 
+[[test]]
+name = "rustcrypto_traits"
+path = "tests/rustcrypto_traits.rs"
+required-features = ["digest-traits", "cipher-traits"]
+
 [features]
 default = []
 std = []   # opt-in std feature; reserved for v0.3+ wire-format file I/O
+# v0.4 W2 — opt-in RustCrypto-trait fit. Two flags per Q4.3 so
+# callers needing only one half don't pay for both. Default-features
+# build is unchanged.
+digest-traits = ["dep:digest"]
+cipher-traits = ["dep:cipher"]
 
 [lints.rust]
 unsafe_code = "forbid"

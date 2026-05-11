@@ -255,6 +255,75 @@ impl MacTrait for HmacSm3 {
     }
 }
 
+#[cfg(feature = "digest-traits")]
+mod digest_impl {
+    //! `digest::Mac`-compatible impl for [`HmacSm3`] (v0.4 W2; Q4.3).
+    //!
+    //! Behind the `digest-traits` feature flag. The HMAC key is
+    //! variable-length per RFC 2104; we set [`KeySize`] to the SM3
+    //! block size (64 bytes) as the canonical fixed-length entry point
+    //! and override [`KeyInit::new_from_slice`] to accept any length
+    //! (matching the `RustCrypto` `hmac` crate's posture).
+
+    use super::{BLOCK_SIZE, DIGEST_SIZE, HmacSm3};
+    use digest::{
+        FixedOutput, MacMarker, Output, OutputSizeUser, Reset, Update,
+        consts::{U32, U64},
+        crypto_common::{InvalidLength, Key, KeyInit, KeySizeUser},
+    };
+
+    const _: () = assert!(BLOCK_SIZE == 64, "U64 KeySize matches SM3 BLOCK_SIZE");
+    const _: () = assert!(DIGEST_SIZE == 32, "U32 OutputSize matches DIGEST_SIZE");
+
+    impl MacMarker for HmacSm3 {}
+
+    impl KeySizeUser for HmacSm3 {
+        type KeySize = U64;
+    }
+
+    impl KeyInit for HmacSm3 {
+        fn new(key: &Key<Self>) -> Self {
+            Self::new(key.as_slice())
+        }
+
+        fn new_from_slice(key: &[u8]) -> Result<Self, InvalidLength> {
+            // Variable-length keys are accepted per RFC 2104 §2.
+            Ok(Self::new(key))
+        }
+    }
+
+    impl OutputSizeUser for HmacSm3 {
+        type OutputSize = U32;
+    }
+
+    impl Update for HmacSm3 {
+        fn update(&mut self, data: &[u8]) {
+            Self::update(self, data);
+        }
+    }
+
+    impl FixedOutput for HmacSm3 {
+        fn finalize_into(self, out: &mut Output<Self>) {
+            let tag: [u8; DIGEST_SIZE] = Self::finalize(self);
+            out.copy_from_slice(&tag);
+        }
+    }
+
+    impl Reset for HmacSm3 {
+        fn reset(&mut self) {
+            // `HmacSm3` doesn't retain the key after construction, so a
+            // post-finalize reset isn't well-defined. The `digest::Mac`
+            // documentation notes `Reset` is rarely useful on MACs;
+            // implementations may panic or no-op. We panic with a clear
+            // message: callers wanting a fresh MAC should call
+            // `HmacSm3::new(key)` directly.
+            panic!(
+                "HmacSm3::reset is not supported; construct a fresh instance via HmacSm3::new(key)"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

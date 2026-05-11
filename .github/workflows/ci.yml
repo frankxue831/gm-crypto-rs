@@ -38,10 +38,19 @@ jobs:
         run: cargo build --workspace --all-targets
       - name: cargo test (tests + doctests; benches excluded — see dudect-pr.yml)
         run: cargo test --workspace
+      # v0.4 W2 — RustCrypto-trait fit, opt-in features. Default-features
+      # build above already gates the no-extra-deps shape. This run
+      # exercises the digest/cipher trait impls + the rustcrypto_traits
+      # integration test (which is `required-features`-gated and only
+      # builds when both flags are on).
+      - name: cargo test --features digest-traits,cipher-traits
+        run: cargo test -p gmcrypto-core --features digest-traits,cipher-traits
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo clippy --features digest-traits,cipher-traits
+        run: cargo clippy -p gmcrypto-core --features digest-traits,cipher-traits --all-targets -- -D warnings
 
   deny:
     name: cargo-deny (no forbidden runtime deps)
@@ -52,8 +61,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-deny
         run: cargo install --locked cargo-deny
-      - name: Run cargo-deny (excluding dev-deps)
+      # Default deny pass — gates the zero-runtime-deps surface of the
+      # default-features build.
+      - name: Run cargo-deny (default features, excluding dev-deps)
         run: cargo deny check --exclude-dev
+      # v0.4 W2 / Q4.5 — second pass with --all-features for visibility.
+      # The opt-in `digest-traits` / `cipher-traits` features pull
+      # `digest` / `cipher` and their transitives (`block-buffer`,
+      # `crypto-common`, `generic-array`, `typenum`, `inout`), which are
+      # allowlisted in deny.toml under a separate rationale comment.
+      - name: Run cargo-deny (all features, excluding dev-deps)
+        run: cargo deny --all-features check --exclude-dev
 
   wasm32:
     name: build wasm32-unknown-unknown (Rust ${{ matrix.toolchain }})
