@@ -241,3 +241,34 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
   the `#[doc(hidden)]` marker. Per Q7.2 it's **not SemVer-stable** —
   same posture as `sign_raw_with_id`. Callers must zeroize the
   returned `[u8; 32]` themselves; document the contract on the method.
+
+## Agent gotchas
+
+- **MSRV 1.85** — don't use `Integer::is_multiple_of` (stable in 1.87).
+  Use `n % m == 0` / `% m != 0`. Clippy catches it at PR time, but
+  the detour wastes a fmt+clippy cycle.
+- **`gmssl sm2keygen -out priv.pem`** writes the encrypted PKCS#8 to
+  the file **and** prints the SPKI public key to stdout by default.
+  Use `-pubout pub.pem` to capture it separately.
+- **`gmssl sm2encrypt`** emits GM/T 0009 DER only. No `-binary` flag
+  in 3.1.1 — a raw byte-concat W4 fixture cannot be sourced directly
+  from gmssl.
+- **Integration-test scratch dir** — use `env!("CARGO_TARGET_TMPDIR")`
+  (cargo-managed; no `tempfile` dev-dep needed). v0.3 W3 interop
+  tests use it.
+- **Workspace version** lives at `[workspace.package].version` in the
+  root `Cargo.toml`; all crates inherit via `version.workspace = true`.
+  `cargo metadata --format-version 1` verifies the resolved version.
+- **`cargo fmt --all` invalidates the Edit tool's file-state cache.**
+  Re-Read any file you'll edit after running fmt, or Edit errors with
+  "file has been modified since read".
+- **Codex review prompts must stay short** (~500 words). Longer prompts
+  silently hang for 25+ min with empty `--output-last-message` files
+  and need `pkill -f "codex exec"`. Stack-rank focus questions; don't
+  paste full file contents.
+- **Stacked PRs**: `gh pr create --base <unmerged-branch>` targets an
+  open PR's head. After the parent merges, GitHub auto-retargets the
+  stacked PR to `main`. Used by v0.3 W2→W3 and the release-prep chain.
+- **`pub(crate) const` inside a `pub(crate) mod`** trips
+  clippy::pub-in-priv. Use plain `pub` on the inner items — the outer
+  module's `pub(crate)` already gates visibility.
