@@ -60,6 +60,35 @@ jobs:
       - name: cargo clippy --features sm4-bitsliced
         run: cargo clippy -p gmcrypto-core --features sm4-bitsliced --all-targets -- -D warnings
 
+  cabi:
+    name: gmcrypto-c FFI build + header drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cabi-stable
+      # v0.4 W4 — build the cdylib + staticlib + rlib (default
+      # crate-types) without the regen-header feature.
+      - name: cargo build -p gmcrypto-c --release
+        run: cargo build -p gmcrypto-c --release
+      # Q4.12 — committed header drift gate. Re-run cbindgen and
+      # `git diff --exit-code` on the header. Fails CI if a developer
+      # added or modified an FFI entry point without regenerating the
+      # header.
+      - name: Regenerate header via cbindgen
+        run: cargo build -p gmcrypto-c --features regen-header
+      - name: Verify committed header is up-to-date
+        run: git diff --exit-code crates/gmcrypto-c/include/gmcrypto.h
+      # The c_smoke integration test exercises every FFI entry point
+      # via Rust's own extern "C" interop. This is the v0.4 W4
+      # cryptographic-correctness gate (Rust-equivalence on every
+      # entry point).
+      - name: cargo test -p gmcrypto-c
+        run: cargo test -p gmcrypto-c
+
   deny:
     name: cargo-deny (no forbidden runtime deps)
     runs-on: ubuntu-latest
@@ -73,13 +102,17 @@ jobs:
       # default-features build.
       - name: Run cargo-deny (default features, excluding dev-deps)
         run: cargo deny check --exclude-dev
-      # v0.4 W2 / Q4.5 — second pass with --all-features for visibility.
-      # The opt-in `digest-traits` / `cipher-traits` features pull
-      # `digest` / `cipher` and their transitives (`block-buffer`,
-      # `crypto-common`, `generic-array`, `typenum`, `inout`), which are
-      # allowlisted in deny.toml under a separate rationale comment.
-      - name: Run cargo-deny (all features, excluding dev-deps)
-        run: cargo deny --all-features check --exclude-dev
+      # v0.4 W2 / Q4.5 — second pass with the runtime opt-in feature
+      # flags (`digest-traits`, `cipher-traits`, and the v0.4 W3
+      # `sm4-bitsliced`). These are the features a downstream consumer
+      # might enable; gmcrypto-c's `regen-header` build-time feature
+      # is deliberately excluded (cbindgen + its ~30-crate transitive
+      # tree is build-tool noise, not runtime dep policy). Pulls
+      # `digest` / `cipher` / `crypto-common` / `inout` (allowlisted
+      # in deny.toml). Uses --features on the workspace-default crate
+      # (`gmcrypto-core`); `gmcrypto-c` has no runtime opt-in features.
+      - name: Run cargo-deny (runtime opt-in features, excluding dev-deps)
+        run: cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced check --exclude-dev
 
   wasm32:
     name: build wasm32-unknown-unknown (Rust ${{ matrix.toolchain }})
