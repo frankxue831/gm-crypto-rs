@@ -194,6 +194,41 @@ v3.1.1 to enable):
 GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
 ```
 
+## wasm32 support
+
+`gmcrypto-core` builds on `wasm32-unknown-unknown` as of v0.4. CI gates
+both stable and MSRV (1.85) builds on the target.
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features
+```
+
+The crate is `no_std + alloc` only and does NOT pull `getrandom`'s
+`wasm_js` backend or `wasm-bindgen` / `js-sys` into its default dep
+graph. Wasm callers wire their own `rand_core::Rng` impl — typically
+by enabling `getrandom`'s `wasm_js` feature in *their* `Cargo.toml`:
+
+```toml
+[dependencies]
+gmcrypto-core = "0.4"
+rand_core = { version = "0.10", default-features = false }
+getrandom = { version = "0.4", default-features = false, features = ["wasm_js"] }
+```
+
+```rust
+use gmcrypto_core::sm2::{sign_with_id, Sm2PrivateKey, DEFAULT_SIGNER_ID};
+use rand_core::UnwrapErr;
+use getrandom::SysRng;
+
+let mut rng = UnwrapErr(SysRng); // wasm_js-backed when targeting wasm32
+let sig = sign_with_id(&priv_key, DEFAULT_SIGNER_ID, b"msg", &mut rng).unwrap();
+```
+
+A `wasm-bindgen-test`-driven test runner (running KAT vectors under
+Node or a headless browser) is post-v0.4 — v0.4 ships the build-target
+gate only.
+
 ## License
 
 Apache-2.0. See [`LICENSE`](LICENSE).
