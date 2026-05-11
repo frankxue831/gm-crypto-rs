@@ -9,7 +9,8 @@
 //!   (GB/T 32918). Comb-table fixed-base scalar mult (v0.3 W6).
 //! - [`sm3`] — SM3 hash (GB/T 32905) with streaming `new/update/finalize`.
 //! - [`sm4`] — SM4 block cipher (GB/T 32907) + CBC mode (single-shot
-//!   and v0.3 W5 streaming).
+//!   and v0.3 W5 streaming). v0.4 W3 adds an opt-in bitsliced
+//!   (table-less, gate-only) S-box behind the `sm4-bitsliced` feature.
 //! - [`hmac`] — HMAC-SM3 (RFC 2104), single-shot + v0.3 W5 streaming.
 //! - [`kdf`] — PBKDF2-HMAC-SM3 (RFC 8018 §5.2).
 //! - [`asn1`] — strict-canonical DER reader / writer / OID constants
@@ -20,16 +21,36 @@
 //! - [`sec1`] — RFC 5915 `ECPrivateKey` + SEC1 uncompressed point (v0.3 W2).
 //! - [`pkcs8`] — RFC 5958 `OneAsymmetricKey` + RFC 8018 PBES2 (v0.3 W2).
 //! - [`traits`] — in-crate `Hash` / `Mac` / `BlockCipher` traits
-//!   (v0.3 W5; RustCrypto-trait fit deferred to v0.4).
+//!   (v0.3 W5). v0.4 W2 adds RustCrypto-trait fit (`digest::Digest`,
+//!   `digest::Mac`, `cipher::BlockEncrypt`/`BlockDecrypt`) behind the
+//!   opt-in `digest-traits` / `cipher-traits` features.
 //!
 //! # Crate features
 //!
-//! - `default` — `no_std`, `alloc`-only.
+//! - `default` — `no_std`, `alloc`-only. No optional dependencies.
 //! - `std` — opt-in; reserved for future file-I/O wire-format helpers.
+//! - `digest-traits` — opt-in (v0.4 W2). Implements `digest::Digest` for
+//!   [`sm3::Sm3`] and `digest::Mac` for [`hmac::HmacSm3`]. Pulls
+//!   `digest = "0.10"`.
+//! - `cipher-traits` — opt-in (v0.4 W2). Implements
+//!   `cipher::{BlockEncrypt, BlockDecrypt, BlockSizeUser, KeySizeUser,
+//!   KeyInit}` for [`sm4::Sm4Cipher`]. Pulls `cipher = "0.4"`.
+//! - `sm4-bitsliced` — opt-in (v0.4 W3). Routes the SM4 S-box through
+//!   a bitsliced (table-less, gate-only) Itoh-Tsujii inversion in
+//!   GF(2^8). Byte-identical output to the default linear-scan path;
+//!   constant-time by construction (no table lookups, no branches on
+//!   secret bits).
+//!
+//! # `wasm32-unknown-unknown`
+//!
+//! Builds clean as of v0.4 W1. The crate is `no_std + alloc` only and
+//! does NOT pull `getrandom`'s `wasm_js` backend or `wasm-bindgen` /
+//! `js-sys` into its default dep graph. Wasm callers wire their own
+//! `rand_core::Rng` impl — see the workspace `README.md`.
 
 #![no_std]
 #![deny(missing_docs)]
-#![doc(html_root_url = "https://docs.rs/gmcrypto-core/0.3.0")]
+#![doc(html_root_url = "https://docs.rs/gmcrypto-core/0.4.0")]
 
 extern crate alloc;
 
