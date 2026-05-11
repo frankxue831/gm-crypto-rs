@@ -31,8 +31,13 @@ use gmcrypto_c::{
     gmcrypto_sm2_pubkey_new, gmcrypto_sm2_pubkey_t, gmcrypto_sm2_pubkey_to_sec1_uncompressed,
     gmcrypto_sm2_sign, gmcrypto_sm2_verify, gmcrypto_sm3_finalize, gmcrypto_sm3_free,
     gmcrypto_sm3_hash, gmcrypto_sm3_new, gmcrypto_sm3_t, gmcrypto_sm3_update,
-    gmcrypto_sm4_cbc_decrypt, gmcrypto_sm4_cbc_encrypt, gmcrypto_sm4_decrypt_block,
-    gmcrypto_sm4_encrypt_block, gmcrypto_sm4_free, gmcrypto_sm4_new, gmcrypto_sm4_t,
+    gmcrypto_sm4_cbc_decrypt, gmcrypto_sm4_cbc_decryptor_finalize, gmcrypto_sm4_cbc_decryptor_free,
+    gmcrypto_sm4_cbc_decryptor_new, gmcrypto_sm4_cbc_decryptor_t,
+    gmcrypto_sm4_cbc_decryptor_update, gmcrypto_sm4_cbc_encrypt,
+    gmcrypto_sm4_cbc_encryptor_finalize, gmcrypto_sm4_cbc_encryptor_free,
+    gmcrypto_sm4_cbc_encryptor_new, gmcrypto_sm4_cbc_encryptor_t,
+    gmcrypto_sm4_cbc_encryptor_update, gmcrypto_sm4_decrypt_block, gmcrypto_sm4_encrypt_block,
+    gmcrypto_sm4_free, gmcrypto_sm4_new, gmcrypto_sm4_t,
 };
 use hex_literal::hex;
 
@@ -303,6 +308,209 @@ fn sm4_cbc_too_small_buffer_returns_required_len() {
     };
     assert_eq!(r, GMCRYPTO_ERR);
     assert_eq!(actual, 112, "required length reported");
+}
+
+// ============================================================
+// SM4-CBC streaming (v0.5 W1)
+// ============================================================
+
+/// Helper: streaming-encrypt `pt` in `chunks` chunks via the FFI.
+/// Returns the ciphertext.
+fn ffi_stream_encrypt(key: &[u8; 16], iv: &[u8; 16], pt: &[u8], chunk_size: usize) -> Vec<u8> {
+    let enc: *mut gmcrypto_sm4_cbc_encryptor_t =
+        unsafe { gmcrypto_sm4_cbc_encryptor_new(key.as_ptr(), iv.as_ptr()) };
+    assert!(!enc.is_null());
+
+    let mut ciphertext = Vec::new();
+    let mut offset = 0;
+    while offset < pt.len() {
+        let take = chunk_size.min(pt.len() - offset);
+        let chunk = &pt[offset..offset + take];
+        // Per the contract, cap = chunk.len() + 16 upper-bounds emit.
+        let mut buf = vec![0u8; chunk.len() + 16];
+        let mut actual = 0usize;
+        let rc = unsafe {
+            gmcrypto_sm4_cbc_encryptor_update(
+                enc,
+                chunk.as_ptr(),
+                chunk.len(),
+                buf.as_mut_ptr(),
+                buf.len(),
+                &mut actual,
+            )
+        };
+        assert_eq!(rc, GMCRYPTO_OK);
+        buf.truncate(actual);
+        ciphertext.extend_from_slice(&buf);
+        offset += take;
+    }
+
+    // finalize emits exactly one block (the padded trailing block).
+    let mut final_buf = [0u8; 16];
+    let mut final_actual = 0usize;
+    let rc = unsafe {
+        gmcrypto_sm4_cbc_encryptor_finalize(
+            enc,
+            final_buf.as_mut_ptr(),
+            final_buf.len(),
+            &mut final_actual,
+        )
+    };
+    assert_eq!(rc, GMCRYPTO_OK);
+    assert_eq!(final_actual, 16);
+    ciphertext.extend_from_slice(&final_buf);
+    // enc is freed by finalize — do NOT call _free.
+    ciphertext
+}
+
+/// Helper: streaming-decrypt `ct` in `chunks` chunks via the FFI.
+/// Returns `Some(plaintext)` on success, `None` on any failure.
+fn ffi_stream_decrypt(
+    key: &[u8; 16],
+    iv: &[u8; 16],
+    ct: &[u8],
+    chunk_size: usize,
+) -> Option<Vec<u8>> {
+    let dec: *mut gmcrypto_sm4_cbc_decryptor_t =
+        unsafe { gmcrypto_sm4_cbc_decryptor_new(key.as_ptr(), iv.as_ptr()) };
+    if dec.is_null() {
+        return None;
+    }
+
+    let mut plaintext = Vec::new();
+    let mut offset = 0;
+    while offset < ct.len() {
+        let take = chunk_size.min(ct.len() - offset);
+        let chunk = &ct[offset..offset + take];
+        let mut buf = vec![0u8; chunk.len() + 16];
+        let mut actual = 0usize;
+        let rc = unsafe {
+            gmcrypto_sm4_cbc_decryptor_update(
+                dec,
+                chunk.as_ptr(),
+                chunk.len(),
+                buf.as_mut_ptr(),
+                buf.len(),
+                &mut actual,
+            )
+        };
+        if rc != GMCRYPTO_OK {
+            unsafe { gmcrypto_sm4_cbc_decryptor_free(dec) };
+            return None;
+        }
+        buf.truncate(actual);
+        plaintext.extend_from_slice(&buf);
+        offset += take;
+    }
+
+    // finalize emits at most 16 bytes (the strip of the held-back block).
+    let mut final_buf = [0u8; 16];
+    let mut final_actual = 0usize;
+    let rc = unsafe {
+        gmcrypto_sm4_cbc_decryptor_finalize(
+            dec,
+            final_buf.as_mut_ptr(),
+            final_buf.len(),
+            &mut final_actual,
+        )
+    };
+    // dec is freed by finalize regardless of success — do NOT call _free.
+    if rc != GMCRYPTO_OK {
+        return None;
+    }
+    plaintext.extend_from_slice(&final_buf[..final_actual]);
+    Some(plaintext)
+}
+
+#[test]
+fn sm4_cbc_streaming_encrypt_matches_single_shot() {
+    let key = [0x42u8; 16];
+    let iv = [0x37u8; 16];
+    let pt = b"the quick brown fox jumps over the lazy dog";
+
+    // Single-shot (golden).
+    let golden = gmcrypto_core::sm4::mode_cbc::encrypt(&key, &iv, pt);
+
+    // Streaming with chunk_size=7 (deliberately non-multiple of 16 to
+    // exercise the partial-block buffer path).
+    let streamed = ffi_stream_encrypt(&key, &iv, pt, 7);
+    assert_eq!(streamed, golden, "streaming encrypt matches single-shot");
+}
+
+#[test]
+fn sm4_cbc_streaming_decrypt_matches_single_shot() {
+    let key = [0x42u8; 16];
+    let iv = [0x37u8; 16];
+    let pt = b"the quick brown fox jumps over the lazy dog";
+    let ct = gmcrypto_core::sm4::mode_cbc::encrypt(&key, &iv, pt);
+
+    let streamed = ffi_stream_decrypt(&key, &iv, &ct, 5).expect("decrypt ok");
+    assert_eq!(streamed, pt, "streaming decrypt matches plaintext");
+}
+
+#[test]
+fn sm4_cbc_streaming_chunk_boundary_invariance() {
+    let key = [0x11u8; 16];
+    let iv = [0x22u8; 16];
+    // 100 bytes — exercises 6 full blocks plus a 4-byte trailing
+    // partial.
+    let pt: Vec<u8> = (0u8..100).collect();
+    let golden = gmcrypto_core::sm4::mode_cbc::encrypt(&key, &iv, &pt);
+
+    // Try a sweep of chunk sizes; every one must match the single-shot
+    // result byte-for-byte.
+    for chunk in [1usize, 2, 5, 13, 15, 16, 17, 31, 32, 33, 100] {
+        let streamed = ffi_stream_encrypt(&key, &iv, &pt, chunk);
+        assert_eq!(
+            streamed, golden,
+            "chunk size {chunk} should yield identical ciphertext"
+        );
+    }
+}
+
+#[test]
+fn sm4_cbc_streaming_round_trip_chunk_boundary_invariance() {
+    let key = [0x9bu8; 16];
+    let iv = [0xa7u8; 16];
+    let pt: Vec<u8> = (0u8..=255).collect(); // 256 bytes = 16 full blocks
+    let ct = gmcrypto_core::sm4::mode_cbc::encrypt(&key, &iv, &pt);
+
+    for chunk in [1usize, 7, 16, 17, 64, 256] {
+        let plaintext = ffi_stream_decrypt(&key, &iv, &ct, chunk).expect("decrypt ok");
+        assert_eq!(plaintext, pt, "chunk size {chunk} must round-trip cleanly");
+    }
+}
+
+#[test]
+fn sm4_cbc_streaming_decrypt_rejects_truncated() {
+    let key = [0u8; 16];
+    let iv = [0u8; 16];
+    // 7 bytes of "ciphertext" — not a multiple of 16. Finalize MUST
+    // reject (single GMCRYPTO_ERR, no plaintext leak).
+    let bogus_ct = [0x00u8; 7];
+    let res = ffi_stream_decrypt(&key, &iv, &bogus_ct, 7);
+    assert!(res.is_none(), "truncated input must collapse to None");
+}
+
+#[test]
+fn sm4_cbc_streaming_decrypt_rejects_bad_padding() {
+    let key = [0x55u8; 16];
+    let iv = [0x66u8; 16];
+    // Construct a valid 32-byte ciphertext, then flip the last byte
+    // (corrupts the PKCS#7 padding-strip's pad-len byte).
+    let pt = b"sixteen-bytes ok";
+    let mut ct = gmcrypto_core::sm4::mode_cbc::encrypt(&key, &iv, pt);
+    let last = ct.len() - 1;
+    ct[last] ^= 0x80;
+    let res = ffi_stream_decrypt(&key, &iv, &ct, 16);
+    assert!(res.is_none(), "bad padding must collapse to None");
+}
+
+#[test]
+fn sm4_cbc_streaming_free_null_is_noop() {
+    // Both free fns accept NULL — must not crash.
+    unsafe { gmcrypto_sm4_cbc_encryptor_free(ptr::null_mut()) };
+    unsafe { gmcrypto_sm4_cbc_decryptor_free(ptr::null_mut()) };
 }
 
 // ============================================================
