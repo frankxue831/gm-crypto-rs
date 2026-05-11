@@ -24,5 +24,14 @@ pub mod mode_cbc;
 #[cfg(feature = "sm4-bitsliced")]
 pub(crate) mod sbox_bitsliced;
 
+// v0.5 W4 — Multi-block SIMD-packed bitsliced SM4 S-box behind the
+// `sm4-bitsliced-simd` feature flag (Q5.10–Q5.15 of
+// docs/v0.5-scope.md). Phase 1 ships scaffolding only — the module
+// delegates transparently to `sbox_bitsliced` so the cfg-dispatch
+// path, dudect target, and CI matrix entry land before the AVX2
+// (phase 2) / NEON (phase 3) intrinsic implementations.
+#[cfg(feature = "sm4-bitsliced-simd")]
+pub(crate) mod sbox_bitsliced_simd;
+
 pub use cbc_streaming::{Sm4CbcDecryptor, Sm4CbcEncryptor};
 pub use cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};

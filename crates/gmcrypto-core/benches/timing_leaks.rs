@@ -446,6 +446,49 @@ fn ct_sm4_encrypt_block(runner: &mut CtRunner, rng: &mut BenchRng) {
     }
 }
 
+/// SM4 encrypt-block diagnostic — SIMD-packed bitsliced path (v0.5 W4).
+///
+/// Cfg-gated under `feature = "sm4-bitsliced-simd"`. Phase 1
+/// transparently delegates to the v0.4 single-block bitslice, so the
+/// measured byte sequence is identical to `ct_sm4_encrypt_block` under
+/// `--features sm4-bitsliced`. Phase 2 swaps in AVX2 8-way intrinsics
+/// (runtime detect; silent fallback to single-block on non-AVX2 CPUs);
+/// phase 3 adds NEON 4-way + `Sm4CbcDecryptor` SIMD fanout. The gate
+/// stays at `|tau| < 0.20` across all three phases (Q5.14 of
+/// docs/v0.5-scope.md).
+///
+/// The target is provisioned in phase 1 so that the CI matrix entry,
+/// gate threshold, and 100K-sample nightly-budget timing data have a
+/// landing pad before the SIMD body lands. The bench function and its
+/// `BenchMetadata` entry only compile when the feature is enabled, so
+/// there's no overhead on the default-features / `sm4-bitsliced` build
+/// paths.
+#[cfg(feature = "sm4-bitsliced-simd")]
+fn ct_sm4_encrypt_block_bitsliced_simd(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let key_left: [u8; 16] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
+        0x10,
+    ];
+    let key_right: [u8; 16] = [
+        0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
+        0xef,
+    ];
+    let plaintext: [u8; 16] = [0u8; 16];
+    for _ in 0..sample_count() {
+        let (class, key) = if rng.random::<bool>() {
+            (Class::Left, &key_left)
+        } else {
+            (Class::Right, &key_right)
+        };
+        runner.run_one(class, || {
+            let cipher = Sm4Cipher::new(key);
+            let mut block = plaintext;
+            cipher.encrypt_block(&mut block);
+            block
+        });
+    }
+}
+
 /// HMAC-SM3 diagnostic. Class-split by key bytes; fixed message.
 /// HMAC moves the secret key into both inner and outer SM3 hash
 /// invocations (`K' XOR ipad` and `K' XOR opad`), so a key-dependent
@@ -555,6 +598,7 @@ fn ct_pkcs8_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// from argv. `cargo bench` injects `--bench` as the first arg by libtest
 /// convention; dudect-bencher's clap parser doesn't recognize it and would
 /// error out.
+#[allow(clippy::too_many_lines)] // bench registry is declarative; splitting hurts clarity
 fn main() {
     // Drop libtest-convention args that dudect-bencher doesn't understand.
     // `--bench` is the only one cargo currently injects, but include the
@@ -591,7 +635,8 @@ fn main() {
         }
     }
 
-    let benches = vec![
+    #[allow(unused_mut)] // mutated only under feature = "sm4-bitsliced-simd"
+    let mut benches = vec![
         BenchMetadata {
             name: BenchName("negative_control"),
             seed: None,
@@ -653,6 +698,18 @@ fn main() {
             benchfn: ct_pkcs8_decrypt,
         },
     ];
+
+    // v0.5 W4 — append the SIMD-packed-bitsliced target only when the
+    // feature is on. Phase 1 measures the same byte sequence as
+    // `ct_sm4_encrypt_block` under `sm4-bitsliced`; phase 2 / phase 3
+    // swap the inner body. The gate stays at `|tau| < 0.20` across
+    // all three phases (Q5.14).
+    #[cfg(feature = "sm4-bitsliced-simd")]
+    benches.push(BenchMetadata {
+        name: BenchName("ct_sm4_encrypt_block_bitsliced_simd"),
+        seed: None,
+        benchfn: ct_sm4_encrypt_block_bitsliced_simd,
+    });
 
     let opts = BenchOpts {
         continuous,

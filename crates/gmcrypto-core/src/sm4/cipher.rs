@@ -347,7 +347,12 @@ fn sbox_ct(x: u8) -> u8 {
 /// Default-features path uses the linear-scan [`sbox_ct`]. Under
 /// `--features sm4-bitsliced` (v0.4 W3) this dispatches to the
 /// table-less Itoh-Tsujii bitsliced S-box in
-/// [`crate::sm4::sbox_bitsliced`].
+/// [`crate::sm4::sbox_bitsliced`]. Under
+/// `--features sm4-bitsliced-simd` (v0.5 W4) it further dispatches to
+/// [`crate::sm4::sbox_bitsliced_simd`] — in phase 1 a transparent
+/// delegate to the single-block bitslice (byte-identical output);
+/// phase 2 / phase 3 swap in AVX2 / NEON intrinsics behind the same
+/// path.
 // Under `sm4-bitsliced` the bitsliced S-box is `const fn`, which
 // would let `tau` be const too — but the default linear-scan path
 // uses runtime `subtle` ops that aren't const-eligible. Suppress the
@@ -363,12 +368,22 @@ fn tau(a: u32) -> u32 {
         sbox_ct(a_bytes[2]),
         sbox_ct(a_bytes[3]),
     ];
-    #[cfg(feature = "sm4-bitsliced")]
+    // `sm4-bitsliced-simd` implies `sm4-bitsliced` per Cargo.toml's
+    // feature-dependency declaration. The dispatch ordering ensures
+    // the SIMD path wins when both are enabled.
+    #[cfg(all(feature = "sm4-bitsliced", not(feature = "sm4-bitsliced-simd")))]
     let b = [
         crate::sm4::sbox_bitsliced::sbox(a_bytes[0]),
         crate::sm4::sbox_bitsliced::sbox(a_bytes[1]),
         crate::sm4::sbox_bitsliced::sbox(a_bytes[2]),
         crate::sm4::sbox_bitsliced::sbox(a_bytes[3]),
+    ];
+    #[cfg(feature = "sm4-bitsliced-simd")]
+    let b = [
+        crate::sm4::sbox_bitsliced_simd::sbox(a_bytes[0]),
+        crate::sm4::sbox_bitsliced_simd::sbox(a_bytes[1]),
+        crate::sm4::sbox_bitsliced_simd::sbox(a_bytes[2]),
+        crate::sm4::sbox_bitsliced_simd::sbox(a_bytes[3]),
     ];
     u32::from_be_bytes(b)
 }

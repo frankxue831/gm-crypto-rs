@@ -3,6 +3,38 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — v0.5 development on `main`
+
+### Added
+
+- **v0.5 W4 phase 1** — `sm4-bitsliced-simd` opt-in feature flag
+  scaffolding (Q5.10–Q5.15 in `docs/v0.5-scope.md`). Adds the new
+  module `gmcrypto_core::sm4::sbox_bitsliced_simd` and wires it into
+  `Sm4Cipher`'s `tau` dispatch under
+  `cfg(feature = "sm4-bitsliced-simd")`. Phase 1 transparently
+  delegates to the v0.4 single-block bitslice
+  (`sm4::sbox_bitsliced::sbox`) — byte-identical output, identical
+  timing profile. **No SIMD intrinsics in phase 1.** Phase 2 (W4
+  phase-2 PR) replaces the inner body with AVX2 8-way bitsliced
+  intrinsics on `x86_64` via the `safe_arch` crate (runtime CPU
+  detection; silent fallback to single-block on non-AVX2 CPUs per
+  Q5.13). Phase 3 adds NEON 4-way on `aarch64` and integrates the
+  SIMD fast path into `Sm4CbcDecryptor` (Q5.10: CBC encryption
+  stays single-block because of block-chain serialization).
+  The feature-flag name is stable across all three phases; callers
+  enabling `sm4-bitsliced-simd` in v0.5.0 transparently pick up the
+  AVX2 / NEON fast paths as v0.5.x patch releases land. Default-off
+  (Q5.15). Enabling `sm4-bitsliced-simd` also enables `sm4-bitsliced`.
+- **dudect harness** — new target `ct_sm4_encrypt_block_bitsliced_simd`
+  cfg-gated under `feature = "sm4-bitsliced-simd"`. Gates at
+  `|tau| < 0.20` across all three phases of the W4 rollout (Q5.14).
+  Both PR-smoke (10K samples) and nightly (100K samples) workflows
+  add a third matrix entry under `features=sm4-bitsliced-simd`.
+- **CI workflows** — `cargo test`, `cargo clippy`, MSRV build, and
+  the dudect workflows all add `sm4-bitsliced-simd` to their feature
+  matrices. The `cargo deny` opt-in-features pass extends to the new
+  feature.
+
 ## [0.4.0] — 2026-05-12
 
 ### Added
