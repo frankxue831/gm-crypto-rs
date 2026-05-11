@@ -124,11 +124,19 @@ jobs:
         toolchain: [stable, "1.85"]
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust ${{ matrix.toolchain }} with wasm32 target
+      - name: Install Rust ${{ matrix.toolchain }}
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
           targets: wasm32-unknown-unknown
+      # `dtolnay/rust-toolchain@master` with `targets:` reliably adds
+      # the target for the *stable* toolchain but, in practice on
+      # GitHub-hosted Ubuntu runners, can land an MSRV toolchain
+      # (e.g. 1.85) without the target installed (E0463: "can't find
+      # crate for `core`"). Belt-and-braces: explicitly add the
+      # target against the matrix toolchain.
+      - name: Ensure wasm32 target is installed for ${{ matrix.toolchain }}
+        run: rustup target add wasm32-unknown-unknown --toolchain ${{ matrix.toolchain }}
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
@@ -138,7 +146,7 @@ jobs:
       # --no-default-features to mirror the no_std + alloc-only posture
       # wasm callers will use. The `std` feature is reserved for future
       # file-I/O helpers and is also smoke-built here.
-      - name: cargo build --target wasm32-unknown-unknown (no default features)
-        run: cargo build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features
-      - name: cargo build --target wasm32-unknown-unknown --features std
-        run: cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features std
+      - name: cargo +${{ matrix.toolchain }} build --target wasm32-unknown-unknown (no default features)
+        run: cargo +${{ matrix.toolchain }} build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features
+      - name: cargo +${{ matrix.toolchain }} build --target wasm32-unknown-unknown --features std
+        run: cargo +${{ matrix.toolchain }} build -p gmcrypto-core --target wasm32-unknown-unknown --features std
