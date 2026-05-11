@@ -71,7 +71,7 @@
 // compile. `gmcrypto-core` itself stays `unsafe_code = "forbid"`.
 #![allow(unsafe_code)]
 
-use core::ffi::{c_char, c_int};
+use core::ffi::{c_char, c_int, c_void};
 use core::ptr;
 use core::slice;
 
@@ -1232,6 +1232,92 @@ pub unsafe extern "C" fn gmcrypto_sm2_encrypt(
     })
 }
 
+// ============================================================
+// v0.5 W3 — Caller-supplied RNG callback adapter.
+//
+// C ABI:
+//   typedef int (*gmcrypto_rng_callback)(
+//       void *context,
+//       uint8_t *buf,
+//       size_t buf_len);
+//
+// Contract per Q5.6 / Q5.8 / Q5.9:
+//   - Returns 0 on success, non-zero on failure. On failure, the
+//     enclosing `gmcrypto_sm2_*_with_rng` call returns
+//     GMCRYPTO_FAILED.
+//   - The `context` pointer is opaque to gmcrypto-c — callers stash
+//     HSM session handles, SDF/SKF context, whatever is needed.
+//   - Callbacks MUST NOT call back into gmcrypto-c (no re-entrancy).
+//     The Rust `Rng` adapter does not hold any locks across the
+//     callback; re-entrancy is technically safe but policy is "don't"
+//     for clarity. No runtime check in v0.5; may add a debug-build
+//     assertion in v0.6.
+//   - The buffer MUST be fully filled with `buf_len` random bytes
+//     before the callback returns 0. Partial fills are caller error
+//     and will produce incorrect cryptographic output.
+// ============================================================
+
+/// C ABI function pointer for caller-supplied RNG. Returns `0` on
+/// success and non-zero on failure. See module-level docs for the
+/// full contract.
+pub type gmcrypto_rng_callback =
+    Option<unsafe extern "C" fn(context: *mut c_void, buf: *mut u8, buf_len: usize) -> c_int>;
+
+/// Tiny error type — only used internally for the `TryRng` impl;
+/// never crosses the FFI boundary. The callback's non-zero return is
+/// erased to a single `GMCRYPTO_FAILED` per the failure-mode invariant.
+#[derive(Debug)]
+struct CallbackRngError;
+
+impl core::fmt::Display for CallbackRngError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("callback returned non-zero")
+    }
+}
+
+impl core::error::Error for CallbackRngError {}
+
+/// Bridge from the C ABI function pointer + opaque context to
+/// `rand_core::TryRng + TryCryptoRng`. Wrapping in
+/// `rand_core::UnwrapErr` gives an infallible `Rng + CryptoRng` that
+/// panics on callback failure; the panic is caught by `ffi_guard` and
+/// converted to `GMCRYPTO_FAILED`.
+struct CallbackRng {
+    callback: unsafe extern "C" fn(context: *mut c_void, buf: *mut u8, buf_len: usize) -> c_int,
+    context: *mut c_void,
+}
+
+impl rand_core::TryRng for CallbackRng {
+    type Error = CallbackRngError;
+
+    fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
+        // SAFETY: caller of the FFI fn guarantees the callback is
+        // either null (rejected upstream) or a valid function pointer.
+        // `dst` is a valid mutable slice and `dst.len()` is its length.
+        let rc = unsafe { (self.callback)(self.context, dst.as_mut_ptr(), dst.len()) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(CallbackRngError)
+        }
+    }
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        let mut buf = [0u8; 4];
+        self.try_fill_bytes(&mut buf)?;
+        Ok(u32::from_le_bytes(buf))
+    }
+
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        let mut buf = [0u8; 8];
+        self.try_fill_bytes(&mut buf)?;
+        Ok(u64::from_le_bytes(buf))
+    }
+}
+
+// Trust the caller: their RNG is suitable for cryptographic use.
+impl rand_core::TryCryptoRng for CallbackRng {}
+
 /// SM2 private-key decrypt of a GM/T 0009-2012 DER ciphertext.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm2_decrypt(
@@ -1420,5 +1506,130 @@ pub unsafe extern "C" fn gmcrypto_sm2_decrypt_c1c2c3_legacy(
             Ok(pt) => unsafe { write_output(&pt, out_pt, out_capacity, out_actual_len) },
             Err(_) => GMCRYPTO_ERR,
         }
+    })
+}
+
+// ============================================================
+// SM2 — sign / encrypt with caller-supplied RNG (v0.5 W3).
+//
+// `_with_rng` variants of [`gmcrypto_sm2_sign`] and
+// [`gmcrypto_sm2_encrypt`] taking a `gmcrypto_rng_callback` function
+// pointer + opaque context. The existing `_sign` / `_encrypt` keep
+// using `getrandom::SysRng` internally — additive surface per Q5.7.
+//
+// All bytes drawn from the callback flow through the same constant-
+// time `sm2::sign_raw_with_id` / `sm2::encrypt` core. The fixed-K
+// masked-select retry contract on sign is preserved: a callback
+// returning the same bytes twice still gets masked-select retry on
+// both candidates, exactly the same as a real RNG.
+// ============================================================
+
+/// `_with_rng` variant of [`gmcrypto_sm2_sign`]. Identical contract
+/// except RNG bytes come from the caller's `rng_callback` rather
+/// than `getrandom::SysRng`.
+///
+/// Returns [`GMCRYPTO_OK`] on success; [`GMCRYPTO_ERR`] on any
+/// failure including:
+/// - null `key` pointer
+/// - null `rng_callback` pointer
+/// - callback returned non-zero on any draw
+/// - signing produced no valid signature within the retry budget
+///
+/// Per the failure-mode invariant, the caller cannot distinguish
+/// callback-error from signing-failure via return code or timing.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_sign_with_rng(
+    key: *const gmcrypto_sm2_privkey_t,
+    signer_id: *const u8,
+    signer_id_len: usize,
+    msg: *const u8,
+    msg_len: usize,
+    rng_callback: gmcrypto_rng_callback,
+    rng_context: *mut c_void,
+    out_der_sig: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if key.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let callback = match rng_callback {
+            Some(cb) => cb,
+            None => return GMCRYPTO_ERR,
+        };
+        let id: &[u8] = if signer_id_len == 0 {
+            DEFAULT_SIGNER_ID
+        } else {
+            match unsafe { try_slice(signer_id, signer_id_len) } {
+                Some(s) => s,
+                None => return GMCRYPTO_ERR,
+            }
+        };
+        let m = match unsafe { try_slice(msg, msg_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: key non-null per check above.
+        let k = unsafe { &*key };
+        let mut rng = rand_core::UnwrapErr(CallbackRng {
+            callback,
+            context: rng_context,
+        });
+        let sig = match sign_with_id(&k.inner, id, m, &mut rng) {
+            Ok(s) => s,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        unsafe { write_output(&sig, out_der_sig, out_capacity, out_actual_len) }
+    })
+}
+
+/// `_with_rng` variant of [`gmcrypto_sm2_encrypt`]. Identical
+/// contract except RNG bytes come from the caller's `rng_callback`
+/// rather than `getrandom::SysRng`.
+///
+/// Output is GM/T 0009-2012 DER (same as `gmcrypto_sm2_encrypt`).
+/// For raw byte-concat output (`C1 || C3 || C2`), use
+/// `gmcrypto_sm2_encrypt_c1c3c2` — v0.5 doesn't ship a
+/// `_c1c3c2_with_rng` combined variant; if needed, callers can
+/// re-encode the DER output via gmcrypto-core's
+/// `asn1::ciphertext::decode` + `raw_ciphertext::encode_c1c3c2`.
+///
+/// Same `GMCRYPTO_ERR`-on-any-failure posture as
+/// `gmcrypto_sm2_sign_with_rng`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_encrypt_with_rng(
+    key: *const gmcrypto_sm2_pubkey_t,
+    pt: *const u8,
+    pt_len: usize,
+    rng_callback: gmcrypto_rng_callback,
+    rng_context: *mut c_void,
+    out_der_ct: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if key.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let callback = match rng_callback {
+            Some(cb) => cb,
+            None => return GMCRYPTO_ERR,
+        };
+        let p = match unsafe { try_slice(pt, pt_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: key non-null per check above.
+        let k = unsafe { &*key };
+        let mut rng = rand_core::UnwrapErr(CallbackRng {
+            callback,
+            context: rng_context,
+        });
+        let ct = match sm2_encrypt(&k.inner, p, &mut rng) {
+            Ok(c) => c,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        unsafe { write_output(&ct, out_der_ct, out_capacity, out_actual_len) }
     })
 }

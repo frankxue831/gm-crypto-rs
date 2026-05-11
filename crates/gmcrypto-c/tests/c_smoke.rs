@@ -25,12 +25,13 @@ use gmcrypto_c::{
     GMCRYPTO_ERR, GMCRYPTO_OK, GMCRYPTO_SM2_SCALAR_SIZE, GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE,
     gmcrypto_hmac_sm3, gmcrypto_hmac_sm3_finalize, gmcrypto_hmac_sm3_new, gmcrypto_hmac_sm3_t,
     gmcrypto_hmac_sm3_update, gmcrypto_hmac_sm3_verify, gmcrypto_pbkdf2_hmac_sm3,
-    gmcrypto_sm2_decrypt, gmcrypto_sm2_decrypt_c1c2c3_legacy, gmcrypto_sm2_decrypt_c1c3c2,
-    gmcrypto_sm2_encrypt, gmcrypto_sm2_encrypt_c1c3c2, gmcrypto_sm2_privkey_free,
-    gmcrypto_sm2_privkey_from_pkcs8, gmcrypto_sm2_privkey_new, gmcrypto_sm2_privkey_t,
-    gmcrypto_sm2_privkey_to_pkcs8, gmcrypto_sm2_privkey_to_sec1_be, gmcrypto_sm2_pubkey_free,
-    gmcrypto_sm2_pubkey_new, gmcrypto_sm2_pubkey_t, gmcrypto_sm2_pubkey_to_sec1_uncompressed,
-    gmcrypto_sm2_sign, gmcrypto_sm2_verify, gmcrypto_sm3_finalize, gmcrypto_sm3_free,
+    gmcrypto_rng_callback, gmcrypto_sm2_decrypt, gmcrypto_sm2_decrypt_c1c2c3_legacy,
+    gmcrypto_sm2_decrypt_c1c3c2, gmcrypto_sm2_encrypt, gmcrypto_sm2_encrypt_c1c3c2,
+    gmcrypto_sm2_encrypt_with_rng, gmcrypto_sm2_privkey_free, gmcrypto_sm2_privkey_from_pkcs8,
+    gmcrypto_sm2_privkey_new, gmcrypto_sm2_privkey_t, gmcrypto_sm2_privkey_to_pkcs8,
+    gmcrypto_sm2_privkey_to_sec1_be, gmcrypto_sm2_pubkey_free, gmcrypto_sm2_pubkey_new,
+    gmcrypto_sm2_pubkey_t, gmcrypto_sm2_pubkey_to_sec1_uncompressed, gmcrypto_sm2_sign,
+    gmcrypto_sm2_sign_with_rng, gmcrypto_sm2_verify, gmcrypto_sm3_finalize, gmcrypto_sm3_free,
     gmcrypto_sm3_hash, gmcrypto_sm3_new, gmcrypto_sm3_t, gmcrypto_sm3_update,
     gmcrypto_sm4_cbc_decrypt, gmcrypto_sm4_cbc_decryptor_finalize, gmcrypto_sm4_cbc_decryptor_free,
     gmcrypto_sm4_cbc_decryptor_new, gmcrypto_sm4_cbc_decryptor_t,
@@ -851,6 +852,213 @@ fn sm2_decrypt_c1c3c2_rejects_truncated() {
         )
     };
     assert_eq!(r, GMCRYPTO_ERR, "too-short input must collapse to ERR");
+
+    unsafe {
+        gmcrypto_sm2_privkey_free(priv_ptr);
+        gmcrypto_sm2_pubkey_free(pub_ptr);
+    }
+}
+
+// ============================================================
+// SM2 RNG callback (v0.5 W3) — used in tests below.
+// ============================================================
+
+/// Simple deterministic byte-pool RNG: callbacks pull bytes from a
+/// Vec<u8> until exhausted, then fail. Used to drive sign-with-rng
+/// tests without depending on the system RNG.
+struct ByteRng {
+    pool: Vec<u8>,
+    cursor: usize,
+}
+
+/// Trampoline that interprets the opaque `context` as a `*mut ByteRng`.
+/// SAFETY: caller MUST pass a valid `*mut ByteRng` as context.
+unsafe extern "C" fn byte_rng_callback(
+    context: *mut core::ffi::c_void,
+    buf: *mut u8,
+    buf_len: usize,
+) -> core::ffi::c_int {
+    if context.is_null() || (buf.is_null() && buf_len > 0) {
+        return -1;
+    }
+    // SAFETY: caller asserts context is *mut ByteRng.
+    let rng = unsafe { &mut *(context.cast::<ByteRng>()) };
+    if rng.cursor + buf_len > rng.pool.len() {
+        return -1;
+    }
+    // SAFETY: buf is valid for buf_len bytes per the FFI contract.
+    let dst = unsafe { core::slice::from_raw_parts_mut(buf, buf_len) };
+    dst.copy_from_slice(&rng.pool[rng.cursor..rng.cursor + buf_len]);
+    rng.cursor += buf_len;
+    0
+}
+
+/// Trampoline that always fails (returns 1). Used to test the
+/// callback-error path.
+unsafe extern "C" fn always_fail_rng_callback(
+    _context: *mut core::ffi::c_void,
+    _buf: *mut u8,
+    _buf_len: usize,
+) -> core::ffi::c_int {
+    1
+}
+
+#[test]
+fn sm2_sign_with_rng_round_trip_via_ffi() {
+    let (priv_ptr, pub_ptr) = fresh_sm2_keys();
+    // ByteRng's pool is large enough to satisfy multiple draws across
+    // the sign retry budget (~2 retries × 32 bytes each, plus padding).
+    let mut rng = ByteRng {
+        pool: vec![0x42u8; 4096],
+        cursor: 0,
+    };
+    let msg = b"hello W3 RNG callback";
+    let mut sig = vec![0u8; 256];
+    let mut sig_len = 0usize;
+    let callback: gmcrypto_rng_callback = Some(byte_rng_callback);
+    let r = unsafe {
+        gmcrypto_sm2_sign_with_rng(
+            priv_ptr,
+            ptr::null(),
+            0, // default signer id
+            msg.as_ptr(),
+            msg.len(),
+            callback,
+            (&raw mut rng).cast::<core::ffi::c_void>(),
+            sig.as_mut_ptr(),
+            sig.len(),
+            &mut sig_len,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert!(rng.cursor > 0, "callback was called");
+    sig.truncate(sig_len);
+
+    // Verify with the public key — sign-with-rng must produce a
+    // valid signature against the regular verify path.
+    let v = unsafe {
+        gmcrypto_sm2_verify(
+            pub_ptr,
+            ptr::null(),
+            0,
+            msg.as_ptr(),
+            msg.len(),
+            sig.as_ptr(),
+            sig.len(),
+        )
+    };
+    assert_eq!(v, GMCRYPTO_OK, "sign-with-rng signature verifies");
+
+    unsafe {
+        gmcrypto_sm2_privkey_free(priv_ptr);
+        gmcrypto_sm2_pubkey_free(pub_ptr);
+    }
+}
+
+#[test]
+fn sm2_encrypt_with_rng_round_trip_via_ffi() {
+    let (priv_ptr, pub_ptr) = fresh_sm2_keys();
+    let mut rng = ByteRng {
+        pool: vec![0xa5u8; 4096],
+        cursor: 0,
+    };
+    let pt = b"hello SM2 encrypt with rng";
+    let mut ct = vec![0u8; 512];
+    let mut ct_len = 0usize;
+    let callback: gmcrypto_rng_callback = Some(byte_rng_callback);
+    let r = unsafe {
+        gmcrypto_sm2_encrypt_with_rng(
+            pub_ptr,
+            pt.as_ptr(),
+            pt.len(),
+            callback,
+            (&raw mut rng).cast::<core::ffi::c_void>(),
+            ct.as_mut_ptr(),
+            ct.len(),
+            &mut ct_len,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert!(rng.cursor > 0, "callback was called");
+    ct.truncate(ct_len);
+
+    // Round-trip through the regular decrypt path.
+    let mut pt_back = vec![0u8; 256];
+    let mut pt_len_back = 0usize;
+    let r = unsafe {
+        gmcrypto_sm2_decrypt(
+            priv_ptr,
+            ct.as_ptr(),
+            ct.len(),
+            pt_back.as_mut_ptr(),
+            pt_back.len(),
+            &mut pt_len_back,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    pt_back.truncate(pt_len_back);
+    assert_eq!(pt_back.as_slice(), pt.as_slice());
+
+    unsafe {
+        gmcrypto_sm2_privkey_free(priv_ptr);
+        gmcrypto_sm2_pubkey_free(pub_ptr);
+    }
+}
+
+#[test]
+fn sm2_sign_with_rng_callback_failure_returns_err() {
+    let (priv_ptr, pub_ptr) = fresh_sm2_keys();
+    let msg = b"x";
+    let mut sig = vec![0u8; 256];
+    let mut sig_len = 0usize;
+    let callback: gmcrypto_rng_callback = Some(always_fail_rng_callback);
+    let r = unsafe {
+        gmcrypto_sm2_sign_with_rng(
+            priv_ptr,
+            ptr::null(),
+            0,
+            msg.as_ptr(),
+            msg.len(),
+            callback,
+            ptr::null_mut(),
+            sig.as_mut_ptr(),
+            sig.len(),
+            &mut sig_len,
+        )
+    };
+    assert_eq!(
+        r, GMCRYPTO_ERR,
+        "callback always-failing must surface as GMCRYPTO_ERR"
+    );
+
+    unsafe {
+        gmcrypto_sm2_privkey_free(priv_ptr);
+        gmcrypto_sm2_pubkey_free(pub_ptr);
+    }
+}
+
+#[test]
+fn sm2_sign_with_rng_null_callback_rejected() {
+    let (priv_ptr, pub_ptr) = fresh_sm2_keys();
+    let msg = b"x";
+    let mut sig = vec![0u8; 256];
+    let mut sig_len = 0usize;
+    let callback: gmcrypto_rng_callback = None;
+    let r = unsafe {
+        gmcrypto_sm2_sign_with_rng(
+            priv_ptr,
+            ptr::null(),
+            0,
+            msg.as_ptr(),
+            msg.len(),
+            callback,
+            ptr::null_mut(),
+            sig.as_mut_ptr(),
+            sig.len(),
+            &mut sig_len,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_ERR, "null callback rejected up-front");
 
     unsafe {
         gmcrypto_sm2_privkey_free(priv_ptr);
