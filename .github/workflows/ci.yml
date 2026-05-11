@@ -54,3 +54,32 @@ jobs:
         run: cargo install --locked cargo-deny
       - name: Run cargo-deny (excluding dev-deps)
         run: cargo deny check --exclude-dev
+
+  wasm32:
+    name: build wasm32-unknown-unknown (Rust ${{ matrix.toolchain }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, "1.85"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust ${{ matrix.toolchain }} with wasm32 target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          targets: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm32-${{ matrix.toolchain }}
+      # v0.4 W1 — caller-supplied RNG only; the core crate does NOT pull
+      # getrandom's wasm_js backend into its default dep graph. Build with
+      # --no-default-features to mirror the no_std + alloc-only posture
+      # wasm callers will use. The `std` feature is reserved for future
+      # file-I/O helpers and is also smoke-built here.
+      - name: cargo build --target wasm32-unknown-unknown (no default features)
+        run: cargo build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features
+      - name: cargo build --target wasm32-unknown-unknown --features std
+        run: cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features std
