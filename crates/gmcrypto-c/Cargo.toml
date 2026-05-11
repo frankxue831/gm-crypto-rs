@@ -1,0 +1,76 @@
+[package]
+name = "gmcrypto-c"
+description = "C ABI for gmcrypto-core — cdylib + staticlib exposing SM2/SM3/SM4/HMAC/PBKDF2 to C / C++ / Python / Go / Zig callers via opaque handles"
+keywords = ["sm2", "sm3", "sm4", "ffi", "c-abi"]
+categories = ["cryptography", "api-bindings"]
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+# v0.4 W4 — the C ABI is a thin shim over gmcrypto-core. The FFI crate
+# is `std`-OK (it's the language-binding layer, not the no_std crypto
+# primitives). RNG is sourced via `getrandom::SysRng` internally
+# per Q4.18; the C surface does not pass an RNG callback in v0.4.
+gmcrypto-core = { path = "../gmcrypto-core", version = "0.3" }
+getrandom.workspace = true
+rand_core.workspace = true
+
+[dev-dependencies]
+hex-literal.workspace = true
+# Needed only by the c_smoke integration test to construct a known
+# SM2 scalar before round-tripping it through the FFI.
+crypto-bigint.workspace = true
+
+[build-dependencies]
+# v0.4 W4 / Q4.12 — cbindgen is a build-time-only dep, gated on the
+# `regen-header` feature. Default builds DO NOT run cbindgen; they
+# use the committed `include/gmcrypto.h`. CI verifies the committed
+# header matches a fresh cbindgen run via `git diff --exit-code`.
+cbindgen = { version = "0.29", optional = true, default-features = false }
+
+[features]
+default = []
+# Opt-in: regenerate `include/gmcrypto.h` via cbindgen on build.
+# Default builds skip cbindgen entirely (saves ~5s per build and
+# avoids the cbindgen dependency on every consumer's machine).
+regen-header = ["dep:cbindgen"]
+
+[lints.rust]
+# v0.4 W4 / Q4.7 — `unsafe_code = "forbid"` is impossible on an FFI
+# crate (slice reconstruction, `Box::from_raw`, `#[unsafe(no_mangle)]`
+# all require `unsafe`). Every `unsafe` block in `src/lib.rs` carries
+# a `// SAFETY:` comment naming the caller-side preconditions.
+# gmcrypto-core itself stays `unsafe_code = "forbid"` workspace-wide.
+unsafe_code = "warn"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+# FFI surfaces use many u8 pointers / size_t pairs; the lint
+# generates noise without flagging real issues.
+similar_names = "allow"
+# Pedantic/nursery lints that conflict with the FFI shim shape:
+# every entry point follows the same null-check + slice-reconstruct
+# + delegate + write_output pattern. Refactoring each `match` into
+# `.map_or` or each `if let` into `let-else` would obscure the
+# uniform shape without changing semantics.
+option_if_let_else = "allow"
+manual_let_else = "allow"
+missing_const_for_fn = "allow"
+unnecessary_box_returns = "allow"
+# cbindgen recognizes byte-literal `CStr::from_bytes_with_nul`; the
+# `c"..."` literal form is post-MSRV 1.85.
+manual_c_str_literals = "allow"
+# Long doc comments on the FFI module + per-entry-point bullets.
+doc_markdown = "allow"
+too_long_first_doc_paragraph = "allow"

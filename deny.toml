@@ -22,7 +22,18 @@ confidence-threshold = 0.8
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Allow workspace-internal `{ path = "..." }` deps without a `version`
+# field; the workspace internal-path graph is naturally wildcard.
+allow-wildcard-paths = true
 highlight = "all"
+# v0.4 W4 — `cbindgen` is a build-time-only optional dep of
+# `gmcrypto-c` (gated on the `regen-header` feature). Its transitive
+# tree (~30 crates: syn, serde, toml, etc.) is irrelevant to runtime
+# consumers and would bloat this allow-list with crates that never
+# ship in a release binary. Skip its subtree entirely.
+skip-tree = [
+    { name = "cbindgen" },
+]
 
 # Allowed normal+build deps in gmcrypto-core's tree. Anything else fails CI.
 allow = [
@@ -57,6 +68,23 @@ allow = [
     # Build-time helper of generic-array (the digest/cipher path picks
     # it up in addition to crypto-bigint's tree).
     { name = "version_check" },
+
+    # v0.4 W4 — `gmcrypto-c` workspace member (FFI shim crate).
+    # The cdylib + staticlib depend on gmcrypto-core + getrandom
+    # + rand_core. getrandom (a dev-dep of gmcrypto-core) becomes a
+    # normal dep of gmcrypto-c for its sign / encrypt RNG sourcing
+    # path, pulling in its platform-specific transitive tree
+    # (cfg-if, libc on Linux/macOS, r-efi / wasip2 / wasip3 /
+    # wit-bindgen on UEFI / WASI targets — getrandom's default
+    # `sys_rng` feature decides at compile-time).
+    { name = "gmcrypto-c" },
+    { name = "getrandom" },
+    { name = "cfg-if" },
+    { name = "libc" },
+    { name = "r-efi" },
+    { name = "wasip2" },
+    { name = "wasip3" },
+    { name = "wit-bindgen" },
 
     # Transitive deps of crypto-bigint.
     { name = "cpubits" },

@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/gmcrypto-core"]
+# v0.4 W4 — `gmcrypto-c` is the C ABI shim (cdylib + staticlib +
+# cbindgen header). Per Q4.15 in docs/v0.4-scope.md, it is a
+# workspace member but NOT in `default-members` — most contributors
+# work on `gmcrypto-core`, so building the cdylib on every workspace
+# `cargo build` would be surprising. CI explicitly `-p gmcrypto-c`
+# for the FFI build / header-drift jobs.
+members = ["crates/gmcrypto-core", "crates/gmcrypto-c"]
 default-members = ["crates/gmcrypto-core"]
 
 [workspace.package]
