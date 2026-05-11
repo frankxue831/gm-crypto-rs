@@ -210,6 +210,54 @@ fn compress(state: &mut [u32; 8], block: &[u8; BLOCK_SIZE]) {
     state[7] ^= h;
 }
 
+#[cfg(feature = "digest-traits")]
+mod digest_impl {
+    //! `digest::Digest`-compatible impl for [`Sm3`] (v0.4 W2; Q4.3).
+    //!
+    //! Behind the `digest-traits` feature flag. Default-features build
+    //! does not pull `digest` into the dep graph.
+
+    use super::{DIGEST_SIZE, Sm3};
+    use digest::{
+        FixedOutput, FixedOutputReset, HashMarker, Output, OutputSizeUser, Reset, Update,
+        consts::U32,
+    };
+
+    impl HashMarker for Sm3 {}
+
+    impl OutputSizeUser for Sm3 {
+        type OutputSize = U32;
+    }
+
+    impl Update for Sm3 {
+        fn update(&mut self, data: &[u8]) {
+            Self::update(self, data);
+        }
+    }
+
+    impl FixedOutput for Sm3 {
+        fn finalize_into(self, out: &mut Output<Self>) {
+            let digest: [u8; DIGEST_SIZE] = Self::finalize(self);
+            out.copy_from_slice(&digest);
+        }
+    }
+
+    impl Reset for Sm3 {
+        fn reset(&mut self) {
+            *self = Self::new();
+        }
+    }
+
+    impl FixedOutputReset for Sm3 {
+        fn finalize_into_reset(&mut self, out: &mut Output<Self>) {
+            let mut taken = Self::new();
+            core::mem::swap(self, &mut taken);
+            let digest: [u8; DIGEST_SIZE] = Self::finalize(taken);
+            out.copy_from_slice(&digest);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
