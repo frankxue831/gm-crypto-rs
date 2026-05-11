@@ -481,4 +481,73 @@ int gmcrypto_sm2_decrypt(const gmcrypto_sm2_privkey_t *key,
                          uintptr_t *out_actual_len)
 ;
 
+/*
+ SM2 public-key encrypt; output in the modern raw byte-concat
+ `C1 || C3 || C2` format. `C1` is the 65-byte SEC1-uncompressed
+ point (`0x04 || X || Y`); `C3` is the 32-byte SM3 MAC; `C2` is
+ `msg_len` bytes of XOR-ed ciphertext. Output length is exactly
+ `65 + 32 + msg_len`.
+
+ RNG is sourced from `getrandom::SysRng` internally (same as
+ [`gmcrypto_sm2_encrypt`]). The W3 RNG-callback variant lands as a
+ separate workstream.
+
+ Same failure-mode posture as [`gmcrypto_sm2_encrypt`]: single
+ [`GMCRYPTO_ERR`] on any failure mode (identity public key, KDF-
+ zero retries exhausted).
+ */
+
+int gmcrypto_sm2_encrypt_c1c3c2(const gmcrypto_sm2_pubkey_t *key,
+                                const uint8_t *pt,
+                                uintptr_t pt_len,
+                                uint8_t *out_raw_ct,
+                                uintptr_t out_capacity,
+                                uintptr_t *out_actual_len)
+;
+
+/*
+ SM2 private-key decrypt of a modern raw byte-concat
+ `C1 || C3 || C2` ciphertext. Input length must be at least
+ `65 + 32 + 1 = 98` bytes (C1 + C3 + at least one C2 byte).
+
+ Same failure-mode posture as [`gmcrypto_sm2_decrypt`]: single
+ [`GMCRYPTO_ERR`] on any failure mode (malformed input, off-curve
+ C1, identity C1, MAC mismatch, or KDF-zero detection). Caller
+ cannot distinguish wrong-key from corrupt-ciphertext via timing
+ or return code.
+ */
+
+int gmcrypto_sm2_decrypt_c1c3c2(const gmcrypto_sm2_privkey_t *key,
+                                const uint8_t *raw_ct,
+                                uintptr_t raw_ct_len,
+                                uint8_t *out_pt,
+                                uintptr_t out_capacity,
+                                uintptr_t *out_actual_len)
+;
+
+/*
+ SM2 private-key decrypt of a **legacy** raw byte-concat
+ `C1 || C2 || C3` ciphertext. Decrypt-only — there is no emit path
+ for the legacy ordering, and there will not be one in any v0.5+
+ version (per `CLAUDE.md` "Don't" entry).
+
+ The two raw byte-concat orderings (`C1 || C3 || C2` modern vs
+ `C1 || C2 || C3` legacy) are NOT auto-detected. The caller MUST
+ know which format their wire-data follows. Mis-feeding modern
+ ciphertext to this entry point or vice-versa will fail at the MAC
+ check (`GMCRYPTO_ERR`); the failure-mode invariant precludes the
+ caller from distinguishing wrong-format from wrong-key.
+
+ Same failure-mode posture as [`gmcrypto_sm2_decrypt_c1c3c2`]:
+ single [`GMCRYPTO_ERR`] on any failure.
+ */
+
+int gmcrypto_sm2_decrypt_c1c2c3_legacy(const gmcrypto_sm2_privkey_t *key,
+                                       const uint8_t *raw_ct,
+                                       uintptr_t raw_ct_len,
+                                       uint8_t *out_pt,
+                                       uintptr_t out_capacity,
+                                       uintptr_t *out_actual_len)
+;
+
 #endif  /* GMCRYPTO_H_ */
