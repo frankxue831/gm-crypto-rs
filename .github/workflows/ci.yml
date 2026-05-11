@@ -7,6 +7,10 @@ on:
   pull_request:
     branches: [main]
     paths-ignore: ['**/*.md', 'LICENSE', '.gitignore']
+  # Manual fire — useful for stacked PRs (where the PR base isn't `main`,
+  # so the `pull_request: branches: [main]` filter wouldn't fire) and
+  # for re-running CI on a branch without an empty-commit push.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
