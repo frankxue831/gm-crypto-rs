@@ -18,19 +18,14 @@ env:
 
 jobs:
   build:
-    name: build & test (Rust ${{ matrix.toolchain }})
+    name: build & test (Rust stable)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        toolchain: [stable, "1.85"]   # latest stable + MSRV
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust ${{ matrix.toolchain }}
-        uses: dtolnay/rust-toolchain@master
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ matrix.toolchain }}
           components: rustfmt, clippy
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -59,6 +54,31 @@ jobs:
         run: cargo clippy -p gmcrypto-core --features digest-traits,cipher-traits --all-targets -- -D warnings
       - name: cargo clippy --features sm4-bitsliced
         run: cargo clippy -p gmcrypto-core --features sm4-bitsliced --all-targets -- -D warnings
+
+  msrv:
+    # MSRV-only build check. Behaviour is rust-version-independent, so
+    # we don't repeat `cargo test` here — that's the `build` job's role
+    # on stable. This row exists solely to prove the crate (and its
+    # opt-in feature combos) still compile on the pinned MSRV. Saves
+    # ~30s per CI run vs. running the full test+clippy matrix twice.
+    # See discussion in rust-lang/api-guidelines#231.
+    name: build (Rust 1.85 MSRV)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust 1.85
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.85"
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: msrv-1.85
+      - name: cargo build (all targets)
+        run: cargo build --workspace --all-targets
+      - name: cargo build with opt-in features
+        run: cargo build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced --all-targets
 
   cabi:
     name: gmcrypto-c FFI build + header drift
@@ -96,8 +116,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # Prebuilt cargo-deny binary from GitHub Releases via the curated
+      # taiki-e/install-action tool list. Replaces `cargo install --locked
+      # cargo-deny`, which compiled from source on every CI run (~3 min).
       - name: Install cargo-deny
-        run: cargo install --locked cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.19
       # Default deny pass — gates the zero-runtime-deps surface of the
       # default-features build.
       - name: Run cargo-deny (default features, excluding dev-deps)
