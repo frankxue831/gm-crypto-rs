@@ -22,23 +22,37 @@ env:
 
 jobs:
   smoke:
-    name: timing-leak smoke (10K samples, |tau|<0.20)
+    name: timing-leak smoke (10K samples, |tau|<0.20, features=${{ matrix.features }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # v0.4 W3 — second pass under `sm4-bitsliced` exercises the
+        # bitsliced S-box gate sequence. `ct_sm4_encrypt_block` and
+        # `ct_sm4_key_schedule` swap to the bitsliced path under this
+        # feature; the same `|tau| < 0.20` gate applies.
+        features:
+          - "default"
+          - "sm4-bitsliced"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          # Share cache with the main CI build job
-          shared-key: gmcrypto-stable
+          shared-key: gmcrypto-stable-${{ matrix.features }}
 
       - name: Run dudect harness (smoke budget)
         env:
           DUDECT_SAMPLES: "10000"
+          MATRIX_FEATURES: ${{ matrix.features }}
         run: |
           set -euxo pipefail
-          cargo bench --bench timing_leaks 2>&1 | tee dudect.log
+          if [ "$MATRIX_FEATURES" = "default" ]; then
+            cargo bench --bench timing_leaks 2>&1 | tee dudect.log
+          else
+            cargo bench --bench timing_leaks --features "$MATRIX_FEATURES" 2>&1 | tee dudect.log
+          fi
 
       - name: Parse and gate
         run: |
@@ -90,6 +104,10 @@ jobs:
               # fail at the MAC check via identical control flow; only
               # d_B's bits drive any timing differential.
               "ct_sm2_decrypt": 0.20,
+              # v0.3 W2 — encrypted-PKCS#8 decrypt, class-split by
+              # password bytes. Both classes' blobs are valid for their
+              # password so both succeed via identical control flow.
+              "ct_pkcs8_decrypt": 0.20,
           }
 
           fail = False
@@ -118,6 +136,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: dudect-pr-log
+          name: dudect-pr-log-${{ matrix.features }}
           path: dudect.log
           retention-days: 7

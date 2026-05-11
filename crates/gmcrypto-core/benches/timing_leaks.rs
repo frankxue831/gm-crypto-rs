@@ -414,6 +414,13 @@ fn ct_sm4_key_schedule(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// encrypt one block" under a single window; a leak in either the key
 /// schedule or the round function fires this target. Plaintext is
 /// fixed; class split is on the master key bytes.
+///
+/// Under `--features sm4-bitsliced` (v0.4 W3) this target measures
+/// the bitsliced S-box path; the default-features build measures the
+/// linear-scan S-box. Per Q4.10, both paths gate at `|tau| < 0.20`.
+/// The bitsliced path is constant-time-by-construction (pure-XOR /
+/// AND gates over public-bit positions); this target is the dudect
+/// regression gate on that property.
 fn ct_sm4_encrypt_block(runner: &mut CtRunner, rng: &mut BenchRng) {
     let key_left: [u8; 16] = [
         0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,

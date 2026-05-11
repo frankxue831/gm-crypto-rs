@@ -17,5 +17,12 @@ pub mod cbc_streaming;
 pub mod cipher;
 pub mod mode_cbc;
 
+// v0.4 W3 — Bitsliced (table-less, gate-only) SM4 S-box behind the
+// `sm4-bitsliced` feature flag (Q4.9 / Q4.10 / Q4.11 of
+// docs/v0.4-scope.md). The module is `pub(crate)` so `cipher.rs`'s
+// `tau` can swap to it when the feature is on; not in the public API.
+#[cfg(feature = "sm4-bitsliced")]
+pub(crate) mod sbox_bitsliced;
+
 pub use cbc_streaming::{Sm4CbcDecryptor, Sm4CbcEncryptor};
 pub use cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};

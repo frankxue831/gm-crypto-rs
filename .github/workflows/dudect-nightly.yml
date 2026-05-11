@@ -24,22 +24,36 @@ env:
 
 jobs:
   full:
-    name: timing-leak nightly (100K samples, |tau|<0.20)
+    name: timing-leak nightly (100K samples, |tau|<0.20, features=${{ matrix.features }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # v0.4 W3 — second matrix entry under `sm4-bitsliced` exercises
+        # the bitsliced S-box gate sequence. Same `|tau| < 0.20` gate
+        # applies to both configurations.
+        features:
+          - "default"
+          - "sm4-bitsliced"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: gmcrypto-stable
+          shared-key: gmcrypto-stable-${{ matrix.features }}
 
       - name: Run dudect harness (nightly budget)
         env:
           DUDECT_SAMPLES: "100000"
+          MATRIX_FEATURES: ${{ matrix.features }}
         run: |
           set -euxo pipefail
-          cargo bench --bench timing_leaks 2>&1 | tee dudect-nightly.log
+          if [ "$MATRIX_FEATURES" = "default" ]; then
+            cargo bench --bench timing_leaks 2>&1 | tee dudect-nightly.log
+          else
+            cargo bench --bench timing_leaks --features "$MATRIX_FEATURES" 2>&1 | tee dudect-nightly.log
+          fi
 
       - name: Parse and gate
         run: |
@@ -85,6 +99,10 @@ jobs:
               # fail at the MAC check via identical control flow; only
               # d_B's bits drive any timing differential.
               "ct_sm2_decrypt": 0.20,
+              # v0.3 W2 — encrypted-PKCS#8 decrypt, class-split by
+              # password bytes. Both classes' blobs are valid for their
+              # password so both succeed via identical control flow.
+              "ct_pkcs8_decrypt": 0.20,
           }
 
           fail = False
@@ -113,6 +131,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dudect-nightly-log
+          name: dudect-nightly-log-${{ matrix.features }}
           path: dudect-nightly.log
           retention-days: 30
