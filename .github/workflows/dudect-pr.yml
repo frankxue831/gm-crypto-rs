@@ -32,9 +32,16 @@ jobs:
         # bitsliced S-box gate sequence. `ct_sm4_encrypt_block` and
         # `ct_sm4_key_schedule` swap to the bitsliced path under this
         # feature; the same `|tau| < 0.20` gate applies.
+        # v0.5 W4 (phase 1) — third pass under `sm4-bitsliced-simd`
+        # exercises the SIMD-packed-bitsliced dispatch path. Phase 1
+        # transparently delegates to the single-block bitslice
+        # (byte-identical output); phase 2 / phase 3 swap in AVX2 /
+        # NEON intrinsics. The new `ct_sm4_encrypt_block_bitsliced_simd`
+        # target is feature-gated and gates at `|tau| < 0.20`.
         features:
           - "default"
           - "sm4-bitsliced"
+          - "sm4-bitsliced-simd"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -126,6 +133,13 @@ jobs:
               # password so both succeed via identical control flow.
               "ct_pkcs8_decrypt": 0.20,
           }
+          # v0.5 W4 — extra target only present under
+          # `sm4-bitsliced-simd`. Phase 1 measures the same byte
+          # sequence as `ct_sm4_encrypt_block` (transparent delegate);
+          # the gate stays at 0.20 across the three-phase rollout.
+          import os
+          if os.environ.get("MATRIX_FEATURES") == "sm4-bitsliced-simd":
+              required_low["ct_sm4_encrypt_block_bitsliced_simd"] = 0.20
 
           fail = False
           for name, lower_bound in required_high.items():

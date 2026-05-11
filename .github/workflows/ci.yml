@@ -50,6 +50,14 @@ jobs:
       # in `sm4::sbox_bitsliced::tests::bitsliced_matches_table`.
       - name: cargo test --features sm4-bitsliced
         run: cargo test -p gmcrypto-core --features sm4-bitsliced
+      # v0.5 W4 (phase 1) — `sm4-bitsliced-simd` is the multi-block
+      # SIMD-packed dispatch path. Phase 1 transparently delegates to
+      # the single-block bitslice; phase 2 / phase 3 swap in AVX2 /
+      # NEON intrinsics. The exhaustive equivalence test in
+      # `sm4::sbox_bitsliced_simd::tests` guards byte-identical output
+      # across all phases.
+      - name: cargo test --features sm4-bitsliced-simd
+        run: cargo test -p gmcrypto-core --features sm4-bitsliced-simd
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
       - name: cargo clippy
@@ -58,6 +66,8 @@ jobs:
         run: cargo clippy -p gmcrypto-core --features digest-traits,cipher-traits --all-targets -- -D warnings
       - name: cargo clippy --features sm4-bitsliced
         run: cargo clippy -p gmcrypto-core --features sm4-bitsliced --all-targets -- -D warnings
+      - name: cargo clippy --features sm4-bitsliced-simd
+        run: cargo clippy -p gmcrypto-core --features sm4-bitsliced-simd --all-targets -- -D warnings
 
   msrv:
     # MSRV-only build check. Behaviour is rust-version-independent, so
@@ -82,7 +92,7 @@ jobs:
       - name: cargo build (all targets)
         run: cargo build --workspace --all-targets
       - name: cargo build with opt-in features
-        run: cargo build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced --all-targets
+        run: cargo build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd --all-targets
 
   cabi:
     name: gmcrypto-c FFI build + header drift
@@ -141,7 +151,7 @@ jobs:
       # in deny.toml). Uses --features on the workspace-default crate
       # (`gmcrypto-core`); `gmcrypto-c` has no runtime opt-in features.
       - name: Run cargo-deny (runtime opt-in features, excluding dev-deps)
-        run: cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced check --exclude-dev
+        run: cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd check --exclude-dev
 
   wasm32:
     name: build wasm32-unknown-unknown (Rust ${{ matrix.toolchain }})

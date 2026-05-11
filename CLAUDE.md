@@ -85,11 +85,15 @@ GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
 ## Dudect harness gate
 
 Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. **Twelve
-targets** (v0.3 added `ct_pkcs8_decrypt`; no new targets in v0.4).
-In v0.4 the PR-smoke and nightly workflows run the harness under a
-matrix over `features=[default, sm4-bitsliced]` so the
+targets at the default / `sm4-bitsliced` budget; thirteen under
+`sm4-bitsliced-simd`** (v0.3 added `ct_pkcs8_decrypt`; v0.5 W4 phase 1
+added `ct_sm4_encrypt_block_bitsliced_simd` cfg-gated on
+`sm4-bitsliced-simd`). The PR-smoke and nightly workflows run the
+harness under a matrix over
+`features=[default, sm4-bitsliced, sm4-bitsliced-simd]` so the
 `ct_sm4_key_schedule` and `ct_sm4_encrypt_block` targets are gated
-under both the default linear-scan and W3 bitsliced S-box paths:
+under both the default linear-scan and W3 bitsliced S-box paths,
+plus the v0.5 W4 SIMD-packed dispatch path:
 
 | Target | Gate | Meaning |
 |---|---|---|
@@ -105,6 +109,7 @@ under both the default linear-scan and W3 bitsliced S-box paths:
 | `ct_hmac_sm3` | `\|tau\| < 0.20` | HMAC-SM3 keyed MAC, class-split by master key (v0.2 W3). Structurally covers PBKDF2-HMAC-SM3's (v0.2 W4) inner PRF, the v0.3 W5 streaming `HmacSm3` (Q7.6 deliberately skipped a separate target), and the PBKDF2 sub-path of v0.3 W2's encrypted PKCS#8 path. |
 | `ct_sm2_decrypt` | `\|tau\| < 0.20` | SM2 decrypt, class-split by recipient `d_B`, fixed ciphertext encrypted to a third party so both classes fail at MAC via identical control flow (v0.2 Phase 3). |
 | `ct_pkcs8_decrypt` | `\|tau\| < 0.20` | Encrypted-PKCS#8 decrypt + parse, class-split by password bytes; both classes' blobs are valid for their class's password so both succeed via identical control flow (v0.3 W2). 10K-sample smoke: `\|tau\| ≈ 0.04`. |
+| `ct_sm4_encrypt_block_bitsliced_simd` | `\|tau\| < 0.20` (cfg-gated on `sm4-bitsliced-simd`) | SM4 "construct cipher + encrypt one block" timed under the SIMD-packed dispatch path (v0.5 W4). Phase 1 transparently delegates to the v0.4 single-block bitslice — byte-identical output, identical timing profile to `ct_sm4_encrypt_block` under `--features sm4-bitsliced`. Phase 2 swaps in AVX2 8-way intrinsics (runtime detect; silent fallback on non-AVX2 CPUs); phase 3 adds NEON 4-way. Same gate across all three phases. |
 
 Gate on **`|tau|`** (scale-free), not `|t|` (grows as `tau · sqrt(N)` so any
 fixed `|t|` threshold is budget-dependent). Same gate at every sample budget;
@@ -160,6 +165,7 @@ crates/gmcrypto-core/
     sm4/                    # v0.2 W1
       cipher.rs             # Sm4Cipher (block cipher) + subtle linear-scan S-box; v0.3 W5 impls in-crate BlockCipher trait; v0.4 W2 impls cipher::BlockEncrypt/BlockDecrypt under `cipher-traits`
       sbox_bitsliced.rs     # v0.4 W3 — bitsliced GF(2^8) Itoh-Tsujii inversion; opt-in via `sm4-bitsliced`; byte-identical to linear-scan
+      sbox_bitsliced_simd.rs # v0.5 W4 phase 1 — SIMD-packed dispatch path (scaffolding); opt-in via `sm4-bitsliced-simd`; phase 1 transparently delegates to sbox_bitsliced. Phase 2 (AVX2) / phase 3 (NEON) swap in real intrinsics behind the same path.
       mode_cbc.rs           # encrypt/decrypt with PKCS#7 padding; caller-supplied unpredictable IV
       cbc_streaming.rs      # v0.3 W5 — Sm4CbcEncryptor / Sm4CbcDecryptor (buffer-back-by-one on decrypt)
     hmac.rs                 # v0.2 W3 — single-shot hmac_sm3; v0.3 W5 — streaming HmacSm3 (impls in-crate Mac trait); v0.4 W2 impls digest::Mac under `digest-traits`

@@ -63,6 +63,18 @@ cipher-traits = ["dep:cipher"]
 # secret bits). Single-block only for v0.4; multi-block SIMD-packed
 # bitslicing deferred to v0.5+ per Q4.11.
 sm4-bitsliced = []
+# v0.5 W4 — multi-block SIMD-packed bitsliced SM4 S-box. Stacks on
+# `sm4-bitsliced`'s gate-only S-box circuit but processes 8 (AVX2) /
+# 4 (NEON) blocks in parallel. Default-off (Q5.15 in
+# docs/v0.5-scope.md); requires `x86_64` or `aarch64` target (Q5.13).
+# On x86_64 without AVX2 support, the runtime detection path silently
+# falls back to the v0.4 single-block bitslice — correctness and CT
+# properties preserved, throughput regresses. Phase 1 (this release)
+# ships the scaffolding and integration point; the AVX2 (W4-phase-2)
+# and NEON (W4-phase-3) intrinsic implementations land in follow-on
+# PRs within v0.5. Phase 1 transparently delegates to the v0.4
+# single-block bitslice — byte-identical output.
+sm4-bitsliced-simd = ["sm4-bitsliced"]
 
 [lints.rust]
 unsafe_code = "forbid"
