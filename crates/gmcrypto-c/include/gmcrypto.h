@@ -82,6 +82,23 @@ typedef struct gmcrypto_sm2_pubkey_t gmcrypto_sm2_pubkey_t;
 typedef struct gmcrypto_sm3_t gmcrypto_sm3_t;
 
 /*
+ Opaque handle for a streaming SM4-CBC decryptor (v0.5 W1). Same
+ buffer-back-by-one padding-oracle defense as the v0.3 W5 Rust
+ streaming surface: the most recent decrypted block is held back
+ from emission until [`gmcrypto_sm4_cbc_decryptor_finalize`]
+ confirms it is the last block and validates the PKCS#7 padding.
+ */
+typedef struct gmcrypto_sm4_cbc_decryptor_t gmcrypto_sm4_cbc_decryptor_t;
+
+/*
+ Opaque handle for a streaming SM4-CBC encryptor (v0.5 W1).
+ Construct with [`gmcrypto_sm4_cbc_encryptor_new`], feed plaintext via
+ [`gmcrypto_sm4_cbc_encryptor_update`], emit the trailing PKCS#7-
+ padded block(s) via [`gmcrypto_sm4_cbc_encryptor_finalize`].
+ */
+typedef struct gmcrypto_sm4_cbc_encryptor_t gmcrypto_sm4_cbc_encryptor_t;
+
+/*
  Opaque handle for an SM4 cipher (key-scheduled).
  */
 typedef struct gmcrypto_sm4_t gmcrypto_sm4_t;
@@ -231,6 +248,114 @@ int gmcrypto_sm4_cbc_decrypt(const uint8_t *key,
                              uintptr_t out_capacity,
                              uintptr_t *out_actual_len)
 ;
+
+/*
+ Construct a streaming SM4-CBC encryptor. `key` is exactly 16
+ bytes; `iv` is exactly 16 bytes and MUST be caller-supplied
+ unpredictable bytes (NIST SP 800-38A Appendix C). Returns NULL
+ on invalid pointer input.
+ */
+
+gmcrypto_sm4_cbc_encryptor_t *gmcrypto_sm4_cbc_encryptor_new(const uint8_t *key,
+                                                             const uint8_t *iv)
+;
+
+/*
+ Absorb plaintext into the streaming SM4-CBC encryptor and emit
+ zero or more full ciphertext blocks. The caller-allocated `out`
+ buffer MUST be at least `pt_len + 16` bytes — that is the upper
+ bound on bytes emitted by a single `_update` call (a buffered
+ partial block from a prior call can produce one extra block when
+ this call's input fills it). On insufficient capacity, the call
+ returns [`GMCRYPTO_ERR`] and the encryptor state is left mid-
+ stream (the ciphertext bytes that would have been emitted are
+ lost). Callers should size the output buffer correctly up-front.
+ */
+
+int gmcrypto_sm4_cbc_encryptor_update(gmcrypto_sm4_cbc_encryptor_t *enc,
+                                      const uint8_t *pt,
+                                      uintptr_t pt_len,
+                                      uint8_t *out,
+                                      uintptr_t out_capacity,
+                                      uintptr_t *out_actual_len)
+;
+
+/*
+ Apply PKCS#7 padding to the buffered tail and emit the final
+ ciphertext block(s). Consumes the encryptor — the handle is
+ **freed** by this call; do NOT call
+ [`gmcrypto_sm4_cbc_encryptor_free`] on it afterwards.
+
+ Output is always exactly one block (16 bytes).
+ */
+
+int gmcrypto_sm4_cbc_encryptor_finalize(gmcrypto_sm4_cbc_encryptor_t *enc,
+                                        uint8_t *out,
+                                        uintptr_t out_capacity,
+                                        uintptr_t *out_actual_len)
+;
+
+/*
+ Free a streaming SM4-CBC encryptor. Passing NULL is a no-op. Do
+ NOT call after [`gmcrypto_sm4_cbc_encryptor_finalize`] — that
+ already consumed the handle.
+ */
+ void gmcrypto_sm4_cbc_encryptor_free(gmcrypto_sm4_cbc_encryptor_t *enc) ;
+
+/*
+ Construct a streaming SM4-CBC decryptor. `key` is exactly 16
+ bytes; `iv` is exactly 16 bytes and must match the value used
+ during encryption. Returns NULL on invalid pointer input.
+ */
+
+gmcrypto_sm4_cbc_decryptor_t *gmcrypto_sm4_cbc_decryptor_new(const uint8_t *key,
+                                                             const uint8_t *iv)
+;
+
+/*
+ Absorb ciphertext into the streaming SM4-CBC decryptor and emit
+ zero or more full plaintext blocks. The final-candidate block is
+ HELD BACK from emission until `_finalize` validates the trailing
+ padding (buffer-back-by-one padding-oracle defense). Same buffer-
+ size contract as the encryptor's `_update`: caller MUST allocate
+ `out_capacity >= ct_len + 16` (strict upper bound on bytes emitted
+ in one call). On insufficient capacity returns [`GMCRYPTO_ERR`]
+ and the decryptor state is left mid-stream; size the buffer
+ up-front.
+ */
+
+int gmcrypto_sm4_cbc_decryptor_update(gmcrypto_sm4_cbc_decryptor_t *dec,
+                                      const uint8_t *ct,
+                                      uintptr_t ct_len,
+                                      uint8_t *out,
+                                      uintptr_t out_capacity,
+                                      uintptr_t *out_actual_len)
+;
+
+/*
+ Strip PKCS#7 padding from the held-back final block and emit the
+ last plaintext bytes. Consumes the decryptor — the handle is
+ **freed** by this call; do NOT call
+ [`gmcrypto_sm4_cbc_decryptor_free`] on it afterwards.
+
+ Returns [`GMCRYPTO_ERR`] on any failure mode (length not multiple
+ of 16, no full blocks seen, or padding-strip rejection) — single
+ uninformative failure code per the failure-mode invariant. The
+ caller-supplied `out_actual_len` is set to `0` on failure.
+ */
+
+int gmcrypto_sm4_cbc_decryptor_finalize(gmcrypto_sm4_cbc_decryptor_t *dec,
+                                        uint8_t *out,
+                                        uintptr_t out_capacity,
+                                        uintptr_t *out_actual_len)
+;
+
+/*
+ Free a streaming SM4-CBC decryptor. Passing NULL is a no-op. Do
+ NOT call after [`gmcrypto_sm4_cbc_decryptor_finalize`] — that
+ already consumed the handle.
+ */
+ void gmcrypto_sm4_cbc_decryptor_free(gmcrypto_sm4_cbc_decryptor_t *dec) ;
 
 /*
  Construct an SM2 private key from a 32-byte big-endian scalar.

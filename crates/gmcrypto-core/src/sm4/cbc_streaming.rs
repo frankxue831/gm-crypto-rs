@@ -110,6 +110,22 @@ impl Sm4CbcEncryptor {
         }
     }
 
+    /// Drain the accumulated ciphertext, leaving the encryptor ready
+    /// for further `update` calls. The Rust streaming API has no
+    /// inherent reason for this method — `finalize` consumes the
+    /// encryptor and returns the full accumulation. This helper exists
+    /// for the `gmcrypto-c` FFI shim's streaming pattern (v0.5 W1)
+    /// which emits ciphertext incrementally as `update` produces full
+    /// blocks.
+    ///
+    /// **Not SemVer-stable.** Same posture as
+    /// [`crate::sm2::sign_raw_with_id`]: `#[doc(hidden)] pub` for FFI-
+    /// shim consumption; its signature may change in any v0.5+ minor.
+    #[doc(hidden)]
+    pub fn take_output(&mut self) -> Vec<u8> {
+        core::mem::take(&mut self.output)
+    }
+
     /// Apply PKCS#7 padding to the buffered tail and emit the final
     /// ciphertext block(s). Consumes the encryptor.
     #[must_use]
@@ -205,6 +221,18 @@ impl Sm4CbcDecryptor {
             self.buffer[..data.len()].copy_from_slice(data);
             self.buffer_len = data.len();
         }
+    }
+
+    /// Drain the emitted plaintext so far (i.e. all decrypted blocks
+    /// EXCEPT the held-back final-candidate block). Same FFI-helper
+    /// posture as [`Sm4CbcEncryptor::take_output`]: `#[doc(hidden)] pub`
+    /// for the v0.5 W1 streaming FFI; not SemVer-stable.
+    ///
+    /// **Note**: the held-back block is *not* drained — the buffer-
+    /// back-by-one invariant is preserved across this call.
+    #[doc(hidden)]
+    pub fn take_output(&mut self) -> Vec<u8> {
+        core::mem::take(&mut self.output)
     }
 
     /// Strip PKCS#7 padding from the held-back final block and emit

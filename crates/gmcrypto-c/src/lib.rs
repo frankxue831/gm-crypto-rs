@@ -82,7 +82,9 @@ use gmcrypto_core::sm2::{
     sign_with_id, verify_with_id,
 };
 use gmcrypto_core::sm3::{Sm3 as InnerSm3, hash as sm3_hash};
-use gmcrypto_core::sm4::{Sm4Cipher, mode_cbc};
+use gmcrypto_core::sm4::{
+    Sm4CbcDecryptor as InnerSm4CbcDec, Sm4CbcEncryptor as InnerSm4CbcEnc, Sm4Cipher, mode_cbc,
+};
 use gmcrypto_core::{pem, pkcs8};
 use rand_core::TryRng;
 
@@ -132,6 +134,23 @@ pub struct gmcrypto_hmac_sm3_t {
 /// Opaque handle for an SM4 cipher (key-scheduled).
 pub struct gmcrypto_sm4_t {
     inner: Sm4Cipher,
+}
+
+/// Opaque handle for a streaming SM4-CBC encryptor (v0.5 W1).
+/// Construct with [`gmcrypto_sm4_cbc_encryptor_new`], feed plaintext via
+/// [`gmcrypto_sm4_cbc_encryptor_update`], emit the trailing PKCS#7-
+/// padded block(s) via [`gmcrypto_sm4_cbc_encryptor_finalize`].
+pub struct gmcrypto_sm4_cbc_encryptor_t {
+    inner: InnerSm4CbcEnc,
+}
+
+/// Opaque handle for a streaming SM4-CBC decryptor (v0.5 W1). Same
+/// buffer-back-by-one padding-oracle defense as the v0.3 W5 Rust
+/// streaming surface: the most recent decrypted block is held back
+/// from emission until [`gmcrypto_sm4_cbc_decryptor_finalize`]
+/// confirms it is the last block and validates the PKCS#7 padding.
+pub struct gmcrypto_sm4_cbc_decryptor_t {
+    inner: InnerSm4CbcDec,
 }
 
 /// Opaque handle for an SM2 private key.
@@ -673,6 +692,230 @@ pub unsafe extern "C" fn gmcrypto_sm4_cbc_decrypt(
             None => GMCRYPTO_ERR,
         }
     })
+}
+
+// ============================================================
+// SM4-CBC — streaming (v0.5 W1).
+//
+// Wraps `gmcrypto_core::sm4::{Sm4CbcEncryptor, Sm4CbcDecryptor}`.
+// Streaming-emit pattern: each `_update` call may emit zero or more
+// full 16-byte ciphertext / plaintext blocks; `_finalize` emits the
+// final block(s) (encryptor: PKCS#7 padding; decryptor: PKCS#7 strip
+// of the held-back final block). Encryptor and decryptor are
+// independent opaque types — Q5.2 pinned this over a unified `_cbc_t`
+// with mode enum.
+//
+// Output buffer convention matches Q5.3: every `_update` /
+// `_finalize` uses `(out, out_capacity, out_actual_len)`; on too-
+// small capacity we return `GMCRYPTO_ERR` and write the required
+// length to `*out_actual_len` (caller-retry pattern).
+//
+// Buffer-back-by-one padding-oracle defense is preserved across the
+// FFI boundary: the decryptor's `_finalize` never returns plaintext
+// if the final block's padding is invalid.
+// ============================================================
+
+/// Construct a streaming SM4-CBC encryptor. `key` is exactly 16
+/// bytes; `iv` is exactly 16 bytes and MUST be caller-supplied
+/// unpredictable bytes (NIST SP 800-38A Appendix C). Returns NULL
+/// on invalid pointer input.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_cbc_encryptor_new(
+    key: *const u8,
+    iv: *const u8,
+) -> *mut gmcrypto_sm4_cbc_encryptor_t {
+    let result = std::panic::catch_unwind(|| {
+        let k = unsafe { try_slice(key, GMCRYPTO_SM4_KEY_SIZE) }?;
+        let v = unsafe { try_slice(iv, GMCRYPTO_SM4_BLOCK_SIZE) }?;
+        let k_arr: &[u8; GMCRYPTO_SM4_KEY_SIZE] = k.try_into().ok()?;
+        let v_arr: &[u8; GMCRYPTO_SM4_BLOCK_SIZE] = v.try_into().ok()?;
+        Some(Box::into_raw(Box::new(gmcrypto_sm4_cbc_encryptor_t {
+            inner: InnerSm4CbcEnc::new(k_arr, v_arr),
+        })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// Absorb plaintext into the streaming SM4-CBC encryptor and emit
+/// zero or more full ciphertext blocks. The caller-allocated `out`
+/// buffer MUST be at least `pt_len + 16` bytes — that is the upper
+/// bound on bytes emitted by a single `_update` call (a buffered
+/// partial block from a prior call can produce one extra block when
+/// this call's input fills it). On insufficient capacity, the call
+/// returns [`GMCRYPTO_ERR`] and the encryptor state is left mid-
+/// stream (the ciphertext bytes that would have been emitted are
+/// lost). Callers should size the output buffer correctly up-front.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_cbc_encryptor_update(
+    enc: *mut gmcrypto_sm4_cbc_encryptor_t,
+    pt: *const u8,
+    pt_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if enc.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let input = match unsafe { try_slice(pt, pt_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: enc non-null per check above; caller guarantees
+        // unique access for the duration of this call.
+        let e = unsafe { &mut *enc };
+        e.inner.update(input);
+        let emitted = e.inner.take_output();
+        unsafe { write_output(&emitted, out, out_capacity, out_actual_len) }
+    })
+}
+
+/// Apply PKCS#7 padding to the buffered tail and emit the final
+/// ciphertext block(s). Consumes the encryptor — the handle is
+/// **freed** by this call; do NOT call
+/// [`gmcrypto_sm4_cbc_encryptor_free`] on it afterwards.
+///
+/// Output is always exactly one block (16 bytes).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_cbc_encryptor_finalize(
+    enc: *mut gmcrypto_sm4_cbc_encryptor_t,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if enc.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        // SAFETY: enc came from Box::into_raw; take ownership and drop.
+        let boxed = unsafe { Box::from_raw(enc) };
+        // finalize() returns ALL of self.output (including any bytes
+        // previously drained via take_output) — but we drained those
+        // on prior update calls, so the returned Vec contains only
+        // the new final padded block(s).
+        let final_bytes = boxed.inner.finalize();
+        unsafe { write_output(&final_bytes, out, out_capacity, out_actual_len) }
+    })
+}
+
+/// Free a streaming SM4-CBC encryptor. Passing NULL is a no-op. Do
+/// NOT call after [`gmcrypto_sm4_cbc_encryptor_finalize`] — that
+/// already consumed the handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_cbc_encryptor_free(enc: *mut gmcrypto_sm4_cbc_encryptor_t) {
+    if enc.is_null() {
+        return;
+    }
+    // SAFETY: enc came from Box::into_raw and has not been freed.
+    drop(unsafe { Box::from_raw(enc) });
+}
+
+/// Construct a streaming SM4-CBC decryptor. `key` is exactly 16
+/// bytes; `iv` is exactly 16 bytes and must match the value used
+/// during encryption. Returns NULL on invalid pointer input.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_cbc_decryptor_new(
+    key: *const u8,
+    iv: *const u8,
+) -> *mut gmcrypto_sm4_cbc_decryptor_t {
+    let result = std::panic::catch_unwind(|| {
+        let k = unsafe { try_slice(key, GMCRYPTO_SM4_KEY_SIZE) }?;
+        let v = unsafe { try_slice(iv, GMCRYPTO_SM4_BLOCK_SIZE) }?;
+        let k_arr: &[u8; GMCRYPTO_SM4_KEY_SIZE] = k.try_into().ok()?;
+        let v_arr: &[u8; GMCRYPTO_SM4_BLOCK_SIZE] = v.try_into().ok()?;
+        Some(Box::into_raw(Box::new(gmcrypto_sm4_cbc_decryptor_t {
+            inner: InnerSm4CbcDec::new(k_arr, v_arr),
+        })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// Absorb ciphertext into the streaming SM4-CBC decryptor and emit
+/// zero or more full plaintext blocks. The final-candidate block is
+/// HELD BACK from emission until `_finalize` validates the trailing
+/// padding (buffer-back-by-one padding-oracle defense). Same buffer-
+/// size contract as the encryptor's `_update`: caller MUST allocate
+/// `out_capacity >= ct_len + 16` (strict upper bound on bytes emitted
+/// in one call). On insufficient capacity returns [`GMCRYPTO_ERR`]
+/// and the decryptor state is left mid-stream; size the buffer
+/// up-front.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_cbc_decryptor_update(
+    dec: *mut gmcrypto_sm4_cbc_decryptor_t,
+    ct: *const u8,
+    ct_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if dec.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let input = match unsafe { try_slice(ct, ct_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: dec non-null per check above.
+        let d = unsafe { &mut *dec };
+        d.inner.update(input);
+        let emitted = d.inner.take_output();
+        unsafe { write_output(&emitted, out, out_capacity, out_actual_len) }
+    })
+}
+
+/// Strip PKCS#7 padding from the held-back final block and emit the
+/// last plaintext bytes. Consumes the decryptor — the handle is
+/// **freed** by this call; do NOT call
+/// [`gmcrypto_sm4_cbc_decryptor_free`] on it afterwards.
+///
+/// Returns [`GMCRYPTO_ERR`] on any failure mode (length not multiple
+/// of 16, no full blocks seen, or padding-strip rejection) — single
+/// uninformative failure code per the failure-mode invariant. The
+/// caller-supplied `out_actual_len` is set to `0` on failure.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_cbc_decryptor_finalize(
+    dec: *mut gmcrypto_sm4_cbc_decryptor_t,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if dec.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        // SAFETY: dec came from Box::into_raw; take ownership and drop.
+        let boxed = unsafe { Box::from_raw(dec) };
+        if let Some(final_bytes) = boxed.inner.finalize() {
+            // SAFETY: write_output's contract documented at its decl.
+            unsafe { write_output(&final_bytes, out, out_capacity, out_actual_len) }
+        } else {
+            if !out_actual_len.is_null() {
+                // SAFETY: caller-asserted non-null.
+                unsafe { ptr::write(out_actual_len, 0) };
+            }
+            GMCRYPTO_ERR
+        }
+    })
+}
+
+/// Free a streaming SM4-CBC decryptor. Passing NULL is a no-op. Do
+/// NOT call after [`gmcrypto_sm4_cbc_decryptor_finalize`] — that
+/// already consumed the handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_cbc_decryptor_free(dec: *mut gmcrypto_sm4_cbc_decryptor_t) {
+    if dec.is_null() {
+        return;
+    }
+    // SAFETY: dec came from Box::into_raw and has not been freed.
+    drop(unsafe { Box::from_raw(dec) });
 }
 
 // ============================================================
