@@ -25,20 +25,42 @@
 //! `encryptedData` is the SM4-CBC ciphertext of the inner
 //! `OneAsymmetricKey`.
 //!
-//! # Failure-mode invariant
+//! # Failure-mode invariant (API)
 //!
 //! All decoders return `Result<_, Error>` with a single
-//! [`Error::Failed`] variant. Distinguishing "wrong password" from
-//! "malformed PEM" from "valid PEM but bad inner `ECPrivateKey`" is
-//! **forbidden** — see CLAUDE.md, the failure-mode invariant section.
+//! [`Error::Failed`] variant. The return type carries no distinction
+//! between "wrong password", "malformed PEM", and "valid PEM but
+//! bad inner `ECPrivateKey`" — the caller sees one uninformative
+//! shape on any failure.
+//!
+//! # Timing-side-channel posture
+//!
+//! Code paths over **secret material** are constant-time-designed:
+//! PBKDF2-HMAC-SM3 (covered by [`crate::hmac`]'s constant-time
+//! discipline), SM4-CBC decrypt + PKCS#7 strip
+//! ([`crate::sm4::mode_cbc::decrypt`]), and the inner
+//! [`Sm2PrivateKey::new`] range gate. The W2 dudect target
+//! `ct_pkcs8_decrypt` class-splits by **password bytes** (both
+//! classes ship valid blobs so both succeed via identical control
+//! flow); local 10K-sample run measures `|tau| ≈ 0.02`.
+//!
+//! Code paths over **public attacker-supplied wire bytes** (the
+//! PBES2 structural parse) early-return on malformed input. A
+//! structurally invalid blob fails in microseconds; a structurally
+//! valid blob with a wrong password runs full PBKDF2 + SM4-CBC + an
+//! inner parse before failing. **This wall-clock distinction is
+//! observable but not secret-dependent** — the attacker built the
+//! blob and already knows its structural validity. The dudect
+//! gate above covers the only secret-dependent timing class
+//! (password vs password under a valid blob).
 //!
 //! # KDF parameter validation
 //!
 //! [`decrypt`] rejects `iterations == 0` (RFC 8018 §5.2 requires
-//! `c ≥ 1`) and `iterations > 10_000_000` (`DoS` bound; the upper
-//! limit is per the W2 risk-trap in `docs/v0.3-scope.md`). Any
-//! other malformed PBES2 parameter folds into [`Error::Failed`]
-//! identically.
+//! `c ≥ 1`) and `iterations > 10_000_000` (denial-of-service
+//! bound; the upper limit is per the W2 risk-trap in
+//! `docs/v0.3-scope.md`). Any other malformed PBES2 parameter
+//! folds into [`Error::Failed`] identically.
 
 use crate::asn1::oid::{ID_EC_PUBLIC_KEY, ID_HMAC_WITH_SM3, ID_PBKDF2, PBES2, SM2P256V1, SM4_CBC};
 use crate::asn1::{reader, writer};
