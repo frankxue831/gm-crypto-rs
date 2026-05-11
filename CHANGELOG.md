@@ -3,6 +3,119 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — 2026-05-12
+
+### Added
+
+- **v0.4 W1** — `wasm32-unknown-unknown` build target. CI gates both
+  stable and MSRV (1.85) on the target via a dedicated matrix job in
+  `.github/workflows/ci.yml`. The crate is `no_std + alloc` only and
+  does NOT pull `getrandom`'s `wasm_js` backend or
+  `wasm-bindgen` / `js-sys` into its default dep graph; wasm callers
+  wire their own `rand_core::Rng` impl (typically by enabling
+  `getrandom`'s `wasm_js` feature in their own `Cargo.toml`).
+  Explicit `rustup target add wasm32-unknown-unknown --toolchain
+  ${MSRV}` workaround for `dtolnay/rust-toolchain@master` not
+  reliably installing the target for non-stable toolchains on
+  GitHub-hosted Ubuntu runners. A `wasm-bindgen-test`-driven KAT
+  runner is deferred to v0.5+.
+- **v0.4 W2** — RustCrypto-trait fit behind opt-in feature flags
+  (`digest-traits` and `cipher-traits`, per Q4.3 in
+  `docs/v0.4-scope.md`). Implements `digest::Digest` for
+  `gmcrypto_core::sm3::Sm3` (via `HashMarker`, `OutputSizeUser`,
+  `Update`, `FixedOutput`, `Reset`, `FixedOutputReset`);
+  `digest::Mac` for `gmcrypto_core::hmac::HmacSm3` (via
+  `MacMarker`, `KeySizeUser` with `KeySize = U64`, `KeyInit` with a
+  custom `new_from_slice` covering the variable-length-key path,
+  `OutputSizeUser`, `Update`, `FixedOutput`); and `cipher::BlockCipher`
+  + `BlockEncrypt` + `BlockDecrypt` + `BlockSizeUser` + `KeySizeUser`
+  + `KeyInit` for `gmcrypto_core::sm4::Sm4Cipher` via the
+  `BlockBackend` pattern. Default-features build is unchanged — no
+  extra runtime deps. New required-features-gated integration test
+  at `crates/gmcrypto-core/tests/rustcrypto_traits.rs` (nine tests
+  using UFCS to disambiguate inherent vs. trait methods). New
+  workspace-deny pass with the runtime opt-in features enabled gates
+  the allowlist for `digest` / `cipher` / `crypto-common` / `inout`.
+  Two separate flags so callers needing only one half don't pay for
+  both. Pinned at major+minor (`digest = "0.10"`, `cipher = "0.4"`);
+  future `digest 0.11` / `cipher 0.5` lines are a v0.5+ candidate.
+- **v0.4 W3** — bitsliced (table-less, gate-only) SM4 S-box behind
+  the opt-in `sm4-bitsliced` feature (Q4.9 / Q4.11 in
+  `docs/v0.4-scope.md`). Boyar-Peralta-style Itoh-Tsujii inversion in
+  GF(2^8) (`x^254` via additive chain in the algebraic structure
+  `S(x) = A·INV(A·x ⊕ B) ⊕ B` with `A` circulant first row `0xD3`,
+  `B = 0xD3`, polynomial `x^8 + x^7 + x^6 + x^5 + x^4 + x^2 + 1`)
+  plus two affine transformations. All `const`, all branch-free,
+  zero table lookups. Byte-identical output to the default linear-
+  scan S-box (exhaustive 256-input equivalence test in
+  `sm4::sbox_bitsliced::tests::bitsliced_matches_table`). Constant-
+  time by construction (no table lookups, no branches on secret
+  bits). Single-block only in v0.4; multi-block SIMD-packed
+  bitslicing deferred to v0.5+ per Q4.11. dudect harness matrix in
+  `.github/workflows/dudect-{pr,nightly}.yml` adds a second entry
+  (`features=sm4-bitsliced`) so the `ct_sm4_key_schedule` and
+  `ct_sm4_encrypt_block` targets are gated under both feature
+  configurations.
+- **v0.4 W4** — `gmcrypto-c` workspace member: a thin C ABI over
+  `gmcrypto-core` (cdylib + staticlib + rlib). 31 FFI entry points
+  via the opaque-handle (`Box::into_raw`) pattern covering SM3 hash
+  (single-shot + streaming), HMAC-SM3 (with constant-time `verify`),
+  PBKDF2-HMAC-SM3, SM4 (block + CBC), and SM2 (key construction,
+  sign / verify, encrypt / decrypt, PKCS#8 PEM). RNG is sourced via
+  `getrandom::SysRng` internally per Q4.18; the C surface does not
+  pass an RNG callback in v0.4. Every entry point follows the same
+  null-check + slice-reconstruct + delegate + `write_output` pattern,
+  with `ffi_guard()` wrapping `catch_unwind` so a Rust panic surfaces
+  as `GMCRYPTO_FAILED` (never crosses the C ABI). Every error path
+  collapses to a single `GMCRYPTO_FAILED` return code per the failure-
+  mode invariant. Per Q4.7 in `docs/v0.4-scope.md`, the
+  `unsafe_code = "forbid"` lint cannot apply to an FFI crate (slice
+  reconstruction, `Box::from_raw`, `#[unsafe(no_mangle)]` all require
+  `unsafe`); `gmcrypto-c` uses `unsafe_code = "warn"` with `// SAFETY:`
+  comments on every `unsafe` block. `gmcrypto-core` itself stays
+  `unsafe_code = "forbid"` workspace-wide. cbindgen 0.29 generates
+  `crates/gmcrypto-c/include/gmcrypto.h`; the committed header is
+  gated for drift via `git diff --exit-code` in CI (Q4.12). New
+  `c_smoke` integration test exercises every entry point via Rust's
+  own `extern "C"` interop and asserts Rust-equivalence. Per Q4.15,
+  `gmcrypto-c` is a workspace member but NOT in `default-members`;
+  most contributors work on `gmcrypto-core` and building the cdylib
+  on every workspace `cargo build` would be surprising. CI explicitly
+  `-p gmcrypto-c` for the FFI build / header-drift job.
+
+### Changed
+
+- **CI**: replaced `cargo install --locked cargo-deny` with
+  `taiki-e/install-action@v2` (prebuilt-binary install). Split the
+  old `[stable, "1.85"]` matrix into a stable `build` job (full
+  test + clippy + fmt sweep, unchanged) and a separate `msrv` job
+  (build-only — behaviour is rust-version-independent so test/clippy
+  duplication was redundant per rust-lang/api-guidelines#231).
+  Combined: ~33% reduction in total CI runner time per run
+  (~2 min 11 sec saved). Added `workflow_dispatch` trigger to allow
+  manual fire on stacked-PR branches.
+- **dudect harness**: same 12 targets as v0.3; PR-smoke and nightly
+  workflows now run the harness under a matrix over
+  `features=[default, sm4-bitsliced]`. No new targets in v0.4.
+
+### Posture (unchanged)
+
+- `unsafe_code = "forbid"` on `gmcrypto-core` (workspace-wide for
+  the no_std core crate; explicitly does not apply to the new
+  `gmcrypto-c` FFI shim, which uses `unsafe_code = "warn"` with
+  `// SAFETY:` comments on every `unsafe` block).
+- `#![no_std]` + `alloc`-only inside `crates/gmcrypto-core/src/`;
+  no `std::` paths.
+- Constant-time discipline on all secret-touching paths. The W3
+  bitsliced S-box is constant-time by construction (no table
+  lookups, no branches on secret bits).
+- Failure-mode invariant: every public surface that can fail returns
+  `Option` or a single-`Failed` enum (`SignError::Failed`,
+  `DecryptError::Failed`, `EncryptError::Failed`, `pem::Error::Failed`,
+  `pkcs8::Error::Failed`). The C ABI collapses to a single
+  `GMCRYPTO_FAILED` return code.
+- MSRV 1.85, edition 2024.
+
 ## [0.3.0] — 2026-05-11
 
 ### Added

@@ -1,21 +1,29 @@
 # CLAUDE.md
 
 Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0 published to crates.io 2026-05-10**;
-**v0.2.0 published 2026-05-10**; **v0.3.0 prep on `main` 2026-05-11**
-(W1 reusable ASN.1 reader/writer, W2 PEM/PKCS#8/SPKI/SEC1, W3 full
-bidirectional gmssl interop, W4 raw byte-concat ciphertext, W5
-streaming traits + HmacSm3 + Sm4Cbc{En,De}cryptor, W6 comb-table
-`mul_g`). Single-crate workspace: `crates/gmcrypto-core/`.
+**v0.2.0 published 2026-05-10**; **v0.3.0 published 2026-05-11**;
+**v0.4.0 prep on `main` 2026-05-12** (W1 `wasm32-unknown-unknown`
+build target, W2 RustCrypto-trait fit behind opt-in feature flags,
+W3 bitsliced SM4 S-box behind `sm4-bitsliced`, W4 new `gmcrypto-c`
+workspace member exposing a C ABI). Two-crate workspace:
+`crates/gmcrypto-core/` (the no_std crypto core; default-member) +
+`crates/gmcrypto-c/` (FFI shim; cdylib + staticlib + cbindgen header).
 
 Read `README.md`, `SECURITY.md`, `CONTRIBUTING.md` for the user-facing posture.
 This file lists the constraints a coding agent will violate by default.
 
 ## Hard constraints (non-negotiable)
 
-- `unsafe_code = "forbid"` workspace-wide. Don't add `unsafe`.
+- `unsafe_code = "forbid"` on `gmcrypto-core`. Don't add `unsafe`.
+  **Exception**: `gmcrypto-c` (v0.4 W4 FFI shim) uses `unsafe_code = "warn"`
+  because raw-pointer FFI primitives (`Box::from_raw`,
+  `#[unsafe(no_mangle)]`, slice reconstruction) cannot be expressed
+  without `unsafe`. Every `unsafe` block in `gmcrypto-c/src/lib.rs`
+  carries a `// SAFETY:` comment naming caller-side preconditions.
 - `#![no_std]` + `alloc` only inside `crates/gmcrypto-core/src/`. No `std::` paths.
   The `std` feature exists but is reserved for future file-I/O wire-format
-  helpers (v0.4+).
+  helpers (v0.5+). `gmcrypto-c` is `std`-OK (it's the language-binding
+  layer, not the no_std crypto primitives).
 - **Constant-time discipline on secrets.** Never `==` / `if` / Rust `bool` on a
   secret-derived value. Use `subtle::{Choice, ConditionallySelectable,
   ConstantTimeEq, ConstantTimeLess, CtOption}`. The SM2 sign retry loop runs
@@ -42,13 +50,29 @@ cargo test --workspace
 # Format / lint — match CI exactly.
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
+# v0.4 W2 / W3 — opt-in features each get their own clippy pass.
+cargo clippy -p gmcrypto-core --features digest-traits,cipher-traits --all-targets -- -D warnings
+cargo clippy -p gmcrypto-core --features sm4-bitsliced --all-targets -- -D warnings
 
 # Supply chain — note: --exclude-dev (dev-deps are exempt from the ban list).
 cargo deny check --exclude-dev
+# v0.4 W2 / W3 — second pass under the opt-in runtime feature flags
+# (digest/cipher/inout/crypto-common allowlisted in deny.toml).
+cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced check --exclude-dev
 
 # MSRV reproducibility.
 cargo +1.85 build -p gmcrypto-core
+cargo +1.85 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced
 cargo build -p gmcrypto-core --no-default-features  # confirms no_std posture
+
+# v0.4 W1 — wasm32 build (caller-supplied RNG only).
+cargo build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features
+
+# v0.4 W4 — C ABI shim build + header drift check.
+cargo build -p gmcrypto-c --release
+cargo build -p gmcrypto-c --features regen-header   # regenerates include/gmcrypto.h
+git diff --exit-code crates/gmcrypto-c/include/gmcrypto.h
+cargo test -p gmcrypto-c                            # c_smoke Rust-equivalence tests
 
 # Dudect harness. Default 100K samples (~75s); CI smoke uses 10K.
 DUDECT_SAMPLES=10000  cargo bench --bench timing_leaks   # PR-smoke budget
@@ -61,7 +85,11 @@ GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
 ## Dudect harness gate
 
 Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. **Twelve
-targets** (v0.3 added `ct_pkcs8_decrypt`):
+targets** (v0.3 added `ct_pkcs8_decrypt`; no new targets in v0.4).
+In v0.4 the PR-smoke and nightly workflows run the harness under a
+matrix over `features=[default, sm4-bitsliced]` so the
+`ct_sm4_key_schedule` and `ct_sm4_encrypt_block` targets are gated
+under both the default linear-scan and W3 bitsliced S-box paths:
 
 | Target | Gate | Meaning |
 |---|---|---|
@@ -72,8 +100,8 @@ targets** (v0.3 added `ct_pkcs8_decrypt`):
 | `ct_sign_k_class` | nightly only: `\|tau\| < 0.25` | `sign_raw_with_id`, class-split by nonce `k` magnitude with `d` held fixed (W0; both retry nonces class-tied). v0.4 release-prep: **dropped from the PR-smoke (10K) allowlist** — observed values span [0.21–0.37] across seven runs on the GH Actions ubuntu-24.04 runner, with no structure tied to code changes. The 100K nightly gate at 0.25 is retained (signal-to-noise is meaningful there). The direct invert diagnostics (`ct_fn_invert` / `ct_fp_invert`) are the actual invert-leak regression guards at the PR budget; `ct_sign_k_class` is a composite that dilutes invert signal by ~50× per the v0.2 W0 analysis. The bench still runs (data lands in the artifact log) but doesn't gate at 10K. |
 | `ct_fn_invert` | `\|tau\| < 0.20` | Direct `Fn::invert((1+d) mod n)` diagnostic (W0). |
 | `ct_fp_invert` | `\|tau\| < 0.20` | Direct `Fp::invert(Z)` diagnostic (W0). |
-| `ct_sm4_key_schedule` | `\|tau\| < 0.20` | SM4 key schedule, class-split by master key bytes (v0.2 W1). |
-| `ct_sm4_encrypt_block` | `\|tau\| < 0.20` | SM4 "construct cipher + encrypt one block" timed under one window, class-split by master key bytes (v0.2 W1). |
+| `ct_sm4_key_schedule` | `\|tau\| < 0.20` | SM4 key schedule, class-split by master key bytes (v0.2 W1). v0.4 CI also gates this under `features=sm4-bitsliced`. |
+| `ct_sm4_encrypt_block` | `\|tau\| < 0.20` | SM4 "construct cipher + encrypt one block" timed under one window, class-split by master key bytes (v0.2 W1). v0.4 CI also gates this under `features=sm4-bitsliced`; 10K-sample smoke on the bitsliced path: `\|tau\| ≈ 0.025`. |
 | `ct_hmac_sm3` | `\|tau\| < 0.20` | HMAC-SM3 keyed MAC, class-split by master key (v0.2 W3). Structurally covers PBKDF2-HMAC-SM3's (v0.2 W4) inner PRF, the v0.3 W5 streaming `HmacSm3` (Q7.6 deliberately skipped a separate target), and the PBKDF2 sub-path of v0.3 W2's encrypted PKCS#8 path. |
 | `ct_sm2_decrypt` | `\|tau\| < 0.20` | SM2 decrypt, class-split by recipient `d_B`, fixed ciphertext encrypted to a third party so both classes fail at MAC via identical control flow (v0.2 Phase 3). |
 | `ct_pkcs8_decrypt` | `\|tau\| < 0.20` | Encrypted-PKCS#8 decrypt + parse, class-split by password bytes; both classes' blobs are valid for their class's password so both succeed via identical control flow (v0.3 W2). 10K-sample smoke: `\|tau\| ≈ 0.04`. |
@@ -116,7 +144,7 @@ The three secret-touching `invert` sites:
 crates/gmcrypto-core/
   src/
     lib.rs
-    sm3.rs                  # single-file SM3 hash (impls v0.3 W5 Hash trait)
+    sm3.rs                  # single-file SM3 hash (impls v0.3 W5 in-crate Hash trait; v0.4 W2 impls digest::Digest under `digest-traits`)
     sm2/
       curve.rs              # Fp, Fn (ConstMontyForm wrappers), curve constants
       point.rs              # ProjectivePoint + RCB add/double (eprint 2015/1060)
@@ -130,10 +158,11 @@ crates/gmcrypto-core/
       decrypt.rs            # v0.2 Phase 3 — decrypt() with constant-time MAC compare, zeroize on fail
       raw_ciphertext.rs     # v0.3 W4 — encode_c1c3c2 / decode_c1c3c2 / decode_c1c2c3_legacy
     sm4/                    # v0.2 W1
-      cipher.rs             # Sm4Cipher (block cipher) + subtle linear-scan S-box; v0.3 W5 impls BlockCipher trait
+      cipher.rs             # Sm4Cipher (block cipher) + subtle linear-scan S-box; v0.3 W5 impls in-crate BlockCipher trait; v0.4 W2 impls cipher::BlockEncrypt/BlockDecrypt under `cipher-traits`
+      sbox_bitsliced.rs     # v0.4 W3 — bitsliced GF(2^8) Itoh-Tsujii inversion; opt-in via `sm4-bitsliced`; byte-identical to linear-scan
       mode_cbc.rs           # encrypt/decrypt with PKCS#7 padding; caller-supplied unpredictable IV
       cbc_streaming.rs      # v0.3 W5 — Sm4CbcEncryptor / Sm4CbcDecryptor (buffer-back-by-one on decrypt)
-    hmac.rs                 # v0.2 W3 — single-shot hmac_sm3; v0.3 W5 — streaming HmacSm3 (impls Mac trait)
+    hmac.rs                 # v0.2 W3 — single-shot hmac_sm3; v0.3 W5 — streaming HmacSm3 (impls in-crate Mac trait); v0.4 W2 impls digest::Mac under `digest-traits`
     kdf.rs                  # v0.2 W4 — PBKDF2-HMAC-SM3 (caller-supplied output buffer)
     asn1/
       reader.rs             # v0.3 W1 — strict-canonical DER reader primitives
@@ -145,21 +174,32 @@ crates/gmcrypto-core/
     spki.rs                 # v0.3 W2 — RFC 5280 SubjectPublicKeyInfo for SM2
     sec1.rs                 # v0.3 W2 — RFC 5915 ECPrivateKey + SEC1 uncompressed point (04||X||Y)
     pkcs8.rs                # v0.3 W2 — RFC 5958 OneAsymmetricKey + RFC 8018 PBES2 (PBKDF2-HMAC-SM3 + SM4-CBC)
-    traits.rs               # v0.3 W5 — in-crate Hash / Mac / BlockCipher traits (RustCrypto fit deferred to v0.4)
+    traits.rs               # v0.3 W5 — in-crate Hash / Mac / BlockCipher traits (v0.4 W2 lands RustCrypto-trait fit alongside)
   benches/timing_leaks.rs   # dudect harness — 12 targets (v0.3 added ct_pkcs8_decrypt)
   tests/                    # integration tests
     interop_gmssl.rs        # v0.2 HMAC/PBKDF2 + v0.3 W3 bidirectional SM2 sign/verify, SM2 encrypt/decrypt, SM4-CBC
     v0_3_pkcs8_kat.rs       # v0.3 W2 — gmssl 3.1.1 PKCS#8/SPKI fixture round-trip
+    rustcrypto_traits.rs    # v0.4 W2 — required-features-gated (digest-traits + cipher-traits); 9 trait integration tests using UFCS
     data/                   # v0.3 W2 binary KAT fixtures + regen recipe (Q7.9 decision)
 
+crates/gmcrypto-c/          # v0.4 W4 — C ABI shim (cdylib + staticlib + rlib)
+  src/lib.rs                # 31 FFI entry points: opaque handles, ffi_guard catch_unwind, GMCRYPTO_FAILED on every error
+  build.rs                  # cbindgen runs only under `regen-header` feature or GMCRYPTO_C_REGEN_HEADER=1
+  cbindgen.toml             # cbindgen config (C language, include_guard = "GMCRYPTO_H_")
+  include/gmcrypto.h        # committed header (CI gates drift via `git diff --exit-code`)
+  examples/sm2_sign.c       # end-to-end C example
+  tests/c_smoke.rs          # 20 Rust-equivalence tests via extern "C" interop
+  README.md                 # C/C++/Python/Go/Zig integration docs
+
 .github/workflows/
-  ci.yml                    # build/test on stable + 1.85 MSRV; deny --exclude-dev
-  dudect-pr.yml             # 10K samples, |tau| gate, path-allowlisted
-  dudect-nightly.yml        # 100K samples, same gate, 30-day artifact retention
+  ci.yml                    # build/test on stable (full) + 1.85 MSRV (build-only); cabi job; wasm32 matrix; cargo-deny via taiki-e/install-action
+  dudect-pr.yml             # 10K samples, |tau| gate, matrix on features=[default, sm4-bitsliced], path-allowlisted
+  dudect-nightly.yml        # 100K samples, same gate + matrix, 30-day artifact retention
 
 docs/
   v0.1.0-release-review.md  # pre-publish reviewer checklist (template)
   v0.3-scope.md             # v0.3 scope doc + Q7.1–Q7.10 sign-off decisions
+  v0.4-scope.md             # v0.4 scope doc + Q4.1–Q4.19 sign-off decisions
 ```
 
 `getrandom` is a direct workspace dep (`0.4.2`, `sys_rng` feature) — added
@@ -180,7 +220,9 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
 - Tags are SSH-signed (`gpg.format = ssh`). Verify locally with
   `git tag -v vX.Y.Z` after configuring `gpg.ssh.allowedSignersFile`.
 - `cargo publish` is the irreversible step. Use `docs/v0.1.0-release-review.md`
-  as the template before publishing v0.3.
+  as the template before publishing v0.4. **Two crates ship**:
+  `gmcrypto-core` first, then `gmcrypto-c` (path dep on core via
+  `version = "0.4"` — core must be on crates.io before c can publish).
 
 ## Don't
 
@@ -189,9 +231,20 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
   candidate. Fixed-K masked-select is the constant-time invariant.
 - Don't reference any external "Java prototype" / `gm-crypto-lite-java` repo.
   The Rust repo is standalone; that prototype was personal scaffolding.
-- Don't replace the SM4 `subtle`-style linear-scan S-box with a direct LUT
-  ("just for performance"). The throughput trade is documented as deliberate;
-  bitsliced S-box is the v0.4 fast-path workstream — not v0.2.
+- Don't replace the default SM4 `subtle`-style linear-scan S-box with a
+  direct LUT ("just for performance"). The throughput trade is
+  documented as deliberate. v0.4 W3 added the opt-in bitsliced
+  (table-less, gate-only) fast-path behind the `sm4-bitsliced` feature;
+  default-features build is unchanged. **Don't widen `sm4-bitsliced`
+  to a multi-block SIMD-packed bitsliced implementation in v0.4** —
+  per Q4.11 that's deferred to v0.5+; the v0.4 path is single-block
+  only and must stay byte-identical to the linear-scan path
+  (exhaustive equivalence test in
+  `sm4::sbox_bitsliced::tests::bitsliced_matches_table`).
+- Don't expose the bitsliced helpers (`gf_mul`, `gf_inv`, `affine_a`)
+  publicly. They're `pub(crate)` (or function-local) by design; the
+  only public surface is the implicit S-box swap when
+  `sm4-bitsliced` is enabled.
 - Don't generate the SM4-CBC IV inside `mode_cbc::encrypt`. Per NIST SP 800-38A
   Appendix C, CBC IVs must be **unpredictable** and caller-supplied; smuggling
   an `OsRng` into the API hides the contract from callers and conflates
@@ -241,6 +294,26 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
   the `#[doc(hidden)]` marker. Per Q7.2 it's **not SemVer-stable** —
   same posture as `sign_raw_with_id`. Callers must zeroize the
   returned `[u8; 32]` themselves; document the contract on the method.
+- Don't widen `unsafe_code` in `gmcrypto-c` from `warn` to `allow`,
+  and don't remove the `// SAFETY:` comment on any FFI `unsafe`
+  block. Per Q4.7 in `docs/v0.4-scope.md`: warn surfaces each
+  `unsafe` site in clippy without forbidding the unavoidable
+  `Box::from_raw` / slice-reconstruct primitives. `gmcrypto-core`
+  itself stays `unsafe_code = "forbid"` — don't relax that.
+- Don't make any C ABI entry point distinguish failure modes. Every
+  error path returns `GMCRYPTO_FAILED` (single failure code).
+  Distinguishing wrong-password from malformed-PEM from MAC-mismatch
+  through the C surface re-introduces the oracle attacks the
+  Rust-side failure-mode invariant defends against.
+- Don't add an RNG callback to the C ABI in v0.4. Per Q4.18, RNG is
+  sourced via `getrandom::SysRng` internally; adding a callback
+  shape is a v0.5+ candidate when the trade-off can be designed
+  alongside multi-block bitslicing.
+- Don't pull `getrandom`'s `wasm_js` backend into `gmcrypto-core`'s
+  default dep graph. Per Q4.2, wasm callers wire their own
+  `rand_core::Rng` impl by enabling `getrandom`'s `wasm_js` feature
+  in *their own* `Cargo.toml`. Adding it to ours hides the contract
+  from callers and bloats the no-wasm target.
 
 ## Agent gotchas
 
@@ -272,3 +345,24 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
 - **`pub(crate) const` inside a `pub(crate) mod`** trips
   clippy::pub-in-priv. Use plain `pub` on the inner items — the outer
   module's `pub(crate)` already gates visibility.
+- **`dtolnay/rust-toolchain@master` with `targets:`** is known-flaky
+  for non-default toolchains on GitHub-hosted Ubuntu (E0463: can't
+  find crate for `core`). Always pair it with an explicit
+  `rustup target add wasm32-unknown-unknown --toolchain ${MSRV}`
+  step. See ci.yml's wasm32 job.
+- **RustCrypto trait method resolution**: inherent methods like
+  `HmacSm3::finalize` collide with `digest::Mac::finalize` when both
+  are in scope. Use UFCS in tests:
+  `<HmacSm3 as DigestMac>::finalize(chained).into_bytes()` and
+  `<Sm4Cipher as CipherBlockEncrypt>::encrypt_block(&cipher, &mut block)`.
+  See `crates/gmcrypto-core/tests/rustcrypto_traits.rs`.
+- **cbindgen 0.27 doesn't recognize Rust 2024 `#[unsafe(no_mangle)]`**.
+  Pin at `0.29` or later (see `gmcrypto-c/Cargo.toml`).
+- **CI workflow only fires on PRs targeting `main`.** For stacked
+  PRs whose base isn't `main`, fire manually via
+  `gh workflow run ci.yml --ref <branch>` (workflow_dispatch added
+  in `bdf4678`).
+- **`cargo deny` in CI** uses the prebuilt `taiki-e/install-action@v2`
+  with `tool: cargo-deny@0.19` — don't switch back to
+  `cargo install --locked cargo-deny` (compiled from source, adds
+  ~3 min per CI run; see `431df89`).

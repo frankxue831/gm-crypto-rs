@@ -10,6 +10,15 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+# v0.4 — docs.rs builds with default features only by default. The
+# v0.4 W2 / W3 opt-in features (`digest-traits` / `cipher-traits` /
+# `sm4-bitsliced`) are the headline ergonomics work and need to
+# appear on the rendered docs page. `all-features = true` is fine
+# here: the three feature flags are additive and pulling all
+# optional deps for docs.rs has no runtime impact.
+[package.metadata.docs.rs]
+all-features = true
+
 [dependencies]
 crypto-bigint.workspace = true
 subtle.workspace = true
