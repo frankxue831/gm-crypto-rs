@@ -259,11 +259,27 @@ per host machine:
 # 1. Dedicated user — runner CANNOT read your daily-driver home dir.
 #    `sysadminctl` is the modern macOS path (auto-assigns a free UID)
 #    and avoids hand-rolled `dscl` boilerplate that can collide with
-#    an existing UID 600.
+#    an existing UID 600. We intentionally do NOT set a login
+#    password for ghrunner — it's a service account, no SSH/login
+#    exposure, and `sudo -iu ghrunner` from the maintainer user
+#    authenticates the maintainer, not ghrunner. Passwordless
+#    service accounts are slightly more secure here.
 sudo sysadminctl -addUser ghrunner -shell /bin/zsh \
   -home /Users/ghrunner -admin no
-# `sysadminctl` will prompt for an admin password and then for the
-# new user's password (set one you'll keep).
+# Expect a "No clear text password ... will not allow user to use
+# FDE" warning — benign for a service account. Note the assigned
+# UID/GID in the output (typically 5xx / 20=staff).
+
+# sysadminctl ASSIGNS but does NOT CREATE the home directory.
+# Create it now or `sudo -iu ghrunner` will fail with
+# "chdir to /Users/ghrunner: No such file or directory".
+sudo mkdir /Users/ghrunner
+sudo chown ghrunner:staff /Users/ghrunner
+sudo chmod 700 /Users/ghrunner   # only ghrunner can read its own home
+
+# Smoke-test before continuing:
+sudo -iu ghrunner whoami   # should print: ghrunner
+sudo -iu ghrunner pwd      # should print: /Users/ghrunner
 
 # 2. Switch users + install rustup with the toolchains CI needs
 sudo -iu ghrunner
