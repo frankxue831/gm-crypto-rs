@@ -76,11 +76,11 @@ fn gmssl_encrypted_pkcs8_wrong_password_fails() {
 /// fixture but exercises the same encrypt-decrypt code paths.
 #[test]
 fn rust_pkcs8_round_trip() {
-    use crypto_bigint::U256;
     use gmcrypto_core::sm2::Sm2PrivateKey;
+    use hex_literal::hex;
 
-    let key = Sm2PrivateKey::new(U256::from_be_hex(
-        "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8",
+    let key = Sm2PrivateKey::from_bytes_be(&hex!(
+        "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8"
     ))
     .expect("valid d");
 
@@ -95,11 +95,11 @@ fn rust_pkcs8_round_trip() {
 /// Wrap with PEM and round-trip through the full file format.
 #[test]
 fn rust_pkcs8_pem_round_trip() {
-    use crypto_bigint::U256;
     use gmcrypto_core::sm2::Sm2PrivateKey;
+    use hex_literal::hex;
 
-    let key = Sm2PrivateKey::new(U256::from_be_hex(
-        "1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0",
+    let key = Sm2PrivateKey::from_bytes_be(&hex!(
+        "1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0"
     ))
     .expect("valid d");
 

@@ -310,7 +310,7 @@ mod tests {
     fn modern_raw_round_trips_via_full_decrypt() {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
-        let key = Sm2PrivateKey::new(d).expect("valid d");
+        let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid d");
         let pk = Sm2PublicKey::from_point(key.public_key());
         let mut rng = UnwrapErr(getrandom::SysRng);
         let plaintext = b"raw-ciphertext modern roundtrip";

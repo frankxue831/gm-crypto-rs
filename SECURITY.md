@@ -188,7 +188,12 @@ wherever a distinguishing failure could leak information. Specifically:
 
 - `verify_with_id` returns `bool` (never an error type).
 - DER decode failures return `None`, never specific error variants.
-- `SignError::Failed` has exactly one variant.
+- The workspace-wide `gmcrypto_core::Error` (with module-level
+  aliases `sm2::Error`, `pem::Error`, `pkcs8::Error`) has exactly
+  one variant: `Failed`. Marked `#[non_exhaustive]` to preserve
+  flexibility, but no second variant is anticipated — adding one
+  would itself be the kind of failure-mode distinction this
+  invariant exists to forbid.
 
 PRs that distinguish failure modes — even "helpfully" — will be rejected.
 

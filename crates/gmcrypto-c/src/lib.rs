@@ -933,8 +933,12 @@ pub unsafe extern "C" fn gmcrypto_sm2_privkey_new(d_be: *const u8) -> *mut gmcry
     let result = std::panic::catch_unwind(|| {
         let bytes = unsafe { try_slice(d_be, GMCRYPTO_SM2_SCALAR_SIZE) }?;
         let arr: &[u8; GMCRYPTO_SM2_SCALAR_SIZE] = bytes.try_into().ok()?;
-        // Use SEC1 import path — does the range check via Sm2PrivateKey::from_sec1_be.
-        let key_opt: Option<Sm2PrivateKey> = Sm2PrivateKey::from_sec1_be(arr).into_option();
+        // Use the byte-array import path — does the constant-time
+        // `[1, n-2]` range check via `Sm2PrivateKey::from_bytes_be`
+        // (renamed from `from_sec1_be` in v0.5 W5; the FFI symbol
+        // name `gmcrypto_sm2_privkey_new` is unchanged for C ABI
+        // backcompat).
+        let key_opt: Option<Sm2PrivateKey> = Sm2PrivateKey::from_bytes_be(arr).into_option();
         key_opt.map(|inner| Box::into_raw(Box::new(gmcrypto_sm2_privkey_t { inner })))
     });
     match result {
@@ -983,7 +987,11 @@ pub unsafe extern "C" fn gmcrypto_sm2_privkey_to_sec1_be(
             None => return GMCRYPTO_ERR,
         };
         let k = unsafe { &*key };
-        let bytes = k.inner.to_sec1_be();
+        // `to_bytes_be` is the v0.5 W5 rename of v0.3's
+        // `#[doc(hidden)] pub fn to_sec1_be(&self)` (now SemVer-
+        // stable). The FFI symbol name keeps the `sec1` suffix for
+        // C ABI backcompat.
+        let bytes = k.inner.to_bytes_be();
         o.copy_from_slice(&bytes);
         // The caller is responsible for zeroizing `out`. The
         // temporary `bytes` is a `[u8; 32]` on the stack; Rust's

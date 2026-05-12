@@ -56,10 +56,12 @@ jobs:
           MATRIX_FEATURES: ${{ matrix.features }}
         run: |
           set -euxo pipefail
+          # v0.5 W5 — `Sm2PrivateKey::from_scalar(U256)` bench callsites
+          # require `crypto-bigint-scalar`; combine with matrix SM4 feature.
           if [ "$MATRIX_FEATURES" = "default" ]; then
-            cargo bench --bench timing_leaks 2>&1 | tee dudect-nightly.log
+            cargo bench --bench timing_leaks --features crypto-bigint-scalar 2>&1 | tee dudect-nightly.log
           else
-            cargo bench --bench timing_leaks --features "$MATRIX_FEATURES" 2>&1 | tee dudect-nightly.log
+            cargo bench --bench timing_leaks --features "$MATRIX_FEATURES,crypto-bigint-scalar" 2>&1 | tee dudect-nightly.log
           fi
 
       - name: Parse and gate

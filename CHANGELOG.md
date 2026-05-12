@@ -5,8 +5,67 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] — v0.5 development on `main`
 
+### Changed — BREAKING (v0.5 W5)
+
+- **Error-type unification (Q5.16).** All `Result`-returning public
+  APIs in `gmcrypto-core` now use the new workspace-wide
+  `gmcrypto_core::Error` enum (single `Failed` variant). The previous
+  per-module enums (`sm2::SignError`, `sm2::EncryptError`,
+  `sm2::DecryptError`) are **removed**; `pem::Error` and `pkcs8::Error`
+  are now type aliases for the workspace-wide type. Module aliases
+  `sm2::Error`, `pem::Error`, `pkcs8::Error` keep existing import
+  paths working; callers matching on `SignError::Failed`,
+  `EncryptError::Failed`, or `DecryptError::Failed` must migrate to
+  `sm2::Error::Failed` (or `gmcrypto_core::Error::Failed`). The new
+  type is `#[non_exhaustive]` so downstream **exhaustive** `match`
+  arms must add a wildcard `_ => ...` (non-exhaustive's standard
+  cross-crate behaviour); single-arm non-exhaustive matches and `if
+  let pem::Error::Failed = _` callsites are unaffected. Failure
+  semantics unchanged.
+- **`Sm2PrivateKey::new(U256)` → `Sm2PrivateKey::from_scalar(U256)`
+  under the new `crypto-bigint-scalar` feature flag (Q5.17).**
+  Callers who don't want a transitive `crypto-bigint` dep should
+  prefer the new always-on `Sm2PrivateKey::from_bytes_be(&[u8;
+  32])` constructor. Migration recipe:
+  ```text
+  // Before v0.5:
+  Sm2PrivateKey::new(d_u256)
+  // After v0.5 (recommended — no crypto_bigint exposure):
+  Sm2PrivateKey::from_bytes_be(&d_u256.to_be_bytes())
+  // After v0.5 (with `crypto-bigint-scalar` enabled):
+  Sm2PrivateKey::from_scalar(d_u256)
+  ```
+- **`Sm2PrivateKey::from_sec1_be` → `from_bytes_be`** (rename,
+  always-on, SemVer-stable). Same `[1, n-2]` constant-time range
+  check.
+- **`Sm2PrivateKey::to_sec1_be` → `to_bytes_be`** (rename, always-on,
+  **promoted from `#[doc(hidden)] pub` to SemVer-stable**). Caller
+  is still responsible for zeroizing the returned `[u8; 32]`.
+- **`std` Cargo feature flag removed (Q5.18).** It had been a no-op
+  reservation since v0.3. Callers with `gmcrypto-core/std` in their
+  feature list must remove the entry; no behavioural change. If a
+  future v0.5.x ships a file-I/O helper, it will get a specific
+  feature name like `std-file-io` rather than the generic `std`.
+
+C ABI (`gmcrypto-c`) is unaffected — the failure path was already
+`GMCRYPTO_FAILED` regardless of the Rust-side error type. FFI symbol
+`gmcrypto_sm2_privkey_to_sec1_be` keeps its name for v0.4 → v0.5
+C-side backcompat (the Rust implementation now calls the renamed
+`to_bytes_be` internally).
+
 ### Added
 
+- **`gmcrypto_core::Error`** — workspace-wide failure type with
+  `Display` and `core::error::Error` impls. Single `Failed` variant
+  (`#[non_exhaustive]`).
+- **`Sm2PrivateKey::from_bytes_be(&[u8; 32]) -> CtOption<Self>`** —
+  always-on, recommended public constructor. Same constant-time
+  `[1, n-2]` range check as the renamed `from_scalar`.
+- **`Sm2PrivateKey::to_bytes_be(&self) -> [u8; 32]`** — always-on,
+  SemVer-stable promotion of v0.3's `#[doc(hidden)] pub fn
+  to_sec1_be`.
+- **`crypto-bigint-scalar` Cargo feature** — gates the public
+  `Sm2PrivateKey::from_scalar(U256)`. Default-off.
 - **v0.5 W4 phase 1** — `sm4-bitsliced-simd` opt-in feature flag
   scaffolding (Q5.10–Q5.15 in `docs/v0.5-scope.md`). Adds the new
   module `gmcrypto_core::sm4::sbox_bitsliced_simd` and wires it into

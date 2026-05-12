@@ -143,7 +143,7 @@ pub fn encode(
 pub struct EcPrivateKey {
     /// 32-byte big-endian scalar `d`. Not validated against the
     /// curve order here — the caller must reject `d == 0` and
-    /// `d == n-1` via [`crate::sm2::Sm2PrivateKey::new`].
+    /// `d == n-1` via [`crate::sm2::Sm2PrivateKey::from_bytes_be`].
     pub scalar_be: [u8; 32],
     /// Decoded uncompressed public point, if the optional
     /// `publicKey` field was present and well-formed.
@@ -229,7 +229,7 @@ pub fn decode(input: &[u8]) -> Option<EcPrivateKey> {
 /// must be a representative of a non-zero scalar field element.
 /// Returns the validated scalar in Mont form. **Caller is
 /// responsible for the tighter `[1, n-2]` range required by
-/// SM2 sign/encrypt — that lives in `Sm2PrivateKey::new`.**
+/// SM2 sign/encrypt — that lives in `Sm2PrivateKey::from_bytes_be`.**
 #[must_use]
 #[allow(dead_code)]
 pub(crate) fn validate_scalar(scalar_be: &[u8; 32]) -> Option<Fn> {
@@ -314,7 +314,7 @@ mod tests {
         ];
         // Use the GB/T 32918.2 sample — its public point is on-curve.
         let d = U256::from_be_slice(&scalar_be);
-        let key = crate::sm2::Sm2PrivateKey::new(d).expect("valid d");
+        let key = crate::sm2::Sm2PrivateKey::from_scalar_inner(d).expect("valid d");
         let (x, y) = key.public_key().to_affine().expect("finite");
         let pk = encode_uncompressed_point(&x, &y);
         let der = encode(&scalar_be, Some(&pk));

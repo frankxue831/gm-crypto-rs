@@ -93,7 +93,7 @@ mod tests {
     fn sec1_round_trip_gbt_sample() {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
-        let priv_key = Sm2PrivateKey::new(d).expect("valid d");
+        let priv_key = Sm2PrivateKey::from_scalar_inner(d).expect("valid d");
         let pub_key = Sm2PublicKey::from_point(priv_key.public_key());
         let bytes = pub_key.to_sec1_uncompressed();
         assert_eq!(bytes[0], 0x04);
