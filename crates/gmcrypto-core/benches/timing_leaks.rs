@@ -202,11 +202,11 @@ fn ct_sign(runner: &mut CtRunner, rng: &mut BenchRng) {
     // degenerate case (whose Montgomery form triggers a fast-path in
     // `crypto-bigint`'s ConstMontyForm operations — confirmed by direct
     // measurement to inflate |t| by ~20x).
-    let key_small = Sm2PrivateKey::new(U256::from_be_hex(
+    let key_small = Sm2PrivateKey::from_scalar(U256::from_be_hex(
         "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8",
     ))
     .expect("sample D in [1, n-2]");
-    let key_large = Sm2PrivateKey::new(U256::from_be_hex(
+    let key_large = Sm2PrivateKey::from_scalar(U256::from_be_hex(
         "B9E5B7C12E48BAB7CC0E91A57F8A48E8C8F87DDD25EBF52F2A75E612CB1A9E4F",
     ))
     .expect("random D in [1, n-2]");
@@ -314,7 +314,7 @@ impl TryCryptoRng for ClassKRng {}
 /// structurally undetectable there. This target inverts the class
 /// assignment.
 fn ct_sign_k_class(runner: &mut CtRunner, rng: &mut BenchRng) {
-    let key = Sm2PrivateKey::new(U256::from_be_hex(
+    let key = Sm2PrivateKey::from_scalar(U256::from_be_hex(
         "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8",
     ))
     .expect("fixed sample D in [1, n-2]");
@@ -517,18 +517,18 @@ fn ct_hmac_sm3(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// scalar mult `mul_var(d_B, C1)` plus `to_affine`'s `Fp::invert` are
 /// the dominant constant-time-relevant work.
 fn ct_sm2_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
-    let key_left = Sm2PrivateKey::new(U256::from_be_hex(
+    let key_left = Sm2PrivateKey::from_scalar(U256::from_be_hex(
         "1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0",
     ))
     .expect("valid d for class Left");
-    let key_right = Sm2PrivateKey::new(U256::from_be_hex(
+    let key_right = Sm2PrivateKey::from_scalar(U256::from_be_hex(
         "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8",
     ))
     .expect("valid d for class Right");
     // Encrypt to a THIRD party so that both classes fail at the MAC
     // check via identical control flow. The class label then identifies
     // only `d_B`; nothing else.
-    let recipient_priv = Sm2PrivateKey::new(U256::from_be_hex(
+    let recipient_priv = Sm2PrivateKey::from_scalar(U256::from_be_hex(
         "B9E5B7C12E48BAB7CC0E91A57F8A48E8C8F87DDD25EBF52F2A75E612CB1A9E4F",
     ))
     .expect("valid d for recipient");
@@ -564,7 +564,7 @@ fn ct_sm2_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// cost manageable, high enough that PBKDF2 dominates the timed
 /// window (matches `kdf::pbkdf2_hmac_sm3` smoke test budgets).
 fn ct_pkcs8_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
-    let key = Sm2PrivateKey::new(U256::from_be_hex(
+    let key = Sm2PrivateKey::from_scalar(U256::from_be_hex(
         "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8",
     ))
     .expect("valid d");

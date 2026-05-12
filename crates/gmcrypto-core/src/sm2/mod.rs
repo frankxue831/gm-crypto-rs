@@ -13,11 +13,21 @@ pub mod sign;
 pub mod verify;
 
 pub use curve::{Fn, Fp};
-pub use decrypt::{DecryptError, decrypt};
-pub use encrypt::{EncryptError, encrypt};
+pub use decrypt::decrypt;
+pub use encrypt::encrypt;
 pub use point::ProjectivePoint;
 pub use private_key::Sm2PrivateKey;
 pub use public_key::Sm2PublicKey;
 pub use scalar_mul::{mul_g, mul_var};
-pub use sign::{DEFAULT_SIGNER_ID, SignError, compute_z, sign_raw_with_id, sign_with_id};
+pub use sign::{DEFAULT_SIGNER_ID, compute_z, sign_raw_with_id, sign_with_id};
 pub use verify::verify_with_id;
+
+/// SM2 module error — alias for the workspace-wide [`crate::Error`].
+///
+/// Prior to v0.5 each operation had its own per-module enum
+/// (`SignError`, `EncryptError`, `DecryptError`) all with a single
+/// `Failed` variant. v0.5 W5 collapses them into one type; migration
+/// recipe is `s/SignError/sm2::Error/g`, `s/EncryptError/sm2::Error/g`,
+/// `s/DecryptError/sm2::Error/g` (or use the workspace-wide path
+/// `gmcrypto_core::Error` directly).
+pub type Error = crate::Error;

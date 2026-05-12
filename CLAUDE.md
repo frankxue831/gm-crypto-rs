@@ -29,9 +29,12 @@ This file lists the constraints a coding agent will violate by default.
   ConstantTimeEq, ConstantTimeLess, CtOption}`. The SM2 sign retry loop runs
   a fixed `K=2` iterations regardless of which (if any) candidate is valid.
 - **Failure-mode invariant.** `verify_with_id` returns `bool` (never `Result`).
-  `SignError` has exactly one variant (`Failed`). DER decode returns `Option`,
-  never specific error variants. PRs that distinguish failure modes get rejected
-  on sight — see `SECURITY.md`. Don't make errors "more helpful."
+  Every fallible `Result`-returning public API uses the workspace-wide
+  `gmcrypto_core::Error` (v0.5 W5) with a single `Failed` variant. Module
+  aliases `sm2::Error`, `pem::Error`, `pkcs8::Error` all point at the same
+  type. DER decode returns `Option`, never specific error variants. PRs
+  that distinguish failure modes get rejected on sight — see
+  `SECURITY.md`. Don't make errors "more helpful."
 - `Cargo.lock` is **gitignored** (lib-crate policy). Don't `git add` it.
   For `cargo deny` runs, generate via `cargo generate-lockfile` first.
 - MSRV is **1.85**, edition **2024** (post-publish bump in `89abfb9`).
@@ -155,7 +158,7 @@ crates/gmcrypto-core/
       point.rs              # ProjectivePoint + RCB add/double (eprint 2015/1060)
       scalar_mul.rs         # mul_g (v0.3 W6: comb-table walk) + mul_var
       comb_table.rs         # v0.3 W6 — precomputed 64×16 table for k·G, spin::Once lazy init
-      private_key.rs        # Sm2PrivateKey + ZeroizeOnDrop; v0.3 W2 adds from_sec1_be / to_sec1_be (#[doc(hidden)], not-SemVer)
+      private_key.rs        # Sm2PrivateKey + ZeroizeOnDrop; v0.5 W5 renames `new` → `from_scalar` (under `crypto-bigint-scalar`), `from_sec1_be` → `from_bytes_be` (always-on), `to_sec1_be` → `to_bytes_be` (always-on, promoted from #[doc(hidden)])
       public_key.rs         # Sm2PublicKey; v0.3 W2 adds from_sec1_bytes / to_sec1_uncompressed + ConstantTimeEq
       sign.rs               # sign_with_id, sign_raw_with_id, compute_z, MAX_ID_LEN
       verify.rs             # verify_with_id (returns bool, rejects identity pubkey + over-long ID)
@@ -296,10 +299,16 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
   PEM from valid-PEM-but-bad-inner-ECPrivateKey. Single `Failed`
   variant per the failure-mode invariant — anything else is a
   password-oracle / inner-ASN.1 distinguishing-attack vector.
-- Don't expose v0.3 W2's `Sm2PrivateKey::to_sec1_be` publicly without
-  the `#[doc(hidden)]` marker. Per Q7.2 it's **not SemVer-stable** —
-  same posture as `sign_raw_with_id`. Callers must zeroize the
-  returned `[u8; 32]` themselves; document the contract on the method.
+- `Sm2PrivateKey::to_bytes_be` (v0.5 W5; was `#[doc(hidden)] pub fn
+  to_sec1_be` in v0.3-0.4) returns the secret scalar as plaintext
+  bytes. **Callers must zeroize the returned `[u8; 32]` themselves**
+  — the SDK can't enforce zeroization on a stack-owned array. v0.5
+  promotes the method to SemVer-stable; the contract is documented
+  on the method.
+- `gmcrypto-c`'s FFI symbol `gmcrypto_sm2_privkey_to_sec1_be` keeps
+  the `sec1` suffix for v0.4→v0.5 C-ABI backcompat even though the
+  Rust method renamed to `to_bytes_be`. Don't rename the FFI symbol
+  — C/Go/Zig callers can't follow a Rust-side type-alias trick.
 - Don't widen `unsafe_code` in `gmcrypto-c` from `warn` to `allow`,
   and don't remove the `// SAFETY:` comment on any FFI `unsafe`
   block. Per Q4.7 in `docs/v0.4-scope.md`: warn surfaces each

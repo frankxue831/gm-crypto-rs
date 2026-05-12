@@ -41,6 +41,12 @@ dudect-bencher.workspace = true
 name = "timing_leaks"
 path = "benches/timing_leaks.rs"
 harness = false
+# v0.5 W5 — the bench harness exercises `Sm2PrivateKey::from_scalar`
+# (renamed from `new` in v0.5 W5), which is gated behind
+# `crypto-bigint-scalar`. The bench is run with this feature enabled
+# via the CI workflow's `cargo bench --bench timing_leaks --features
+# crypto-bigint-scalar`. Local runs must do the same.
+required-features = ["crypto-bigint-scalar"]
 
 [[test]]
 name = "rustcrypto_traits"
@@ -49,12 +55,23 @@ required-features = ["digest-traits", "cipher-traits"]
 
 [features]
 default = []
-std = []   # opt-in std feature; reserved for v0.3+ wire-format file I/O
 # v0.4 W2 — opt-in RustCrypto-trait fit. Two flags per Q4.3 so
 # callers needing only one half don't pay for both. Default-features
 # build is unchanged.
 digest-traits = ["dep:digest"]
 cipher-traits = ["dep:cipher"]
+# v0.5 W5 (Q5.17) — opt-in `crypto_bigint::U256` constructor for
+# `Sm2PrivateKey`. The always-on `Sm2PrivateKey::from_bytes_be(&[u8;
+# 32])` is the recommended path for callers who don't want a
+# transitive `crypto-bigint` major-version dep. Enabling this feature
+# unlocks `Sm2PrivateKey::from_scalar(d: U256)` for callers already
+# carrying `crypto-bigint`.
+crypto-bigint-scalar = []
+# NOTE — `std` feature flag removed in v0.5 W5 (Q5.18). It had been a
+# no-op reservation since v0.3; a reserved flag without contents is
+# worse than no flag (callers wondered what it did, docs had to
+# explain "nothing yet"). If a future v0.5.x ships a file-I/O helper,
+# it gets a specific feature name like `std-file-io`.
 # v0.4 W3 — bitsliced (table-less, gate-only) SM4 S-box. Boyar-Peralta-
 # style Itoh-Tsujii inversion in GF(2^8) plus two affine
 # transformations. Default-off (Q4.9 in docs/v0.4-scope.md); callers

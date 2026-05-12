@@ -86,7 +86,7 @@ mod tests {
     fn round_trip_random_message() {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
-        let key = Sm2PrivateKey::new(d).expect("valid");
+        let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid");
         let pk = Sm2PublicKey::from_point(key.public_key());
         let id = b"ALICE123@YAHOO.COM";
         let msg = b"hello world";
@@ -99,7 +99,7 @@ mod tests {
     fn tampered_message_rejected() {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
-        let key = Sm2PrivateKey::new(d).expect("valid");
+        let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid");
         let pk = Sm2PublicKey::from_point(key.public_key());
         let id = b"ALICE123@YAHOO.COM";
         let mut rng = UnwrapErr(SysRng);
@@ -113,8 +113,8 @@ mod tests {
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
         let d_b =
             U256::from_be_hex("0000000000000000000000000000000000000000000000000000000000000007");
-        let key_a = Sm2PrivateKey::new(d_a).expect("valid");
-        let key_b = Sm2PrivateKey::new(d_b).expect("valid");
+        let key_a = Sm2PrivateKey::from_scalar_inner(d_a).expect("valid");
+        let key_b = Sm2PrivateKey::from_scalar_inner(d_b).expect("valid");
         let pk_b = Sm2PublicKey::from_point(key_b.public_key());
         let id = b"ALICE123@YAHOO.COM";
         let msg = b"hello world";
@@ -128,7 +128,7 @@ mod tests {
     fn malformed_der_rejected() {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
-        let key = Sm2PrivateKey::new(d).expect("valid");
+        let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid");
         let pk = Sm2PublicKey::from_point(key.public_key());
         // Garbage signature bytes.
         assert!(!verify_with_id(&pk, b"id", b"msg", &[0u8; 8]));
@@ -158,7 +158,7 @@ mod tests {
     fn over_long_id_rejected() {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
-        let key = Sm2PrivateKey::new(d).expect("valid");
+        let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid");
         let pk = Sm2PublicKey::from_point(key.public_key());
         let too_long = alloc::vec![0u8; crate::sm2::sign::MAX_ID_LEN + 1];
         // Doesn't matter what the signature is — must be rejected before

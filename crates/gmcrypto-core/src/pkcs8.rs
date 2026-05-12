@@ -39,7 +39,7 @@
 //! PBKDF2-HMAC-SM3 (covered by [`crate::hmac`]'s constant-time
 //! discipline), SM4-CBC decrypt + PKCS#7 strip
 //! ([`crate::sm4::mode_cbc::decrypt`]), and the inner
-//! [`Sm2PrivateKey::new`] range gate. The W2 dudect target
+//! [`Sm2PrivateKey::from_bytes_be`] range gate. The W2 dudect target
 //! `ct_pkcs8_decrypt` class-splits by **password bytes** (both
 //! classes ship valid blobs so both succeed via identical control
 //! flow); local 10K-sample run measures `|tau| ≈ 0.02`.
@@ -73,16 +73,14 @@ use crypto_bigint::U256;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
-/// PKCS#8 codec failure. Single uninformative variant per the
-/// project's failure-mode invariant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Error {
-    /// Decoding, decryption, or inner-key reconstruction failed for
-    /// any reason — wrong password, malformed PBES2 parameters,
-    /// off-curve public key, out-of-range scalar, etc. Single
-    /// uninformative outcome.
-    Failed,
-}
+/// PKCS#8 codec failure — alias for the workspace-wide [`crate::Error`].
+///
+/// Single uninformative variant per the project's failure-mode
+/// invariant. Prior to v0.5 this was a distinct `pkcs8::Error` enum;
+/// v0.5 W5 unifies it with the workspace-wide type via this alias,
+/// so existing `match` callsites binding against `pkcs8::Error::Failed`
+/// keep compiling unchanged.
+pub type Error = crate::Error;
 
 /// PKCS#8 version field (`v1 = 0`). RFC 5958 also defines `v2 = 1`
 /// when the optional `publicKey` BIT STRING is present; v0.3 emits
@@ -116,7 +114,7 @@ pub const PBKDF2_MAX_ITERATIONS: u32 = 10_000_000;
 /// their stack frame.
 #[must_use]
 pub fn encode(key: &Sm2PrivateKey) -> Vec<u8> {
-    let mut scalar_be = key.to_sec1_be();
+    let mut scalar_be = key.to_bytes_be();
     let pub_uncompressed = {
         let pub_key = crate::sm2::Sm2PublicKey::from_point(key.public_key());
         pub_key.to_sec1_uncompressed()
@@ -216,7 +214,7 @@ pub fn decode(input: &[u8]) -> Result<Sm2PrivateKey, Error> {
 
     let d = U256::from_be_slice(&inner.scalar_be);
     inner.scalar_be.zeroize();
-    let key = Sm2PrivateKey::new(d);
+    let key = Sm2PrivateKey::from_scalar_inner(d);
     let key: Option<Sm2PrivateKey> = key.into();
     let key = key.ok_or(Error::Failed)?;
 
@@ -510,7 +508,7 @@ mod tests {
     fn sample_key() -> Sm2PrivateKey {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
-        Sm2PrivateKey::new(d).expect("valid d")
+        Sm2PrivateKey::from_scalar_inner(d).expect("valid d")
     }
 
     /// Unencrypted PKCS#8 round-trip.
@@ -541,9 +539,9 @@ mod tests {
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
         let d2 =
             U256::from_be_hex("1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0");
-        let key1 = Sm2PrivateKey::new(d1).expect("d1");
-        let key2 = Sm2PrivateKey::new(d2).expect("d2");
-        let scalar1 = key1.to_sec1_be();
+        let key1 = Sm2PrivateKey::from_scalar_inner(d1).expect("d1");
+        let key2 = Sm2PrivateKey::from_scalar_inner(d2).expect("d2");
+        let scalar1 = key1.to_bytes_be();
         let pk2 = crate::sm2::Sm2PublicKey::from_point(key2.public_key()).to_sec1_uncompressed();
         let inner_bad = sec1::encode(&scalar1, Some(&pk2));
 

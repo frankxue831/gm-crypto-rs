@@ -34,7 +34,7 @@
 //!
 //! # Failure-mode invariant
 //!
-//! [`encrypt`] returns `Result<Vec<u8>, EncryptError>` with a single
+//! [`encrypt`] returns `Result<Vec<u8>, crate::Error>` with a single
 //! `Failed` variant — collapses every retry-budget-exhausted, identity-
 //! point, or KDF-zero outcome to one uninformative shape. With a
 //! [`CryptoRng`], the cumulative-failure probability is `≤ 2^-512` per
@@ -87,16 +87,6 @@ use zeroize::Zeroize;
 /// reached in practice with a uniform CSPRNG.
 const ENCRYPT_RETRY_BUDGET: usize = 64;
 
-/// Encrypt failure — single uninformative variant per the project's
-/// failure-mode invariant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EncryptError {
-    /// The retry budget was exhausted, or the recipient public key is
-    /// the identity point. Effectively unreachable with a uniform
-    /// CSPRNG and a real public key.
-    Failed,
-}
-
 /// Encrypt `plaintext` to recipient `public`, returning a GM/T 0009
 /// DER-encoded ciphertext.
 ///
@@ -106,7 +96,7 @@ pub enum EncryptError {
 ///
 /// # Errors
 ///
-/// Returns [`EncryptError::Failed`] if the recipient public key is the
+/// Returns [`crate::Error::Failed`] if the recipient public key is the
 /// identity point (a malicious caller could construct one via
 /// [`Sm2PublicKey::from_point`]) or if every retry produced an
 /// all-zeros KDF output.
@@ -114,9 +104,9 @@ pub fn encrypt<R: CryptoRng + Rng>(
     public: &Sm2PublicKey,
     plaintext: &[u8],
     rng: &mut R,
-) -> Result<Vec<u8>, EncryptError> {
+) -> Result<Vec<u8>, crate::Error> {
     if bool::from(public.point().is_identity()) {
-        return Err(EncryptError::Failed);
+        return Err(crate::Error::Failed);
     }
     for _ in 0..ENCRYPT_RETRY_BUDGET {
         let k = sample_nonzero_scalar(rng);
@@ -124,7 +114,7 @@ pub fn encrypt<R: CryptoRng + Rng>(
             return Ok(encode(&ct));
         }
     }
-    Err(EncryptError::Failed)
+    Err(crate::Error::Failed)
 }
 
 /// Single encrypt attempt. Returns `None` when the KDF output is
@@ -369,7 +359,7 @@ mod tests {
         let mut rng = rand_core::UnwrapErr(getrandom::SysRng);
         assert_eq!(
             encrypt(&pk, b"any plaintext", &mut rng),
-            Err(EncryptError::Failed)
+            Err(crate::Error::Failed)
         );
     }
 
@@ -380,7 +370,7 @@ mod tests {
     fn encrypt_with_fixed_k_is_deterministic() {
         let d =
             U256::from_be_hex("1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0");
-        let key = Sm2PrivateKey::new(d).expect("valid d");
+        let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid d");
         let pk = Sm2PublicKey::from_point(key.public_key());
         let k_bytes =
             U256::from_be_hex("4C62EEFD6ECFC2B95B92FD6C3D9575148AFA17425546D49018E5388D49DD7B4F")

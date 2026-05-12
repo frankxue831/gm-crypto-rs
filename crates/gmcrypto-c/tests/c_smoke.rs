@@ -520,12 +520,14 @@ fn sm4_cbc_streaming_free_null_is_noop() {
 // ============================================================
 
 fn fresh_sm2_keys() -> (*mut gmcrypto_sm2_privkey_t, *mut gmcrypto_sm2_pubkey_t) {
-    use crypto_bigint::U256;
     use gmcrypto_core::sm2::{Sm2PrivateKey, Sm2PublicKey};
 
-    let d = U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
-    let key = Sm2PrivateKey::new(d).expect("valid d");
-    let scalar_bytes: [u8; 32] = key.to_sec1_be();
+    // v0.5 W5 — `Sm2PrivateKey::new(U256)` renamed to `from_scalar` and
+    // gated behind `crypto-bigint-scalar`. The c_smoke test uses the
+    // always-on `from_bytes_be` constructor instead.
+    let d_be: [u8; 32] = hex!("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
+    let key = Sm2PrivateKey::from_bytes_be(&d_be).expect("valid d");
+    let scalar_bytes: [u8; 32] = key.to_bytes_be();
     let pub_bytes: [u8; 65] = Sm2PublicKey::from_point(key.public_key()).to_sec1_uncompressed();
 
     let priv_ptr = unsafe { gmcrypto_sm2_privkey_new(scalar_bytes.as_ptr()) };
@@ -720,13 +722,13 @@ fn sm2_encrypt_c1c3c2_round_trip_via_ffi() {
 fn sm2_decrypt_c1c2c3_legacy_via_ffi() {
     // Construct a legacy C1||C2||C3 ciphertext via the gmcrypto-core
     // surface (no encode-legacy emit fn — by design).
-    use crypto_bigint::U256;
     use gmcrypto_core::asn1::ciphertext::decode as der_decode;
     use gmcrypto_core::sm2::raw_ciphertext::{C1_LEN, C3_LEN, encode_c1c3c2};
     use gmcrypto_core::sm2::{Sm2PrivateKey, Sm2PublicKey, encrypt as core_encrypt};
 
-    let d = U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
-    let key = Sm2PrivateKey::new(d).expect("valid d");
+    // v0.5 W5 — use `from_bytes_be` (always-on); `new(U256)` removed.
+    let d_be: [u8; 32] = hex!("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
+    let key = Sm2PrivateKey::from_bytes_be(&d_be).expect("valid d");
     let pub_key = Sm2PublicKey::from_point(key.public_key());
 
     let pt = b"legacy ordering";
@@ -748,7 +750,7 @@ fn sm2_decrypt_c1c2c3_legacy_via_ffi() {
     legacy.extend_from_slice(c3);
 
     // Pass key into the FFI through SEC1 import.
-    let scalar_bytes: [u8; 32] = key.to_sec1_be();
+    let scalar_bytes: [u8; 32] = key.to_bytes_be();
     let priv_ptr = unsafe { gmcrypto_sm2_privkey_new(scalar_bytes.as_ptr()) };
     assert!(!priv_ptr.is_null());
 

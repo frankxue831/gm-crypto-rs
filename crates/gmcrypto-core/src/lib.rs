@@ -28,7 +28,6 @@
 //! # Crate features
 //!
 //! - `default` — `no_std`, `alloc`-only. No optional dependencies.
-//! - `std` — opt-in; reserved for future file-I/O wire-format helpers.
 //! - `digest-traits` — opt-in (v0.4 W2). Implements `digest::Digest` for
 //!   [`sm3::Sm3`] and `digest::Mac` for [`hmac::HmacSm3`]. Pulls
 //!   `digest = "0.10"`.
@@ -40,6 +39,14 @@
 //!   GF(2^8). Byte-identical output to the default linear-scan path;
 //!   constant-time by construction (no table lookups, no branches on
 //!   secret bits).
+//! - `sm4-bitsliced-simd` — opt-in (v0.5 W4 scaffolding; AVX2 / NEON
+//!   intrinsic implementations land in v0.5.x). Implies
+//!   `sm4-bitsliced`. Default-off.
+//! - `crypto-bigint-scalar` — opt-in (v0.5 W5). Exposes
+//!   [`sm2::Sm2PrivateKey::from_scalar`] which takes a
+//!   `crypto_bigint::U256` directly. Default-off; the always-on
+//!   `from_bytes_be` constructor is the recommended path for callers
+//!   who don't want a transitive `crypto-bigint` dep.
 //!
 //! # `wasm32-unknown-unknown`
 //!
@@ -50,12 +57,9 @@
 
 #![no_std]
 #![deny(missing_docs)]
-#![doc(html_root_url = "https://docs.rs/gmcrypto-core/0.4.0")]
+#![doc(html_root_url = "https://docs.rs/gmcrypto-core/0.5.0")]
 
 extern crate alloc;
-
-#[cfg(feature = "std")]
-extern crate std;
 
 pub mod asn1;
 pub mod hmac;
@@ -68,3 +72,34 @@ pub mod sm3;
 pub mod sm4;
 pub mod spki;
 pub mod traits;
+
+/// Workspace-wide failure type (v0.5 W5).
+///
+/// Every fallible public surface in `gmcrypto-core` that does not
+/// return `Option` / `bool` / `subtle::CtOption` returns
+/// `Result<_, Error>`. The single `Failed` variant is deliberate per
+/// the **failure-mode invariant** (see `SECURITY.md`): distinguishing
+/// failure modes leaks information to padding-oracle / invalid-curve /
+/// password-oracle attackers.
+///
+/// Per-module aliases keep the established import paths working:
+/// `sm2::Error`, `pem::Error`, `pkcs8::Error` are type aliases for
+/// this one type. Prior to v0.5 these were separate per-module enums
+/// (`SignError`, `EncryptError`, `DecryptError`, `pem::Error`,
+/// `pkcs8::Error`) all with a single `Failed` variant; v0.5 unifies
+/// them per Q5.16 in `docs/v0.5-scope.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Error {
+    /// The operation failed. No further information is exposed —
+    /// distinguishing failure modes leaks attacker-useful signal.
+    Failed,
+}
+
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("gmcrypto-core operation failed")
+    }
+}
+
+impl core::error::Error for Error {}

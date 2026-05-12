@@ -73,17 +73,10 @@ pub fn compute_z(public: &Sm2PublicKey, id: &[u8]) -> [u8; DIGEST_SIZE] {
 /// Fixed-K signing retry budget. v0.1 = 2.
 pub(crate) const SIGN_RETRY_BUDGET: usize = 2;
 
-/// Sign error: single uninformative variant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SignError {
-    /// The retry budget was exhausted. Effectively unreachable with a uniform CSPRNG.
-    Failed,
-}
-
 /// Sign `message` with `id` under `key`.
 ///
 /// Returns a DER-encoded `SEQUENCE { r, s }` signature, or
-/// `SignError::Failed` if the `SIGN_RETRY_BUDGET` was exhausted
+/// [`crate::Error::Failed`] if the `SIGN_RETRY_BUDGET` was exhausted
 /// (probability ~9·2^-512 with a uniform CSPRNG).
 ///
 /// # Constant-time contract
@@ -93,7 +86,7 @@ pub enum SignError {
 ///
 /// # Errors
 ///
-/// Returns `SignError::Failed` if `id.len() > MAX_ID_LEN` (the
+/// Returns [`crate::Error::Failed`] if `id.len() > MAX_ID_LEN` (the
 /// `ENTL_A` field is 16-bit) or if every retry in the budget produced
 /// an invalid candidate (`r == 0`, `r + k == n`, or `s == 0`). Failure
 /// modes are deliberately collapsed to one variant per the
@@ -103,7 +96,7 @@ pub fn sign_with_id<R: CryptoRng + Rng>(
     id: &[u8],
     message: &[u8],
     rng: &mut R,
-) -> Result<Vec<u8>, SignError> {
+) -> Result<Vec<u8>, crate::Error> {
     let (r, s) = sign_raw_with_id(key, id, message, rng)?;
     Ok(encode_sig(&r, &s))
 }
@@ -123,18 +116,18 @@ pub fn sign_with_id<R: CryptoRng + Rng>(
 ///
 /// # Errors
 ///
-/// Same as [`sign_with_id`]: returns `SignError::Failed` only if every
-/// retry produced an invalid candidate (`r == 0`, `r + k == n`, or
-/// `s == 0`).
+/// Same as [`sign_with_id`]: returns [`crate::Error::Failed`] only if
+/// every retry produced an invalid candidate (`r == 0`, `r + k == n`,
+/// or `s == 0`).
 #[doc(hidden)]
 pub fn sign_raw_with_id<R: CryptoRng + Rng>(
     key: &Sm2PrivateKey,
     id: &[u8],
     message: &[u8],
     rng: &mut R,
-) -> Result<(U256, U256), SignError> {
+) -> Result<(U256, U256), crate::Error> {
     if id.len() > MAX_ID_LEN {
-        return Err(SignError::Failed);
+        return Err(crate::Error::Failed);
     }
     let public = Sm2PublicKey::from_point(key.public_key());
     let z = compute_z(&public, id);
@@ -154,7 +147,7 @@ pub fn sign_raw_with_id<R: CryptoRng + Rng>(
     }
 
     let pair: Option<RsPair> = chosen.into();
-    let pair = pair.ok_or(SignError::Failed)?;
+    let pair = pair.ok_or(crate::Error::Failed)?;
     Ok((pair.r, pair.s))
 }
 
@@ -271,7 +264,7 @@ mod tests {
     fn z_appendix_a2() {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
-        let key = Sm2PrivateKey::new(d).expect("valid scalar");
+        let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid scalar");
         let public = Sm2PublicKey::from_point(key.public_key());
         let z = compute_z(&public, b"ALICE123@YAHOO.COM");
 
@@ -291,11 +284,11 @@ mod tests {
     fn sign_over_long_id_rejected() {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
-        let key = Sm2PrivateKey::new(d).expect("valid scalar");
+        let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid scalar");
         let too_long = alloc::vec![0u8; MAX_ID_LEN + 1];
         let mut rng = UnwrapErr(SysRng);
         let result = sign_with_id(&key, &too_long, b"msg", &mut rng);
-        assert_eq!(result, Err(SignError::Failed));
+        assert_eq!(result, Err(crate::Error::Failed));
     }
 
     #[test]
@@ -362,7 +355,7 @@ mod sign_tests {
     fn gbt32918_appendix_a2_fixed_k() {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
-        let key = Sm2PrivateKey::new(d).expect("valid scalar");
+        let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid scalar");
         let id = b"ALICE123@YAHOO.COM";
         let message = b"message digest";
         let mut rng =
