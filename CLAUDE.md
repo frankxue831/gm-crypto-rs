@@ -232,15 +232,161 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
 
 ## Workflow notes
 
+- **Self-hosted CI runner (v0.5+).** Private-repo Pro-plan minute caps
+  drove a split: `ci.yml`'s five jobs (build / msrv / cabi / deny /
+  wasm32) run on a **self-hosted macOS aarch64 runner labelled
+  `gmcrypto`**; the two dudect workflows stay on `ubuntu-latest`
+  because their `|tau|` gates were empirically calibrated against
+  GitHub's `ubuntu-24.04` runner-image noise floor (v0.4 release-prep
+  PR #22). Moving dudect would invalidate the calibration. See the
+  `## Self-hosted CI runner setup` section below for the runbook.
 - Branch model: direct commits to `main` for the maintainer; external PRs go
   through CI + dudect-pr.yml. The dudect smoke is path-allowlisted so doc-only
   PRs skip the bench job.
 - Tags are SSH-signed (`gpg.format = ssh`). Verify locally with
   `git tag -v vX.Y.Z` after configuring `gpg.ssh.allowedSignersFile`.
 - `cargo publish` is the irreversible step. Use `docs/v0.1.0-release-review.md`
-  as the template before publishing v0.4. **Two crates ship**:
+  as the template before publishing v0.5. **Two crates ship**:
   `gmcrypto-core` first, then `gmcrypto-c` (path dep on core via
-  `version = "0.4"` — core must be on crates.io before c can publish).
+  `version = "0.5"` — core must be on crates.io before c can publish).
+
+## Self-hosted CI runner setup
+
+`ci.yml` runs on a self-hosted macOS aarch64 runner. One-time setup
+per host machine:
+
+```bash
+# 1. Dedicated user — runner CANNOT read your daily-driver home dir.
+#    `sysadminctl` is the modern macOS path (auto-assigns a free UID)
+#    and avoids hand-rolled `dscl` boilerplate that can collide with
+#    an existing UID 600. We intentionally do NOT set a login
+#    password for ghrunner — it's a service account, no SSH/login
+#    exposure, and `sudo -iu ghrunner` from the maintainer user
+#    authenticates the maintainer, not ghrunner. Passwordless
+#    service accounts are slightly more secure here.
+sudo sysadminctl -addUser ghrunner -shell /bin/zsh \
+  -home /Users/ghrunner -admin no
+# Expect a "No clear text password ... will not allow user to use
+# FDE" warning — benign for a service account. Note the assigned
+# UID/GID in the output (typically 5xx / 20=staff).
+
+# sysadminctl ASSIGNS but does NOT CREATE the home directory.
+# Create it now or `sudo -iu ghrunner` will fail with
+# "chdir to /Users/ghrunner: No such file or directory".
+sudo mkdir /Users/ghrunner
+sudo chown ghrunner:staff /Users/ghrunner
+sudo chmod 700 /Users/ghrunner   # only ghrunner can read its own home
+
+# Smoke-test before continuing:
+sudo -iu ghrunner whoami   # should print: ghrunner
+sudo -iu ghrunner pwd      # should print: /Users/ghrunner
+
+# 2. Switch users + install rustup with the toolchains CI needs
+sudo -iu ghrunner
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    --default-toolchain stable
+source $HOME/.cargo/env
+rustup toolchain install 1.85
+rustup target add wasm32-unknown-unknown --toolchain stable
+rustup target add wasm32-unknown-unknown --toolchain 1.85
+rustup component add clippy rustfmt --toolchain stable
+
+# 2b. Pre-empt git's macOS keychain credential helper. The system
+#     gitconfig that ships with Xcode CLT configures `credential.helper =
+#     osxkeychain` globally. When git runs as a fresh user (ghrunner),
+#     the first credential lookup triggers macOS Keychain Services
+#     prompting "<user> wants to use the login keychain" — and ghrunner
+#     has no login keychain, so the prompt is unsatisfiable and hangs
+#     the runner. Override with an empty helper in ghrunner's user-
+#     scoped gitconfig (written directly to sidestep `git config`'s
+#     newer "no action specified" gotcha with empty-string values).
+cat > ~/.gitconfig <<'INNER'
+[credential]
+	helper =
+[safe]
+	directory = *
+INNER
+
+# 3. Register the runner.
+#
+# 3a. Look up the latest runner version as your MAINTAINER user
+#     (NOT as ghrunner — ghrunner has no `gh` auth). The
+#     unauthenticated GitHub API has a 60-req/hour-per-IP cap; `gh
+#     api` auto-uses your stored auth token and has a 5000/hour
+#     limit. The first version of this runbook used raw `curl
+#     https://api.github.com/...` and hit the rate limit on a fresh
+#     setup attempt.
+#
+LATEST=$(gh api /repos/actions/runner/releases/latest \
+  --jq '.tag_name | ltrimstr("v")')
+echo "Use this version when prompted: ${LATEST}"
+#
+# 3b. Get TOKEN from
+#     https://github.com/frankxue831/gm-crypto-rs/settings/actions/runners/new
+#     (one-time-use, ~1 hour TTL).
+#
+# 3c. Switch to ghrunner and download + register. Substitute the
+#     literal LATEST value from 3a above (ghrunner's shell does not
+#     inherit it from sudo -iu).
+sudo -iu ghrunner
+mkdir -p ~/actions-runner && cd ~/actions-runner
+LATEST=2.319.1   # <-- paste the literal version from 3a
+curl -fsSL -o runner.tar.gz \
+  "https://github.com/actions/runner/releases/download/v${LATEST}/actions-runner-osx-arm64-${LATEST}.tar.gz"
+tar xzf runner.tar.gz
+./config.sh --url https://github.com/frankxue831/gm-crypto-rs \
+  --token <TOKEN> \
+  --labels self-hosted,macos,arm64,gmcrypto \
+  --work _work \
+  --unattended
+
+# 4. Test interactively first:
+./run.sh   # Ctrl-C to stop
+
+# 5. Once green, install as a launchd service. On macOS the runner's
+#    `svc.sh` does NOT take a username argument (Linux semantics) and
+#    must be invoked WITHOUT `sudo` — it installs under the current
+#    user (which is `ghrunner` here per the `sudo -iu` in step 2).
+./svc.sh install
+./svc.sh start
+./svc.sh status   # verify "active" / "Started"
+```
+
+Operational notes:
+
+- The runner-side `_work/` directory holds checked-out repo + build
+  artifacts. Persists between jobs (good for warm Cargo cache). Wipe
+  with `rm -rf /Users/ghrunner/actions-runner/_work/*` (as
+  `ghrunner`, no sudo) if state ever gets corrupted.
+- The labels `[self-hosted, macos, arm64, gmcrypto]` are AND-ed in
+  `ci.yml` (case-insensitive). Only runners matching ALL four labels
+  pick up the job. The `gmcrypto` label is specific to this repo —
+  important when you one day host multiple project runners on the
+  same Mac.
+- **Offline-runner behaviour: queued jobs sit pending until they hit
+  GitHub's 24-hour timeout and then fail.** Not "indefinite". If you
+  see a job stuck in `Queued`, check the runner is still healthy at
+  https://github.com/frankxue831/gm-crypto-rs/settings/actions/runners
+  (status should say `Idle`). Escape hatch: revert the self-hosted
+  PR's `runs-on:` to `ubuntu-latest` and `git push`. Monitoring tip:
+  GitHub emails the repo owner if a job fails for `no_self_hosted_
+  runner_available` after the 24-hour timeout.
+- The runner's CARGO_HOME (`/Users/ghrunner/.cargo/`) is pre-populated
+  in step 2 with rustup + stable + 1.85 + clippy + rustfmt +
+  wasm32-unknown-unknown targets. `Swatinem/rust-cache@v2` calls in
+  `ci.yml` are configured with `cache-bin: "false"` so the action's
+  restore step won't evict those pre-installed binaries (the
+  default `cache-bin: "true"` has a known issue on long-lived
+  self-hosted runners where the restore overwrites `~/.cargo/bin/`
+  with whatever was in the cached snapshot).
+- `Swatinem/rust-cache@v2`'s registry / target caches live under
+  `/Users/ghrunner/actions-runner/_work/_cache/`. Native macOS
+  filesystem makes incremental warm-cache builds significantly
+  faster than the equivalent on `ubuntu-latest` (no Docker
+  bind-mount).
+- The dudect workflows STAY on `ubuntu-latest`. Don't move them —
+  the `|tau|` gates were calibrated against GitHub's `ubuntu-24.04`
+  image.
 
 ## Don't
 
