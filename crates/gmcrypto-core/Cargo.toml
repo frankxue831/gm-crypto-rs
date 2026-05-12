@@ -81,16 +81,21 @@ crypto-bigint-scalar = []
 # bitslicing deferred to v0.5+ per Q4.11.
 sm4-bitsliced = []
 # v0.5 W4 — multi-block SIMD-packed bitsliced SM4 S-box. Stacks on
-# `sm4-bitsliced`'s gate-only S-box circuit but processes 8 (AVX2) /
+# `sm4-bitsliced`'s gate-only S-box circuit, packing 8 (AVX2) /
 # 4 (NEON) blocks in parallel. Default-off (Q5.15 in
-# docs/v0.5-scope.md); requires `x86_64` or `aarch64` target (Q5.13).
-# On x86_64 without AVX2 support, the runtime detection path silently
-# falls back to the v0.4 single-block bitslice — correctness and CT
-# properties preserved, throughput regresses. Phase 1 (this release)
-# ships the scaffolding and integration point; the AVX2 (W4-phase-2)
-# and NEON (W4-phase-3) intrinsic implementations land in follow-on
-# PRs within v0.5. Phase 1 transparently delegates to the v0.4
-# single-block bitslice — byte-identical output.
+# docs/v0.5-scope.md).
+#
+# v0.5.0 ships **phase 1 scaffolding only**: enabling this feature
+# in v0.5.0 transparently delegates to the v0.4 single-block
+# bitslice — no SIMD intrinsics, no throughput win, byte-identical
+# output. The W4 phase 2 (AVX2 8-way on `x86_64`) and phase 3
+# (NEON 4-way on `aarch64` + `Sm4CbcDecryptor` SIMD fanout)
+# intrinsic implementations are deferred to v0.5.x patch releases
+# or v0.6 (see CHANGELOG.md `[0.5.0]` "Scope retrospective" for the
+# rationale). The feature-flag name is stable across the rollout;
+# callers enabling `sm4-bitsliced-simd` in v0.5.0 will transparently
+# pick up the AVX2 / NEON fast paths when v0.5.x lands them, with
+# no source change required.
 sm4-bitsliced-simd = ["sm4-bitsliced"]
 
 [lints.rust]

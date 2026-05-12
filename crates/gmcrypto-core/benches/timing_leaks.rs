@@ -565,7 +565,8 @@ fn ct_sm2_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// 2. SM4-CBC decrypt + PKCS#7 strip (already covered structurally
 ///    by `ct_sm4_*` + `mode_cbc::decrypt`'s subtle PKCS#7 strip).
 /// 3. **New:** `ECPrivateKey` ASN.1 parse over derived plaintext bytes,
-///    feeding into `Sm2PrivateKey::new`'s constant-time range check.
+///    feeding into `Sm2PrivateKey::from_scalar`'s constant-time
+///    range check (`from_scalar` renamed from `new` in v0.5 W5).
 ///
 /// Iteration count is held at 1024 — low enough to keep the per-sample
 /// cost manageable, high enough that PBKDF2 dominates the timed

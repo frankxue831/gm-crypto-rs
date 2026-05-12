@@ -1,11 +1,14 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0 published to crates.io 2026-05-10**;
-**v0.2.0 published 2026-05-10**; **v0.3.0 published 2026-05-11**;
-**v0.4.0 prep on `main` 2026-05-12** (W1 `wasm32-unknown-unknown`
-build target, W2 RustCrypto-trait fit behind opt-in feature flags,
-W3 bitsliced SM4 S-box behind `sm4-bitsliced`, W4 new `gmcrypto-c`
-workspace member exposing a C ABI). Two-crate workspace:
+Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0–v0.4.0 published to crates.io
+2026-05-10 → 2026-05-12**; **v0.5.0 prep on `main` 2026-05-12** (W1
+streaming SM4-CBC FFI, W2 raw byte-concat SM2 ciphertext on the C
+ABI, W3 caller-supplied RNG callback on the C ABI — all closing v0.4
+W4 deferrals; W4 phase 1 `sm4-bitsliced-simd` feature-flag
+scaffolding, AVX2 / NEON intrinsic phases 2 / 3 deferred to v0.5.x
+or v0.6; W5 BREAKING — workspace-wide `gmcrypto_core::Error` enum,
+`Sm2PrivateKey` U256 escape hatch + `from_scalar`/`from_bytes_be`/
+`to_bytes_be` rename, `std` feature flag removed). Two-crate workspace:
 `crates/gmcrypto-core/` (the no_std crypto core; default-member) +
 `crates/gmcrypto-c/` (FFI shim; cdylib + staticlib + cbindgen header).
 
@@ -21,9 +24,11 @@ This file lists the constraints a coding agent will violate by default.
   without `unsafe`. Every `unsafe` block in `gmcrypto-c/src/lib.rs`
   carries a `// SAFETY:` comment naming caller-side preconditions.
 - `#![no_std]` + `alloc` only inside `crates/gmcrypto-core/src/`. No `std::` paths.
-  The `std` feature exists but is reserved for future file-I/O wire-format
-  helpers (v0.5+). `gmcrypto-c` is `std`-OK (it's the language-binding
-  layer, not the no_std crypto primitives).
+  The reserved `std` Cargo feature flag was **removed in v0.5 W5
+  (Q5.18)** — a no-op feature flag had negative documentation value.
+  A future file-I/O helper would land under a specific name like
+  `std-file-io`, not the generic `std`. `gmcrypto-c` is `std`-OK
+  (it's the language-binding layer, not the no_std crypto primitives).
 - **Constant-time discipline on secrets.** Never `==` / `if` / Rust `bool` on a
   secret-derived value. Use `subtle::{Choice, ConditionallySelectable,
   ConstantTimeEq, ConstantTimeLess, CtOption}`. The SM2 sign retry loop runs

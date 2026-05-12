@@ -3,7 +3,25 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — v0.5 development on `main`
+## [0.5.0] — 2026-05-12
+
+v0.5.0 lands two workstreams from `docs/v0.5-scope.md` — **W4 phase 1**
+(SIMD-packed-bitsliced SM4 feature-flag scaffolding) and **W5 BREAKING**
+(workspace-wide error type, `crypto_bigint::U256` escape hatch, `std`
+feature removal). The C-ABI-completeness workstreams (W1 streaming
+SM4-CBC FFI, W2 raw byte-concat SM2 ciphertext on the C ABI, W3
+caller-supplied RNG callback on the C ABI) shipped earlier on `main`
+during the v0.5 development window and roll into v0.5.0.
+
+The original v0.5 scope also committed to **W4 phases 2 and 3** —
+real AVX2 8-way and NEON 4-way bitsliced SIMD intrinsics, plus
+`Sm4CbcDecryptor` SIMD fanout. Those phases are **deferred to v0.5.x
+patch releases or v0.6** (see "Scope retrospective" below); the
+`sm4-bitsliced-simd` feature flag in v0.5.0 transparently delegates
+to the v0.4 single-block bitslice with no SIMD intrinsics. The
+feature flag name is stable so callers enabling it in v0.5.0 will
+transparently pick up the AVX2 / NEON fast paths when v0.5.x lands
+them — no source change required.
 
 ### Changed — BREAKING (v0.5 W5)
 
@@ -93,6 +111,76 @@ C-side backcompat (the Rust implementation now calls the renamed
   the dudect workflows all add `sm4-bitsliced-simd` to their feature
   matrices. The `cargo deny` opt-in-features pass extends to the new
   feature.
+- **v0.5 W1 (gmcrypto-c)** — streaming SM4-CBC FFI surface. Adds
+  `gmcrypto_sm4_cbc_encryptor_t` and `gmcrypto_sm4_cbc_decryptor_t`
+  opaque types with 8 new entry points (new / update / finalize /
+  free per direction). Buffer contract: `out_capacity ≥ pt_len + 16`.
+  Wraps the v0.3 W5 streaming `Sm4Cbc{En,De}cryptor` shapes so C
+  callers get the same streaming envelope Rust has. Closes the v0.4
+  W4 Q4.16 deferral.
+- **v0.5 W2 (gmcrypto-c)** — raw byte-concat SM2 ciphertext on the
+  C ABI. Adds 3 entry points (`gmcrypto_sm2_encrypt_c1c3c2`,
+  `gmcrypto_sm2_decrypt_c1c3c2`, `gmcrypto_sm2_decrypt_c1c2c3_legacy`).
+  No `_c1c2c3_legacy` emit path — matches the gmcrypto-core surface
+  (the legacy ordering is decrypt-only forever per the v0.3 W4
+  decision; emitting it would propagate the legacy ordering). Closes
+  the v0.4 W4 Q4.17 deferral.
+- **v0.5 W3 (gmcrypto-c)** — caller-supplied RNG callback on the C
+  ABI. Adds `gmcrypto_rng_callback` typedef +
+  `gmcrypto_sm2_sign_with_rng` + `gmcrypto_sm2_encrypt_with_rng`.
+  Existing `_sign` / `_encrypt` keep using `getrandom::SysRng`
+  internally (additive surface). Callback failure collapses to
+  `GMCRYPTO_FAILED`. Closes the v0.4 W4 Q4.18 deferral; opens the
+  door for HSM / SDF / SKF RNG integrations.
+
+### Scope retrospective
+
+v0.5 originally committed to **W4 phase 2** (AVX2 8-way intrinsic
+implementation) and **W4 phase 3** (NEON 4-way + `Sm4CbcDecryptor`
+SIMD fanout). Both phases are deferred to v0.5.x patch releases or
+v0.6.
+
+Rationale: implementing multi-block SIMD-packed SM4 bit-slicing is a
+multi-week R&D effort (no audited public Rust reference; needs
+original bit-transposition design + cross-platform AVX2 / NEON +
+extensive constant-time auditing of the gate sequence). The
+scope-doc claim in Section "Posture" that "W4's SIMD intrinsics use
+safe `core::arch` wrappers — no new `unsafe` blocks" is technically
+inaccurate: `core::arch` intrinsics are all `unsafe fn`. Resolving
+that honestly (`safe_arch` crate dep, or controlled module-level
+`#[allow(unsafe_code)]`) is its own design decision worth doing
+unhurried.
+
+The v0.5 W4 phase 1 scaffolding delivered in this release is real
+value: the feature flag is stable, dependent code (`tau` dispatch,
+dudect target, CI matrix entry, deny allowlist) is wired, and the
+v0.5.x patch releases that ship the AVX2 / NEON bodies will land as
+pure-additive PRs with no further scaffolding churn.
+
+### Changed
+
+- **CI**: extended the dudect matrix to three feature configurations
+  (`default`, `sm4-bitsliced`, `sm4-bitsliced-simd`). `cargo deny`'s
+  opt-in-features pass extends to `crypto-bigint-scalar` and
+  `sm4-bitsliced-simd`. Removed the redundant `--features std`
+  wasm32 smoke build (the `std` feature is gone). The dudect bench
+  invocation now passes `--features crypto-bigint-scalar` per the
+  W5 bench-target requirement (`Sm2PrivateKey::from_scalar`).
+
+### Posture (unchanged from v0.4)
+
+- `unsafe_code = "forbid"` on `gmcrypto-core`; `unsafe_code = "warn"`
+  on `gmcrypto-c` (FFI shim) with `// SAFETY:` comments on every
+  `unsafe` block.
+- `no_std + alloc` only inside `crates/gmcrypto-core/src/`. (The
+  reserved `std` feature flag is removed in v0.5 W5; a future
+  file-I/O helper would land under a specific feature name like
+  `std-file-io` rather than the generic `std`.)
+- MSRV 1.85, edition 2024.
+- Constant-time discipline on all secret-touching paths.
+- Failure-mode invariant: every fallible public API returns
+  `Option`, `bool`, `CtOption`, or `Result<_, gmcrypto_core::Error>`
+  (single `Failed` variant, `#[non_exhaustive]`).
 
 ## [0.4.0] — 2026-05-12
 
