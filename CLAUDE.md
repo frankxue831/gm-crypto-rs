@@ -291,6 +291,22 @@ rustup target add wasm32-unknown-unknown --toolchain stable
 rustup target add wasm32-unknown-unknown --toolchain 1.85
 rustup component add clippy rustfmt --toolchain stable
 
+# 2b. Pre-empt git's macOS keychain credential helper. The system
+#     gitconfig that ships with Xcode CLT configures `credential.helper =
+#     osxkeychain` globally. When git runs as a fresh user (ghrunner),
+#     the first credential lookup triggers macOS Keychain Services
+#     prompting "<user> wants to use the login keychain" — and ghrunner
+#     has no login keychain, so the prompt is unsatisfiable and hangs
+#     the runner. Override with an empty helper in ghrunner's user-
+#     scoped gitconfig (written directly to sidestep `git config`'s
+#     newer "no action specified" gotcha with empty-string values).
+cat > ~/.gitconfig <<'INNER'
+[credential]
+	helper =
+[safe]
+	directory = *
+INNER
+
 # 3. Register the runner.
 #
 # 3a. Look up the latest runner version as your MAINTAINER user
