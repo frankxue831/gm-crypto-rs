@@ -151,9 +151,9 @@ twist or other curve sharing the same `x` coordinate could leak
 bits of `d_B` via the small-order subgroup of the rogue curve.
 
 **Failure-mode invariant.** `decrypt` returns
-`Result<Vec<u8>, DecryptError>` with a single `Failed` variant
-collapsing every failure mode (malformed DER, off-curve `C1`,
-identity `C1`, all-zero KDF, MAC mismatch). MAC compare uses
+`Result<Vec<u8>, gmcrypto_core::Error>` (alias `sm2::Error`) with a
+single `Failed` variant collapsing every failure mode (malformed
+DER, off-curve `C1`, identity `C1`, all-zero KDF, MAC mismatch). MAC compare uses
 `subtle::ConstantTimeEq` on the 32-byte digest; on failure the
 already-XOR'd plaintext buffer is zeroized before return.
 
