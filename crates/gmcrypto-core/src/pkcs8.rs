@@ -78,8 +78,12 @@ use zeroize::Zeroize;
 /// Single uninformative variant per the project's failure-mode
 /// invariant. Prior to v0.5 this was a distinct `pkcs8::Error` enum;
 /// v0.5 W5 unifies it with the workspace-wide type via this alias,
-/// so existing `match` callsites binding against `pkcs8::Error::Failed`
-/// keep compiling unchanged.
+/// so import paths and non-exhaustive `match` callsites against
+/// `pkcs8::Error::Failed` continue to work. **One caveat:** the
+/// workspace-wide type is `#[non_exhaustive]`, so downstream
+/// **exhaustive** `match` arms must now add a wildcard `_ => ...`
+/// (single-variant non-exhaustive enums require the wildcard from
+/// outside-crate matches).
 pub type Error = crate::Error;
 
 /// PKCS#8 version field (`v1 = 0`). RFC 5958 also defines `v2 = 1`

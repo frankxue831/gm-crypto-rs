@@ -16,7 +16,11 @@ the project follows [Semantic Versioning](https://semver.org/).
   `sm2::Error`, `pem::Error`, `pkcs8::Error` keep existing import
   paths working; callers matching on `SignError::Failed`,
   `EncryptError::Failed`, or `DecryptError::Failed` must migrate to
-  `sm2::Error::Failed` (or `gmcrypto_core::Error::Failed`). Failure
+  `sm2::Error::Failed` (or `gmcrypto_core::Error::Failed`). The new
+  type is `#[non_exhaustive]` so downstream **exhaustive** `match`
+  arms must add a wildcard `_ => ...` (non-exhaustive's standard
+  cross-crate behaviour); single-arm non-exhaustive matches and `if
+  let pem::Error::Failed = _` callsites are unaffected. Failure
   semantics unchanged.
 - **`Sm2PrivateKey::new(U256)` → `Sm2PrivateKey::from_scalar(U256)`
   under the new `crypto-bigint-scalar` feature flag (Q5.17).**

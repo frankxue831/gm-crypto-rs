@@ -165,12 +165,12 @@ Everything v0.2 shipped is unchanged:
   tighter empirical confidence at the same threshold). Plus a
   deliberately-leaky negative control that proves the harness can
   detect leaks.
-- Failure-mode invariant: error types collapse to single uninformative
-  variants (`SignError::Failed`, `DecryptError::Failed`,
-  `EncryptError::Failed`, `pem::Error::Failed`, `pkcs8::Error::Failed`);
-  `verify_with_id` returns `bool`; DER decode returns `Option`.
-  Defense against padding-oracle, malleability, and invalid-curve
-  attacks.
+- Failure-mode invariant: every `Result`-returning public API uses
+  the workspace-wide `gmcrypto_core::Error` (single `Failed` variant,
+  `#[non_exhaustive]`); per-module aliases `sm2::Error`, `pem::Error`,
+  `pkcs8::Error` all point at the same type. `verify_with_id` returns
+  `bool`; DER decode returns `Option`. Defense against padding-oracle,
+  malleability, and invalid-curve attacks.
 - Zeroization on private keys, SM4 round keys, HMAC `K'` /
   `K' XOR ipad` / `K' XOR opad`, PBKDF2 intermediates, SM2 KDF
   buffers, and PKCS#8 inner-key scratch.
@@ -182,7 +182,8 @@ Everything v0.2 shipped is unchanged:
 | v0.2 (shipped) | SM4 + SM4-CBC, HMAC-SM3, PBKDF2-HMAC-SM3, SM2 encrypt/decrypt + GM/T 0009 ciphertext DER, dudect harness expansion to 11 targets. See [`CHANGELOG.md`](CHANGELOG.md) `[0.2.0]`. |
 | v0.3 (shipped) | Reusable ASN.1 reader/writer subset; PEM, encrypted PKCS#8, X.509 SPKI, SEC1; full bidirectional gmssl interop (incl. SM2 sign/verify + SM2 encrypt/decrypt with PEM-wrapped keys + SM4-CBC); raw byte-concat ciphertext helpers (`C1\|\|C3\|\|C2` modern + legacy `C1\|\|C2\|\|C3` decrypt); streaming `HmacSm3` / `Sm4CbcEncryptor` / `Sm4CbcDecryptor` + in-crate `Hash`/`Mac`/`BlockCipher` traits; comb-table `mul_g` (~5× sign-side speedup); dudect harness expanded to 12 targets. See [`CHANGELOG.md`](CHANGELOG.md) `[0.3.0]`. |
 | v0.4 (shipped) | `wasm32-unknown-unknown` build target; RustCrypto-trait fit (`digest::Digest` / `digest::Mac` / `cipher::BlockEncrypt`/`BlockDecrypt`) behind opt-in `digest-traits` / `cipher-traits` feature flags; bitsliced (table-less, gate-only) SM4 S-box behind the opt-in `sm4-bitsliced` feature; new `gmcrypto-c` workspace member exposing the SM2/SM3/SM4/HMAC/PBKDF2 surface as a C ABI (cdylib + staticlib + cbindgen-generated header). See [`CHANGELOG.md`](CHANGELOG.md) `[0.4.0]`. |
-| v0.5 | Multi-block SIMD-packed SM4 bitslicing; RustCrypto `digest` 0.11 / `cipher` 0.5 migration when those lines stabilize; `wasm-bindgen-test`-driven KAT runner. |
+| v0.5 (shipping) | C-ABI completeness (streaming CBC + raw-byte SM2 ciphertext + caller-supplied RNG callback); `sm4-bitsliced-simd` feature-flag scaffolding (AVX2 / NEON intrinsics deferred to v0.5.x patch releases); BREAKING ergonomic cleanup — workspace-wide `gmcrypto_core::Error`, `Sm2PrivateKey::new(U256)` → `from_scalar(U256)` (gated behind `crypto-bigint-scalar`) + always-on `from_bytes_be(&[u8; 32])` constructor, `std` feature removed. See [`CHANGELOG.md`](CHANGELOG.md) `[0.5.0]`. |
+| v0.6 | Multi-block SIMD-packed SM4 (real AVX2/NEON intrinsic implementations); RustCrypto `digest` 0.11 / `cipher` 0.5 migration when those lines stabilize; `wasm-bindgen-test`-driven KAT runner. |
 | v1.0 | API stabilization. |
 
 ## Quick-start
@@ -191,14 +192,16 @@ Everything v0.2 shipped is unchanged:
 use gmcrypto_core::sm2::{
     sign_with_id, verify_with_id, Sm2PrivateKey, Sm2PublicKey, DEFAULT_SIGNER_ID,
 };
-use crypto_bigint::U256;
 use getrandom::SysRng;
+use hex_literal::hex;
 use rand_core::UnwrapErr;
 
-let d = U256::from_be_hex(
-    "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8",
+// v0.5 W5 — `from_bytes_be` is the recommended public constructor
+// (always-on, doesn't expose `crypto_bigint::U256` to callers).
+let d_be: [u8; 32] = hex!(
+    "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8"
 );
-let key = Sm2PrivateKey::new(d).expect("d in [1, n-2]");
+let key = Sm2PrivateKey::from_bytes_be(&d_be).expect("d in [1, n-2]");
 let public = Sm2PublicKey::from_point(key.public_key());
 
 let mut rng = UnwrapErr(SysRng);
@@ -215,9 +218,9 @@ dudect harness covers are NOT in scope.
 ## Build & test
 
 ```bash
-cargo test --workspace                                # unit + integration
-cargo bench --bench timing_leaks                      # local timing harness (~75s)
-DUDECT_SAMPLES=10000 cargo bench --bench timing_leaks # match CI smoke budget
+cargo test --workspace                                                          # unit + integration
+cargo bench --bench timing_leaks --features crypto-bigint-scalar                # local timing harness (~75s)
+DUDECT_SAMPLES=10000 cargo bench --bench timing_leaks --features crypto-bigint-scalar  # match CI smoke budget
 ```
 
 `gmssl` interop test (gated; install [`gmssl`](https://github.com/guanzhi/GmSSL)

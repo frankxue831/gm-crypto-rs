@@ -29,8 +29,12 @@ use alloc::vec::Vec;
 /// Single uninformative variant per the project's failure-mode
 /// invariant. Prior to v0.5 this was a distinct `pem::Error` enum;
 /// v0.5 W5 unifies it with the workspace-wide type via this alias,
-/// so existing `match` callsites binding against `pem::Error::Failed`
-/// keep compiling unchanged.
+/// so import paths and non-exhaustive `match` callsites against
+/// `pem::Error::Failed` continue to work. **One caveat:** the
+/// workspace-wide type is `#[non_exhaustive]`, so downstream
+/// **exhaustive** `match` arms must now add a wildcard `_ => ...`
+/// (single-variant non-exhaustive enums require the wildcard from
+/// outside-crate matches).
 pub type Error = crate::Error;
 
 /// Strict line length emitted by [`encode`]. RFC 1421 §4.3.2.4 fixes

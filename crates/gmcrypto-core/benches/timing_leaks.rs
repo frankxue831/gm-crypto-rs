@@ -83,10 +83,17 @@
 //!
 //! # Running
 //!
+//! v0.5 W5 — the bench harness uses `Sm2PrivateKey::from_scalar`
+//! (renamed from `new` in v0.5) which is gated behind the
+//! `crypto-bigint-scalar` feature flag (Cargo.toml's `[[bench]]`
+//! entry sets `required-features = ["crypto-bigint-scalar"]`, so
+//! `cargo bench` will activate it implicitly — but stating it
+//! explicitly here is the safer documentation).
+//!
 //! ```text
-//! cargo bench --bench timing_leaks                          # 100K samples each (default)
-//! DUDECT_SAMPLES=10000 cargo bench --bench timing_leaks     # PR-smoke budget
-//! DUDECT_SAMPLES=100000 cargo bench --bench timing_leaks    # nightly budget
+//! cargo bench --bench timing_leaks --features crypto-bigint-scalar                       # 100K samples each (default)
+//! DUDECT_SAMPLES=10000  cargo bench --bench timing_leaks --features crypto-bigint-scalar # PR-smoke budget
+//! DUDECT_SAMPLES=100000 cargo bench --bench timing_leaks --features crypto-bigint-scalar # nightly budget
 //! ```
 //!
 //! The output line emitted by `dudect-bencher` for each bench is:

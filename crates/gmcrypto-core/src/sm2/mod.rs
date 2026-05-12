@@ -29,5 +29,6 @@ pub use verify::verify_with_id;
 /// `Failed` variant. v0.5 W5 collapses them into one type; migration
 /// recipe is `s/SignError/sm2::Error/g`, `s/EncryptError/sm2::Error/g`,
 /// `s/DecryptError/sm2::Error/g` (or use the workspace-wide path
-/// `gmcrypto_core::Error` directly).
+/// `gmcrypto_core::Error` directly). The workspace-wide type is
+/// `#[non_exhaustive]`, so exhaustive `match` arms must add `_ => ...`.
 pub type Error = crate::Error;

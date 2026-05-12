@@ -78,8 +78,12 @@ git diff --exit-code crates/gmcrypto-c/include/gmcrypto.h
 cargo test -p gmcrypto-c                            # c_smoke Rust-equivalence tests
 
 # Dudect harness. Default 100K samples (~75s); CI smoke uses 10K.
-DUDECT_SAMPLES=10000  cargo bench --bench timing_leaks   # PR-smoke budget
-DUDECT_SAMPLES=100000 cargo bench --bench timing_leaks   # nightly budget
+# v0.5 W5 — the bench uses Sm2PrivateKey::from_scalar (renamed from
+# `new`) which is gated on `crypto-bigint-scalar`. The [[bench]] entry
+# in gmcrypto-core/Cargo.toml has required-features set, so cargo
+# auto-enables it — but explicit is safer.
+DUDECT_SAMPLES=10000  cargo bench --bench timing_leaks --features crypto-bigint-scalar  # PR-smoke budget
+DUDECT_SAMPLES=100000 cargo bench --bench timing_leaks --features crypto-bigint-scalar  # nightly budget
 
 # gmssl interop (gated; needs gmssl 3.1.1 installed).
 GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
