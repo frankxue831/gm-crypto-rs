@@ -1,5 +1,23 @@
 name: CI
 
+# v0.5+ — self-hosted runner split.
+#
+# The five jobs in this workflow (build / msrv / cabi / deny / wasm32)
+# all run on a self-hosted macOS aarch64 runner labelled `gmcrypto` —
+# privately-hosted to dodge GitHub Pro's 3000-min/month cap on private
+# repos. Register a runner at:
+#   https://github.com/frankxue831/gm-crypto-rs/settings/actions/runners/new
+# Runner setup instructions live in CLAUDE.md under the "Self-hosted
+# CI runner" section.
+#
+# The dudect workflows (`dudect-pr.yml`, `dudect-nightly.yml`) DO NOT
+# move — they stay on `ubuntu-latest` because the `|tau|` gates were
+# empirically calibrated against the GitHub Actions `ubuntu-24.04`
+# runner image's noise floor (see the v0.4 release-prep recalibration
+# in PR #22 / CLAUDE.md dudect table). Moving them to a different
+# host would invalidate the calibration; rebuilding it would mean
+# weeks of baseline measurement.
+
 on:
   push:
     branches: [main]
@@ -23,7 +41,7 @@ env:
 jobs:
   build:
     name: build & test (Rust stable)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macos, arm64, gmcrypto]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -85,7 +103,7 @@ jobs:
     # ~30s per CI run vs. running the full test+clippy matrix twice.
     # See discussion in rust-lang/api-guidelines#231.
     name: build (Rust 1.85 MSRV)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macos, arm64, gmcrypto]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -104,7 +122,7 @@ jobs:
 
   cabi:
     name: gmcrypto-c FFI build + header drift
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macos, arm64, gmcrypto]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -133,7 +151,7 @@ jobs:
 
   deny:
     name: cargo-deny (no forbidden runtime deps)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macos, arm64, gmcrypto]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -163,7 +181,7 @@ jobs:
 
   wasm32:
     name: build wasm32-unknown-unknown (Rust ${{ matrix.toolchain }})
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macos, arm64, gmcrypto]
     timeout-minutes: 10
     strategy:
       fail-fast: false

@@ -232,15 +232,94 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
 
 ## Workflow notes
 
+- **Self-hosted CI runner (v0.5+).** Private-repo Pro-plan minute caps
+  drove a split: `ci.yml`'s five jobs (build / msrv / cabi / deny /
+  wasm32) run on a **self-hosted macOS aarch64 runner labelled
+  `gmcrypto`**; the two dudect workflows stay on `ubuntu-latest`
+  because their `|tau|` gates were empirically calibrated against
+  GitHub's `ubuntu-24.04` runner-image noise floor (v0.4 release-prep
+  PR #22). Moving dudect would invalidate the calibration. See the
+  `## Self-hosted CI runner setup` section below for the runbook.
 - Branch model: direct commits to `main` for the maintainer; external PRs go
   through CI + dudect-pr.yml. The dudect smoke is path-allowlisted so doc-only
   PRs skip the bench job.
 - Tags are SSH-signed (`gpg.format = ssh`). Verify locally with
   `git tag -v vX.Y.Z` after configuring `gpg.ssh.allowedSignersFile`.
 - `cargo publish` is the irreversible step. Use `docs/v0.1.0-release-review.md`
-  as the template before publishing v0.4. **Two crates ship**:
+  as the template before publishing v0.5. **Two crates ship**:
   `gmcrypto-core` first, then `gmcrypto-c` (path dep on core via
-  `version = "0.4"` — core must be on crates.io before c can publish).
+  `version = "0.5"` — core must be on crates.io before c can publish).
+
+## Self-hosted CI runner setup
+
+`ci.yml` runs on a self-hosted macOS aarch64 runner. One-time setup
+per host machine:
+
+```bash
+# 1. Dedicated user — runner CANNOT read your daily-driver home dir
+sudo dscl . -create /Users/ghrunner
+sudo dscl . -create /Users/ghrunner UserShell /bin/zsh
+sudo dscl . -create /Users/ghrunner UniqueID 600
+sudo dscl . -create /Users/ghrunner PrimaryGroupID 20
+sudo dscl . -create /Users/ghrunner NFSHomeDirectory /Users/ghrunner
+sudo mkdir /Users/ghrunner && sudo chown ghrunner:staff /Users/ghrunner
+sudo passwd ghrunner   # set a password you'll keep
+
+# 2. Switch users + install rustup with the toolchains CI needs
+sudo -iu ghrunner
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    --default-toolchain stable
+source $HOME/.cargo/env
+rustup toolchain install 1.85
+rustup target add wasm32-unknown-unknown --toolchain stable
+rustup target add wasm32-unknown-unknown --toolchain 1.85
+rustup component add clippy rustfmt --toolchain stable
+
+# 3. Register the runner. Get TOKEN from
+#    https://github.com/frankxue831/gm-crypto-rs/settings/actions/runners/new
+mkdir actions-runner && cd actions-runner
+LATEST=$(curl -s https://api.github.com/repos/actions/runner/releases/latest | \
+  grep -oE '"tag_name": "v[^"]+' | cut -d'"' -f4 | cut -c2-)
+curl -o runner.tar.gz -L \
+  "https://github.com/actions/runner/releases/download/v${LATEST}/actions-runner-osx-arm64-${LATEST}.tar.gz"
+tar xzf runner.tar.gz
+./config.sh --url https://github.com/frankxue831/gm-crypto-rs \
+  --token <TOKEN> \
+  --labels self-hosted,macos,arm64,gmcrypto \
+  --work _work \
+  --unattended
+
+# 4. Test interactively first:
+./run.sh   # Ctrl-C to stop
+
+# 5. Once green, install as launchd service running under `ghrunner`:
+exit       # back to maintainer user
+cd /Users/ghrunner/actions-runner
+sudo ./svc.sh install ghrunner
+sudo ./svc.sh start
+sudo ./svc.sh status   # verify "active (running)"
+```
+
+Operational notes:
+
+- The runner-side `_work/` directory holds checked-out repo + build
+  artifacts. Persists between jobs (good for warm Cargo cache). Wipe
+  with `sudo rm -rf /Users/ghrunner/actions-runner/_work/*` if state
+  ever gets corrupted.
+- The labels `[self-hosted, macos, arm64, gmcrypto]` are AND-ed in
+  `ci.yml`. Only runners matching ALL four labels pick up the job.
+  The `gmcrypto` label is specific to this repo — important when you
+  one day host multiple project runners on the same Mac.
+- If the runner is offline, jobs queue indefinitely (no hard failure).
+  GitHub's UI shows "Queued — waiting for a runner to pick up this
+  job". Useful escape hatch: bump the `runs-on:` back to
+  `ubuntu-latest` and `git push`.
+- `Swatinem/rust-cache@v2` writes to
+  `/Users/ghrunner/actions-runner/_work/_cache/`. The native macOS
+  filesystem makes incremental warm-cache builds significantly faster
+  than the equivalent on `ubuntu-latest` (no Docker bind-mount).
+- The dudect workflows STAY on `ubuntu-latest`. Don't move them — the
+  `|tau|` gates were calibrated against GitHub's `ubuntu-24.04` image.
 
 ## Don't
 
