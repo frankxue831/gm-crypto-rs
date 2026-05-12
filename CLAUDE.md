@@ -275,14 +275,30 @@ rustup target add wasm32-unknown-unknown --toolchain stable
 rustup target add wasm32-unknown-unknown --toolchain 1.85
 rustup component add clippy rustfmt --toolchain stable
 
-# 3. Register the runner. Get TOKEN from
-#    https://github.com/frankxue831/gm-crypto-rs/settings/actions/runners/new
-mkdir actions-runner && cd actions-runner
-# Use the GitHub releases API + jq for robust parsing; `curl -fsSL` so a
-# 404 or bad parse fails the command instead of silently downloading
-# an HTML error page that `tar xzf` then chokes on.
-LATEST=$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest \
-  | jq -r '.tag_name | ltrimstr("v")')
+# 3. Register the runner.
+#
+# 3a. Look up the latest runner version as your MAINTAINER user
+#     (NOT as ghrunner — ghrunner has no `gh` auth). The
+#     unauthenticated GitHub API has a 60-req/hour-per-IP cap; `gh
+#     api` auto-uses your stored auth token and has a 5000/hour
+#     limit. The first version of this runbook used raw `curl
+#     https://api.github.com/...` and hit the rate limit on a fresh
+#     setup attempt.
+#
+LATEST=$(gh api /repos/actions/runner/releases/latest \
+  --jq '.tag_name | ltrimstr("v")')
+echo "Use this version when prompted: ${LATEST}"
+#
+# 3b. Get TOKEN from
+#     https://github.com/frankxue831/gm-crypto-rs/settings/actions/runners/new
+#     (one-time-use, ~1 hour TTL).
+#
+# 3c. Switch to ghrunner and download + register. Substitute the
+#     literal LATEST value from 3a above (ghrunner's shell does not
+#     inherit it from sudo -iu).
+sudo -iu ghrunner
+mkdir -p ~/actions-runner && cd ~/actions-runner
+LATEST=2.319.1   # <-- paste the literal version from 3a
 curl -fsSL -o runner.tar.gz \
   "https://github.com/actions/runner/releases/download/v${LATEST}/actions-runner-osx-arm64-${LATEST}.tar.gz"
 tar xzf runner.tar.gz
