@@ -256,14 +256,14 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
 per host machine:
 
 ```bash
-# 1. Dedicated user — runner CANNOT read your daily-driver home dir
-sudo dscl . -create /Users/ghrunner
-sudo dscl . -create /Users/ghrunner UserShell /bin/zsh
-sudo dscl . -create /Users/ghrunner UniqueID 600
-sudo dscl . -create /Users/ghrunner PrimaryGroupID 20
-sudo dscl . -create /Users/ghrunner NFSHomeDirectory /Users/ghrunner
-sudo mkdir /Users/ghrunner && sudo chown ghrunner:staff /Users/ghrunner
-sudo passwd ghrunner   # set a password you'll keep
+# 1. Dedicated user — runner CANNOT read your daily-driver home dir.
+#    `sysadminctl` is the modern macOS path (auto-assigns a free UID)
+#    and avoids hand-rolled `dscl` boilerplate that can collide with
+#    an existing UID 600.
+sudo sysadminctl -addUser ghrunner -shell /bin/zsh \
+  -home /Users/ghrunner -admin no
+# `sysadminctl` will prompt for an admin password and then for the
+# new user's password (set one you'll keep).
 
 # 2. Switch users + install rustup with the toolchains CI needs
 sudo -iu ghrunner
@@ -278,9 +278,12 @@ rustup component add clippy rustfmt --toolchain stable
 # 3. Register the runner. Get TOKEN from
 #    https://github.com/frankxue831/gm-crypto-rs/settings/actions/runners/new
 mkdir actions-runner && cd actions-runner
-LATEST=$(curl -s https://api.github.com/repos/actions/runner/releases/latest | \
-  grep -oE '"tag_name": "v[^"]+' | cut -d'"' -f4 | cut -c2-)
-curl -o runner.tar.gz -L \
+# Use the GitHub releases API + jq for robust parsing; `curl -fsSL` so a
+# 404 or bad parse fails the command instead of silently downloading
+# an HTML error page that `tar xzf` then chokes on.
+LATEST=$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest \
+  | jq -r '.tag_name | ltrimstr("v")')
+curl -fsSL -o runner.tar.gz \
   "https://github.com/actions/runner/releases/download/v${LATEST}/actions-runner-osx-arm64-${LATEST}.tar.gz"
 tar xzf runner.tar.gz
 ./config.sh --url https://github.com/frankxue831/gm-crypto-rs \
@@ -292,34 +295,50 @@ tar xzf runner.tar.gz
 # 4. Test interactively first:
 ./run.sh   # Ctrl-C to stop
 
-# 5. Once green, install as launchd service running under `ghrunner`:
-exit       # back to maintainer user
-cd /Users/ghrunner/actions-runner
-sudo ./svc.sh install ghrunner
-sudo ./svc.sh start
-sudo ./svc.sh status   # verify "active (running)"
+# 5. Once green, install as a launchd service. On macOS the runner's
+#    `svc.sh` does NOT take a username argument (Linux semantics) and
+#    must be invoked WITHOUT `sudo` — it installs under the current
+#    user (which is `ghrunner` here per the `sudo -iu` in step 2).
+./svc.sh install
+./svc.sh start
+./svc.sh status   # verify "active" / "Started"
 ```
 
 Operational notes:
 
 - The runner-side `_work/` directory holds checked-out repo + build
   artifacts. Persists between jobs (good for warm Cargo cache). Wipe
-  with `sudo rm -rf /Users/ghrunner/actions-runner/_work/*` if state
-  ever gets corrupted.
+  with `rm -rf /Users/ghrunner/actions-runner/_work/*` (as
+  `ghrunner`, no sudo) if state ever gets corrupted.
 - The labels `[self-hosted, macos, arm64, gmcrypto]` are AND-ed in
-  `ci.yml`. Only runners matching ALL four labels pick up the job.
-  The `gmcrypto` label is specific to this repo — important when you
-  one day host multiple project runners on the same Mac.
-- If the runner is offline, jobs queue indefinitely (no hard failure).
-  GitHub's UI shows "Queued — waiting for a runner to pick up this
-  job". Useful escape hatch: bump the `runs-on:` back to
-  `ubuntu-latest` and `git push`.
-- `Swatinem/rust-cache@v2` writes to
-  `/Users/ghrunner/actions-runner/_work/_cache/`. The native macOS
-  filesystem makes incremental warm-cache builds significantly faster
-  than the equivalent on `ubuntu-latest` (no Docker bind-mount).
-- The dudect workflows STAY on `ubuntu-latest`. Don't move them — the
-  `|tau|` gates were calibrated against GitHub's `ubuntu-24.04` image.
+  `ci.yml` (case-insensitive). Only runners matching ALL four labels
+  pick up the job. The `gmcrypto` label is specific to this repo —
+  important when you one day host multiple project runners on the
+  same Mac.
+- **Offline-runner behaviour: queued jobs sit pending until they hit
+  GitHub's 24-hour timeout and then fail.** Not "indefinite". If you
+  see a job stuck in `Queued`, check the runner is still healthy at
+  https://github.com/frankxue831/gm-crypto-rs/settings/actions/runners
+  (status should say `Idle`). Escape hatch: revert the self-hosted
+  PR's `runs-on:` to `ubuntu-latest` and `git push`. Monitoring tip:
+  GitHub emails the repo owner if a job fails for `no_self_hosted_
+  runner_available` after the 24-hour timeout.
+- The runner's CARGO_HOME (`/Users/ghrunner/.cargo/`) is pre-populated
+  in step 2 with rustup + stable + 1.85 + clippy + rustfmt +
+  wasm32-unknown-unknown targets. `Swatinem/rust-cache@v2` calls in
+  `ci.yml` are configured with `cache-bin: "false"` so the action's
+  restore step won't evict those pre-installed binaries (the
+  default `cache-bin: "true"` has a known issue on long-lived
+  self-hosted runners where the restore overwrites `~/.cargo/bin/`
+  with whatever was in the cached snapshot).
+- `Swatinem/rust-cache@v2`'s registry / target caches live under
+  `/Users/ghrunner/actions-runner/_work/_cache/`. Native macOS
+  filesystem makes incremental warm-cache builds significantly
+  faster than the equivalent on `ubuntu-latest` (no Docker
+  bind-mount).
+- The dudect workflows STAY on `ubuntu-latest`. Don't move them —
+  the `|tau|` gates were calibrated against GitHub's `ubuntu-24.04`
+  image.
 
 ## Don't
 
