@@ -17,6 +17,27 @@ name: CI
 # in PR #22 / CLAUDE.md dudect table). Moving them to a different
 # host would invalidate the calibration; rebuilding it would mean
 # weeks of baseline measurement.
+#
+# Conventions to keep this workflow stable on the self-hosted runner:
+#
+# 1. All `dtolnay/rust-toolchain@*` invocations use the `@stable` tag
+#    (NOT `@master`). The `@master` ref was observed prompting for
+#    sudo on the self-hosted macOS runner; `@stable` is the action's
+#    release tag and behaves consistently. The Rust toolchain version
+#    is still controlled via the action's `toolchain:` input.
+#
+# 2. All `Swatinem/rust-cache@v2` invocations set:
+#    - `cache-bin: "false"` — the runner's CARGO_HOME bin/ is
+#      pre-populated with rustup / clippy / rustfmt at setup time; we
+#      don't want CI restores to evict those. (See rust-cache's
+#      persistent self-hosted issue.)
+#    - `save-if: ${{ github.ref == 'refs/heads/main' }}` — PR runs
+#      RESTORE the cache (fast warm builds) but only push-to-main
+#      SAVES it. Self-hosted Mac upload to GH's cache backend runs at
+#      ~0.2 MB/s — a fresh save is several minutes per job. Save-on-
+#      main cuts ~80% of cache-backend traffic with negligible
+#      warm-cache regression (push-to-main runs once per merge and
+#      refreshes the cache for downstream PRs).
 
 on:
   push:
@@ -60,6 +81,13 @@ jobs:
           # via the one-time setup; we don't want CI restores to evict
           # them.
           cache-bin: "false"
+          # Self-hosted Mac runner uploads to GitHub's cache backend at
+          # ~0.2 MB/s — a fresh cache save on the wasm32 + build jobs
+          # takes 3-5 min each. PRs *restore* the cache on every run
+          # but only *save* it when CI fires on a merge to main. Cuts
+          # ~80% of total cache-backend traffic with negligible warm-
+          # cache regression (the on-main save runs once per merge).
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo build (all targets, including bench compile-only)
         run: cargo build --workspace --all-targets
       - name: cargo test (tests + doctests; benches excluded — see dudect-pr.yml)
@@ -117,7 +145,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust 1.85
-        uses: dtolnay/rust-toolchain@master
+        # v0.5 self-hosted CI: switched from `@master` to `@stable`
+        # (the action's release tag, NOT the toolchain) so this job
+        # uses the same vetted action commit as the other jobs.
+        # `@master` was observed prompting for sudo on the self-hosted
+        # macOS runner; the cargo-deny job using `@stable` did not.
+        # The `toolchain:` parameter still picks the Rust toolchain
+        # version per Cargo's MSRV (1.85), unchanged.
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.85"
       - name: Cache cargo
@@ -125,6 +160,7 @@ jobs:
         with:
           shared-key: msrv-1.85
           cache-bin: "false"   # self-hosted: don't evict the runner's CARGO_HOME bin/
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo build (all targets)
         run: cargo build --workspace --all-targets
       - name: cargo build with opt-in features
@@ -141,6 +177,7 @@ jobs:
         with:
           shared-key: cabi-stable
           cache-bin: "false"   # self-hosted: don't evict the runner's CARGO_HOME bin/
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # v0.4 W4 — build the cdylib + staticlib + rlib (default
       # crate-types) without the regen-header feature.
       - name: cargo build -p gmcrypto-c --release
@@ -201,16 +238,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust ${{ matrix.toolchain }}
-        uses: dtolnay/rust-toolchain@master
+        # v0.5 self-hosted CI: switched from `@master` to `@stable`
+        # (the action's release tag, NOT the toolchain) so the wasm32
+        # job uses the same vetted action commit as the other jobs.
+        # `@master` was observed prompting for sudo on the self-hosted
+        # macOS runner. The `toolchain:` + `targets:` parameters still
+        # do their job.
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.toolchain }}
           targets: wasm32-unknown-unknown
-      # `dtolnay/rust-toolchain@master` with `targets:` reliably adds
-      # the target for the *stable* toolchain but, in practice on
-      # GitHub-hosted Ubuntu runners, can land an MSRV toolchain
-      # (e.g. 1.85) without the target installed (E0463: "can't find
-      # crate for `core`"). Belt-and-braces: explicitly add the
-      # target against the matrix toolchain.
+      # The `targets:` parameter above usually installs the wasm32
+      # target for the named toolchain, but on GH-hosted Ubuntu runners
+      # it has been observed to land the MSRV toolchain without the
+      # target (E0463: "can't find crate for `core`"). Belt-and-braces:
+      # explicitly add the target against the matrix toolchain. On the
+      # self-hosted Mac runner this is a no-op since both toolchains
+      # already have the target pre-installed (see CLAUDE.md
+      # "Self-hosted CI runner setup" step 2).
       - name: Ensure wasm32 target is installed for ${{ matrix.toolchain }}
         run: rustup target add wasm32-unknown-unknown --toolchain ${{ matrix.toolchain }}
       - name: Cache cargo
@@ -218,6 +263,7 @@ jobs:
         with:
           key: wasm32-${{ matrix.toolchain }}
           cache-bin: "false"   # self-hosted: don't evict the runner's CARGO_HOME bin/
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # v0.4 W1 — caller-supplied RNG only; the core crate does NOT pull
       # getrandom's wasm_js backend into its default dep graph. Build with
       # --no-default-features to mirror the no_std + alloc-only posture
