@@ -3,6 +3,102 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] — 2026-05-14
+
+v0.5.1 is a minor-additive patch on top of v0.5.0 (which shipped W4
+**phase 1** scaffolding only). It closes the gap to **W4 phase 2**
+— a real AVX2 8-way bitsliced SM4 S-box backend — and recalibrates
+two dudect targets affected by an upstream GitHub Actions runner-
+image change. No `gmcrypto-core` public API changes; no breaking
+changes; v0.5.0 callers can `cargo update` without migration.
+
+**Throughput note.** v0.5.1's AVX2 backend exists and is exercised
+end-to-end (lane-equivalence test against the GB/T 32907-2016 §6.2
+S-box table; dudect target `ct_sm4_encrypt_block_bitsliced_simd`
+gated at `|tau| < 0.20` on CI's `ubuntu-24.04` AVX2 runner). It
+does **not** yet batch real SM4-CBC decrypt blocks through the
+packed S-box — `tau` dispatch still calls into the 8-way path
+with the single input replicated across all 8 lanes, leaving 7
+lanes wasted. **Production throughput on x86_64 with
+`sm4-bitsliced-simd` enabled in v0.5.1 matches the v0.4 single-
+block bitslice path** (and may trail it slightly on the AVX2 setup
+cost per call). The real throughput win lands in W4 **phase 3**
+(NEON 4-way on `aarch64` + `Sm4CbcDecryptor::process_chunk` SIMD
+fanout per Q5.10), deferred to v0.5.2 or v0.6. Callers enabling
+`sm4-bitsliced-simd` today pick up the phase 3 throughput when
+it ships; the feature-flag name is stable across the full W4
+rollout.
+
+### Added
+
+- **New crate `gmcrypto-simd`** (rlib-only, `unsafe_code = "warn"`,
+  mirroring the established `gmcrypto-c` precedent) carrying an
+  **AVX2 8-way packed bitsliced SM4 S-box** on `x86_64` with
+  runtime CPU detection via
+  [`cpufeatures`](https://crates.io/crates/cpufeatures) (no_std-OK,
+  cached after first call) and silent scalar fallback on
+  non-AVX2 hosts. The scalar path re-implements the v0.4 W3
+  Boyar-Peralta Itoh-Tsujii gate sequence locally (~50 LOC)
+  rather than widening the v0.4 module's `pub(crate)` visibility —
+  sibling stays self-contained; lane-equivalence tests cross-check
+  both paths against the public GB/T 32907-2016 §6.2 S-box table.
+  `gmcrypto-core` keeps `unsafe_code = "forbid"` + `no_std`
+  unchanged. The Q5.11 scope-doc addendum (in
+  `docs/v0.5-scope.md`) records the architectural reset: the
+  original `safe_arch` + `is_x86_feature_detected!` posture didn't
+  compose with `forbid(unsafe_code)` + `no_std` on MSRV 1.85, so
+  SIMD intrinsics live in the sibling crate behind `// SAFETY:`
+  comments. Workspace member but NOT in `default-members` — same
+  posture as `gmcrypto-c`.
+- **W4 phase 2 `tau` dispatch wire-up.**
+  `gmcrypto_core::sm4::sbox_bitsliced_simd::sbox` now calls into
+  `gmcrypto_simd::sm4::sbox_x8::sbox_x8` instead of v0.5.0's
+  transparent delegate. `tau` is unchanged at the call-site level;
+  the routing under `cfg(feature = "sm4-bitsliced-simd")` now
+  reaches the AVX2 path when the host CPU supports it (and the
+  scalar bitslice otherwise). Phase 2's per-`tau` shape invokes the
+  AVX2 path with the input replicated across all 8 lanes (7 wasted
+  per call); see the throughput note in the section preamble.
+
+### Changed
+
+- **Dudect recalibration** — `ct_fn_invert` + `ct_fp_invert`
+  demoted from the blocking allowlist after the 2026-05-12
+  [GitHub `actions/runner-images`](https://github.com/actions/runner-images/releases)
+  `ubuntu-24.04` update (image `20260413.86.1` → `20260512.134.1`,
+  kernel `6.17.0-1010-azure` → `6.17.0-1013-azure`, Rust toolchain
+  `1.94.1` → `1.95.0`) raised the empirical 100K noise floor on
+  those two SM2 direct invert diagnostics from ~0.006 to
+  intermittent [0.29–0.40], with same-commit pass/fail across
+  consecutive nightly runs. PR-smoke: both targets now print as
+  `TELEMETRY:` (non-blocking). Nightly: both targets gate at
+  `|tau| ≥ 0.55` (gross-regression sentinel — the v0.1
+  `crypto-bigint 0.6 ConstMontyForm::invert` regression at
+  `|tau| ≈ 0.70` in isolation would still fire). New
+  runner-environment-capture step printed in both workflows
+  (`ImageVersion`, kernel, CPU model, governor, `rustc -Vv`).
+  Full data + posture rationale in
+  `docs/v0.5-dudect-recalibration.md`. Authoritative fix
+  (pinned / noise-isolated dudect runner) deferred to a future
+  scope doc. The CODE is unchanged from v0.2 baseline; the CI
+  noise floor is the moving piece.
+
+### Posture (unchanged from v0.5.0 except for the `gmcrypto-simd` addition)
+
+- `unsafe_code = "forbid"` on `gmcrypto-core`. Exceptions
+  (`unsafe_code = "warn"`, `// SAFETY:` comment per `unsafe` block):
+  - `gmcrypto-c` — FFI shim (raw-pointer primitives).
+  - **`gmcrypto-simd` (new in v0.5.1)** — SIMD intrinsic backend.
+    `core::arch::*` intrinsics are all `unsafe fn` and
+    `#[target_feature(enable = "...")] unsafe fn` is the only
+    stable-Rust mechanism on MSRV 1.85 to combine runtime CPU
+    dispatch with intrinsic calls. See `docs/v0.5-scope.md` Q5.11
+    addendum.
+- `no_std + alloc` only inside `crates/gmcrypto-core/src/` and
+  `crates/gmcrypto-simd/src/`.
+- MSRV 1.85, edition 2024. Constant-time discipline on all
+  secret-touching paths. Failure-mode invariant unchanged.
+
 ## [0.5.0] — 2026-05-12
 
 v0.5.0 lands two workstreams from `docs/v0.5-scope.md` — **W4 phase 1**
