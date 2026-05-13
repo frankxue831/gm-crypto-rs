@@ -21,7 +21,15 @@ pub mod mode_cbc;
 // `sm4-bitsliced` feature flag (Q4.9 / Q4.10 / Q4.11 of
 // docs/v0.4-scope.md). The module is `pub(crate)` so `cipher.rs`'s
 // `tau` can swap to it when the feature is on; not in the public API.
+//
+// When `sm4-bitsliced-simd` is also enabled, `tau` dispatches into
+// `sbox_bitsliced_simd::sbox` instead (which calls the sibling
+// crate). The v0.4 W3 module then becomes dead code at the
+// non-test build path, but its `tests::bitsliced_matches_table` is
+// still useful as an algorithmic correctness gate and as a
+// reference for `sbox_bitsliced_simd::tests::simd_sbox_matches_single_block`.
 #[cfg(feature = "sm4-bitsliced")]
+#[cfg_attr(feature = "sm4-bitsliced-simd", allow(dead_code))]
 pub(crate) mod sbox_bitsliced;
 
 // v0.5 W4 — Multi-block SIMD-packed bitsliced SM4 S-box behind the

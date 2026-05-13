@@ -8,9 +8,16 @@ W4 deferrals; W4 phase 1 `sm4-bitsliced-simd` feature-flag
 scaffolding, AVX2 / NEON intrinsic phases 2 / 3 deferred to v0.5.x
 or v0.6; W5 BREAKING — workspace-wide `gmcrypto_core::Error` enum,
 `Sm2PrivateKey` U256 escape hatch + `from_scalar`/`from_bytes_be`/
-`to_bytes_be` rename, `std` feature flag removed). Two-crate workspace:
+`to_bytes_be` rename, `std` feature flag removed). **v0.5 W4 phase 2
+on feature branch 2026-05-13** — AVX2 8-way packed bitsliced SM4
+S-box backend lands in a new sibling crate `crates/gmcrypto-simd/`
+with `unsafe_code = "warn"` (mirroring the `gmcrypto-c` precedent),
+runtime CPU detection via `cpufeatures`, silent scalar fallback on
+non-AVX2 hosts. Three-crate workspace:
 `crates/gmcrypto-core/` (the no_std crypto core; default-member) +
-`crates/gmcrypto-c/` (FFI shim; cdylib + staticlib + cbindgen header).
+`crates/gmcrypto-c/` (FFI shim; cdylib + staticlib + cbindgen header) +
+`crates/gmcrypto-simd/` (SIMD backend; rlib-only, opt-in via
+`gmcrypto-core`'s `sm4-bitsliced-simd` feature).
 
 Read `README.md`, `SECURITY.md`, `CONTRIBUTING.md` for the user-facing posture.
 This file lists the constraints a coding agent will violate by default.
@@ -18,11 +25,18 @@ This file lists the constraints a coding agent will violate by default.
 ## Hard constraints (non-negotiable)
 
 - `unsafe_code = "forbid"` on `gmcrypto-core`. Don't add `unsafe`.
-  **Exception**: `gmcrypto-c` (v0.4 W4 FFI shim) uses `unsafe_code = "warn"`
-  because raw-pointer FFI primitives (`Box::from_raw`,
-  `#[unsafe(no_mangle)]`, slice reconstruction) cannot be expressed
-  without `unsafe`. Every `unsafe` block in `gmcrypto-c/src/lib.rs`
-  carries a `// SAFETY:` comment naming caller-side preconditions.
+  **Exceptions** (both `unsafe_code = "warn"`, both with `// SAFETY:`
+  comments per `unsafe` block):
+  - `gmcrypto-c` (v0.4 W4 FFI shim) — raw-pointer FFI primitives
+    (`Box::from_raw`, `#[unsafe(no_mangle)]`, slice reconstruction)
+    cannot be expressed without `unsafe`.
+  - `gmcrypto-simd` (v0.5 W4 phase 2 SIMD backend) — AVX2 (x86_64)
+    and later NEON (aarch64) intrinsics from `core::arch::*` are
+    `unsafe fn`; `#[target_feature(enable = "...")] unsafe fn` is
+    the only stable-Rust mechanism on MSRV 1.85 to combine runtime
+    CPU dispatch with intrinsic calls. See `docs/v0.5-scope.md`
+    Q5.11 addendum for the architectural reset that landed
+    alongside W4 phase 2.
 - `#![no_std]` + `alloc` only inside `crates/gmcrypto-core/src/`. No `std::` paths.
   The reserved `std` Cargo feature flag was **removed in v0.5 W5
   (Q5.18)** — a no-op feature flag had negative documentation value.
@@ -220,6 +234,12 @@ crates/gmcrypto-c/          # v0.4 W4 — C ABI shim (cdylib + staticlib + rlib)
   examples/sm2_sign.c       # end-to-end C example
   tests/c_smoke.rs          # 20 Rust-equivalence tests via extern "C" interop
   README.md                 # C/C++/Python/Go/Zig integration docs
+
+crates/gmcrypto-simd/       # v0.5 W4 phase 2 — SIMD backend crate (rlib-only, opt-in via gmcrypto-core's sm4-bitsliced-simd feature)
+  src/lib.rs                # `#![no_std]`; re-exports `has_avx2()`
+  src/detect.rs             # `cpufeatures::new!(..., "avx2")` + `has_avx2()` wrapper (cached)
+  src/sm4/sbox_x8.rs        # local re-impl of v0.4 W3 gate sequence + AVX2 byte-parallel translation; dispatch fn `sbox_x8`
+  tests/lane_equivalence.rs # exhaustive cross-check vs inline GB/T 32907-2016 §6.2 S-box table; AVX2-path explicit test announces "AVX2 path exercised" on AVX2 hosts
 
 .github/workflows/
   ci.yml                    # build/test on stable (full) + 1.85 MSRV (build-only); cabi job; wasm32 matrix; cargo-deny via taiki-e/install-action
@@ -482,6 +502,35 @@ Operational notes:
   `unsafe` site in clippy without forbidding the unavoidable
   `Box::from_raw` / slice-reconstruct primitives. `gmcrypto-core`
   itself stays `unsafe_code = "forbid"` — don't relax that.
+- Don't add SIMD intrinsics directly to `gmcrypto-core`. Route via
+  the v0.5 W4 phase 2 sibling crate `gmcrypto-simd`
+  (`unsafe_code = "warn"`). The `forbid` lint on `gmcrypto-core` is
+  non-negotiable; `core::arch::x86_64::*` intrinsics are all
+  `unsafe fn` and `#[target_feature(enable = "avx2")] unsafe fn` is
+  the only stable-Rust path on MSRV 1.85 that combines runtime AVX2
+  dispatch with intrinsic calls — neither composes with `forbid`
+  in the same crate. The `gmcrypto-simd` ↔ `gmcrypto-c` precedent
+  is the model: unavoidable-unsafe primitives quarantined to a
+  named sibling, every block carrying a `// SAFETY:` comment.
+- Don't promote `gmcrypto-simd` from rlib to cdylib/staticlib.
+  `gmcrypto-c` is the single C ABI surface for the workspace.
+  Adding a public SIMD dylib creates ABI / support surface without
+  benefit — downstream non-Rust callers get the SIMD path
+  transparently when they enable the C-ABI library's
+  `sm4-bitsliced-simd` feature.
+- Don't widen the `gmcrypto-simd` public API beyond Rust-internal
+  use. No raw pointers across the crate boundary, no extern "C"
+  shapes. The public API is `sbox_x8(&[u8; 8]) -> [u8; 8]` plus
+  `has_avx2()`; phase 3 adds equivalents for NEON. Anything else
+  invites the same "fixed-shape FFI primitives" problems the C-ABI
+  shim already has — keep them in `gmcrypto-c`.
+- Don't add a `cpufeatures` check inside an inner SM4 loop in
+  `gmcrypto-core`. The detection is cached in `gmcrypto-simd`'s
+  `detect.rs` already; the single per-call cost is acceptable for
+  phase 2's per-`tau` shape. Phase 3's `Sm4CbcDecryptor` fanout
+  amortizes the call over an 8-block batch — that's the right
+  level. Don't pull `cpufeatures` into `gmcrypto-core` directly to
+  "skip the indirection."
 - Don't make any C ABI entry point distinguish failure modes. Every
   error path returns `GMCRYPTO_FAILED` (single failure code).
   Distinguishing wrong-password from malformed-PEM from MAC-mismatch

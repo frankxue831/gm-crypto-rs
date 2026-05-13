@@ -31,6 +31,13 @@ spin.workspace = true
 # current stable lines; future major-bumps are a v0.5 candidate.
 digest = { version = "0.10", default-features = false, features = ["mac"], optional = true }
 cipher = { version = "0.4", default-features = false, optional = true }
+# v0.5 W4 phase 2 — sibling crate carrying the AVX2 8-way packed
+# bitsliced SM4 S-box (and NEON in phase 3). Quarantines the
+# unavoidable `unsafe` of SIMD intrinsics so `gmcrypto-core` itself
+# can keep `unsafe_code = "forbid"`. Mirrors the established
+# `gmcrypto-c` precedent for FFI primitives. Only pulled in when
+# `sm4-bitsliced-simd` is enabled — default builds never touch it.
+gmcrypto-simd = { path = "../gmcrypto-simd", version = "0.5", default-features = false, optional = true }
 
 [dev-dependencies]
 hex-literal.workspace = true
@@ -96,7 +103,14 @@ sm4-bitsliced = []
 # callers enabling `sm4-bitsliced-simd` in v0.5.0 will transparently
 # pick up the AVX2 / NEON fast paths when v0.5.x lands them, with
 # no source change required.
-sm4-bitsliced-simd = ["sm4-bitsliced"]
+# v0.5 W4 phase 2 — `sm4-bitsliced-simd` activates the
+# `gmcrypto-simd` sibling crate. Phase 1 was a transparent
+# delegate; phase 2 routes through the sibling's AVX2-or-scalar
+# dispatch with runtime CPU detection via `cpufeatures`. See
+# `crates/gmcrypto-core/src/sm4/sbox_bitsliced_simd.rs` for the
+# in-tree wire-up and `docs/v0.5-scope.md` Q5.11 addendum for the
+# architectural rationale.
+sm4-bitsliced-simd = ["sm4-bitsliced", "dep:gmcrypto-simd"]
 
 [lints.rust]
 unsafe_code = "forbid"
