@@ -1,0 +1,76 @@
+[package]
+name = "gmcrypto-simd"
+description = "SIMD backends for gmcrypto-core — AVX2 (x86_64) and NEON (aarch64) packed bitsliced SM4 S-box, quarantined to keep `gmcrypto-core` `unsafe_code = forbid`"
+keywords = ["sm4", "simd", "avx2", "bitsliced"]
+categories = ["cryptography", "no-std"]
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+# v0.5 W4 phase 2 — rlib-only. `gmcrypto-c` stays the single C-ABI /
+# cdylib / staticlib surface; this crate is a Rust-internal SIMD
+# backend with no foreign-call ABI.
+crate-type = ["rlib"]
+
+[dependencies]
+# v0.5 W4 phase 2 — runtime AVX2 detection (RustCrypto, no_std-OK,
+# cached after first call). Replaces the scope-doc Q5.11 mention of
+# `is_x86_feature_detected!` (a `std` macro, incompatible with
+# our no_std posture).
+cpufeatures = "0.2"
+
+# Intentional: no `gmcrypto-core` dep. The sibling crate
+# re-implements the v0.4 W3 Boyar-Peralta gate sequence locally
+# (~50 LOC of bitslice in `src/sm4/sbox_x8.rs`) rather than
+# widening `gmcrypto_core::sm4::sbox_bitsliced`'s `pub(crate)`
+# visibility. This preserves the CLAUDE.md "Don't expose the
+# bitsliced helpers publicly" rule. Lane-equivalence tests
+# cross-check both the scalar and AVX2 paths against an inline
+# copy of the GB/T 32907-2016 §6.2 S-box table — the public
+# standard, not a private re-export.
+
+[lints.rust]
+# v0.5 W4 phase 2 / Q5.11 addendum — `unsafe_code = "forbid"` is
+# impossible on this crate: AVX2 intrinsics in `core::arch::x86_64`
+# are `unsafe fn`, and `#[target_feature(enable = "avx2")] unsafe fn`
+# is the only stable Rust mechanism on MSRV 1.85 that combines
+# runtime AVX2 dispatch with intrinsic calls. Every `unsafe` block
+# in this crate carries a `// SAFETY:` comment naming the AVX2
+# precondition. `gmcrypto-core` itself stays `forbid` workspace-wide.
+unsafe_code = "warn"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+# The SIMD body's bitwise gate sequence reuses short identifiers
+# (`a`, `b`, `r`, `x2`, `x4`, ...) that pedantic flags as
+# `similar_names`. Established v0.4 W3 convention in
+# `gmcrypto-core/src/sm4/sbox_bitsliced.rs`.
+similar_names = "allow"
+# AVX2 intrinsic chains naturally produce many `__m256i` rebinds;
+# `shadow_unrelated` would force renaming each rebind for no
+# semantic gain.
+shadow_unrelated = "allow"
+# The SIMD body is a flat sequence of intrinsic calls; extracting
+# helpers for each gate would obscure the gate sequence's mapping
+# to the v0.4 single-block bitslice.
+too_many_lines = "allow"
+# `has_avx2` cannot be `const fn` on x86_64 (cpufeatures' cached
+# detection runs through a non-const `Once`). Scalar fallback
+# `sbox_x8_scalar` could theoretically be const, but keeping it
+# non-const matches the public dispatch API (`sbox_x8` is non-const
+# on x86_64 too) and avoids cfg-conditional const machinery.
+missing_const_for_fn = "allow"
+# Doc bodies reference architecture / register-type identifiers
+# (`x86_64`, `aarch64`, `__m256i`, `_mm256_*`) in narrative text;
+# pedantic's `doc_markdown` would demand backticks on each. The
+# heavy hand here adds noise without changing readability for
+# crypto reviewers familiar with the intrinsic vocabulary.
+doc_markdown = "allow"

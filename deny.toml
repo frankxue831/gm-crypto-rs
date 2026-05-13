@@ -86,6 +86,21 @@ allow = [
     { name = "wasip3" },
     { name = "wit-bindgen" },
 
+    # v0.5 W4 phase 2 — `gmcrypto-simd` workspace member (SIMD backend
+    # crate, rlib-only). Carries the AVX2 8-way packed bitsliced SM4
+    # S-box (and NEON in phase 3); quarantines the unavoidable
+    # `unsafe` of SIMD intrinsics so `gmcrypto-core` itself can stay
+    # `unsafe_code = "forbid"`. Mirrors the `gmcrypto-c` posture in
+    # this allow-list. Only reachable from a downstream consumer
+    # when they enable `gmcrypto-core`'s `sm4-bitsliced-simd` feature.
+    { name = "gmcrypto-simd" },
+    # v0.5 W4 phase 2 — runtime AVX2 detection (RustCrypto, no_std-OK,
+    # cached after first call via a `Once`-protected static).
+    # Replaces the scope-doc Q5.11 mention of
+    # `is_x86_feature_detected!` (a `std` macro, incompatible with
+    # our no_std posture). See `docs/v0.5-scope.md` Q5.11 addendum.
+    { name = "cpufeatures" },
+
     # Transitive deps of crypto-bigint.
     { name = "cpubits" },
     { name = "ctutils" },
