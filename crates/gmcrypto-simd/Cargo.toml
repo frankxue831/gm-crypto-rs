@@ -17,12 +17,6 @@ rust-version.workspace = true
 crate-type = ["rlib"]
 
 [dependencies]
-# v0.5 W4 phase 2 — runtime AVX2 detection (RustCrypto, no_std-OK,
-# cached after first call). Replaces the scope-doc Q5.11 mention of
-# `is_x86_feature_detected!` (a `std` macro, incompatible with
-# our no_std posture).
-cpufeatures = "0.2"
-
 # Intentional: no `gmcrypto-core` dep. The sibling crate
 # re-implements the v0.4 W3 Boyar-Peralta gate sequence locally
 # (~50 LOC of bitslice in `src/sm4/sbox_x8.rs`) rather than
@@ -32,6 +26,15 @@ cpufeatures = "0.2"
 # cross-check both the scalar and AVX2 paths against an inline
 # copy of the GB/T 32907-2016 §6.2 S-box table — the public
 # standard, not a private re-export.
+
+# v0.5 W4 phase 2 — runtime AVX2 detection (RustCrypto, no_std-OK,
+# cached after first call). Target-gated to x86_64 only: the
+# `cpufeatures` crate hard-fails (`compile_error!`) on unsupported
+# targets like wasm32, and our scalar fallback doesn't need it on
+# those targets. Phase 3 NEON on aarch64 is baseline (Q5.12; no
+# runtime detect needed) so aarch64 also doesn't pull cpufeatures.
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+cpufeatures = "0.2"
 
 [lints.rust]
 # v0.5 W4 phase 2 / Q5.11 addendum — `unsafe_code = "forbid"` is
