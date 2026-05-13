@@ -49,6 +49,35 @@ jobs:
         with:
           shared-key: gmcrypto-stable-${{ matrix.features }}
 
+      # v0.5 W4 phase 2 prep — capture runner environment so that
+      # future calibration drifts (kernel / runner-image / Rust
+      # toolchain) can be correlated with `|tau|` shifts. See
+      # `docs/v0.5-dudect-recalibration.md` for the 2026-05-12
+      # `ubuntu-24.04` runner-image drift that motivated this.
+      - name: Capture runner environment (for noise-floor correlation)
+        run: |
+          set +e
+          echo "=== Runner image ==="
+          echo "ImageVersion: ${ImageVersion:-<unset>}"
+          echo "ImageOS:      ${ImageOS:-<unset>}"
+          echo
+          echo "=== Kernel ==="
+          uname -a
+          echo
+          echo "=== CPU ==="
+          lscpu 2>/dev/null | head -30 || cat /proc/cpuinfo | head -25
+          echo
+          echo "=== CPU governor / turbo state ==="
+          for cpu in /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor; do
+            [ -r "$cpu" ] && echo "$cpu = $(cat "$cpu")"
+          done
+          [ -r /sys/devices/system/cpu/intel_pstate/no_turbo ] && \
+            echo "intel_pstate/no_turbo = $(cat /sys/devices/system/cpu/intel_pstate/no_turbo)"
+          echo
+          echo "=== Rust ==="
+          rustc -Vv
+          cargo -V
+
       - name: Run dudect harness (smoke budget)
         env:
           DUDECT_SAMPLES: "10000"
@@ -106,18 +135,36 @@ jobs:
               # no detectable structure tied to code changes. The 100K
               # nightly gate (see dudect-nightly.yml) remains at 0.25
               # for `ct_sign_k_class`, where the signal-to-noise ratio
-              # is meaningful. The actual invert-leak regression guards
-              # at the PR budget are the direct diagnostics
-              # `ct_fn_invert` and `ct_fp_invert` (both consistently
-              # under 0.03 at 10K); `ct_sign_k_class` is a composite
-              # that dilutes invert signal by ~50× per the v0.2 W0
-              # analysis. Dropping it from PR-smoke is the honest
+              # is meaningful. Dropping it from PR-smoke is the honest
               # framing — chasing a higher gate would turn this into
               # an effectively unenforced rule. The bench still runs
               # (so the data lands in the artifact log) but doesn't
               # gate.
-              "ct_fn_invert": 0.20,
-              "ct_fp_invert": 0.20,
+              #
+              # v0.5 W4 phase 2 prep — `ct_fn_invert` and `ct_fp_invert`
+              # also moved to telemetry-only at the PR-smoke budget.
+              # The 2026-05-12 GH Actions `ubuntu-24.04` runner-image
+              # update (image `20260413.86.1` → `20260512.134.1`,
+              # kernel `6.17.0-1010-azure` → `6.17.0-1013-azure`,
+              # Rust toolchain `1.94.1` → `1.95.0`; see
+              # https://github.com/actions/runner-images/releases)
+              # shifted the noise floor on these two direct invert
+              # diagnostics: 100K-sample nightlies on `main` started
+              # producing `|tau|` values in [0.29–0.40] intermittently
+              # on the same commits that had measured [0.006–0.020] a
+              # few days earlier, with same-commit pass/fail across
+              # consecutive runs (data in
+              # `docs/v0.5-dudect-recalibration.md`). At 10K samples
+              # the effect is even stronger. Gating these at 0.20
+              # on the PR-smoke produces flaky failures that don't
+              # correspond to code changes. The nightly retains a
+              # gross-regression sentinel at `|tau| ≥ 0.55` for
+              # both targets (catches a real leak like the v0.1
+              # `crypto-bigint 0.6 ConstMontyForm::invert` at
+              # `|tau| ≈ 0.70`); the PR-smoke prints values as
+              # telemetry without gating. The authoritative fix
+              # would be a pinned / noise-isolated dudect runner;
+              # that's deferred to a future scope doc.
               # v0.2 W1 — SM4 timing surfaces. Key schedule and encrypt
               # share an S-box-and-linear-transform pipeline; both run on
               # secret-derived state.
@@ -144,6 +191,12 @@ jobs:
           if os.environ.get("MATRIX_FEATURES") == "sm4-bitsliced-simd":
               required_low["ct_sm4_encrypt_block_bitsliced_simd"] = 0.20
 
+          # v0.5 W4 phase 2 prep — telemetry-only targets. The data
+          # lands in the CI log for trend tracking but doesn't gate
+          # on the PR-smoke budget. See `required_low`'s big comment
+          # above for the runner-image-drift rationale.
+          telemetry_only = ["ct_fn_invert", "ct_fp_invert", "ct_sign_k_class"]
+
           fail = False
           for name, lower_bound in required_high.items():
               tau = findings.get(name)
@@ -163,6 +216,15 @@ jobs:
                   fail = True
               else:
                   print(f"OK:   {name} |tau|={tau:.4f} (must be < {upper_bound})")
+          # Telemetry-only: print measured |tau| with no pass/fail gate.
+          # Prefix with `TELEMETRY:` so log readers can grep it out
+          # from the gating lines above.
+          for name in telemetry_only:
+              tau = findings.get(name)
+              if tau is None:
+                  print(f"TELEMETRY: {name} not measured")
+              else:
+                  print(f"TELEMETRY: {name} |tau|={tau:.4f} (non-blocking)")
           sys.exit(1 if fail else 0)
           PY
 

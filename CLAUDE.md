@@ -114,8 +114,8 @@ plus the v0.5 W4 SIMD-packed dispatch path:
 | `ct_mul_var` | `\|tau\| < 0.20` | Variable-base scalar mult. |
 | `ct_sign` | `\|tau\| < 0.20` | `sign_raw_with_id`, class-split by private key `d` (NOT `sign_with_id` — DER is variable-time on public output). |
 | `ct_sign_k_class` | nightly only: `\|tau\| < 0.25` | `sign_raw_with_id`, class-split by nonce `k` magnitude with `d` held fixed (W0; both retry nonces class-tied). v0.4 release-prep: **dropped from the PR-smoke (10K) allowlist** — observed values span [0.21–0.37] across seven runs on the GH Actions ubuntu-24.04 runner, with no structure tied to code changes. The 100K nightly gate at 0.25 is retained (signal-to-noise is meaningful there). The direct invert diagnostics (`ct_fn_invert` / `ct_fp_invert`) are the actual invert-leak regression guards at the PR budget; `ct_sign_k_class` is a composite that dilutes invert signal by ~50× per the v0.2 W0 analysis. The bench still runs (data lands in the artifact log) but doesn't gate at 10K. |
-| `ct_fn_invert` | `\|tau\| < 0.20` | Direct `Fn::invert((1+d) mod n)` diagnostic (W0). |
-| `ct_fp_invert` | `\|tau\| < 0.20` | Direct `Fp::invert(Z)` diagnostic (W0). |
+| `ct_fn_invert` | PR-smoke: **telemetry only**. Nightly: gross-regression sentinel at `\|tau\| ≥ 0.55`. | Direct `Fn::invert((1+d) mod n)` diagnostic (W0). Recalibrated 2026-05-13 — see `docs/v0.5-dudect-recalibration.md`. |
+| `ct_fp_invert` | PR-smoke: **telemetry only**. Nightly: gross-regression sentinel at `\|tau\| ≥ 0.55`. | Direct `Fp::invert(Z)` diagnostic (W0). The 2026-05-12 GH Actions `ubuntu-24.04` runner-image update (image `20260413.86.1` → `20260512.134.1`, kernel `6.17.0-1010-azure` → `6.17.0-1013-azure`, Rust toolchain `1.94.1` → `1.95.0`) shifted the 100K noise floor on this target from ~0.006 (v0.2 baseline) to intermittent values in [0.29–0.40]. The 0.20 gate is no longer authoritative on the current shared runner; the gross-regression sentinel at 0.55 retains protection against a real cryptographic leak (the v0.1 `ConstMontyForm::invert` regression at `\|tau\| ≈ 0.70` would still fire). Authoritative fix (pinned / noise-isolated dudect runner) deferred to a future scope doc — see `docs/v0.5-dudect-recalibration.md`. |
 | `ct_sm4_key_schedule` | `\|tau\| < 0.20` | SM4 key schedule, class-split by master key bytes (v0.2 W1). v0.4 CI also gates this under `features=sm4-bitsliced`. |
 | `ct_sm4_encrypt_block` | `\|tau\| < 0.20` | SM4 "construct cipher + encrypt one block" timed under one window, class-split by master key bytes (v0.2 W1). v0.4 CI also gates this under `features=sm4-bitsliced`; 10K-sample smoke on the bitsliced path: `\|tau\| ≈ 0.025`. |
 | `ct_hmac_sm3` | `\|tau\| < 0.20` | HMAC-SM3 keyed MAC, class-split by master key (v0.2 W3). Structurally covers PBKDF2-HMAC-SM3's (v0.2 W4) inner PRF, the v0.3 W5 streaming `HmacSm3` (Q7.6 deliberately skipped a separate target), and the PBKDF2 sub-path of v0.3 W2's encrypted PKCS#8 path. |
@@ -145,6 +145,18 @@ All four under the 0.10 W5 Branch A threshold; two orders of magnitude under
 the 0.20 gate. The v0.2 Fermat-invert workstream was dropped on this evidence.
 `pow_bounded_exp` remains a fallback if a future `crypto-bigint` release
 regresses on this gate. See `SECURITY.md` for the full posture.
+
+**2026-05-13 recalibration note:** the 100K-sample baseline shown above
+was measured against the GH Actions `ubuntu-24.04` image `20260413.86.1`
+(kernel `6.17.0-1010-azure`, Rust toolchain `1.94.1`). After the
+2026-05-12 image update to `20260512.134.1` (kernel `6.17.0-1013-azure`,
+Rust toolchain `1.95.0`), `ct_fn_invert` and `ct_fp_invert` started
+producing intermittent `|tau|` values in [0.29–0.40] on the same source
+code, with same-commit pass/fail across consecutive nightly runs. The
+PR-smoke gates and 100K nightly gates for these two targets were
+relaxed; see `docs/v0.5-dudect-recalibration.md` for the data + the
+new sentinel posture. The CODE is unchanged from v0.2 baseline; the
+CI noise floor is the moving piece.
 
 The three secret-touching `invert` sites:
 
