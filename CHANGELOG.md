@@ -3,6 +3,122 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] — 2026-05-14
+
+v0.6.0 lands **W6** from `docs/v0.6-scope.md`: multi-block SIMD
+fanout for SM4-CBC decryption, plus the NEON 4-way bitsliced
+backend on `aarch64`. **This is the throughput-win release** —
+the W4 SIMD milestone formally closes (phases 1, 2, and 3 all
+shipped). No public Rust API changes; no breaking changes; v0.5.1
+callers can `cargo update` without migration.
+
+**Throughput shape.** Under `--features sm4-bitsliced-simd`,
+`Sm4CbcDecryptor::process_chunk` now batches ciphertext blocks
+through the packed S-box: 8 blocks per call on `x86_64` (AVX2,
+runtime-detected) and 4 blocks per call on `aarch64` (NEON,
+compile-time baseline). Per round of the SM4 decrypt, all
+batched blocks' `tau` inputs (32 bytes on AVX2, 16 on NEON) pack
+into one SIMD register and run through the new packed S-box in
+a single call — 32× fewer SIMD dispatches per 8-block batch than
+v0.5.1 would do. Single-block decrypt and CBC encrypt are
+unchanged (CBC chain-of-blocks defeats per-block SIMD packing
+for encryption; Q5.10 decision unchanged).
+
+### Added
+
+- `gmcrypto-simd::sm4::sbox_x32::sbox_x32(&[u8; 32]) -> [u8; 32]`
+  (PR [#35](https://github.com/frankxue831/gm-crypto-rs/pull/35),
+  Q6.1 + Q6.2). AVX2 byte-parallel S-box across the full
+  256-bit `__m256i`. Runtime-detected via `cpufeatures`; silent
+  scalar fallback on non-AVX2 x86_64 (32 sequential `sbox_byte`
+  calls — codex flag #1: not slower than scalar bitslice).
+- `gmcrypto-simd::sm4::sbox_x16::sbox_x16(&[u8; 16]) -> [u8; 16]`
+  (PR #35, Q6.3). NEON byte-parallel S-box across `uint8x16_t`.
+  **Compile-time baseline on `aarch64`** (Q5.12 + Q6.3); no
+  runtime detect. Scalar fallback for non-aarch64 targets.
+- Private `gmcrypto-simd::sm4::neon` module with byte-parallel
+  primitives (`gf_mul`, `gf_inv`, `affine_a`, `parity`,
+  `sbox_round`, `sbox_x16_impl`). NEON's native byte-wise shifts
+  (`vshlq_n_u8` / `vshrq_n_u8`) mean no inter-byte bleed, so the
+  gate sequence is cleaner than the AVX2 equivalent.
+- `Sm4CbcDecryptor::process_chunk` SIMD fanout
+  (PR [#36](https://github.com/frankxue831/gm-crypto-rs/pull/36),
+  Q5.10). **No new public Rust surface** — the feature flag
+  swaps the underlying inner loop; `Sm4CbcDecryptor`'s
+  buffer-back-by-one invariant is preserved exactly (codex's
+  phase 3 design flag #2). Internal helpers:
+  `pub(crate) fn decrypt_batch` in `cbc_streaming.rs` and
+  `pub(super) fn Sm4Cipher::decrypt_blocks_simd` +
+  `crypt_batch_x8` / `crypt_batch_x4` free functions in
+  `cipher.rs`. Behavior is byte-identical to N sequential
+  `decrypt_block` calls.
+- New dudect target `ct_sm4_cbc_decrypt_fanout`
+  (Q6.7) cfg-gated on `sm4-bitsliced-simd`. Class-split by
+  master key (both classes' ciphertexts are valid encrypts
+  under their own keys, so both decrypt paths share identical
+  control flow). Gate `|tau| < 0.20` matching the rest of the
+  SM4 surface. PR-smoke + nightly matrices add the entry under
+  the `sm4-bitsliced-simd` feature.
+- Three new chunk-boundary tests in `cbc_streaming::tests`:
+  `cbc_decrypt_simd_batch_boundary_sweep` (8 block-counts
+  around the SIMD batch size: `0, 1, N-1, N, N+1, 2N-1, 2N,
+  2N+1`); `cbc_decrypt_simd_chunked_update_sweep` (9 chunk
+  sizes); `cbc_decrypt_simd_take_output_preserves_held_back`.
+  Per codex's phase 3 design flag #3.
+- Exhaustive lane-position-shifted SIMD tests
+  `crates/gmcrypto-simd/tests/lane_position_x32.rs` (8192
+  cases: 256 input bytes × 32 lane positions) and
+  `lane_position_x16.rs` (4096 cases: 256 × 16) per Q6.8 +
+  codex's phase 3 flag #4 — lane-permutation bugs are the easy
+  miss in `x32` / `x16`.
+
+### Changed
+
+- Refactor in `gmcrypto-simd` (PR #35): scalar bitslice
+  primitives extracted to `sm4/scalar.rs` (private module);
+  AVX2 byte-parallel primitives extracted to `sm4/avx2.rs`
+  (shared between `sbox_x8` and the new `sbox_x32`). NEON
+  primitives in new `sm4/neon.rs`. `sbox_x8.rs` slimmed to
+  dispatch + AVX2 entry using the shared primitives. **Public
+  surface of `gmcrypto-simd` unchanged for the `sbox_x8` path**
+  (v0.5.1 callers see the same API); two new entries added.
+- `gmcrypto-simd` gains a crate-level `#![allow(unsafe_code)]`
+  in `src/lib.rs` with a comment block mirroring
+  `gmcrypto-c/src/lib.rs`'s pattern. The Cargo.toml `[lints.rust]
+  unsafe_code = "warn"` stays as intent marker; the crate-level
+  allow keeps per-decl review noise off the critical path. Every
+  `unsafe` block / fn carries a `// SAFETY:` comment naming the
+  architectural / runtime-detect precondition. `gmcrypto-core`
+  itself stays `unsafe_code = "forbid"`.
+
+### Posture (unchanged from v0.5.1)
+
+- `unsafe_code = "forbid"` on `gmcrypto-core`. Exceptions
+  (`unsafe_code = "warn"`, `// SAFETY:` comment per `unsafe`
+  block): `gmcrypto-c` (FFI shim), `gmcrypto-simd` (SIMD
+  intrinsic backend).
+- `no_std + alloc` only inside `crates/gmcrypto-core/src/` and
+  `crates/gmcrypto-simd/src/`.
+- MSRV 1.85, edition 2024. Constant-time discipline on all
+  secret-touching paths. Failure-mode invariant unchanged.
+
+### W4 milestone retrospective
+
+v0.5 W4 originally split into three phases under one scope:
+SIMD-packed bitsliced SM4. **All three phases now shipped:**
+
+| Phase | Version | Content |
+|---|---|---|
+| Phase 1 | v0.5.0 | `sm4-bitsliced-simd` feature flag + transparent delegate to v0.4 single-block bitslice. Scaffolding. No SIMD intrinsics. |
+| Phase 2 | v0.5.1 | New `gmcrypto-simd` sibling crate; AVX2 8-way packed S-box backend (`sbox_x8`) wired into `Sm4Cipher::tau` per-byte dispatch (7 wasted lanes per call). Throughput matches v0.4 single-block. |
+| Phase 3 | **v0.6.0** | NEON 4-way path (`sbox_x16`); 32-byte AVX2 packed S-box (`sbox_x32`); `Sm4CbcDecryptor::process_chunk` SIMD fanout filling the lanes with real parallel data. Throughput win lands here. |
+
+v0.7 candidate Q-list (from `docs/v0.6-scope.md` §8): pinned /
+noise-isolated dudect runner; SM4-CTR; AEAD modes (SM4-GCM /
+SM4-CCM); RustCrypto `digest = 0.11` / `cipher = 0.5` migration;
+`wasm-bindgen-test` KAT runner; AVX-512 16-way; public batch API
+on `Sm4Cipher`.
+
 ## [0.5.1] — 2026-05-14
 
 v0.5.1 is a minor-additive patch on top of v0.5.0 (which shipped W4
