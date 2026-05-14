@@ -190,6 +190,12 @@ jobs:
           import os
           if os.environ.get("MATRIX_FEATURES") == "sm4-bitsliced-simd":
               required_low["ct_sm4_encrypt_block_bitsliced_simd"] = 0.20
+              # v0.6 W6 — CBC-decrypt SIMD-fanout target (Q6.7 of
+              # docs/v0.6-scope.md). Exercises the
+              # Sm4CbcDecryptor::decrypt_batch path through sbox_x32
+              # (AVX2) / sbox_x16 (NEON). Same 0.20 gate as the rest
+              # of the SM4 surface; class-split by master key.
+              required_low["ct_sm4_cbc_decrypt_fanout"] = 0.20
 
           # v0.5 W4 phase 2 prep — telemetry-only targets. The data
           # lands in the CI log for trend tracking but doesn't gate
