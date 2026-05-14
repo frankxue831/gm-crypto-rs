@@ -158,6 +158,68 @@ impl Sm4Cipher {
         crypt(block, &self.round_keys, true);
     }
 
+    /// v0.7 W1 — Encrypt N 16-byte blocks in place. Byte-identical
+    /// to calling [`encrypt_block`] N times; under the
+    /// `sm4-bitsliced-simd` feature this fans the SM4 round loop
+    /// across the SIMD register width (8-block batches on `x86_64`
+    /// AVX2 via `sbox_x32`, 4-block batches on `aarch64` NEON via
+    /// `sbox_x16`). `blocks.len()` may be any value including zero;
+    /// the tail after the largest multiple of `SIMD_BATCH` falls
+    /// back to per-block [`encrypt_block`]. Cross-checked in
+    /// `tests/sm4_batch_api.rs`.
+    ///
+    /// [`encrypt_block`]: Self::encrypt_block
+    #[allow(clippy::missing_panics_doc)] // chunks_exact_mut → try_into can't fail by construction.
+    pub fn encrypt_blocks(&self, blocks: &mut [[u8; BLOCK_SIZE]]) {
+        #[cfg(feature = "sm4-bitsliced-simd")]
+        {
+            let mut chunks = blocks.chunks_exact_mut(SIMD_BATCH);
+            for chunk in chunks.by_ref() {
+                let array: &mut [[u8; BLOCK_SIZE]; SIMD_BATCH] = chunk
+                    .try_into()
+                    .expect("chunks_exact_mut yields slices of length SIMD_BATCH");
+                self.encrypt_blocks_simd(array);
+            }
+            for block in chunks.into_remainder() {
+                self.encrypt_block(block);
+            }
+        }
+        #[cfg(not(feature = "sm4-bitsliced-simd"))]
+        {
+            for block in blocks {
+                self.encrypt_block(block);
+            }
+        }
+    }
+
+    /// v0.7 W1 — Decrypt N 16-byte blocks in place. Symmetric
+    /// counterpart of [`encrypt_blocks`]; see that method's
+    /// docstring for the SIMD-fanout posture.
+    ///
+    /// [`encrypt_blocks`]: Self::encrypt_blocks
+    #[allow(clippy::missing_panics_doc)] // chunks_exact_mut → try_into can't fail by construction.
+    pub fn decrypt_blocks(&self, blocks: &mut [[u8; BLOCK_SIZE]]) {
+        #[cfg(feature = "sm4-bitsliced-simd")]
+        {
+            let mut chunks = blocks.chunks_exact_mut(SIMD_BATCH);
+            for chunk in chunks.by_ref() {
+                let array: &mut [[u8; BLOCK_SIZE]; SIMD_BATCH] = chunk
+                    .try_into()
+                    .expect("chunks_exact_mut yields slices of length SIMD_BATCH");
+                self.decrypt_blocks_simd(array);
+            }
+            for block in chunks.into_remainder() {
+                self.decrypt_block(block);
+            }
+        }
+        #[cfg(not(feature = "sm4-bitsliced-simd"))]
+        {
+            for block in blocks {
+                self.decrypt_block(block);
+            }
+        }
+    }
+
     /// v0.6 W6 — Batched SIMD-packed CBC-decrypt path. Runs the SM4
     /// decrypt round loop on `SIMD_BATCH` blocks in lockstep; the
     /// per-round `tau` (4 byte S-box lookups per block) gets fanned
@@ -168,11 +230,13 @@ impl Sm4Cipher {
     /// targets, `SIMD_BATCH = 1` and this falls back to a single
     /// [`decrypt_block`] call.
     ///
-    /// Only [`super::cbc_streaming::Sm4CbcDecryptor`] calls this;
-    /// the surface is `pub(super)` per Q5.10 ("no new public Rust
-    /// API").
+    /// Used by [`super::cbc_streaming::Sm4CbcDecryptor`]'s
+    /// `decrypt_batch` (which keeps the fixed-size-array shape for
+    /// the lockstep prev-block XOR semantics) and by
+    /// [`decrypt_blocks`] (length-flexible public API; v0.7 W1).
     ///
     /// [`decrypt_block`]: Self::decrypt_block
+    /// [`decrypt_blocks`]: Self::decrypt_blocks
     #[cfg(all(feature = "sm4-bitsliced-simd", target_arch = "x86_64"))]
     pub(super) fn decrypt_blocks_simd(&self, blocks: &mut [[u8; BLOCK_SIZE]; SIMD_BATCH]) {
         crypt_batch_x8(blocks, &self.round_keys, true);
@@ -190,6 +254,31 @@ impl Sm4Cipher {
     pub(super) fn decrypt_blocks_simd(&self, blocks: &mut [[u8; BLOCK_SIZE]; SIMD_BATCH]) {
         // SIMD_BATCH = 1 on this arch; just delegate.
         self.decrypt_block(&mut blocks[0]);
+    }
+
+    /// v0.7 W1 — Encrypt-direction mirror of [`decrypt_blocks_simd`].
+    /// Same SIMD batched gate sequence, with `reverse=false`. Used
+    /// internally by [`encrypt_blocks`].
+    ///
+    /// [`decrypt_blocks_simd`]: Self::decrypt_blocks_simd
+    /// [`encrypt_blocks`]: Self::encrypt_blocks
+    #[cfg(all(feature = "sm4-bitsliced-simd", target_arch = "x86_64"))]
+    pub(super) fn encrypt_blocks_simd(&self, blocks: &mut [[u8; BLOCK_SIZE]; SIMD_BATCH]) {
+        crypt_batch_x8(blocks, &self.round_keys, false);
+    }
+
+    #[cfg(all(feature = "sm4-bitsliced-simd", target_arch = "aarch64"))]
+    pub(super) fn encrypt_blocks_simd(&self, blocks: &mut [[u8; BLOCK_SIZE]; SIMD_BATCH]) {
+        crypt_batch_x4(blocks, &self.round_keys, false);
+    }
+
+    #[cfg(all(
+        feature = "sm4-bitsliced-simd",
+        not(any(target_arch = "x86_64", target_arch = "aarch64"))
+    ))]
+    pub(super) fn encrypt_blocks_simd(&self, blocks: &mut [[u8; BLOCK_SIZE]; SIMD_BATCH]) {
+        // SIMD_BATCH = 1 on this arch; just delegate.
+        self.encrypt_block(&mut blocks[0]);
     }
 }
 
