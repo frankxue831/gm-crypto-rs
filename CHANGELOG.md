@@ -3,6 +3,102 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] — 2026-05-14
+
+v0.7.0 lands the **cipher-mode surface expansion** that v0.6's
+SIMD-fanout machinery was designed to enable: SM4-CTR (single-shot
+and streaming) plus the public length-flexible batch API on
+`Sm4Cipher`. The AEAD scope doc for v0.8 ships alongside. **No
+public API breakage** — purely additive surface; v0.6.0 callers
+can `cargo update` without migration.
+
+**Throughput shape.** SM4-CTR's keystream generation drives
+`Sm4Cipher::encrypt_blocks` (W1 — newly public, length-flexible)
+which internally chunks into `SIMD_BATCH` and routes through the
+v0.6 W6 `crypt_batch_x8` / `crypt_batch_x4` helpers under
+`sm4-bitsliced-simd`. CTR-encrypt of N blocks fans out as N/8
+AVX2 batches on `x86_64` (or N/4 NEON batches on `aarch64`) plus
+a per-block tail. Criterion benches deferred until v0.8 can
+include AEAD throughput numbers in the same sweep.
+
+### Added
+
+- `Sm4Cipher::encrypt_blocks(&mut [[u8; 16]])` — public,
+  length-flexible batched-encrypt. Internally chunks into
+  `SIMD_BATCH` (8 on `x86_64` AVX2, 4 on `aarch64` NEON,
+  1 elsewhere under `sm4-bitsliced-simd`; per-block loop
+  without the feature). Tail handled per-block. Byte-identical
+  to N calls into `Sm4Cipher::encrypt_block` — verified
+  exhaustively in `tests/sm4_batch_api.rs` at every length
+  0..=33. (PR [#40](https://github.com/frankxue831/gm-crypto-rs/pull/40), v0.7 W1.)
+- `Sm4Cipher::decrypt_blocks(&mut [[u8; 16]])` — symmetric
+  counterpart of `encrypt_blocks`. (PR [#40](https://github.com/frankxue831/gm-crypto-rs/pull/40), v0.7 W1.)
+- `sm4::mode_ctr::encrypt(key, counter, plaintext) -> Vec<u8>` —
+  GM/T 0002-2012 §5.4 / NIST SP 800-38A §6.5 single-shot
+  SM4-CTR. Counter encoded big-endian, per-block keystream is
+  `SM4_E(key, counter + i)` for `i = 0..N-1`, BE add, wrap at
+  `2^128`. No padding; output length == input length. Module
+  docstring documents the counter contract (unique-per-key, not
+  unpredictable — opposite of CBC IV) and the no-authenticity
+  caveat. (PR [#41](https://github.com/frankxue831/gm-crypto-rs/pull/41), v0.7 W2.)
+- `sm4::mode_ctr::decrypt(key, counter, ciphertext) -> Vec<u8>` —
+  CTR is its own inverse; byte-identical to `encrypt`. Both
+  names exist as a readability affordance. (PR [#41](https://github.com/frankxue831/gm-crypto-rs/pull/41), v0.7 W2.)
+- `sm4::ctr_streaming::Sm4CtrCipher` — streaming counterpart to
+  `mode_ctr`. Single struct serves both encrypt and decrypt
+  (CTR is symmetric). State machine: 16-byte leftover-keystream
+  buffer + position cursor in 0..=16 handles unaligned chunk
+  boundaries; the aligned middle of each `update()` routes
+  through `Sm4Cipher::encrypt_blocks` for SIMD fanout. Re-exported
+  as `sm4::Sm4CtrCipher`. (PR [#42](https://github.com/frankxue831/gm-crypto-rs/pull/42), v0.7 W3.)
+- Dudect target `ct_sm4_ctr_encrypt` — class-split by master
+  key bytes; fixed counter + fixed 256-byte plaintext. Runs
+  under all three feature matrix entries (default linear-scan /
+  `sm4-bitsliced` / `sm4-bitsliced-simd`). Gate: `|tau| < 0.20`.
+  (PR [#42](https://github.com/frankxue831/gm-crypto-rs/pull/42), v0.7 W3.)
+- `docs/v0.7-aead-scope.md` — design cycle scope doc for the
+  v0.8 SM4-GCM + SM4-CCM implementation. Q8.1–Q8.8 sign-off list
+  with provisional answers, hard-contract checklist, v0.9
+  candidate Q-list. No code; pure design doc.
+  (PR [#43](https://github.com/frankxue831/gm-crypto-rs/pull/43), v0.7 W4.)
+
+### Changed
+
+- `gmcrypto-core` workspace version: `0.6.0` → `0.7.0`.
+- `gmcrypto-simd` workspace version: `0.6.0` → `0.7.0`.
+- `gmcrypto-c` workspace version: `0.6.0` → `0.7.0`.
+- `gmcrypto-core/Cargo.toml`: `gmcrypto-simd` path-dep pin
+  `version = "0.6"` → `"0.7"`.
+- `gmcrypto-c/Cargo.toml`: `gmcrypto-core` path-dep pin
+  `version = "0.6"` → `"0.7"`.
+
+### Retrospective: v0.5 → v0.7
+
+The W4 SIMD milestone (closed in v0.6 as the "throughput-win
+release") was scoped against a multi-version arc:
+
+| version | landed | shape |
+|---|---|---|
+| v0.5.0 (W4 phase 1) | 2026-05-13 | Scaffolding: feature flag, dispatch path, dudect target, CI matrix entry — transparent delegate to v0.4 single-block bitslice. |
+| v0.5.1 (W4 phase 2) | 2026-05-14 | AVX2 8-way `sbox_x8` in new sibling crate `gmcrypto-simd`; runtime CPU detect via `cpufeatures`; silent fallback. |
+| v0.6.0 (W4 phase 3 / W6) | 2026-05-14 | `sbox_x32` (AVX2 32-byte full-width) + `sbox_x16` (NEON 4-way, compile-time baseline on `aarch64`) + `Sm4CbcDecryptor::process_chunk` SIMD fanout. |
+| v0.7.0 (cipher modes) | 2026-05-14 | Public batch API + SM4-CTR (single-shot + streaming). First version where the v0.6 SIMD machinery is **directly callable** from user code outside the CBC-decrypt internal path. |
+
+v0.7 is the first version where the throughput win reaches a
+generic mode rather than a single internal CBC-decrypt path.
+v0.8 (AEAD) extends that to authenticated modes; v0.9+ continues
+through streaming AEAD, AVX-512, and trait-fit migration.
+
+### Hard-contract carryover
+
+- `unsafe_code = "forbid"` on `gmcrypto-core` — unchanged. SIMD
+  intrinsics stay quarantined in `gmcrypto-simd`.
+- `no_std` + `alloc` only inside `gmcrypto-core` — unchanged.
+- Failure-mode invariant — unchanged. `mode_ctr::decrypt`
+  returns `Vec<u8>` (cannot fail); AEAD's `Option<Vec<u8>>`
+  lands in v0.8 per `docs/v0.7-aead-scope.md` Q8.5.
+- MSRV 1.85, edition 2024 — unchanged.
+
 ## [0.6.0] — 2026-05-14
 
 v0.6.0 lands **W6** from `docs/v0.6-scope.md`: multi-block SIMD

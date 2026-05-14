@@ -18,7 +18,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 # is `std`-OK (it's the language-binding layer, not the no_std crypto
 # primitives). RNG is sourced via `getrandom::SysRng` internally
 # per Q4.18; the C surface does not pass an RNG callback in v0.4.
-gmcrypto-core = { path = "../gmcrypto-core", version = "0.6" }
+gmcrypto-core = { path = "../gmcrypto-core", version = "0.7" }
 getrandom.workspace = true
 rand_core.workspace = true
 
