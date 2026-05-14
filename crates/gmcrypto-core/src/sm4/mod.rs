@@ -10,12 +10,17 @@
 //!
 //! - [`cbc_streaming::Sm4CbcEncryptor`] / [`cbc_streaming::Sm4CbcDecryptor`].
 //!
+//! v0.7 W2 adds SM4-CTR (counter mode; unauthenticated stream cipher):
+//!
+//! - [`mode_ctr::encrypt`] / [`mode_ctr::decrypt`] (single-shot).
+//!
 //! See [`cipher`]'s module-doc for the constant-time stance, throughput
 //! cost, and KAT sources.
 
 pub mod cbc_streaming;
 pub mod cipher;
 pub mod mode_cbc;
+pub mod mode_ctr;
 
 // v0.4 W3 — Bitsliced (table-less, gate-only) SM4 S-box behind the
 // `sm4-bitsliced` feature flag (Q4.9 / Q4.10 / Q4.11 of

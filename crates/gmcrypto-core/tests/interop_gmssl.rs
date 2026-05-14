@@ -16,6 +16,7 @@
 //!   / we decrypt. We encrypt / gmssl decrypts. GM/T 0009 DER on the
 //!   wire.
 //! - **SM4-CBC** (v0.3 W3): bidirectional, caller-supplied IV.
+//! - **SM4-CTR** (v0.7 W2): bidirectional, caller-supplied counter.
 //!
 //! v0.1 used a binary-reachability stub here while the wire-format
 //! work was still pending; v0.3 is the version where the headline
@@ -529,6 +530,101 @@ fn gmssl_sm4_cbc_encrypt_us_decrypt_them() {
     assert!(
         output.status.success(),
         "gmssl sm4 -cbc -decrypt rejected our ciphertext: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let recovered = fs::read(&recovered_path).expect("read recovered");
+    assert_eq!(recovered, plaintext);
+}
+
+/// SM4-CTR (v0.7 W2): gmssl encrypts, gmcrypto-core decrypts. gmssl's
+/// `-iv` flag holds the initial counter (CTR has no IV/counter split
+/// in gmssl 3.1.1's CLI — the `-iv` value IS the initial 16-byte
+/// counter, BE-incremented per block).
+#[test]
+fn gmssl_sm4_ctr_encrypt_them_decrypt_us() {
+    if !enabled() {
+        eprintln!("skipping: GMCRYPTO_GMSSL != 1");
+        return;
+    }
+    assert!(gmssl_present(), "GMCRYPTO_GMSSL=1 but no gmssl on PATH");
+
+    let dir = scratch_dir("w7_sm4_ctr_them");
+    let key = [0xAB; 16];
+    let counter = [0xCD; 16];
+    // Length deliberately not a block multiple to exercise the
+    // byte-truncation tail.
+    let plaintext: &[u8] = b"v0.7 W2 SM4-CTR cross-validation, partial-block tail xyz";
+
+    let pt_path = dir.join("pt.bin");
+    let ct_path = dir.join("ct.bin");
+    fs::write(&pt_path, plaintext).expect("write pt");
+
+    let output = Command::new("gmssl")
+        .args([
+            "sm4",
+            "-ctr",
+            "-encrypt",
+            "-key",
+            &hex(&key),
+            "-iv",
+            &hex(&counter),
+            "-in",
+            pt_path.to_str().unwrap(),
+            "-out",
+            ct_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn gmssl sm4");
+    assert!(
+        output.status.success(),
+        "gmssl sm4 -ctr -encrypt failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let ct = fs::read(&ct_path).expect("read ct");
+    let recovered = sm4::mode_ctr::decrypt(&key, &counter, &ct);
+    assert_eq!(recovered, plaintext);
+}
+
+/// SM4-CTR (v0.7 W2): gmcrypto-core encrypts, gmssl decrypts.
+#[test]
+fn gmssl_sm4_ctr_encrypt_us_decrypt_them() {
+    if !enabled() {
+        eprintln!("skipping: GMCRYPTO_GMSSL != 1");
+        return;
+    }
+    assert!(gmssl_present(), "GMCRYPTO_GMSSL=1 but no gmssl on PATH");
+
+    let dir = scratch_dir("w7_sm4_ctr_us");
+    let key = [0xAB; 16];
+    let counter = [0xCD; 16];
+    let plaintext: &[u8] = b"v0.7 W2 SM4-CTR encrypt-us cross-validation";
+
+    let ct_path = dir.join("ct.bin");
+    let recovered_path = dir.join("recovered.bin");
+    let ct = sm4::mode_ctr::encrypt(&key, &counter, plaintext);
+    fs::write(&ct_path, &ct).expect("write ct");
+
+    let output = Command::new("gmssl")
+        .args([
+            "sm4",
+            "-ctr",
+            "-decrypt",
+            "-key",
+            &hex(&key),
+            "-iv",
+            &hex(&counter),
+            "-in",
+            ct_path.to_str().unwrap(),
+            "-out",
+            recovered_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn gmssl sm4");
+    assert!(
+        output.status.success(),
+        "gmssl sm4 -ctr -decrypt rejected our ciphertext: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
