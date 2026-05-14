@@ -1,19 +1,18 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0–v0.4.0 published to crates.io
-2026-05-10 → 2026-05-12**; **v0.5.0 prep on `main` 2026-05-12** (W1
-streaming SM4-CBC FFI, W2 raw byte-concat SM2 ciphertext on the C
-ABI, W3 caller-supplied RNG callback on the C ABI — all closing v0.4
-W4 deferrals; W4 phase 1 `sm4-bitsliced-simd` feature-flag
-scaffolding, AVX2 / NEON intrinsic phases 2 / 3 deferred to v0.5.x
-or v0.6; W5 BREAKING — workspace-wide `gmcrypto_core::Error` enum,
-`Sm2PrivateKey` U256 escape hatch + `from_scalar`/`from_bytes_be`/
-`to_bytes_be` rename, `std` feature flag removed). **v0.5 W4 phase 2
-on feature branch 2026-05-13** — AVX2 8-way packed bitsliced SM4
-S-box backend lands in a new sibling crate `crates/gmcrypto-simd/`
-with `unsafe_code = "warn"` (mirroring the `gmcrypto-c` precedent),
-runtime CPU detection via `cpufeatures`, silent scalar fallback on
-non-AVX2 hosts. Three-crate workspace:
+Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0–v0.5.0 published to crates.io
+2026-05-10 → 2026-05-13**; **v0.5.1 tagged 2026-05-14** (W4 phase 2
+— AVX2 8-way packed bitsliced SM4 S-box backend in new sibling
+crate `gmcrypto-simd` with `unsafe_code = "warn"`; dudect
+recalibration after the 2026-05-12 GH Actions `ubuntu-24.04`
+runner-image change). **v0.6.0 prep on `main` 2026-05-14** — W4
+phase 3 (THE THROUGHPUT-WIN RELEASE — milestone close-out):
+`sbox_x32` (AVX2 32-byte full-width packed) + `sbox_x16` (NEON
+4-way, compile-time baseline on aarch64) + `Sm4CbcDecryptor::
+process_chunk` SIMD fanout (8-block batches on x86_64, 4-block
+on aarch64) + new dudect target `ct_sm4_cbc_decrypt_fanout`.
+No public API changes; no breaking changes — additive only.
+Three-crate workspace:
 `crates/gmcrypto-core/` (the no_std crypto core; default-member) +
 `crates/gmcrypto-c/` (FFI shim; cdylib + staticlib + cbindgen header) +
 `crates/gmcrypto-simd/` (SIMD backend; rlib-only, opt-in via
