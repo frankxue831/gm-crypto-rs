@@ -42,15 +42,36 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore: ['**/*.md', 'LICENSE', '.gitignore']
+    # Skip doc-only / repo-meta-only changes. The dudect workflows use
+    # their own (allowlist) `paths:` filter; this list is the inverse
+    # for ci.yml's broader build/test surface.
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'docs/**'                          # scope docs, runbooks, release reviews
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - '.github/CODEOWNERS'
   pull_request:
     branches: [main]
-    paths-ignore: ['**/*.md', 'LICENSE', '.gitignore']
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - '.github/CODEOWNERS'
   # Manual fire — useful for stacked PRs (where the PR base isn't `main`,
   # so the `pull_request: branches: [main]` filter wouldn't fire) and
   # for re-running CI on a branch without an empty-commit push.
   workflow_dispatch:
 
+# Cancel outdated runs on the same ref (branch / PR). Critical during
+# rapid-iteration / vibe-coding cycles where a force-push or follow-up
+# commit lands seconds after the previous one — without this, both
+# runs would occupy a self-hosted slot in sequence.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -59,10 +80,36 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
 
+# Skip-CI gate. GitHub honors `[skip ci]` / `[ci skip]` / `[no ci]` /
+# `[skip actions]` natively on `push` events (the workflow run is never
+# created), but NOT on `pull_request` events. The job-level `if:` below
+# closes that gap by checking the PR title and the PR head commit
+# message. On push events, both `github.event.pull_request.*` lookups
+# return null and `contains(null, ...)` is false, so the gate is a
+# no-op there (GitHub's native skip already handled it).
+#
+# Drop into a YAML anchor so all jobs share the same expression
+# without duplicating it five times.
+#
+# YAML anchors don't work inside GitHub Actions `if:` directly, so the
+# expression is repeated per-job below. Keep them in lock-step.
+
 jobs:
   build:
     name: build & test (Rust stable)
     runs-on: [self-hosted, macos, arm64, gmcrypto]
+    # Skip-CI gate for `pull_request` events (GitHub natively handles push).
+    # Checks the PR title for `[skip ci]` etc. Same expression appears on
+    # every job in this workflow — keep them in lock-step.
+    if: >-
+      !contains(github.event.pull_request.title, '[skip ci]') &&
+      !contains(github.event.pull_request.title, '[ci skip]') &&
+      !contains(github.event.pull_request.title, '[no ci]') &&
+      !contains(github.event.pull_request.title, '[skip actions]') &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, '[ci skip]') &&
+      !contains(github.event.head_commit.message, '[no ci]') &&
+      !contains(github.event.head_commit.message, '[skip actions]')
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -141,6 +188,15 @@ jobs:
     # See discussion in rust-lang/api-guidelines#231.
     name: build (Rust 1.85 MSRV)
     runs-on: [self-hosted, macos, arm64, gmcrypto]
+    if: >-
+      !contains(github.event.pull_request.title, '[skip ci]') &&
+      !contains(github.event.pull_request.title, '[ci skip]') &&
+      !contains(github.event.pull_request.title, '[no ci]') &&
+      !contains(github.event.pull_request.title, '[skip actions]') &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, '[ci skip]') &&
+      !contains(github.event.head_commit.message, '[no ci]') &&
+      !contains(github.event.head_commit.message, '[skip actions]')
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -169,6 +225,15 @@ jobs:
   cabi:
     name: gmcrypto-c FFI build + header drift
     runs-on: [self-hosted, macos, arm64, gmcrypto]
+    if: >-
+      !contains(github.event.pull_request.title, '[skip ci]') &&
+      !contains(github.event.pull_request.title, '[ci skip]') &&
+      !contains(github.event.pull_request.title, '[no ci]') &&
+      !contains(github.event.pull_request.title, '[skip actions]') &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, '[ci skip]') &&
+      !contains(github.event.head_commit.message, '[no ci]') &&
+      !contains(github.event.head_commit.message, '[skip actions]')
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -200,6 +265,15 @@ jobs:
   deny:
     name: cargo-deny (no forbidden runtime deps)
     runs-on: [self-hosted, macos, arm64, gmcrypto]
+    if: >-
+      !contains(github.event.pull_request.title, '[skip ci]') &&
+      !contains(github.event.pull_request.title, '[ci skip]') &&
+      !contains(github.event.pull_request.title, '[no ci]') &&
+      !contains(github.event.pull_request.title, '[skip actions]') &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, '[ci skip]') &&
+      !contains(github.event.head_commit.message, '[no ci]') &&
+      !contains(github.event.head_commit.message, '[skip actions]')
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -230,6 +304,15 @@ jobs:
   wasm32:
     name: build wasm32-unknown-unknown (Rust ${{ matrix.toolchain }})
     runs-on: [self-hosted, macos, arm64, gmcrypto]
+    if: >-
+      !contains(github.event.pull_request.title, '[skip ci]') &&
+      !contains(github.event.pull_request.title, '[ci skip]') &&
+      !contains(github.event.pull_request.title, '[no ci]') &&
+      !contains(github.event.pull_request.title, '[skip actions]') &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, '[ci skip]') &&
+      !contains(github.event.head_commit.message, '[no ci]') &&
+      !contains(github.event.head_commit.message, '[skip actions]')
     timeout-minutes: 10
     strategy:
       fail-fast: false
