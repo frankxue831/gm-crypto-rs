@@ -496,6 +496,62 @@ fn ct_sm4_encrypt_block_bitsliced_simd(runner: &mut CtRunner, rng: &mut BenchRng
     }
 }
 
+/// v0.6 W6 — CBC-decrypt SIMD-fanout target (Q6.7 of
+/// `docs/v0.6-scope.md`).
+///
+/// Exercises the new `Sm4CbcDecryptor::decrypt_batch` path: a
+/// fixed-size ciphertext (16 blocks = 2 × SIMD_BATCH on x86_64,
+/// 4 × SIMD_BATCH on aarch64, 16 × SIMD_BATCH elsewhere) is
+/// stream-decrypted under a class-split master key. The dudect
+/// harness measures the full decrypt-stream-and-finalize timeline;
+/// the per-round `tau` is dispatched through `sbox_x32` (AVX2) or
+/// `sbox_x16` (NEON) when the feature is enabled.
+///
+/// Class split by master key bytes (matching
+/// `ct_sm4_encrypt_block` / `ct_sm4_encrypt_block_bitsliced_simd`).
+/// Same `|tau| < 0.20` gate as other SM4 targets. The two classes
+/// share identical control flow (both decrypts succeed) so only
+/// key-dependent timing differentials surface.
+#[cfg(feature = "sm4-bitsliced-simd")]
+fn ct_sm4_cbc_decrypt_fanout(runner: &mut CtRunner, rng: &mut BenchRng) {
+    use gmcrypto_core::sm4::cbc_streaming::Sm4CbcDecryptor;
+
+    let key_left: [u8; 16] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
+        0x10,
+    ];
+    let key_right: [u8; 16] = [
+        0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
+        0xef,
+    ];
+    let iv: [u8; 16] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f,
+    ];
+    // 16 blocks = 256 bytes. On x86_64 with SIMD_BATCH=8 this runs
+    // two full SIMD batches plus the held-back tail; on aarch64
+    // with SIMD_BATCH=4 it runs four full batches. Ciphertext is
+    // pre-built for each class (each is a valid encrypt under its
+    // own key) so both decrypt paths share identical control flow.
+    let plaintext: [u8; 256] = [0u8; 256];
+    let ct_left = gmcrypto_core::sm4::mode_cbc::encrypt(&key_left, &iv, &plaintext);
+    let ct_right = gmcrypto_core::sm4::mode_cbc::encrypt(&key_right, &iv, &plaintext);
+
+    for _ in 0..sample_count() {
+        let (class, key, ct) = if rng.random::<bool>() {
+            (Class::Left, &key_left, &ct_left)
+        } else {
+            (Class::Right, &key_right, &ct_right)
+        };
+        runner.run_one(class, || {
+            let mut dec = Sm4CbcDecryptor::new(key, &iv);
+            dec.update(ct);
+            dec.finalize()
+                .expect("dudect: valid ciphertext must decrypt")
+        });
+    }
+}
+
 /// HMAC-SM3 diagnostic. Class-split by key bytes; fixed message.
 /// HMAC moves the secret key into both inner and outer SM3 hash
 /// invocations (`K' XOR ipad` and `K' XOR opad`), so a key-dependent
@@ -717,6 +773,18 @@ fn main() {
         name: BenchName("ct_sm4_encrypt_block_bitsliced_simd"),
         seed: None,
         benchfn: ct_sm4_encrypt_block_bitsliced_simd,
+    });
+
+    // v0.6 W6 — CBC-decrypt SIMD-fanout target (Q6.7). Measures the
+    // `Sm4CbcDecryptor::decrypt_batch` path that batches
+    // `SIMD_BATCH` ciphertext blocks through `sbox_x32` (x86_64) or
+    // `sbox_x16` (aarch64). Same `|tau| < 0.20` gate as the rest
+    // of the SM4 surface; class-split by master key.
+    #[cfg(feature = "sm4-bitsliced-simd")]
+    benches.push(BenchMetadata {
+        name: BenchName("ct_sm4_cbc_decrypt_fanout"),
+        seed: None,
+        benchfn: ct_sm4_cbc_decrypt_fanout,
     });
 
     let opts = BenchOpts {

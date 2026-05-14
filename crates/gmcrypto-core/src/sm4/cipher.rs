@@ -157,7 +157,58 @@ impl Sm4Cipher {
     pub fn decrypt_block(&self, block: &mut [u8; BLOCK_SIZE]) {
         crypt(block, &self.round_keys, true);
     }
+
+    /// v0.6 W6 — Batched SIMD-packed CBC-decrypt path. Runs the SM4
+    /// decrypt round loop on `SIMD_BATCH` blocks in lockstep; the
+    /// per-round `tau` (4 byte S-box lookups per block) gets fanned
+    /// out across the full SIMD register width via
+    /// `gmcrypto_simd::sm4::sbox_x32` (x86_64 AVX2: 8 blocks × 4 =
+    /// 32 bytes packed in `__m256i`) or `sbox_x16` (aarch64 NEON:
+    /// 4 blocks × 4 = 16 bytes packed in `uint8x16_t`). On other
+    /// targets, `SIMD_BATCH = 1` and this falls back to a single
+    /// [`decrypt_block`] call.
+    ///
+    /// Only [`super::cbc_streaming::Sm4CbcDecryptor`] calls this;
+    /// the surface is `pub(super)` per Q5.10 ("no new public Rust
+    /// API").
+    ///
+    /// [`decrypt_block`]: Self::decrypt_block
+    #[cfg(all(feature = "sm4-bitsliced-simd", target_arch = "x86_64"))]
+    pub(super) fn decrypt_blocks_simd(&self, blocks: &mut [[u8; BLOCK_SIZE]; SIMD_BATCH]) {
+        crypt_batch_x8(blocks, &self.round_keys, true);
+    }
+
+    #[cfg(all(feature = "sm4-bitsliced-simd", target_arch = "aarch64"))]
+    pub(super) fn decrypt_blocks_simd(&self, blocks: &mut [[u8; BLOCK_SIZE]; SIMD_BATCH]) {
+        crypt_batch_x4(blocks, &self.round_keys, true);
+    }
+
+    #[cfg(all(
+        feature = "sm4-bitsliced-simd",
+        not(any(target_arch = "x86_64", target_arch = "aarch64"))
+    ))]
+    pub(super) fn decrypt_blocks_simd(&self, blocks: &mut [[u8; BLOCK_SIZE]; SIMD_BATCH]) {
+        // SIMD_BATCH = 1 on this arch; just delegate.
+        self.decrypt_block(&mut blocks[0]);
+    }
 }
+
+/// v0.6 W6 — compile-time batch size for [`Sm4Cipher::decrypt_blocks_simd`].
+///
+/// - 8 on x86_64 (AVX2 `__m256i` = 32 bytes = 8 blocks × 4 `tau` bytes).
+/// - 4 on aarch64 (NEON `uint8x16_t` = 16 bytes = 4 blocks × 4 `tau` bytes).
+/// - 1 elsewhere (`decrypt_blocks_simd` collapses to `decrypt_block`).
+#[cfg(all(feature = "sm4-bitsliced-simd", target_arch = "x86_64"))]
+pub(super) const SIMD_BATCH: usize = 8;
+
+#[cfg(all(feature = "sm4-bitsliced-simd", target_arch = "aarch64"))]
+pub(super) const SIMD_BATCH: usize = 4;
+
+#[cfg(all(
+    feature = "sm4-bitsliced-simd",
+    not(any(target_arch = "x86_64", target_arch = "aarch64"))
+))]
+pub(super) const SIMD_BATCH: usize = 1;
 
 impl crate::traits::BlockCipher for Sm4Cipher {
     const BLOCK_SIZE: usize = BLOCK_SIZE;
@@ -314,6 +365,124 @@ fn crypt(block: &mut [u8; BLOCK_SIZE], rk: &[u32; 32], reverse: bool) {
     let out = [x[3], x[2], x[1], x[0]];
     for (i, w) in out.iter().enumerate() {
         block[i * 4..i * 4 + 4].copy_from_slice(&w.to_be_bytes());
+    }
+}
+
+/// v0.6 W6 — AVX2 batched SM4 round loop on 8 blocks in lockstep.
+///
+/// Same algorithm as [`crypt`] for `N = 8` blocks; the difference is
+/// that per round, all 8 blocks' `tau` inputs (32 bytes total) are
+/// packed into one `__m256i` and S-boxed in a single
+/// [`gmcrypto_simd::sm4::sbox_x32::sbox_x32`] call. 32× fewer SIMD
+/// dispatches per batch vs 8 sequential [`crypt`] calls × 32 rounds
+/// × 4 S-box bytes per round = 1024 single-byte `sbox_x8` dispatches.
+///
+/// The L transform (`l_round`) and the round-state shift stay
+/// per-block — they're per-u32 bit rotations / XORs, not naturally
+/// SIMD-packable in the same shape.
+///
+/// Behavior is byte-identical to 8 sequential `crypt` calls; verified
+/// in `super::cbc_streaming::tests`.
+#[cfg(all(feature = "sm4-bitsliced-simd", target_arch = "x86_64"))]
+fn crypt_batch_x8(blocks: &mut [[u8; BLOCK_SIZE]; 8], rk: &[u32; 32], reverse: bool) {
+    let mut x: [[u32; 4]; 8] = [[0; 4]; 8];
+    for b in 0..8 {
+        for w in 0..4 {
+            x[b][w] = u32::from_be_bytes([
+                blocks[b][w * 4],
+                blocks[b][w * 4 + 1],
+                blocks[b][w * 4 + 2],
+                blocks[b][w * 4 + 3],
+            ]);
+        }
+    }
+
+    for i in 0..32 {
+        let rki = if reverse { rk[31 - i] } else { rk[i] };
+
+        // Pack all 8 blocks' tau inputs (8 × 4 = 32 bytes) into one
+        // buffer, run a single SIMD S-box pass, then unpack.
+        let mut t_bytes = [0u8; 32];
+        for b in 0..8 {
+            let t = x[b][1] ^ x[b][2] ^ x[b][3] ^ rki;
+            t_bytes[b * 4..b * 4 + 4].copy_from_slice(&t.to_be_bytes());
+        }
+        let s_bytes = gmcrypto_simd::sm4::sbox_x32::sbox_x32(&t_bytes);
+
+        // Per-block: apply L, XOR with x[0], shift state window.
+        for b in 0..8 {
+            let s = u32::from_be_bytes([
+                s_bytes[b * 4],
+                s_bytes[b * 4 + 1],
+                s_bytes[b * 4 + 2],
+                s_bytes[b * 4 + 3],
+            ]);
+            let new_x = x[b][0] ^ l_round(s);
+            x[b][0] = x[b][1];
+            x[b][1] = x[b][2];
+            x[b][2] = x[b][3];
+            x[b][3] = new_x;
+        }
+    }
+
+    // Reverse-output per block (matches `crypt`'s tail).
+    for b in 0..8 {
+        let out = [x[b][3], x[b][2], x[b][1], x[b][0]];
+        for w in 0..4 {
+            blocks[b][w * 4..w * 4 + 4].copy_from_slice(&out[w].to_be_bytes());
+        }
+    }
+}
+
+/// v0.6 W6 — NEON batched SM4 round loop on 4 blocks in lockstep.
+///
+/// Same as [`crypt_batch_x8`] but for `N = 4` blocks; per-round
+/// tau bytes (4 × 4 = 16) pack into one `uint8x16_t` and S-box
+/// via [`gmcrypto_simd::sm4::sbox_x16::sbox_x16`].
+#[cfg(all(feature = "sm4-bitsliced-simd", target_arch = "aarch64"))]
+fn crypt_batch_x4(blocks: &mut [[u8; BLOCK_SIZE]; 4], rk: &[u32; 32], reverse: bool) {
+    let mut x: [[u32; 4]; 4] = [[0; 4]; 4];
+    for b in 0..4 {
+        for w in 0..4 {
+            x[b][w] = u32::from_be_bytes([
+                blocks[b][w * 4],
+                blocks[b][w * 4 + 1],
+                blocks[b][w * 4 + 2],
+                blocks[b][w * 4 + 3],
+            ]);
+        }
+    }
+
+    for i in 0..32 {
+        let rki = if reverse { rk[31 - i] } else { rk[i] };
+
+        let mut t_bytes = [0u8; 16];
+        for b in 0..4 {
+            let t = x[b][1] ^ x[b][2] ^ x[b][3] ^ rki;
+            t_bytes[b * 4..b * 4 + 4].copy_from_slice(&t.to_be_bytes());
+        }
+        let s_bytes = gmcrypto_simd::sm4::sbox_x16::sbox_x16(&t_bytes);
+
+        for b in 0..4 {
+            let s = u32::from_be_bytes([
+                s_bytes[b * 4],
+                s_bytes[b * 4 + 1],
+                s_bytes[b * 4 + 2],
+                s_bytes[b * 4 + 3],
+            ]);
+            let new_x = x[b][0] ^ l_round(s);
+            x[b][0] = x[b][1];
+            x[b][1] = x[b][2];
+            x[b][2] = x[b][3];
+            x[b][3] = new_x;
+        }
+    }
+
+    for b in 0..4 {
+        let out = [x[b][3], x[b][2], x[b][1], x[b][0]];
+        for w in 0..4 {
+            blocks[b][w * 4..w * 4 + 4].copy_from_slice(&out[w].to_be_bytes());
+        }
     }
 }
 

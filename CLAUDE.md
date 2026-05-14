@@ -111,10 +111,11 @@ GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
 ## Dudect harness gate
 
 Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. **Twelve
-targets at the default / `sm4-bitsliced` budget; thirteen under
+targets at the default / `sm4-bitsliced` budget; fourteen under
 `sm4-bitsliced-simd`** (v0.3 added `ct_pkcs8_decrypt`; v0.5 W4 phase 1
 added `ct_sm4_encrypt_block_bitsliced_simd` cfg-gated on
-`sm4-bitsliced-simd`). The PR-smoke and nightly workflows run the
+`sm4-bitsliced-simd`; v0.6 W6 added `ct_sm4_cbc_decrypt_fanout`
+cfg-gated on the same feature per Q6.7 of `docs/v0.6-scope.md`). The PR-smoke and nightly workflows run the
 harness under a matrix over
 `features=[default, sm4-bitsliced, sm4-bitsliced-simd]` so the
 `ct_sm4_key_schedule` and `ct_sm4_encrypt_block` targets are gated
@@ -136,6 +137,7 @@ plus the v0.5 W4 SIMD-packed dispatch path:
 | `ct_sm2_decrypt` | `\|tau\| < 0.20` | SM2 decrypt, class-split by recipient `d_B`, fixed ciphertext encrypted to a third party so both classes fail at MAC via identical control flow (v0.2 Phase 3). |
 | `ct_pkcs8_decrypt` | `\|tau\| < 0.20` | Encrypted-PKCS#8 decrypt + parse, class-split by password bytes; both classes' blobs are valid for their class's password so both succeed via identical control flow (v0.3 W2). 10K-sample smoke: `\|tau\| ≈ 0.04`. |
 | `ct_sm4_encrypt_block_bitsliced_simd` | `\|tau\| < 0.20` (cfg-gated on `sm4-bitsliced-simd`) | SM4 "construct cipher + encrypt one block" timed under the SIMD-packed dispatch path (v0.5 W4). Phase 1 transparently delegates to the v0.4 single-block bitslice — byte-identical output, identical timing profile to `ct_sm4_encrypt_block` under `--features sm4-bitsliced`. Phase 2 swaps in AVX2 8-way intrinsics (runtime detect; silent fallback on non-AVX2 CPUs); phase 3 adds NEON 4-way. Same gate across all three phases. |
+| `ct_sm4_cbc_decrypt_fanout` | `\|tau\| < 0.20` (cfg-gated on `sm4-bitsliced-simd`) | v0.6 W6 — Sm4CbcDecryptor's batched fanout path (`decrypt_batch`) timed under load. Class-split by master key; both classes' ciphertexts are valid encrypts under their own keys so both decrypt paths share identical control flow. Exercises `sbox_x32` (x86_64 AVX2; 8 blocks × 4 tau bytes per round = 32 bytes packed) or `sbox_x16` (aarch64 NEON; 4 blocks × 4 tau bytes per round = 16 bytes packed). Per Q6.7 of `docs/v0.6-scope.md`. |
 
 Gate on **`|tau|`** (scale-free), not `|t|` (grows as `tau · sqrt(N)` so any
 fixed `|t|` threshold is budget-dependent). Same gate at every sample budget;

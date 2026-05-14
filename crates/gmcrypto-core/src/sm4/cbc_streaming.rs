@@ -198,6 +198,18 @@ impl Sm4CbcDecryptor {
     }
 
     /// Absorb ciphertext bytes.
+    ///
+    /// **v0.6 W6 fanout (under `sm4-bitsliced-simd`):** when the
+    /// incoming `data` holds enough buffered ciphertext for a full
+    /// SIMD batch (`SIMD_BATCH` blocks — 8 on `x86_64`, 4 on `aarch64`,
+    /// 1 elsewhere), the batched path
+    /// [`super::cipher::Sm4Cipher::decrypt_blocks_simd`] fans the
+    /// per-round `tau` across the full SIMD register width via
+    /// [`gmcrypto_simd::sm4::sbox_x32`] / [`gmcrypto_simd::sm4::sbox_x16`].
+    /// Behavior is byte-identical to the per-block
+    /// [`Self::decrypt_one`] path (Q5.10's "no new public Rust
+    /// surface" carries through — only the internal loop shape
+    /// changes).
     pub fn update(&mut self, mut data: &[u8]) {
         if self.buffer_len > 0 {
             let need = BLOCK_SIZE - self.buffer_len;
@@ -211,6 +223,30 @@ impl Sm4CbcDecryptor {
                 self.buffer_len = 0;
             }
         }
+
+        // v0.6 W6 — SIMD batch fanout. Drains `data` in
+        // `SIMD_BATCH`-sized chunks while at least one batch is
+        // available. The chaining-input snapshot (`saved`) is taken
+        // before parallel decrypt; each plaintext is then XOR-ed
+        // with the previous ciphertext (preserving the standard CBC
+        // chaining). The last decrypted block of the batch lands in
+        // `held_back` (preserving the buffer-back-by-one
+        // invariant); the prior batch's `held_back` is flushed to
+        // `output`. Same per-block semantics as `decrypt_one`,
+        // amortized across `SIMD_BATCH` blocks.
+        #[cfg(feature = "sm4-bitsliced-simd")]
+        {
+            use super::cipher::SIMD_BATCH;
+            while data.len() >= SIMD_BATCH * BLOCK_SIZE {
+                let mut batch = [[0u8; BLOCK_SIZE]; SIMD_BATCH];
+                for i in 0..SIMD_BATCH {
+                    batch[i].copy_from_slice(&data[i * BLOCK_SIZE..(i + 1) * BLOCK_SIZE]);
+                }
+                self.decrypt_batch(&batch);
+                data = &data[SIMD_BATCH * BLOCK_SIZE..];
+            }
+        }
+
         while data.len() >= BLOCK_SIZE {
             let mut block = [0u8; BLOCK_SIZE];
             block.copy_from_slice(&data[..BLOCK_SIZE]);
@@ -268,6 +304,67 @@ impl Sm4CbcDecryptor {
             self.output.extend_from_slice(&prev_held);
         }
         self.held_back = Some(block);
+    }
+
+    /// v0.6 W6 — Batch-decrypt a SIMD_BATCH-block chunk of ciphertext,
+    /// preserving the buffer-back-by-one invariant.
+    ///
+    /// State-machine contract (preserved across the batched call):
+    ///
+    /// ```text
+    /// Before:
+    ///   self.prev      = ciphertext of last block before this batch (or IV)
+    ///   self.held_back = Some(plaintext of last-block-before-this-batch),
+    ///                    or None on first batch
+    ///
+    /// For ct_blocks[0..N] (N = SIMD_BATCH):
+    ///   1. saved[i] = ct_blocks[i]                  (chaining snapshot)
+    ///   2. pt_blocks[0..N] = batched_decrypt(ct_blocks[0..N])
+    ///   3. pt_blocks[0] ^= self.prev                (chain to pre-batch state)
+    ///      pt_blocks[i] ^= saved[i-1]   for i in 1..N
+    ///   4. Emit prior self.held_back to self.output (if Some).
+    ///   5. Emit pt_blocks[0..N-1]   to self.output  (confirmed-not-last)
+    ///   6. self.held_back = Some(pt_blocks[N-1])    (defer last for padding)
+    ///   7. self.prev = saved[N-1]                    (= ct_blocks[N-1])
+    /// ```
+    ///
+    /// Byte-identical to calling [`Self::decrypt_one`] N times on the
+    /// same ciphertext blocks.
+    #[cfg(feature = "sm4-bitsliced-simd")]
+    fn decrypt_batch(&mut self, ct_blocks: &[[u8; BLOCK_SIZE]; super::cipher::SIMD_BATCH]) {
+        use super::cipher::SIMD_BATCH;
+
+        // 1. Snapshot the chaining inputs before decryption.
+        let saved = *ct_blocks;
+
+        // 2. Batched parallel decrypt (in-place).
+        let mut pt_blocks = saved;
+        self.cipher.decrypt_blocks_simd(&mut pt_blocks);
+
+        // 3. XOR with chaining inputs: pt[0] ^= prev; pt[i] ^= saved[i-1].
+        for (b, p) in pt_blocks[0].iter_mut().zip(self.prev.iter()) {
+            *b ^= *p;
+        }
+        for i in 1..SIMD_BATCH {
+            let chain = saved[i - 1];
+            for (b, p) in pt_blocks[i].iter_mut().zip(chain.iter()) {
+                *b ^= *p;
+            }
+        }
+
+        // 4. Flush prior held_back.
+        if let Some(prev_held) = self.held_back.take() {
+            self.output.extend_from_slice(&prev_held);
+        }
+        // 5. Emit pt_blocks[0..N-1] (confirmed-not-last; another block
+        //    follows in held_back).
+        for pt in pt_blocks.iter().take(SIMD_BATCH - 1) {
+            self.output.extend_from_slice(pt);
+        }
+        // 6. Hold back the last decrypted block (PKCS#7 candidate).
+        self.held_back = Some(pt_blocks[SIMD_BATCH - 1]);
+        // 7. Update prev to the last ciphertext of this batch.
+        self.prev = saved[SIMD_BATCH - 1];
     }
 }
 
@@ -397,6 +494,143 @@ mod tests {
         let mut dec = Sm4CbcDecryptor::new(&key, &iv);
         dec.update(&ct);
         assert!(dec.finalize().is_none());
+    }
+
+    /// v0.6 W6 — chunk-boundary sweep around the SIMD batch size.
+    ///
+    /// Per codex's phase 3 design flag #3: "chunk-boundary tests
+    /// around `0, 1, N-1, N, N+1, 2N` blocks, including
+    /// `take_output`." The new `decrypt_batch` path only triggers
+    /// when `data.len() >= SIMD_BATCH * BLOCK_SIZE`; this test
+    /// covers the transitions on either side.
+    ///
+    /// `SIMD_BATCH` is compile-time arch-specific. On `x86_64`: 8;
+    /// on `aarch64`: 4; elsewhere: 1 (where this test degenerates
+    /// to single-block).
+    #[cfg(feature = "sm4-bitsliced-simd")]
+    #[test]
+    fn cbc_decrypt_simd_batch_boundary_sweep() {
+        use super::super::cipher::SIMD_BATCH;
+        let key = [0x42u8; KEY_SIZE];
+        let iv = [0x33u8; BLOCK_SIZE];
+
+        // Block counts around the batch boundary. For SIMD_BATCH=8
+        // (x86_64): 0, 1, 7, 8, 9, 15, 16, 17. For SIMD_BATCH=4
+        // (aarch64): 0, 1, 3, 4, 5, 7, 8, 9. For SIMD_BATCH=1
+        // (other): degenerates to 0, 1, 0, 1, 2, 1, 2, 3 — still
+        // valid, just less interesting.
+        let block_counts: [usize; 8] = [
+            0,
+            1,
+            SIMD_BATCH.saturating_sub(1),
+            SIMD_BATCH,
+            SIMD_BATCH + 1,
+            (2 * SIMD_BATCH).saturating_sub(1),
+            2 * SIMD_BATCH,
+            2 * SIMD_BATCH + 1,
+        ];
+
+        for &n_blocks in &block_counts {
+            // Build n_blocks worth of plaintext (16 bytes per block).
+            // n_blocks = 0 maps to empty plaintext (PKCS#7 pads to
+            // one full block of 0x10).
+            let pt: Vec<u8> = (0..(n_blocks * BLOCK_SIZE))
+                .map(|i| u8::try_from(i & 0xFF).unwrap_or(0))
+                .collect();
+            let canonical = mode_cbc::encrypt(&key, &iv, &pt);
+
+            // Stream-decrypt the canonical ciphertext.
+            let mut dec = Sm4CbcDecryptor::new(&key, &iv);
+            dec.update(&canonical);
+            let recovered = dec.finalize().expect("decrypt");
+            assert_eq!(
+                recovered, pt,
+                "boundary sweep: n_blocks={n_blocks} (SIMD_BATCH={SIMD_BATCH})",
+            );
+        }
+    }
+
+    /// v0.6 W6 — chunked-update boundary sweep. The same total
+    /// ciphertext, fed through `update` in chunks of varying sizes
+    /// (including sub-block, exact-batch, batch+1, etc.), must
+    /// recover the same plaintext. Catches state-machine bugs in
+    /// the partial-buffer + batch-drain + single-block-drain
+    /// transitions.
+    #[cfg(feature = "sm4-bitsliced-simd")]
+    #[test]
+    fn cbc_decrypt_simd_chunked_update_sweep() {
+        use super::super::cipher::SIMD_BATCH;
+        let key = [0x42u8; KEY_SIZE];
+        let iv = [0x33u8; BLOCK_SIZE];
+        // 3 * SIMD_BATCH + half-block of plaintext to ensure
+        // every batch boundary is crossed at least once.
+        let total_blocks = 3 * SIMD_BATCH + 1;
+        let pt: Vec<u8> = (0..(total_blocks * BLOCK_SIZE - 5))
+            .map(|i| u8::try_from((i * 17) & 0xFF).unwrap_or(0))
+            .collect();
+        let ct = mode_cbc::encrypt(&key, &iv, &pt);
+
+        let batch_bytes = SIMD_BATCH * BLOCK_SIZE;
+        let chunk_sizes = [
+            1,
+            7,
+            BLOCK_SIZE,
+            BLOCK_SIZE + 1,
+            batch_bytes - 1,
+            batch_bytes,
+            batch_bytes + 1,
+            2 * batch_bytes,
+            ct.len().max(1),
+        ];
+
+        for &chunk_size in &chunk_sizes {
+            let mut dec = Sm4CbcDecryptor::new(&key, &iv);
+            for chunk in ct.chunks(chunk_size) {
+                dec.update(chunk);
+            }
+            let recovered = dec.finalize().expect("decrypt");
+            assert_eq!(
+                recovered, pt,
+                "chunked update: chunk_size={chunk_size} (batch_bytes={batch_bytes})",
+            );
+        }
+    }
+
+    /// v0.6 W6 — `take_output` interaction with the SIMD batch
+    /// path. The FFI-shim helper drains emitted plaintext partway
+    /// through a stream; the held-back block must remain held back
+    /// across the take. Verifies that calling `take_output` mid-
+    /// stream doesn't drop the SIMD-batched held-back invariant.
+    #[cfg(feature = "sm4-bitsliced-simd")]
+    #[test]
+    fn cbc_decrypt_simd_take_output_preserves_held_back() {
+        use super::super::cipher::SIMD_BATCH;
+        let key = [0x42u8; KEY_SIZE];
+        let iv = [0x33u8; BLOCK_SIZE];
+        // 2 * SIMD_BATCH + 1 blocks of plaintext to force at least
+        // one batch and one straggler-block path.
+        let total_blocks = 2 * SIMD_BATCH + 1;
+        let pt: Vec<u8> = (0..(total_blocks * BLOCK_SIZE))
+            .map(|i| u8::try_from((i ^ 0xA5) & 0xFF).unwrap_or(0))
+            .collect();
+        let ct = mode_cbc::encrypt(&key, &iv, &pt);
+
+        // Feed in two chunks: first SIMD_BATCH + 1 blocks, then the
+        // rest. Drain emitted plaintext via take_output after the
+        // first chunk; the held_back block must still be there for
+        // finalize to consume.
+        let mut dec = Sm4CbcDecryptor::new(&key, &iv);
+        let split = (SIMD_BATCH + 1) * BLOCK_SIZE;
+        dec.update(&ct[..split]);
+        let first_chunk_pt = dec.take_output();
+
+        dec.update(&ct[split..]);
+        let rest = dec.finalize().expect("decrypt");
+
+        // Concatenated result must equal the original plaintext.
+        let mut combined = first_chunk_pt;
+        combined.extend_from_slice(&rest);
+        assert_eq!(combined, pt);
     }
 
     /// Cross-validation: streaming encrypt of a decryption of a

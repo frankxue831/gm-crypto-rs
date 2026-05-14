@@ -183,6 +183,8 @@ jobs:
           import os
           if os.environ.get("MATRIX_FEATURES") == "sm4-bitsliced-simd":
               required_low["ct_sm4_encrypt_block_bitsliced_simd"] = 0.20
+              # v0.6 W6 — CBC-decrypt SIMD-fanout target (Q6.7).
+              required_low["ct_sm4_cbc_decrypt_fanout"] = 0.20
 
           # v0.5 W4 phase 2 prep — gross-regression sentinel for
           # targets too noisy for a 0.20 gate on the current
