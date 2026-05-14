@@ -235,11 +235,18 @@ crates/gmcrypto-c/          # v0.4 W4 — C ABI shim (cdylib + staticlib + rlib)
   tests/c_smoke.rs          # 20 Rust-equivalence tests via extern "C" interop
   README.md                 # C/C++/Python/Go/Zig integration docs
 
-crates/gmcrypto-simd/       # v0.5 W4 phase 2 — SIMD backend crate (rlib-only, opt-in via gmcrypto-core's sm4-bitsliced-simd feature)
-  src/lib.rs                # `#![no_std]`; re-exports `has_avx2()`
-  src/detect.rs             # `cpufeatures::new!(..., "avx2")` + `has_avx2()` wrapper (cached)
-  src/sm4/sbox_x8.rs        # local re-impl of v0.4 W3 gate sequence + AVX2 byte-parallel translation; dispatch fn `sbox_x8`
-  tests/lane_equivalence.rs # exhaustive cross-check vs inline GB/T 32907-2016 §6.2 S-box table; AVX2-path explicit test announces "AVX2 path exercised" on AVX2 hosts
+crates/gmcrypto-simd/       # v0.5 W4 phase 2 / v0.6 W6 — SIMD backend crate (rlib-only, opt-in via gmcrypto-core's sm4-bitsliced-simd feature)
+  src/lib.rs                # `#![no_std]` + `#![allow(unsafe_code)]` (per-decl noise; Cargo.toml lint stays `warn` for intent); re-exports `has_avx2()`
+  src/detect.rs             # `cpufeatures::new!(..., "avx2")` + `has_avx2()` wrapper (cached); x86_64-only
+  src/sm4/scalar.rs         # local re-impl of v0.4 W3 Boyar-Peralta gate sequence (sbox_byte, const fn); fallback path for every SIMD entry
+  src/sm4/avx2.rs           # x86_64-only — shared AVX2 byte-parallel primitives (gf_mul, gf_inv, affine_a, parity, sbox_round) on `__m256i`
+  src/sm4/neon.rs           # aarch64-only — shared NEON byte-parallel primitives on `uint8x16_t`; compile-time baseline, no runtime detect
+  src/sm4/sbox_x8.rs        # AVX2 path: 8 bytes packed in low lanes of __m256i (24 wasted); used by phase 2 `tau` per-byte dispatch
+  src/sm4/sbox_x32.rs       # v0.6 W6 — AVX2 32-byte full-width packed S-box; used by phase 3 8-block CBC-decrypt batch
+  src/sm4/sbox_x16.rs       # v0.6 W6 — NEON 16-byte packed S-box on aarch64; used by phase 3 4-block CBC-decrypt batch
+  tests/lane_equivalence.rs # v0.5 W4 phase 2 — exhaustive cross-check of sbox_x8 vs inline GB/T 32907-2016 §6.2 S-box table
+  tests/lane_position_x32.rs # v0.6 W6 — lane-position-shifted exhaustive sweep for sbox_x32 (256 × 32 = 8192 cases); codex's phase 3 flag #4
+  tests/lane_position_x16.rs # v0.6 W6 — same for sbox_x16 (256 × 16 = 4096 cases)
 
 .github/workflows/
   ci.yml                    # build/test on stable (full) + 1.85 MSRV (build-only); cabi job; wasm32 matrix; cargo-deny via taiki-e/install-action
