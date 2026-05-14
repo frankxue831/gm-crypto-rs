@@ -1,23 +1,34 @@
 name: dudect nightly (deeper budget)
 
+# Cost-conscious trigger model (added during the post-v0.6.0 CI sweep):
+#
+# - REMOVED `push: branches: [main]`. Previously every merge to `main`
+#   fired the full 3-feature × 100K-sample matrix (~45 billed minutes
+#   per merge on `ubuntu-latest`). During rapid-merge weeks this was
+#   the single biggest billed-minute consumer. The PR-smoke
+#   (`dudect-pr.yml`) already gated every commit at 10K before merge,
+#   and the daily cron at 05:00 UTC catches statistical drift at 100K
+#   within 24h — so the merge trigger was duplicative. If you need an
+#   off-schedule deep run after a merge (e.g. a crypto-touching PR
+#   landed and you want the 100K confirmation before the next nightly
+#   cron), use `workflow_dispatch`:
+#     gh workflow run dudect-nightly.yml --ref main
+#
+# - KEPT `schedule:` (daily cron — the actual regression watch).
+# - KEPT `workflow_dispatch:` (manual ad-hoc reruns, including
+#   post-merge confirmation when needed).
 on:
-  push:
-    branches: [main]
-    # Same allowlist as the PR job — don't re-run nightly on doc-only commits.
-    paths:
-      - 'crates/gmcrypto-core/src/**'
-      - 'crates/gmcrypto-core/Cargo.toml'
-      - 'crates/gmcrypto-core/benches/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/workflows/dudect-nightly.yml'
   schedule:
     - cron: '0 5 * * *'  # 05:00 UTC daily
   workflow_dispatch:
 
+# `cancel-in-progress: false` is intentional here — a partially-
+# completed 100K-sample run is wasted compute; we'd rather queue
+# behind it than discard 10+ minutes of measurement. (Compare with
+# `dudect-pr.yml` and `ci.yml`, which both cancel in progress.)
 concurrency:
   group: dudect-nightly-${{ github.ref }}
-  cancel-in-progress: false   # don't cancel a long run
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always

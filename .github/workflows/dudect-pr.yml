@@ -13,6 +13,10 @@ on:
       - 'Cargo.lock'
       - '.github/workflows/dudect-pr.yml'
 
+# Cancel outdated runs on the same PR ref. Critical during
+# rapid-iteration cycles where a PR receives multiple force-pushes
+# in quick succession — each bench run is ~5-8 min on ubuntu-latest
+# at the 10K-sample budget, so stale runs would burn billed minutes.
 concurrency:
   group: dudect-pr-${{ github.ref }}
   cancel-in-progress: true
@@ -24,6 +28,20 @@ jobs:
   smoke:
     name: timing-leak smoke (10K samples, |tau|<0.20, features=${{ matrix.features }})
     runs-on: ubuntu-latest
+    # Skip-CI gate. GitHub's native `[skip ci]` handles push events but
+    # not pull_request — this is exclusively a pull_request workflow, so
+    # the explicit gate is what actually skips the run. Checks both PR
+    # title and head commit message; the latter is null on PR events but
+    # `contains(null, ...)` is false so it never blocks erroneously.
+    if: >-
+      !contains(github.event.pull_request.title, '[skip ci]') &&
+      !contains(github.event.pull_request.title, '[ci skip]') &&
+      !contains(github.event.pull_request.title, '[no ci]') &&
+      !contains(github.event.pull_request.title, '[skip actions]') &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, '[ci skip]') &&
+      !contains(github.event.head_commit.message, '[no ci]') &&
+      !contains(github.event.head_commit.message, '[skip actions]')
     timeout-minutes: 10
     strategy:
       fail-fast: false
