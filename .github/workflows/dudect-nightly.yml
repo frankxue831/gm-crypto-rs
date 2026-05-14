@@ -174,6 +174,13 @@ jobs:
               # secret-derived state.
               "ct_sm4_key_schedule": 0.20,
               "ct_sm4_encrypt_block": 0.20,
+              # v0.7 W3 — SM4-CTR encrypt (Q7.2). Class-split by master
+              # key; dispatches into the same Sm4Cipher path as
+              # ct_sm4_encrypt_block but exercises the W1 length-flexible
+              # encrypt_blocks API (and the SIMD fanout under
+              # sm4-bitsliced-simd). Not cfg-gated — runs under all three
+              # matrix entries.
+              "ct_sm4_ctr_encrypt": 0.20,
               # v0.2 W3 — HMAC-SM3 keyed MAC. Covers the inner PRF for
               # PBKDF2-HMAC-SM3 (W4); no separate W4 target.
               "ct_hmac_sm3": 0.20,

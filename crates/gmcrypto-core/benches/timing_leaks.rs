@@ -453,6 +453,42 @@ fn ct_sm4_encrypt_block(runner: &mut CtRunner, rng: &mut BenchRng) {
     }
 }
 
+/// SM4-CTR encrypt diagnostic (v0.7 W3 — Q7.2). Class-split by master
+/// key bytes; fixed counter + fixed plaintext (16 blocks = 256 bytes,
+/// hits two full AVX2 batches on `x86_64` or four full NEON batches on
+/// `aarch64` under `sm4-bitsliced-simd`; collapses to per-block loop
+/// without the feature). Runs under all three matrix entries — CTR's
+/// public surface dispatches into linear-scan / `sm4-bitsliced` /
+/// `sm4-bitsliced-simd` paths through `Sm4Cipher::encrypt_blocks` (v0.7
+/// W1), so the CT discipline is verified end-to-end on every cipher
+/// path. NOT cfg-gated; same shape as `ct_sm4_encrypt_block`.
+fn ct_sm4_ctr_encrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
+    use gmcrypto_core::sm4::mode_ctr;
+
+    let key_left: [u8; 16] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
+        0x10,
+    ];
+    let key_right: [u8; 16] = [
+        0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
+        0xef,
+    ];
+    let counter: [u8; 16] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f,
+    ];
+    let plaintext: [u8; 256] = [0u8; 256];
+
+    for _ in 0..sample_count() {
+        let (class, key) = if rng.random::<bool>() {
+            (Class::Left, &key_left)
+        } else {
+            (Class::Right, &key_right)
+        };
+        runner.run_one(class, || mode_ctr::encrypt(key, &counter, &plaintext));
+    }
+}
+
 /// SM4 encrypt-block diagnostic — SIMD-packed bitsliced path (v0.5 W4).
 ///
 /// Cfg-gated under `feature = "sm4-bitsliced-simd"`. Phase 1
@@ -745,6 +781,11 @@ fn main() {
             name: BenchName("ct_sm4_encrypt_block"),
             seed: None,
             benchfn: ct_sm4_encrypt_block,
+        },
+        BenchMetadata {
+            name: BenchName("ct_sm4_ctr_encrypt"),
+            seed: None,
+            benchfn: ct_sm4_ctr_encrypt,
         },
         BenchMetadata {
             name: BenchName("ct_hmac_sm3"),

@@ -14,11 +14,16 @@
 //!
 //! - [`mode_ctr::encrypt`] / [`mode_ctr::decrypt`] (single-shot).
 //!
+//! v0.7 W3 adds the streaming SM4-CTR counterpart:
+//!
+//! - [`ctr_streaming::Sm4CtrCipher`] (symmetric — serves both directions).
+//!
 //! See [`cipher`]'s module-doc for the constant-time stance, throughput
 //! cost, and KAT sources.
 
 pub mod cbc_streaming;
 pub mod cipher;
+pub mod ctr_streaming;
 pub mod mode_cbc;
 pub mod mode_ctr;
 
@@ -48,3 +53,4 @@ pub(crate) mod sbox_bitsliced_simd;
 
 pub use cbc_streaming::{Sm4CbcDecryptor, Sm4CbcEncryptor};
 pub use cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
+pub use ctr_streaming::Sm4CtrCipher;
