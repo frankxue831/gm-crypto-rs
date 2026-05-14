@@ -5,8 +5,8 @@ Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0–v0.5.0 published to crates.io
 — AVX2 8-way packed bitsliced SM4 S-box backend in new sibling
 crate `gmcrypto-simd` with `unsafe_code = "warn"`; dudect
 recalibration after the 2026-05-12 GH Actions `ubuntu-24.04`
-runner-image change). **v0.6.0 prep on `main` 2026-05-14** — W4
-phase 3 (THE THROUGHPUT-WIN RELEASE — milestone close-out):
+runner-image change). **v0.6.0 tagged 2026-05-14** (publish pending)
+— W4 phase 3 (THE THROUGHPUT-WIN RELEASE — milestone close-out):
 `sbox_x32` (AVX2 32-byte full-width packed) + `sbox_x16` (NEON
 4-way, compile-time baseline on aarch64) + `Sm4CbcDecryptor::
 process_chunk` SIMD fanout (8-block batches on x86_64, 4-block
@@ -79,11 +79,11 @@ cargo clippy -p gmcrypto-core --features sm4-bitsliced --all-targets -- -D warni
 cargo deny check --exclude-dev
 # v0.4 W2 / W3 — second pass under the opt-in runtime feature flags
 # (digest/cipher/inout/crypto-common allowlisted in deny.toml).
-cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced check --exclude-dev
+cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/crypto-bigint-scalar check --exclude-dev
 
 # MSRV reproducibility.
 cargo +1.85 build -p gmcrypto-core
-cargo +1.85 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced
+cargo +1.85 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,crypto-bigint-scalar
 cargo build -p gmcrypto-core --no-default-features  # confirms no_std posture
 
 # v0.4 W1 — wasm32 build (caller-supplied RNG only).
@@ -250,14 +250,18 @@ crates/gmcrypto-simd/       # v0.5 W4 phase 2 / v0.6 W6 — SIMD backend crate (
   tests/lane_position_x16.rs # v0.6 W6 — same for sbox_x16 (256 × 16 = 4096 cases)
 
 .github/workflows/
-  ci.yml                    # build/test on stable (full) + 1.85 MSRV (build-only); cabi job; wasm32 matrix; cargo-deny via taiki-e/install-action
-  dudect-pr.yml             # 10K samples, |tau| gate, matrix on features=[default, sm4-bitsliced], path-allowlisted
-  dudect-nightly.yml        # 100K samples, same gate + matrix, 30-day artifact retention
+  ci.yml                    # 5 jobs on self-hosted macOS aarch64: build/test (stable, full) + msrv (1.85, build-only) + cabi + cargo-deny + wasm32 matrix. Per-feature clippy passes (digest-traits, cipher-traits, sm4-bitsliced, sm4-bitsliced-simd, crypto-bigint-scalar). concurrency: cancel-in-progress.
+  dudect-pr.yml             # 10K samples on ubuntu-latest, |tau| gate, matrix on features=[default, sm4-bitsliced, sm4-bitsliced-simd], path-allowlisted, concurrency: cancel-in-progress
+  dudect-nightly.yml        # 100K samples on ubuntu-latest, same gate + matrix, 30-day artifact retention; concurrency: cancel-in-progress=false (a partial 100K run is wasted compute). PR #38 drops the push:main trigger in favour of cron-only (regression watch) + workflow_dispatch (manual reruns).
 
 docs/
-  v0.1.0-release-review.md  # pre-publish reviewer checklist (template)
-  v0.3-scope.md             # v0.3 scope doc + Q7.1–Q7.10 sign-off decisions
-  v0.4-scope.md             # v0.4 scope doc + Q4.1–Q4.19 sign-off decisions
+  v0.1.0-release-review.md      # pre-publish reviewer checklist (template)
+  v0.2.0-release-review.md      # v0.2 pre-publish reviewer checklist
+  v0.3-scope.md                 # v0.3 scope doc + Q7.1–Q7.10 sign-off decisions
+  v0.4-scope.md                 # v0.4 scope doc + Q4.1–Q4.19 sign-off decisions
+  v0.5-scope.md                 # v0.5 scope doc + Q5.x sign-off decisions (Q5.11 SIMD architectural reset)
+  v0.5-dudect-recalibration.md  # 2026-05-12 GH runner-image noise-floor analysis + sentinel posture
+  v0.6-scope.md                 # v0.6 scope doc + Q6.1–Q6.10 sign-off decisions (W4 phase 3 / W6)
 ```
 
 `getrandom` is a direct workspace dep (`0.4.2`, `sys_rng` feature) — added
@@ -280,9 +284,13 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
   GitHub's `ubuntu-24.04` runner-image noise floor (v0.4 release-prep
   PR #22). Moving dudect would invalidate the calibration. See the
   `## Self-hosted CI runner setup` section below for the runbook.
-- Branch model: direct commits to `main` for the maintainer; external PRs go
-  through CI + dudect-pr.yml. The dudect smoke is path-allowlisted so doc-only
-  PRs skip the bench job.
+- Branch model: branch + PR for all changes. Direct commits to `main` reserved
+  for trivial-and-time-sensitive fixes only. CI fires on the PR (+ on the
+  merge commit to `main`); dudect-pr.yml smoke is path-allowlisted so doc-only
+  PRs skip the bench job. For WIP PRs that should skip CI, put `[skip ci]` /
+  `[ci skip]` / `[no ci]` / `[skip actions]` in the PR title (the workflow
+  `if:` checks PR title; GitHub's native skip on push events also honours
+  these markers in commit messages — added in PR #38).
 - Tags are SSH-signed (`gpg.format = ssh`). Verify locally with
   `git tag -v vX.Y.Z` after configuring `gpg.ssh.allowedSignersFile`.
 - `cargo publish` is the irreversible step. Use `docs/v0.1.0-release-review.md`
