@@ -19,7 +19,7 @@ Server-side use, dedicated host, operator-trusted. Network MITM is in scope;
 side channels beyond what the in-CI `dudect-bencher` harness exercises are
 NOT in scope.
 
-## Constant-time posture (v0.1)
+## Constant-time posture
 
 `gmcrypto-core` is **constant-time-designed** — every secret-dependent operation
 is implemented through `subtle`-style masked selection rather than data-dependent
@@ -27,7 +27,17 @@ branches, and the SM2 sign retry loop runs a fixed number of iterations
 regardless of which (if any) candidate is valid.
 
 The in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
-(`benches/timing_leaks.rs`) gates on `|tau| < 0.20` for the real targets:
+(`benches/timing_leaks.rs`) ships **14 real `ct_*` targets** (12 always-on
++ 2 cfg-gated under `sm4-bitsliced-simd`) plus a deliberately-leaky
+`negative_control`. Most real targets gate on `|tau| < 0.20`;
+`negative_control` gates the opposite direction (`|tau| > 1.0` **must**
+fire to prove harness wiring); `ct_sign_k_class` and the direct
+`ct_fn_invert` / `ct_fp_invert` invert diagnostics have target-specific
+gate policy after the 2026-05-12 GH Actions runner-image shift — see
+the recalibration note below and `docs/v0.5-dudect-recalibration.md`.
+CLAUDE.md carries the canonical per-target gate table.
+
+**Real `ct_*` always-on (12):**
 
 - `ct_mul_g`         — fixed-base scalar multiplication `k·G`.
 - `ct_mul_var`       — variable-base scalar multiplication `k·P`.
@@ -35,23 +45,45 @@ The in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
   private key `d`.
 - `ct_sign_k_class`  — same, class-split by nonce `k` magnitude with `d` held
   fixed (W0; closes the v0.1 structural blind spot to nonce-only leaks).
+  Nightly-only gate at `|tau| < 0.25`; dropped from the PR-smoke 10K
+  allowlist (telemetry-only there).
 - `ct_fn_invert`     — direct `Fn::invert((1+d) mod n)` diagnostic (W0).
-- `ct_fp_invert`     — direct `Fp::invert(Z)` diagnostic (W0).
+  PR-smoke telemetry-only; nightly gross-regression sentinel at
+  `|tau| ≥ 0.55`.
+- `ct_fp_invert`     — direct `Fp::invert(Z)` diagnostic (W0). Same
+  policy as `ct_fn_invert`.
 - `ct_sm4_key_schedule` — SM4 key schedule class-split by master key bytes
-  (W1; the key-schedule pipeline runs the S-box on secret-derived state).
+  (v0.2 W1; the key-schedule pipeline runs the S-box on secret-derived state).
 - `ct_sm4_encrypt_block` — SM4 "construct cipher + encrypt one block" timed
-  under one window, class-split by master key bytes (W1).
-- `ct_hmac_sm3` — HMAC-SM3 keyed MAC, class-split by master key (W3).
-  Structurally covers PBKDF2-HMAC-SM3's (W4) inner PRF.
+  under one window, class-split by master key bytes (v0.2 W1).
+- `ct_sm4_ctr_encrypt` — SM4-CTR encrypt over a fixed 256-byte plaintext
+  (16 blocks), class-split by master key bytes (v0.7 W3). Dispatches through
+  `Sm4Cipher::encrypt_blocks` so the gate covers every cipher path: linear-scan
+  default, gate-only `sm4-bitsliced`, SIMD-packed batches under
+  `sm4-bitsliced-simd`.
+- `ct_hmac_sm3` — HMAC-SM3 keyed MAC, class-split by master key (v0.2 W3).
+  Structurally covers PBKDF2-HMAC-SM3's (v0.2 W4) inner PRF and the v0.3 W2
+  PBKDF2 sub-path of encrypted-PKCS#8 decrypt.
 - `ct_sm2_decrypt` — SM2 decrypt, class-split by recipient `d_B`,
   fixed ciphertext encrypted to a third party so both classes fail
-  at the MAC check via identical control flow (Phase 3).
+  at the MAC check via identical control flow (v0.2 Phase 3).
+- `ct_pkcs8_decrypt` — encrypted-PKCS#8 decrypt + parse, class-split by
+  password bytes (v0.3 W2). Both classes' blobs are valid for their class's
+  password so both succeed via identical control flow.
 
-A deliberately-leaky `negative_control` target gates `|tau| > 1.0` to confirm
-the harness wiring on every PR. **The harness detects leaks; it does not prove
-constant-time.** Low `|tau|` values mean the test could not detect a leak with
-the budget given, not that no leak exists. Language is from `dudect-bencher`'s
-own docs.
+**Cfg-gated on `sm4-bitsliced-simd` (2):**
+
+- `ct_sm4_encrypt_block_bitsliced_simd` — SM4 single-block encrypt under the
+  SIMD-packed dispatch path (v0.5 W4 phase 2). Same `|tau| < 0.20` gate.
+- `ct_sm4_cbc_decrypt_fanout` — `Sm4CbcDecryptor`'s batched fanout
+  (`decrypt_batch`) timed under load, class-split by master key (v0.6 W6).
+  Exercises `sbox_x32` on `x86_64` AVX2 (8 blocks × 4 tau bytes = 32 bytes
+  packed) and `sbox_x16` on `aarch64` NEON (4 blocks × 4 = 16 bytes).
+
+**The harness detects leaks; it does not prove constant-time.** Low
+`|tau|` values mean the test could not detect a leak with the budget
+given, not that no leak exists. Language is from `dudect-bencher`'s own
+docs.
 
 ### `crypto-bigint::ConstMontyForm::invert` — v0.1 vs. main
 
@@ -80,6 +112,21 @@ invert measurement land in the noise regime, two orders of magnitude
 below the v0.6 measurement. The v0.2 Fermat-invert workstream (W5) is
 **dropped**; `pow_bounded_exp` remains a fallback if a future
 `crypto-bigint` release regresses on this gate.
+
+**Recalibration note (2026-05-12).** The 100K-sample baseline above
+was measured against the GH Actions `ubuntu-24.04` image
+`20260413.86.1` (kernel `6.17.0-1010-azure`, Rust toolchain `1.94.1`).
+After the 2026-05-12 image update to `20260512.134.1` (kernel
+`6.17.0-1013-azure`, Rust toolchain `1.95.0`), `ct_fn_invert` and
+`ct_fp_invert` began producing intermittent `|tau|` values in
+[0.29–0.40] on identical source code, with same-commit pass/fail
+across consecutive nightly runs. Both targets were moved to PR-smoke
+telemetry + a nightly gross-regression sentinel at `|tau| ≥ 0.55` —
+preserving protection against a real cryptographic leak (the v0.1
+`ConstMontyForm::invert` regression at `|tau| ≈ 0.70` would still
+fire) while acknowledging that the 0.20 gate is no longer authoritative
+on the current shared runner. The code is unchanged from the v0.2
+baseline. See [`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md).
 
 The three secret-touching invert sites are documented for completeness:
 
@@ -157,13 +204,14 @@ DER, off-curve `C1`, identity `C1`, all-zero KDF, MAC mismatch). MAC compare use
 `subtle::ConstantTimeEq` on the 32-byte digest; on failure the
 already-XOR'd plaintext buffer is zeroized before return.
 
-**Wire format.** v0.2 ships GM/T 0009-2012 §6 DER **only**. Raw
-byte concatenation (`C1||C3||C2` modern, `C1||C2||C3` legacy
-gmssl) is out of scope until v0.3. gmssl `sm2encrypt`/`sm2decrypt`
-cross-validation is also v0.3 — gmssl's CLI requires
-PEM/PKCS#8/SPKI key wrapping, which v0.2 does not ship. v0.2 SM2
-envelope encryption is KAT-validated via internal round-trip + a
-fixed-`k` smoke test.
+**Wire format.** GM/T 0009-2012 §6 DER is the primary wire format and
+the only emit format until v0.3. v0.3 W4 added raw-byte concatenation
+helpers: `sm2::raw_ciphertext::encode_c1c3c2` / `decode_c1c3c2` for
+the modern `C1||C3||C2` ordering, and `decode_c1c2c3_legacy`
+(decrypt-only) for the legacy `C1||C2||C3` gmssl ordering. v0.3 W3
+added bidirectional gmssl `sm2encrypt`/`sm2decrypt` cross-validation
+(gated on `GMCRYPTO_GMSSL=1`); v0.2's KAT-validation via internal
+round-trip + fixed-`k` smoke test remains.
 
 ## Other known limitations (non-goals)
 

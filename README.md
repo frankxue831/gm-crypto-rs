@@ -2,8 +2,9 @@
 
 Constant-time-designed pure-Rust SM2 / SM3 / SM4 SDK for Chinese national
 cryptography (GB/T 32905 / 32918 / 32907 / GM/T 0009). Sign / verify,
-public-key encrypt / decrypt, SM4-CBC, HMAC-SM3, PBKDF2-HMAC-SM3 — all
-secret-touching paths guarded by an in-CI `dudect-bencher`
+public-key encrypt / decrypt, SM4-CBC, SM4-CTR (single-shot + streaming),
+length-flexible batched SM4 block encryption, HMAC-SM3, PBKDF2-HMAC-SM3 —
+all secret-touching paths guarded by an in-CI `dudect-bencher`
 detectable-leak regression harness.
 
 [![Crates.io](https://img.shields.io/crates/v/gmcrypto-core.svg)](https://crates.io/crates/gmcrypto-core)
@@ -19,31 +20,44 @@ or vendor.
 A small, auditable, pure-Rust SM2 / SM3 / SM4 SDK whose central
 differentiating commitment is that secret-touching code paths are
 **constant-time-designed and guarded by an in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/)
-detectable-leak regression harness** with 12 gates at `|tau| < 0.20`.
+detectable-leak regression harness**: 14 real `ct_*` targets (12
+always-on + 2 cfg-gated under `sm4-bitsliced-simd`) plus a
+deliberately-leaky `negative_control` that proves the harness can
+detect leaks. Most real targets gate at `|tau| < 0.20`;
+`ct_sign_k_class` and the direct `ct_fn_invert` / `ct_fp_invert` invert
+diagnostics carry target-specific gate policy after the 2026-05-12
+recalibration — see [`SECURITY.md`](SECURITY.md) and
+[`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md).
 
 The harness reports timing-leak detection events. **It does not prove
 constant-time.** Low `|tau|` values mean the test could not detect a leak with
 the budget given, not that no leak exists. Language taken directly from
 `dudect-bencher`'s own docs.
 
-v0.4's harness covers the same 12 secret-touching code paths as v0.3 —
-no new dudect targets in v0.4. The W3 bitsliced SM4 S-box runs under
-its own matrix entry in CI (`features=sm4-bitsliced`), so the
-`ct_sm4_key_schedule` and `ct_sm4_encrypt_block` targets are gated
-under both feature configurations. The harness covers: SM2 sign (split
-by both private key `d` and nonce `k` magnitude, with both retry
-nonces class-tied), SM2 decrypt (split by recipient `d_B`), SM4 key
-schedule and encrypt (split by master key, under both the default
-linear-scan and v0.4 bitsliced S-box), HMAC-SM3 (split by key),
-encrypted-PKCS#8 decrypt (split by password bytes — both classes' blobs
-valid for their class's password so both succeed via identical control
-flow), plus direct `Fn::invert` and `Fp::invert` diagnostics. The
-`ct_sign_k_class` target closes v0.1's structural blind spot to
-nonce-only leaks. The `crypto-bigint 0.6 → 0.7.3` upgrade resolved the
-v0.6-era `ConstMontyForm::invert` leak directly: at 100K samples on
-0.7.3 both direct invert diagnostics measure under `|tau| ≈ 0.01`, two
-orders of magnitude below the gate. See [`SECURITY.md`](SECURITY.md)
-for the full posture.
+The harness covers: SM2 sign (split by both private key `d` and nonce
+`k` magnitude, with both retry nonces class-tied), SM2 decrypt (split
+by recipient `d_B`), SM4 key schedule + single-block encrypt (split by
+master key, under default linear-scan and `sm4-bitsliced` paths), the
+v0.5 SIMD-packed dispatch (`ct_sm4_encrypt_block_bitsliced_simd`,
+cfg-gated), v0.6's batched CBC-decrypt fanout
+(`ct_sm4_cbc_decrypt_fanout`, cfg-gated), v0.7's SM4-CTR encrypt
+(`ct_sm4_ctr_encrypt`, exercising the public batch path on every
+cipher matrix entry), HMAC-SM3 (split by key), encrypted-PKCS#8
+decrypt (split by password bytes — both classes' blobs valid for their
+class's password so both succeed via identical control flow), plus
+direct `Fn::invert` and `Fp::invert` diagnostics. The `ct_sign_k_class`
+target closes v0.1's structural blind spot to nonce-only leaks.
+
+The `crypto-bigint 0.6 → 0.7.3` upgrade resolved the v0.1-era
+`ConstMontyForm::invert` leak directly: on the v0.2 W0 harness both
+direct invert diagnostics measured under `|tau| ≈ 0.01`, two orders of
+magnitude below the gate. Subsequent GH Actions runner-image drift on
+2026-05-12 raised the empirical noise floor on `ct_fn_invert` /
+`ct_fp_invert` — both targets moved to PR-smoke telemetry + a nightly
+gross-regression sentinel at `|tau| ≥ 0.55`. See
+[`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md)
+for the data and posture. See [`SECURITY.md`](SECURITY.md) for the full
+constant-time discipline.
 
 The differentiator vs. existing Rust SM2 crates (notably
 [`RustCrypto/sm2`](https://docs.rs/sm2/), which already aims for constant-time
@@ -60,46 +74,55 @@ the design intent in isolation.
   x86, some embedded).
 - Not a comprehensive SM-crypto library yet — see the milestone roadmap.
 
-## v0.4 scope (shipped)
+## v0.7 scope (shipping)
 
-Builds on v0.3 (PEM, encrypted PKCS#8, SPKI, SEC1, bidirectional gmssl
-interop, raw byte-concat ciphertext, streaming `HmacSm3` and
-`Sm4Cbc{En,De}cryptor`, in-crate `Hash` / `Mac` / `BlockCipher`
-traits, comb-table `mul_g`). v0.4 adds the platform-fit and
-ergonomics work v0.3 deferred:
+The cipher-mode surface expansion. v0.7 is the **first version where
+v0.6's SIMD machinery is directly callable from user code outside the
+CBC-decrypt internal path**:
 
-- **`wasm32-unknown-unknown` build target** — W1. CI gates both stable
-  and MSRV (1.85) on the target. The crate is `no_std + alloc` only
-  and does NOT pull `getrandom`'s `wasm_js` backend or
-  `wasm-bindgen` / `js-sys` into its default dep graph; wasm callers
-  wire their own `rand_core::Rng` impl. See [`wasm32 support`](#wasm32-support)
-  below.
-- **RustCrypto-trait fit** — W2. Opt-in via the `digest-traits` and
-  `cipher-traits` features. Implements `digest::Digest` for `Sm3`,
-  `digest::Mac` for `HmacSm3`, and
-  `cipher::{BlockEncrypt, BlockDecrypt, KeyInit}` for `Sm4Cipher`.
-  Default-features build is unchanged: no extra runtime deps. Two
-  separate flags so callers needing only one half don't pay for both.
-- **Bitsliced SM4 S-box** — W3. Opt-in via the `sm4-bitsliced`
-  feature. Boyar-Peralta-style Itoh-Tsujii inversion in GF(2^8)
-  plus two affine transformations — table-less, gate-only,
-  constant-time by construction. Byte-identical output to the
-  default linear-scan path (exhaustive 256-input equivalence test).
-  Single-block only in v0.4; multi-block SIMD-packed bitslicing
-  deferred to v0.5+.
-- **`gmcrypto-c` C ABI crate** — W4. New workspace member building
-  `cdylib` + `staticlib` + `rlib`; cbindgen-generated C header at
-  [`crates/gmcrypto-c/include/gmcrypto.h`](crates/gmcrypto-c/include/gmcrypto.h)
-  is committed and CI gates header drift via `git diff --exit-code`.
-  31 FFI entry points covering SM3 (single-shot + streaming), HMAC-SM3
-  (with constant-time `verify`), PBKDF2-HMAC-SM3, SM4 (block + CBC),
-  and SM2 (keys + sign/verify + encrypt/decrypt + PKCS#8). Opaque
-  handle pattern (`Box::into_raw` + `ZeroizeOnDrop`); every error
-  path collapses to a single `GMCRYPTO_FAILED` return code per the
-  failure-mode invariant. `unsafe_code = "forbid"` is workspace-wide
-  on `gmcrypto-core` (no change); `gmcrypto-c` necessarily uses
-  `unsafe` for raw-pointer FFI primitives, with `// SAFETY:` comments
-  on every block.
+- **Public batch API on `Sm4Cipher`** — W1.
+  `Sm4Cipher::encrypt_blocks(&mut [[u8; 16]])` and
+  `decrypt_blocks(&mut [[u8; 16]])`, length-flexible (any N including
+  empty). Internally chunks into `SIMD_BATCH` (8 on `x86_64` AVX2, 4
+  on `aarch64` NEON, 1 elsewhere under `sm4-bitsliced-simd`; per-block
+  loop without the feature) and routes the aligned middle through the
+  v0.6 W6 `crypt_batch_x8` / `crypt_batch_x4` helpers. Byte-identical
+  to N calls into `Sm4Cipher::encrypt_block` — exhaustively verified
+  at lengths `0..=33` in `tests/sm4_batch_api.rs`.
+- **`sm4::mode_ctr::encrypt` / `decrypt`** — W2. Single-shot SM4-CTR
+  per GM/T 0002-2012 §5.4 / NIST SP 800-38A §6.5. Counter encoded
+  big-endian, per-block keystream is `SM4_E(key, counter + i)`,
+  BE add, wrap at `2^128`. No padding (output length == input
+  length). Counter contract is **unique-per-key** (opposite of CBC's
+  unpredictable IV); no `Option` return — CTR cannot fail on
+  length/parse like CBC-decrypt can. CTR is unauthenticated; pair
+  with HMAC-SM3 encrypt-then-MAC at the call site if integrity is
+  required (or wait for v0.8 AEAD).
+- **`sm4::ctr_streaming::Sm4CtrCipher`** — W3. Streaming SM4-CTR.
+  Single struct serves both encrypt and decrypt (CTR is symmetric).
+  State machine: 16-byte leftover-keystream buffer + position cursor
+  in `0..=16` handles unaligned chunk boundaries; the aligned middle
+  of each `update()` routes through `Sm4Cipher::encrypt_blocks` for
+  SIMD fanout. Re-exported as `sm4::Sm4CtrCipher`.
+- **AEAD scope doc for v0.8** — W4.
+  [`docs/v0.7-aead-scope.md`](docs/v0.7-aead-scope.md) — design cycle
+  scope doc for SM4-GCM + SM4-CCM (Q8.1–Q8.8 sign-off list + v0.9
+  candidate Q-list). No code; pure design.
+- **New dudect target `ct_sm4_ctr_encrypt`** — class-split by master
+  key over a fixed 256-byte plaintext. Dispatches through
+  `Sm4Cipher::encrypt_blocks` so the gate covers every cipher path:
+  linear-scan default, gate-only `sm4-bitsliced`, and SIMD-packed
+  batches under `sm4-bitsliced-simd`. Runs under all three feature
+  matrix entries; gate `|tau| < 0.20`.
+
+**No public API breakage — purely additive.** v0.6.0 callers can
+`cargo update` to v0.7.0 without migration.
+
+Everything v0.4 shipped (`wasm32-unknown-unknown` build, RustCrypto
+trait fit behind `digest-traits` / `cipher-traits`, bitsliced SM4
+S-box behind `sm4-bitsliced`, `gmcrypto-c` C ABI crate) is unchanged
+— see the Roadmap row for the compact reference and `CHANGELOG.md`
+`[0.4.0]` for detail.
 
 Everything v0.3 shipped is unchanged:
 
@@ -159,12 +182,14 @@ Everything v0.2 shipped is unchanged:
 - `gmssl` CLI cross-validation for HMAC-SM3, PBKDF2-HMAC-SM3, and
   (new in v0.3) SM2 sign/verify, SM2 encrypt/decrypt, and SM4-CBC
   in both directions. Gated on `GMCRYPTO_GMSSL=1`.
-- `dudect-bencher` harness with **12 targets** at `|tau| < 0.20`,
-  matrix-run under both `features=default` and `features=sm4-bitsliced`
-  in v0.4 — PR-smoke 10⁴ samples; nightly 10⁵ samples (more samples =
-  tighter empirical confidence at the same threshold). Plus a
-  deliberately-leaky negative control that proves the harness can
-  detect leaks.
+- `dudect-bencher` harness — 14 real `ct_*` targets (12 always-on + 2
+  cfg-gated under `sm4-bitsliced-simd`) plus a deliberately-leaky
+  `negative_control` that proves the harness can detect leaks.
+  Matrix-run under `features=default`, `sm4-bitsliced`, and
+  `sm4-bitsliced-simd` — PR-smoke 10⁴ samples; nightly 10⁵ samples
+  (more samples = tighter empirical confidence at the same threshold).
+  Most real targets gate at `|tau| < 0.20`; per-target policy in
+  [`SECURITY.md`](SECURITY.md).
 - Failure-mode invariant: every `Result`-returning public API uses
   the workspace-wide `gmcrypto_core::Error` (single `Failed` variant,
   `#[non_exhaustive]`); per-module aliases `sm2::Error`, `pem::Error`,
@@ -250,7 +275,7 @@ by enabling `getrandom`'s `wasm_js` feature in *their* `Cargo.toml`:
 
 ```toml
 [dependencies]
-gmcrypto-core = "0.4"
+gmcrypto-core = "0.7"
 rand_core = { version = "0.10", default-features = false }
 getrandom = { version = "0.4", default-features = false, features = ["wasm_js"] }
 ```
