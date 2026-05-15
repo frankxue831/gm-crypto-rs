@@ -3,6 +3,120 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] — 2026-05-15
+
+v0.8.0 lands the **AEAD core** that v0.7's public batch API and
+SM4-CTR were designed to enable: SM4-GCM and SM4-CCM single-shot,
+plus a constant-time GHASH primitive in `gmcrypto-simd` (CLMUL on
+`x86_64` / NEON `pmull` on `aarch64` / software Karatsuba
+fallback). **No public API breakage** — entirely additive behind
+the new opt-in `sm4-aead` feature flag; v0.7.0 callers can `cargo
+update` without migration.
+
+**Hard contract validated.** SM4-GCM is byte-identical to gmssl
+3.1.1 `sm4 -gcm` across the v0.8 W2 KAT scenarios + bidirectional
+interop. SM4-CCM is byte-identical to OpenSSL 3.x EVP `SM4-CCM`
+(OID `1.2.156.10197.1.104.9`) across 8 W3 KAT scenarios spanning
+`nonce_len ∈ {7, 12, 13}`, `tag_len ∈ {4, 10, 16}`, empty PT,
+empty AAD, long AAD crossing block boundary. gmssl 3.1.1 doesn't
+ship `sm4 -ccm` so the CCM interop oracle comes from OpenSSL
+EVP (see `docs/v0.8-ccm-kat-sourcing.md` for the W0 provenance
+deliverable + harness source).
+
+**Throughput shape.** GHASH dispatches to hardware CLMUL/PMULL64
+when the host CPU supports it (Intel Westmere+ / AMD Bulldozer+ /
+Apple Silicon / most modern ARM server / mobile chips); falls
+back to constant-time software Karatsuba on other targets. SM4-GCM
+and SM4-CCM's CTR layers ride `Sm4Cipher::encrypt_blocks` (v0.7
+W1) so SIMD fanout under `sm4-bitsliced-simd` carries through. CCM's
+CBC-MAC pass is sequential by spec — block-by-block.
+
+### Added
+
+- `gmcrypto-simd::ghash::ghash_mul(h, x) -> [u8; 16]` — public
+  constant-time GHASH multiplication over `GF(2^128) /
+  (x^128 + x^7 + x^2 + x + 1)`. Single dispatch entry point that
+  selects at runtime between:
+  - `ghash_mul_clmul` on `x86_64` (PCLMULQDQ + SSE2, runtime
+    cpufeatures detect).
+  - `ghash_mul_pmull` on `aarch64` (ARMv8.0 AES extension
+    `vmull_p64`, runtime cpufeatures detect).
+  - `ghash_mul_software` (bit-serial mask-XOR, available on every
+    target; constant-time over both inputs).
+- `gmcrypto-simd::has_pclmulqdq()` and `has_pmull()` runtime CPU
+  feature checks (joining the existing `has_avx2()`).
+- `gmcrypto-core::sm4::mode_gcm` behind the new `sm4-aead` feature
+  flag — single-shot SM4-GCM AEAD per NIST SP 800-38D / GM/T 0009 /
+  RFC 8998. `encrypt(key, nonce, aad, pt) -> (Vec<u8>, [u8; 16])`
+  and `decrypt(key, nonce, aad, ct, tag) -> Option<Vec<u8>>`. Both
+  12-byte canonical and arbitrary-length nonce paths supported.
+  Tag length fixed at 128 bits in v0.8; parameterization deferred
+  to v0.9.
+- `gmcrypto-core::sm4::mode_ccm` behind the same `sm4-aead`
+  feature flag — single-shot SM4-CCM AEAD per NIST SP 800-38C /
+  RFC 3610 / GM/T 0009. `encrypt(key, nonce, aad, pt, tag_len) ->
+  Option<Vec<u8>>` (output: `ct ‖ tag`) and `decrypt(key, nonce,
+  aad, ct_with_tag, tag_len) -> Option<Vec<u8>>`. `tag_len ∈ {4,
+  6, 8, 10, 12, 14, 16}` per spec, validated at API entry. `nonce.
+  len() ∈ [7, 13]`. Pure-Rust CBC-MAC + CTR over the existing
+  `Sm4Cipher` path — no GHASH.
+- New feature flag `sm4-aead = ["dep:gmcrypto-simd"]` in
+  `gmcrypto-core`. Default-off; additive on the default-features
+  build.
+- New dudect targets `ct_sm4_gcm_decrypt` and `ct_sm4_ccm_decrypt`
+  in `gmcrypto-core/benches/timing_leaks.rs`, cfg-gated on
+  `sm4-aead`. Same `|tau| < 0.20` gate as the rest of the SM4
+  surface. 5K-sample local smoke on aarch64: GCM |τ|≈0.073, CCM
+  |τ|≈0.063.
+- New CI matrix slot `sm4-bitsliced-simd,sm4-aead` in both
+  `dudect-pr.yml` and `dudect-nightly.yml` exercises the
+  most-demanding cipher-stack combination. The 10K-sample PR
+  smoke and 100K-sample nightly budgets both gate the new
+  targets at `|τ| < 0.20`.
+- `docs/v0.7-aead-scope.md` Q8.4 — back-reference to v0.8 W0
+  resolution.
+- `docs/v0.8-ccm-kat-sourcing.md` (v0.8 W0) — sourcing decision
+  for SM4-CCM KAT vectors (OpenSSL 3.x EVP `SM4-CCM`), ~80-line
+  C harness source, parametric-coverage matrix, three-way
+  cross-validation plan.
+- `crates/gmcrypto-core/tests/data/sm4_ccm_oracle.c` — the
+  committed C harness with build/run recipe in
+  `crates/gmcrypto-core/tests/data/README.md`.
+- gmssl interop tests: `gmssl_sm4_gcm_encrypt_them_decrypt_us`
+  and `gmssl_sm4_gcm_encrypt_us_decrypt_them` in
+  `crates/gmcrypto-core/tests/interop_gmssl.rs` (cfg-gated on
+  `sm4-aead`; gated on `GMCRYPTO_GMSSL=1`).
+
+### Changed
+
+- `gmcrypto-simd/Cargo.toml`: `cpufeatures` is now pulled in on
+  `aarch64` too (was `x86_64`-only). Plain NEON stays compile-time
+  baseline on `aarch64` per Q5.12 / Q6.3; the new `cpufeatures`
+  dep enables runtime detection of the ARMv8.0 AES extension for
+  PMULL64.
+- Workspace version `0.7.0 → 0.8.0`; `gmcrypto-simd` and
+  `gmcrypto-core` path-dep version pins updated accordingly.
+
+### Scope retrospective
+
+The v0.5–v0.8 arc — the "throughput-win + AEAD" four-version
+sequence — has now landed in full:
+
+| Version | Date       | Headline |
+|---------|------------|----------|
+| 0.5.0   | 2026-05-12 | W4 phase 1 scaffolding (transparent delegate) |
+| 0.5.1   | 2026-05-13 | W4 phase 2 (AVX2 `sbox_x8`) |
+| 0.6.0   | 2026-05-14 | W4 phase 3 + W6 (`sbox_x32` + `sbox_x16` + CBC-decrypt fanout) |
+| 0.7.0   | 2026-05-14 | Cipher modes (public batch API + SM4-CTR + AEAD scope doc) |
+| 0.8.0   | 2026-05-15 | AEAD (SM4-GCM + SM4-CCM + GHASH primitive) |
+
+The v0.8 substrate (`Sm4Cipher::encrypt_blocks` + `gmcrypto-simd::
+ghash::ghash_mul`) is now in place for v0.9's streaming AEAD work.
+See `docs/v0.7-aead-scope.md` Q9.x candidate Q-list for the
+next-version setup.
+
+---
+
 ## [0.7.0] — 2026-05-14
 
 v0.7.0 lands the **cipher-mode surface expansion** that v0.6's
