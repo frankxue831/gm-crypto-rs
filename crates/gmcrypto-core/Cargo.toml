@@ -111,6 +111,14 @@ sm4-bitsliced = []
 # in-tree wire-up and `docs/v0.5-scope.md` Q5.11 addendum for the
 # architectural rationale.
 sm4-bitsliced-simd = ["sm4-bitsliced", "dep:gmcrypto-simd"]
+# v0.8 W2 / W3 — AEAD modes: SM4-GCM (mode_gcm) + SM4-CCM (mode_ccm)
+# single-shot, per docs/v0.7-aead-scope.md. Default-off (additive;
+# zero impact on the default-features build). Pulls in
+# `gmcrypto-simd` for the GHASH primitive (v0.8 W1) — GHASH dispatches
+# at runtime to CLMUL on x86_64 / PMULL on aarch64 / software fallback
+# elsewhere. See the module docstrings on `sm4::mode_gcm` and
+# `sm4::mode_ccm` for nonce-uniqueness and tag-length contracts.
+sm4-aead = ["dep:gmcrypto-simd"]
 
 [lints.rust]
 unsafe_code = "forbid"
