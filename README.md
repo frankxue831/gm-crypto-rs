@@ -42,7 +42,9 @@ v0.5 SIMD-packed dispatch (`ct_sm4_encrypt_block_bitsliced_simd`,
 cfg-gated), v0.6's batched CBC-decrypt fanout
 (`ct_sm4_cbc_decrypt_fanout`, cfg-gated), v0.7's SM4-CTR encrypt
 (`ct_sm4_ctr_encrypt`, exercising the public batch path on every
-cipher matrix entry), HMAC-SM3 (split by key), encrypted-PKCS#8
+cipher matrix entry), v0.8's SM4-GCM + SM4-CCM decrypt
+(`ct_sm4_gcm_decrypt` and `ct_sm4_ccm_decrypt`, cfg-gated on
+`sm4-aead`), HMAC-SM3 (split by key), encrypted-PKCS#8
 decrypt (split by password bytes — both classes' blobs valid for their
 class's password so both succeed via identical control flow), plus
 direct `Fn::invert` and `Fp::invert` diagnostics. The `ct_sign_k_class`
@@ -74,49 +76,56 @@ the design intent in isolation.
   x86, some embedded).
 - Not a comprehensive SM-crypto library yet — see the milestone roadmap.
 
-## v0.7 scope (shipping)
+## v0.8 scope (shipping)
 
-The cipher-mode surface expansion. v0.7 is the **first version where
-v0.6's SIMD machinery is directly callable from user code outside the
-CBC-decrypt internal path**:
+The **AEAD core**. v0.8 cashes in the cipher-mode surface that v0.7
+opened up: SM4-GCM and SM4-CCM single-shot, plus a constant-time
+GHASH primitive in `gmcrypto-simd`.
 
-- **Public batch API on `Sm4Cipher`** — W1.
-  `Sm4Cipher::encrypt_blocks(&mut [[u8; 16]])` and
-  `decrypt_blocks(&mut [[u8; 16]])`, length-flexible (any N including
-  empty). Internally chunks into `SIMD_BATCH` (8 on `x86_64` AVX2, 4
-  on `aarch64` NEON, 1 elsewhere under `sm4-bitsliced-simd`; per-block
-  loop without the feature) and routes the aligned middle through the
-  v0.6 W6 `crypt_batch_x8` / `crypt_batch_x4` helpers. Byte-identical
-  to N calls into `Sm4Cipher::encrypt_block` — exhaustively verified
-  at lengths `0..=33` in `tests/sm4_batch_api.rs`.
-- **`sm4::mode_ctr::encrypt` / `decrypt`** — W2. Single-shot SM4-CTR
-  per GM/T 0002-2012 §5.4 / NIST SP 800-38A §6.5. Counter encoded
-  big-endian, per-block keystream is `SM4_E(key, counter + i)`,
-  BE add, wrap at `2^128`. No padding (output length == input
-  length). Counter contract is **unique-per-key** (opposite of CBC's
-  unpredictable IV); no `Option` return — CTR cannot fail on
-  length/parse like CBC-decrypt can. CTR is unauthenticated; pair
-  with HMAC-SM3 encrypt-then-MAC at the call site if integrity is
-  required (or wait for v0.8 AEAD).
-- **`sm4::ctr_streaming::Sm4CtrCipher`** — W3. Streaming SM4-CTR.
-  Single struct serves both encrypt and decrypt (CTR is symmetric).
-  State machine: 16-byte leftover-keystream buffer + position cursor
-  in `0..=16` handles unaligned chunk boundaries; the aligned middle
-  of each `update()` routes through `Sm4Cipher::encrypt_blocks` for
-  SIMD fanout. Re-exported as `sm4::Sm4CtrCipher`.
-- **AEAD scope doc for v0.8** — W4.
-  [`docs/v0.7-aead-scope.md`](docs/v0.7-aead-scope.md) — design cycle
-  scope doc for SM4-GCM + SM4-CCM (Q8.1–Q8.8 sign-off list + v0.9
-  candidate Q-list). No code; pure design.
-- **New dudect target `ct_sm4_ctr_encrypt`** — class-split by master
-  key over a fixed 256-byte plaintext. Dispatches through
-  `Sm4Cipher::encrypt_blocks` so the gate covers every cipher path:
-  linear-scan default, gate-only `sm4-bitsliced`, and SIMD-packed
-  batches under `sm4-bitsliced-simd`. Runs under all three feature
-  matrix entries; gate `|tau| < 0.20`.
+- **`sm4::mode_gcm::encrypt` / `decrypt`** — W2. Single-shot SM4-GCM
+  per NIST SP 800-38D / GM/T 0009 / RFC 8998. `encrypt(key, nonce,
+  aad, pt) -> (Vec<u8>, [u8; 16])` returns `(ciphertext, tag)`.
+  `decrypt(key, nonce, aad, ct, tag) -> Option<Vec<u8>>` —
+  `Some(plaintext)` only when the tag verifies (constant-time
+  compare via `subtle::ConstantTimeEq`). Both 12-byte canonical
+  and arbitrary-length nonce paths supported. Tag length fixed at
+  128 bits in v0.8; parameterization deferred to v0.9 alongside
+  streaming AEAD. **Byte-identical to gmssl 3.1.1 `sm4 -gcm`** —
+  bidirectional interop validated.
+- **`sm4::mode_ccm::encrypt` / `decrypt`** — W3. Single-shot SM4-CCM
+  per NIST SP 800-38C / RFC 3610 / GM/T 0009 (OID
+  `1.2.156.10197.1.104.9`). `encrypt(key, nonce, aad, pt, tag_len)
+  -> Option<Vec<u8>>` (output: `ciphertext ‖ tag`). `tag_len ∈
+  {4, 6, 8, 10, 12, 14, 16}` per spec, validated at API entry.
+  `nonce.len() ∈ [7, 13]`. Pure-Rust CBC-MAC + CTR over the
+  existing `Sm4Cipher` path — no GHASH. **Byte-identical to OpenSSL
+  3.x EVP `SM4-CCM`** across 8 KAT scenarios (gmssl 3.1.1 doesn't
+  ship `sm4 -ccm` so the CCM reference oracle comes from OpenSSL;
+  see [`docs/v0.8-ccm-kat-sourcing.md`](docs/v0.8-ccm-kat-sourcing.md)).
+- **`gmcrypto_simd::ghash::ghash_mul(h, x) -> [u8; 16]`** — W1.
+  Constant-time GHASH multiplication over `GF(2^128) /
+  (x^128 + x^7 + x^2 + x + 1)`. Single dispatch entry point:
+  - `ghash_mul_clmul` on `x86_64` (PCLMULQDQ + SSE2; runtime
+    cpufeatures detect; Intel Westmere+ / AMD Bulldozer+).
+  - `ghash_mul_pmull` on `aarch64` (ARMv8.0 AES extension
+    `vmull_p64`; runtime cpufeatures detect; Apple Silicon /
+    most modern ARM chips).
+  - `ghash_mul_software` (bit-serial mask-XOR; constant-time over
+    both inputs; available everywhere as fallback).
+- **New `sm4-aead` feature flag** — default-off; opt-in.
+  `sm4-aead = ["dep:gmcrypto-simd"]` activates `mode_gcm` and
+  `mode_ccm`. Additive on the default-features build.
+- **New dudect targets `ct_sm4_gcm_decrypt` + `ct_sm4_ccm_decrypt`**
+  — W4. Class-split by master key over a fixed 256-byte
+  plaintext + 16-byte AAD. Both classes' `(ct, tag)` pairs are
+  valid encrypts under their **own** keys, so both decrypt paths
+  reach the tag-compare via identical control flow. Same
+  `|tau| < 0.20` gate as the rest of the SM4 surface; new CI
+  matrix slot `sm4-bitsliced-simd,sm4-aead` exercises the
+  most-demanding cipher-stack combination.
 
-**No public API breakage — purely additive.** v0.6.0 callers can
-`cargo update` to v0.7.0 without migration.
+**No public API breakage — purely additive.** v0.7.0 callers can
+`cargo update` to v0.8.0 without migration; `sm4-aead` is opt-in.
 
 Everything v0.4 shipped (`wasm32-unknown-unknown` build, RustCrypto
 trait fit behind `digest-traits` / `cipher-traits`, bitsliced SM4
@@ -210,8 +219,9 @@ Everything v0.2 shipped is unchanged:
 | v0.5.0 (shipped) | C-ABI completeness (streaming CBC + raw-byte SM2 ciphertext + caller-supplied RNG callback); `sm4-bitsliced-simd` feature-flag scaffolding — v0.5.0 ships no SIMD fast path (the feature transparently delegates to the v0.4 single-block bitslice); BREAKING ergonomic cleanup — workspace-wide `gmcrypto_core::Error`, `Sm2PrivateKey::new(U256)` → `from_scalar(U256)` (gated behind `crypto-bigint-scalar`) + always-on `from_bytes_be(&[u8; 32])` constructor, `std` feature removed. See [`CHANGELOG.md`](CHANGELOG.md) `[0.5.0]`. |
 | v0.5.1 (shipped) | W4 phase 2 — new sibling crate `gmcrypto-simd` carrying an **AVX2 8-way packed bitsliced SM4 S-box** behind opt-in `sm4-bitsliced-simd`, with runtime CPU detection (`cpufeatures`) and silent scalar fallback on non-AVX2 hosts. v0.5.1's `tau` dispatch fed the AVX2 path with 7 wasted lanes; production throughput matched v0.4 single-block bitslice. Dudect calibration update — `ct_fn_invert` / `ct_fp_invert` moved to PR-smoke telemetry + 100K nightly gross-regression sentinel after a GH Actions `ubuntu-24.04` runner-image shift on 2026-05-12 raised the empirical noise floor; see `docs/v0.5-dudect-recalibration.md`. See [`CHANGELOG.md`](CHANGELOG.md) `[0.5.1]`. |
 | v0.6.0 (shipped) | **W4 milestone close-out — the throughput-win release.** W4 phase 3: NEON 4-way bitsliced SM4 on `aarch64` (compile-time baseline) + AVX2 32-byte full-width packed S-box (`sbox_x32`) + `Sm4CbcDecryptor::process_chunk` SIMD fanout. Per round of the SM4 decrypt, batched blocks' `tau` inputs pack into one SIMD register (32 bytes on x86_64 / 8-block batch, 16 bytes on aarch64 / 4-block batch) — 32× fewer SIMD dispatches per 8-block batch than v0.5.1. CBC encryption stays single-block (chain-of-blocks defeats SIMD packing). New dudect target `ct_sm4_cbc_decrypt_fanout` (Q6.7) gates the fanout path at `\|tau\| < 0.20`. Exhaustive lane-position-shifted SIMD tests (8192 + 4096 cases) per Q6.8. **No public API changes; no breaking changes — additive only.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.6.0]` and `docs/v0.6-scope.md`. |
-| v0.7.0 (shipping) | **Cipher-mode surface expansion.** First version where v0.6's SIMD machinery is callable from user code outside the CBC-decrypt internal path. New: public length-flexible `Sm4Cipher::encrypt_blocks` / `decrypt_blocks` (W1; Q7.7); single-shot `sm4::mode_ctr::encrypt` / `decrypt` (W2; GM/T 0002-2012 §5.4); streaming `sm4::ctr_streaming::Sm4CtrCipher` (W3); new dudect target `ct_sm4_ctr_encrypt` (gates `\|tau\| < 0.20` on every cipher path). Plus the v0.8 AEAD scope doc (`docs/v0.7-aead-scope.md`, Q8.1–Q8.8 sign-off + v0.9 candidate Q-list). **No public API breakage — additive only.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.7.0]`. |
-| v0.8+ | AEAD per `docs/v0.7-aead-scope.md` — SM4-GCM + SM4-CCM with constant-time GHASH (CLMUL on `x86_64` via `gmcrypto-simd`, NEON `pmull` on `aarch64`, Karatsuba software fallback elsewhere) + constant-time tag compare + bidirectional gmssl interop + two new dudect targets. Behind opt-in `sm4-aead` feature flag. Other v0.8+ candidates: pinned / noise-isolated dudect runner; AVX-512 16-way `sbox_x64`; RustCrypto `digest = 0.11` / `cipher = 0.5` / `aead = 0.6` migration; `wasm-bindgen-test` KAT runner; streaming AEAD. Each lands behind its own scope-doc cycle. |
+| v0.7.0 (shipped) | **Cipher-mode surface expansion.** First version where v0.6's SIMD machinery is callable from user code outside the CBC-decrypt internal path. New: public length-flexible `Sm4Cipher::encrypt_blocks` / `decrypt_blocks` (W1; Q7.7); single-shot `sm4::mode_ctr::encrypt` / `decrypt` (W2; GM/T 0002-2012 §5.4); streaming `sm4::ctr_streaming::Sm4CtrCipher` (W3); new dudect target `ct_sm4_ctr_encrypt` (gates `\|tau\| < 0.20` on every cipher path). Plus the v0.8 AEAD scope doc (`docs/v0.7-aead-scope.md`, Q8.1–Q8.8 sign-off + v0.9 candidate Q-list). **No public API breakage — additive only.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.7.0]`. |
+| v0.8.0 (shipping) | **AEAD core — SM4-GCM + SM4-CCM.** Per `docs/v0.7-aead-scope.md` Q8.1–Q8.8. New: `gmcrypto_simd::ghash::ghash_mul` constant-time GHASH primitive (CLMUL on `x86_64` / PMULL on `aarch64` / software Karatsuba fallback; W1); `sm4::mode_gcm::encrypt` / `decrypt` byte-identical to gmssl 3.1.1 `sm4 -gcm` with bidirectional interop (W2); `sm4::mode_ccm::encrypt` / `decrypt` byte-identical to OpenSSL 3.x EVP `SM4-CCM` across 8 KAT scenarios (W3; gmssl 3.1.1 lacks `sm4 -ccm` so OpenSSL is the oracle — see `docs/v0.8-ccm-kat-sourcing.md`); new dudect targets `ct_sm4_gcm_decrypt` + `ct_sm4_ccm_decrypt` + new CI matrix slot `sm4-bitsliced-simd,sm4-aead` (W4). Behind opt-in `sm4-aead` feature flag (additive; default-off). **No public API breakage — additive only.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.8.0]`. |
+| v0.9+ | Per `docs/v0.7-aead-scope.md` Q9.x candidate list: streaming AEAD (`Sm4GcmEncryptor` / `Sm4CcmEncryptor` etc.); `gmcrypto-c` FFI surface for GCM/CCM; RustCrypto `aead = 0.6` trait fit; CCM/GCM tag-length parameterization; pinned / noise-isolated dudect runner; AVX-512 16-way `sbox_x64`; `digest = 0.11` / `cipher = 0.5` upstream-blocked migrations; `wasm-bindgen-test` KAT runner; SM4-XTS for disk encryption; Argon2-with-SM3 alternative KDF (research-only). Each lands behind its own scope-doc cycle. |
 | v1.0 | API stabilization. |
 
 ## Quick-start
