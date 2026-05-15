@@ -47,8 +47,10 @@
 // `gmcrypto-core` itself stays `unsafe_code = "forbid"`.
 #![allow(unsafe_code)]
 
+pub mod ghash;
 pub mod sm4;
 
 mod detect;
 
-pub use detect::has_avx2;
+pub use detect::{has_avx2, has_pclmulqdq, has_pmull};
+pub use ghash::ghash_mul;

@@ -28,12 +28,19 @@ crate-type = ["rlib"]
 # standard, not a private re-export.
 
 # v0.5 W4 phase 2 — runtime AVX2 detection (RustCrypto, no_std-OK,
-# cached after first call). Target-gated to x86_64 only: the
+# cached after first call). Target-gated to x86_64 and aarch64: the
 # `cpufeatures` crate hard-fails (`compile_error!`) on unsupported
 # targets like wasm32, and our scalar fallback doesn't need it on
-# those targets. Phase 3 NEON on aarch64 is baseline (Q5.12; no
-# runtime detect needed) so aarch64 also doesn't pull cpufeatures.
+# those targets.
+#
+# v0.8 W1 — aarch64 now also pulls `cpufeatures` for PMULL64 ("aes"
+# extension) runtime detection by the GHASH path. Plain NEON is
+# still compile-time baseline on aarch64 per Q5.12 / Q6.3, so the
+# v0.6 W6 sbox_x16 path doesn't go through detect.rs.
 [target.'cfg(target_arch = "x86_64")'.dependencies]
+cpufeatures = "0.2"
+
+[target.'cfg(target_arch = "aarch64")'.dependencies]
 cpufeatures = "0.2"
 
 [lints.rust]
