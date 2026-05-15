@@ -34,6 +34,13 @@ pub mod mode_ctr;
 #[cfg(feature = "sm4-aead")]
 pub mod mode_gcm;
 
+// v0.8 W3 — SM4-CCM single-shot AEAD per NIST SP 800-38C / RFC 3610 +
+// GM/T 0009 (OID 1.2.156.10197.1.104.9). Same `sm4-aead` feature flag
+// as mode_gcm; pure-Rust CBC-MAC + CTR over the existing
+// `Sm4Cipher::encrypt_block(s)` path (no GHASH).
+#[cfg(feature = "sm4-aead")]
+pub mod mode_ccm;
+
 // v0.4 W3 — Bitsliced (table-less, gate-only) SM4 S-box behind the
 // `sm4-bitsliced` feature flag (Q4.9 / Q4.10 / Q4.11 of
 // docs/v0.4-scope.md). The module is `pub(crate)` so `cipher.rs`'s
