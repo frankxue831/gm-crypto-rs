@@ -185,8 +185,12 @@ pub fn encrypt(
 /// `(key, nonce)` with `aad` authenticated. Returns `Some(plaintext)`
 /// on tag verification, `None` otherwise.
 ///
-/// CTR decryption is deferred until **after** tag verification so no
-/// failure-path plaintext is materialized.
+/// CCM's CBC-MAC pass requires the plaintext to compute the
+/// authentication tag, so the CTR decryption must happen before tag
+/// verification (unlike SM4-GCM, where verify-before-decrypt is
+/// possible because GHASH operates on ciphertext bytes). The
+/// tentative plaintext buffer is dropped on the failure path; the
+/// `None` return never exposes it.
 #[must_use]
 pub fn decrypt(
     key: &[u8; KEY_SIZE],
@@ -281,7 +285,13 @@ fn validate_params(nonce: &[u8], pt_len: usize, aad_len: usize, tag_len: usize) 
 }
 
 /// Construct the first authentication block `B0` per RFC 3610 §2.2.
-fn build_b0(nonce: &[u8], pt_len: usize, has_aad: bool, tag_len: usize, q: usize) -> [u8; BLOCK_SIZE] {
+fn build_b0(
+    nonce: &[u8],
+    pt_len: usize,
+    has_aad: bool,
+    tag_len: usize,
+    q: usize,
+) -> [u8; BLOCK_SIZE] {
     let mut b0 = [0u8; BLOCK_SIZE];
     // Flags byte: reserved(1)=0 || Adata(1) || ((t-2)/2)(3 bits) || (q-1)(3 bits)
     let adata_bit: u8 = if has_aad { 0x40 } else { 0 };
