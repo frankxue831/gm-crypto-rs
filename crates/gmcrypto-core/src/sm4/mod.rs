@@ -27,6 +27,13 @@ pub mod ctr_streaming;
 pub mod mode_cbc;
 pub mod mode_ctr;
 
+// v0.8 W2 — SM4-GCM single-shot AEAD per NIST SP 800-38D + GM/T 0009 /
+// RFC 8998. Behind the `sm4-aead` feature flag (additive; zero impact
+// on the default-features build). Pulls in `gmcrypto-simd::ghash` for
+// the GHASH primitive (v0.8 W1).
+#[cfg(feature = "sm4-aead")]
+pub mod mode_gcm;
+
 // v0.4 W3 — Bitsliced (table-less, gate-only) SM4 S-box behind the
 // `sm4-bitsliced` feature flag (Q4.9 / Q4.10 / Q4.11 of
 // docs/v0.4-scope.md). The module is `pub(crate)` so `cipher.rs`'s

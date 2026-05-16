@@ -631,3 +631,132 @@ fn gmssl_sm4_ctr_encrypt_us_decrypt_them() {
     let recovered = fs::read(&recovered_path).expect("read recovered");
     assert_eq!(recovered, plaintext);
 }
+
+// ============================================================
+// SM4-GCM (v0.8 W2) — cfg-gated on `sm4-aead`.
+//
+// gmssl's `sm4 -gcm -encrypt ... -aad <str>` emits `ciphertext ‖ tag`
+// concatenated to the output file. Our `mode_gcm::encrypt` returns a
+// tuple; the shim handles the concat/split on the gmssl boundary.
+// gmssl 3.1.1 accepts arbitrary IV lengths (verified locally); the
+// tests below use the canonical 12-byte nonce.
+// ============================================================
+
+/// SM4-GCM (v0.8 W2): gmssl encrypts, gmcrypto-core decrypts.
+#[cfg(feature = "sm4-aead")]
+#[test]
+fn gmssl_sm4_gcm_encrypt_them_decrypt_us() {
+    use gmcrypto_core::sm4::mode_gcm;
+
+    if !enabled() {
+        eprintln!("skipping: GMCRYPTO_GMSSL != 1");
+        return;
+    }
+    assert!(gmssl_present(), "GMCRYPTO_GMSSL=1 but no gmssl on PATH");
+
+    let dir = scratch_dir("w8_sm4_gcm_them");
+    let key = [0xAB; 16];
+    let nonce: [u8; 12] = [0xCDu8; 12];
+    let aad = b"v0.8 W2 GCM bidirectional interop";
+    let plaintext: &[u8] = b"v0.8 W2 SM4-GCM cross-validation against gmssl 3.1.1";
+
+    let pt_path = dir.join("pt.bin");
+    let ct_path = dir.join("ct.bin");
+    fs::write(&pt_path, plaintext).expect("write pt");
+
+    let output = Command::new("gmssl")
+        .args([
+            "sm4",
+            "-gcm",
+            "-encrypt",
+            "-key",
+            &hex(&key),
+            "-iv",
+            &hex(&nonce),
+            "-aad",
+            std::str::from_utf8(aad).unwrap(),
+            "-in",
+            pt_path.to_str().unwrap(),
+            "-out",
+            ct_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn gmssl sm4");
+    assert!(
+        output.status.success(),
+        "gmssl sm4 -gcm -encrypt failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let combined = fs::read(&ct_path).expect("read gmssl ct||tag");
+    assert!(
+        combined.len() >= 16,
+        "gmssl output too short for ct||tag: {} bytes",
+        combined.len(),
+    );
+    let split = combined.len() - 16;
+    let ct = &combined[..split];
+    let tag: [u8; 16] = combined[split..].try_into().expect("tag slice is 16 bytes");
+
+    let recovered = mode_gcm::decrypt(&key, &nonce, aad, ct, &tag);
+    assert_eq!(
+        recovered.as_deref(),
+        Some(plaintext),
+        "gmcrypto-core failed to decrypt gmssl SM4-GCM output (tag mismatch?)",
+    );
+}
+
+/// SM4-GCM (v0.8 W2): gmcrypto-core encrypts, gmssl decrypts.
+#[cfg(feature = "sm4-aead")]
+#[test]
+fn gmssl_sm4_gcm_encrypt_us_decrypt_them() {
+    use gmcrypto_core::sm4::mode_gcm;
+
+    if !enabled() {
+        eprintln!("skipping: GMCRYPTO_GMSSL != 1");
+        return;
+    }
+    assert!(gmssl_present(), "GMCRYPTO_GMSSL=1 but no gmssl on PATH");
+
+    let dir = scratch_dir("w8_sm4_gcm_us");
+    let key = [0xAB; 16];
+    let nonce: [u8; 12] = [0xCDu8; 12];
+    let aad = b"v0.8 W2 GCM encrypt-us cross-validation";
+    let plaintext: &[u8] = b"v0.8 W2 SM4-GCM encrypt-us cross-validation against gmssl 3.1.1";
+
+    let (ct, tag) = mode_gcm::encrypt(&key, &nonce, aad, plaintext);
+    let mut combined = Vec::with_capacity(ct.len() + tag.len());
+    combined.extend_from_slice(&ct);
+    combined.extend_from_slice(&tag);
+
+    let ct_path = dir.join("ct.bin");
+    let recovered_path = dir.join("recovered.bin");
+    fs::write(&ct_path, &combined).expect("write our ct||tag");
+
+    let output = Command::new("gmssl")
+        .args([
+            "sm4",
+            "-gcm",
+            "-decrypt",
+            "-key",
+            &hex(&key),
+            "-iv",
+            &hex(&nonce),
+            "-aad",
+            std::str::from_utf8(aad).unwrap(),
+            "-in",
+            ct_path.to_str().unwrap(),
+            "-out",
+            recovered_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn gmssl sm4");
+    assert!(
+        output.status.success(),
+        "gmssl sm4 -gcm -decrypt rejected our (ct||tag): {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let recovered = fs::read(&recovered_path).expect("read recovered");
+    assert_eq!(recovered, plaintext);
+}
