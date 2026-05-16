@@ -588,6 +588,97 @@ fn ct_sm4_cbc_decrypt_fanout(runner: &mut CtRunner, rng: &mut BenchRng) {
     }
 }
 
+/// v0.8 W4 — SM4-GCM decrypt diagnostic (Q8.7 of
+/// `docs/v0.7-aead-scope.md`). Class-split by master key; both
+/// classes' `(ciphertext, tag)` tuples are valid encrypts under their
+/// **own** keys, so both decrypt paths reach the tag-compare with
+/// identical control flow. Mirrors `ct_sm2_decrypt`'s shape (both
+/// classes succeed → identical timing surface; only key-bit
+/// differentials surface). Exercises the full SM4-GCM stack: key
+/// schedule, H derivation, GHASH chain (rides CLMUL on `x86_64` /
+/// PMULL on `aarch64` / software Karatsuba elsewhere), GCTR, tag
+/// compare.
+///
+/// Cfg-gated on `sm4-aead` so the target only compiles in CI matrix
+/// slots that exercise the AEAD path. Same `|tau| < 0.20` gate as
+/// the rest of the SM4 surface.
+#[cfg(feature = "sm4-aead")]
+fn ct_sm4_gcm_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
+    use gmcrypto_core::sm4::mode_gcm;
+
+    let key_left: [u8; 16] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
+        0x10,
+    ];
+    let key_right: [u8; 16] = [
+        0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
+        0xef,
+    ];
+    let nonce: [u8; 12] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b,
+    ];
+    let aad: [u8; 16] = [0xAA; 16];
+    let plaintext: [u8; 256] = [0u8; 256];
+
+    let (ct_left, tag_left) = mode_gcm::encrypt(&key_left, &nonce, &aad, &plaintext);
+    let (ct_right, tag_right) = mode_gcm::encrypt(&key_right, &nonce, &aad, &plaintext);
+
+    for _ in 0..sample_count() {
+        let (class, key, ct, tag) = if rng.random::<bool>() {
+            (Class::Left, &key_left, &ct_left, &tag_left)
+        } else {
+            (Class::Right, &key_right, &ct_right, &tag_right)
+        };
+        runner.run_one(class, || {
+            mode_gcm::decrypt(key, &nonce, &aad, ct, tag)
+                .expect("dudect: valid (ct, tag) must verify")
+        });
+    }
+}
+
+/// v0.8 W4 — SM4-CCM decrypt diagnostic (Q8.7 of
+/// `docs/v0.7-aead-scope.md`). Same class-split-by-key shape as
+/// `ct_sm4_gcm_decrypt`. Exercises the full SM4-CCM stack:
+/// CBC-MAC chain (uses `Sm4Cipher::encrypt_block` in a tight loop),
+/// CTR stream (rides v0.7 W1 batch API + v0.6 SIMD fanout under
+/// `sm4-bitsliced-simd`), constant-time tag compare. Fixed
+/// `tag_len = 16` and 12-byte nonce; covers the most-common shape.
+#[cfg(feature = "sm4-aead")]
+fn ct_sm4_ccm_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
+    use gmcrypto_core::sm4::mode_ccm;
+
+    let key_left: [u8; 16] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
+        0x10,
+    ];
+    let key_right: [u8; 16] = [
+        0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
+        0xef,
+    ];
+    let nonce: [u8; 12] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b,
+    ];
+    let aad: [u8; 16] = [0xAA; 16];
+    let plaintext: [u8; 256] = [0u8; 256];
+
+    let ct_with_tag_left =
+        mode_ccm::encrypt(&key_left, &nonce, &aad, &plaintext, 16).expect("valid params");
+    let ct_with_tag_right =
+        mode_ccm::encrypt(&key_right, &nonce, &aad, &plaintext, 16).expect("valid params");
+
+    for _ in 0..sample_count() {
+        let (class, key, ct) = if rng.random::<bool>() {
+            (Class::Left, &key_left, &ct_with_tag_left)
+        } else {
+            (Class::Right, &key_right, &ct_with_tag_right)
+        };
+        runner.run_one(class, || {
+            mode_ccm::decrypt(key, &nonce, &aad, ct, 16)
+                .expect("dudect: valid (ct, tag) must verify")
+        });
+    }
+}
+
 /// HMAC-SM3 diagnostic. Class-split by key bytes; fixed message.
 /// HMAC moves the secret key into both inner and outer SM3 hash
 /// invocations (`K' XOR ipad` and `K' XOR opad`), so a key-dependent
@@ -826,6 +917,23 @@ fn main() {
         name: BenchName("ct_sm4_cbc_decrypt_fanout"),
         seed: None,
         benchfn: ct_sm4_cbc_decrypt_fanout,
+    });
+
+    // v0.8 W4 — SM4-GCM / SM4-CCM decrypt targets (Q8.7). Cfg-gated
+    // on `sm4-aead`; class-split by master key with valid (ct, tag)
+    // pairs for both classes (no failure-path divergence). Same
+    // `|tau| < 0.20` gate as the rest of the SM4 surface.
+    #[cfg(feature = "sm4-aead")]
+    benches.push(BenchMetadata {
+        name: BenchName("ct_sm4_gcm_decrypt"),
+        seed: None,
+        benchfn: ct_sm4_gcm_decrypt,
+    });
+    #[cfg(feature = "sm4-aead")]
+    benches.push(BenchMetadata {
+        name: BenchName("ct_sm4_ccm_decrypt"),
+        seed: None,
+        benchfn: ct_sm4_ccm_decrypt,
     });
 
     let opts = BenchOpts {

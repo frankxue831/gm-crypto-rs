@@ -50,10 +50,16 @@ jobs:
         # phase 3 swap in AVX2 / NEON intrinsics). The new
         # `ct_sm4_encrypt_block_bitsliced_simd` target gates at
         # `|tau| < 0.20`.
+        # v0.8 W4 — fourth entry under `sm4-bitsliced-simd,sm4-aead`
+        # exercises SM4-GCM / SM4-CCM under the SIMD-packed cipher
+        # path. The new `ct_sm4_gcm_decrypt` and `ct_sm4_ccm_decrypt`
+        # targets are cfg-gated on `sm4-aead`; same `|tau| < 0.20`
+        # gate at the 100K-sample budget.
         features:
           - "default"
           - "sm4-bitsliced"
           - "sm4-bitsliced-simd"
+          - "sm4-bitsliced-simd,sm4-aead"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -199,10 +205,18 @@ jobs:
           # sequence as `ct_sm4_encrypt_block`; the gate stays at
           # 0.20 across the three-phase rollout.
           import os
-          if os.environ.get("MATRIX_FEATURES") == "sm4-bitsliced-simd":
+          matrix_features = os.environ.get("MATRIX_FEATURES", "")
+          if "sm4-bitsliced-simd" in matrix_features:
               required_low["ct_sm4_encrypt_block_bitsliced_simd"] = 0.20
               # v0.6 W6 — CBC-decrypt SIMD-fanout target (Q6.7).
               required_low["ct_sm4_cbc_decrypt_fanout"] = 0.20
+          if "sm4-aead" in matrix_features:
+              # v0.8 W4 — SM4-GCM / SM4-CCM decrypt targets (Q8.7 of
+              # docs/v0.7-aead-scope.md). Class-split by master key
+              # with valid (ct, tag) pairs for both classes; same
+              # 0.20 gate at the 100K-sample budget.
+              required_low["ct_sm4_gcm_decrypt"] = 0.20
+              required_low["ct_sm4_ccm_decrypt"] = 0.20
 
           # v0.5 W4 phase 2 prep — gross-regression sentinel for
           # targets too noisy for a 0.20 gate on the current
