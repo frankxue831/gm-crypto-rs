@@ -1,41 +1,71 @@
-# Pre-open-source audit
+# v1.0 open-source readiness checklist
 
-**Date:** 2026-05-17 · **Repo state:** v0.9.0 on `main` · **History:** 193
-commits, 2.9 MB `.git`.
+**Started:** 2026-05-17 · **Repo state:** v0.9.0 on `main` (private) ·
+**History:** 193 commits, 2.9 MB `.git`.
 
-Purpose: a one-time review before flipping `frankxue831/gm-crypto-rs` from
-private to public. Git history becomes permanently visible on a public repo,
-so the bar is "nothing in the working tree *or* history should embarrass or
-endanger us once it's world-readable, and the CI/community surface should be
-credible for a cryptography library."
+**Publication target: v1.0.** The repo stays **private** until then. This is
+a standing checklist — items that are safe and cost-free now are done
+immediately; items that only matter once the repo is public (or that have a
+real cost while private) are **staged** and applied during the v1.0 pre-flip
+pass. Git history becomes permanently visible on a public repo, so the bar is
+"nothing in the working tree *or* history should embarrass or endanger us
+once it's world-readable, and the CI / community surface should be credible
+for a cryptography library."
 
-Findings are ranked by risk. Each is marked **[fixed]** (addressed in the
-audit PR), **[ok]** (checked, no action), or **[action]** (a GitHub-settings
-or human step that must happen outside the repo — see the go-live checklist).
+Findings are ranked by risk. Each is marked **[done]** (landed now, in the
+audit PR), **[ok]** (checked, no action), or **[staged — pre-publish]** (a
+change prepared but deliberately deferred to the v1.0 flip — see the
+pre-flip checklist at the end).
+
+> **Why staged, not done:** the self-hosted-runner risk and the CLAUDE.md
+> runbook exposure are *public-repo* problems only. While the repo is
+> private, only trusted users can trigger CI, so the self-hosted runner is
+> safe — and GitHub-hosted **macOS** minutes bill at a 10× multiplier
+> against the private-repo quota (the exact cost the self-hosted runner was
+> chosen to avoid). Migrating months early would burn quota for zero
+> security benefit. So the migration is prepared and parked, not applied.
 
 ---
 
 ## 🔴 Critical
 
-### C1 — Self-hosted CI runner on a (soon-to-be) public repo  **[fixed]**
+### C1 — Self-hosted CI runner must not survive the public flip  **[staged — pre-publish]**
 
-`ci.yml`'s five jobs ran on a self-hosted macOS runner
-(`[self-hosted, macos, arm64, gmcrypto]`) and triggered on
-`pull_request: branches: [main]` with no fork guard. On a public repo this
-is remote code execution: any fork PR would run on the maintainer's Mac
-(arbitrary code as the `ghrunner` account, warm-cache poisoning, potential
-secret access). GitHub explicitly recommends never using self-hosted runners
-with public repositories.
+`ci.yml`'s five jobs run on a self-hosted macOS runner
+(`[self-hosted, macos, arm64, gmcrypto]`) and trigger on
+`pull_request: branches: [main]`. **While the repo is private this is
+safe** — only trusted users can open PRs that trigger CI. But the moment
+the repo goes public it becomes remote code execution: any fork PR would
+run on the maintainer's Mac (arbitrary code as the `ghrunner` account,
+warm-cache poisoning, potential secret access). GitHub explicitly recommends
+never using self-hosted runners with public repositories.
 
-**Fix:** migrated all five jobs to GitHub-hosted `macos-14` (aarch64).
-Public repos get unmetered Actions minutes, and fork PRs running on hosted
-ephemeral runners is the normal, safe OSS model. Removed the self-hosted
-cache tunings (`cache-bin: false`, `save-if: main` — both self-hosted
-artifacts). The dudect workflows stay on `ubuntu-latest` (their `|tau|`
-gates are calibrated to that image; see `docs/v0.5-dudect-recalibration.md`).
-Also closed a coverage gap: CI now exercises `sm4-aead` (the v0.8/v0.9
-flagship feature had zero build/test coverage — only the dudect matrix
-touched it).
+**Staged, not applied** (see the box at the top for the cost rationale). The
+swap is one mechanical change to `ci.yml`, to be applied during the v1.0
+pre-flip pass:
+
+1. On all five jobs: `runs-on: [self-hosted, macos, arm64, gmcrypto]` →
+   `runs-on: macos-14` (GitHub-hosted aarch64).
+2. Delete the self-hosted-only cache tunings from every `Swatinem/rust-cache@v2`
+   block: drop `cache-bin: "false"` and `save-if: ${{ github.ref == 'refs/heads/main' }}`
+   (ephemeral hosted runners want rust-cache's defaults).
+3. Bump `timeout-minutes` (cold hosted builds are slower than the warm
+   self-hosted cache): build 15→30, msrv 10→20, cabi 10→20, deny 5→15,
+   wasm32 10→20.
+4. Replace the self-hosted header comment block + the `## CI runner` note
+   in CLAUDE.md (see S3).
+
+A header comment in `ci.yml` already flags this (`>>> BEFORE MAKING THIS
+REPO PUBLIC …`). The dudect workflows stay on `ubuntu-latest` regardless
+(their `|tau|` gates are calibrated to that image; see
+`docs/v0.5-dudect-recalibration.md`).
+
+**Done now (runner-independent):** closed a real coverage gap — `ci.yml`
+now exercises `sm4-aead` (the v0.8/v0.9 flagship had zero build/test/clippy
+coverage; only the dudect matrix touched it), across `gmcrypto-core`
+(alone + with `sm4-bitsliced-simd`), `gmcrypto-c` (FFI), the MSRV build, the
+`cargo-deny` opt-in pass, and the wasm32 builds. These run fine on the
+current self-hosted runner.
 
 ---
 
@@ -70,13 +100,18 @@ email is **not** in history. Two display names appear (`Fengxiang Xue`,
 could unify them. No `authors` field in any `Cargo.toml` (deliberate, per
 CLAUDE.md). Nothing to remediate.
 
-### S3 — `CLAUDE.md` self-hosted runbook exposure  **[fixed]**
+### S3 — `CLAUDE.md` self-hosted runbook exposure  **[staged — pre-publish]**
 
-`CLAUDE.md` carried an ~138-line self-hosted-runner runbook (service-account
-name, home paths, runner-registration token flow). Not secret, but stale the
-moment C1's migration landed. Removed it and replaced with a short
-"## CI runner" note describing the GitHub-hosted setup; updated the
-"Workflow notes" bullet and the architecture-map `ci.yml` line accordingly.
+`CLAUDE.md` carries an ~138-line self-hosted-runner runbook (service-account
+name, home paths, runner-registration token flow). Not secret, and **still
+operationally needed while the self-hosted runner is in use** (re-registering
+the runner if it dies). So it stays until C1's migration happens. At the v1.0
+pre-flip pass, remove the `## Self-hosted CI runner setup` section + trim the
+"Workflow notes" bullet + update the architecture-map `ci.yml` line to
+GitHub-hosted — together with the C1 runner swap (the runbook is dead weight
+the instant the self-hosted runner is retired). This was prototyped during
+the audit and reverted to keep the doc accurate to the current self-hosted
+reality.
 
 ### S4 — `SECURITY.md` dudect inventory was stale  **[fixed]**
 
@@ -137,14 +172,24 @@ test material, never reused as real keys. Safe.
 
 ---
 
-## Go-live checklist (GitHub settings — must be done by a human in the UI)
+## v1.0 pre-flip checklist (do these when actually making the repo public)
 
-These cannot be set from inside the repo; do them when flipping to public (or
-immediately after):
+**In the repo (staged changes to apply — see C1, S3):**
+
+- [ ] Swap `ci.yml`'s five jobs from `[self-hosted, macos, arm64, gmcrypto]`
+      to GitHub-hosted `macos-14`; drop the self-hosted cache tunings; bump
+      timeouts (C1, step list).
+- [ ] Remove the `## Self-hosted CI runner setup` runbook from `CLAUDE.md` +
+      update the Workflow-notes bullet + the architecture-map `ci.yml` line
+      (S3).
+- [ ] Decommission the self-hosted runner (remove it in
+      Settings → Actions → Runners; wipe `~ghrunner/actions-runner/_work`).
+
+**In the GitHub UI (cannot be set from inside the repo):**
 
 - [ ] **Settings → Code security:** enable **Secret scanning** + **Push
       protection**, and **Dependabot** alerts + security updates (all free on
-      public repos). Covers S1 going forward.
+      public repos). Forward-looking cover for S1.
 - [ ] **Settings → Actions → General:** set **Fork pull request workflows
       from outside collaborators** to *Require approval for all outside
       collaborators* (defence in depth even on hosted runners), and set
@@ -153,15 +198,25 @@ immediately after):
 - [ ] **Settings → Branches:** add a branch-protection rule on `main` —
       require the CI checks (build / msrv / cabi / deny / wasm32) + at least
       one approving review; disallow force-push.
-- [ ] (Optional) Run one authoritative `gitleaks detect --no-git` on the
-      working tree and `gitleaks detect` over history before flipping public.
+
+**Final sweep:**
+
+- [ ] Run one authoritative `gitleaks detect` over history + working tree
+      (no scanner was installed at audit time; the manual high-signal sweep
+      was clean — S1).
 - [ ] (Optional) Add a `.mailmap` to unify the two author display names (S2).
+- [ ] (Optional) Add a one-line "not independently audited" banner near the
+      top of the README (L1).
 - [ ] Confirm the crates.io README/links render (they point at the GitHub
       repo, which becomes reachable on flip).
+- [ ] Re-read `CLAUDE.md` once more with fresh eyes for any internal detail
+      not wanted in public (it's retained deliberately as the agent guide).
 
 ## What this audit did NOT change
 
 - No git-history rewrite (none warranted — history is clean).
 - No code/algorithm changes (out of scope for an open-sourcing audit).
-- `CLAUDE.md` retained (it's a useful internal/agent guide; only the
-  self-hosted runbook was removed). Keeping it public is a deliberate choice.
+- The self-hosted runner stays live until v1.0 (publication is deferred);
+  the migration is staged, not applied — see C1.
+- `CLAUDE.md` retained as the internal/agent guide; only the self-hosted
+  runbook is slated for removal at the flip (S3).
