@@ -679,6 +679,54 @@ fn ct_sm4_ccm_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
     }
 }
 
+/// v0.9 W3 — incremental-input buffered SM4-GCM decrypt diagnostic
+/// (Q9.5 of `docs/v0.9-scope.md`). Same class-split-by-key shape as
+/// `ct_sm4_gcm_decrypt`; both classes' (chunked ct, tag) verify under
+/// their own key so both reach `finalize_verify` via identical
+/// control flow. Drives the buffered decryptor in two chunks to
+/// exercise the partial-block GHASH accumulator path. Exercises key
+/// schedule, `H = SM4_E(key, 0^128)`, the running GHASH (rides CLMUL on
+/// `x86_64` / PMULL on `aarch64` / software Karatsuba elsewhere), GCTR,
+/// and the constant-time tag compare. `|tau| < 0.20`.
+#[cfg(feature = "sm4-aead")]
+fn ct_sm4_gcm_decrypt_buffered(runner: &mut CtRunner, rng: &mut BenchRng) {
+    use gmcrypto_core::sm4::{Sm4GcmDecryptor, mode_gcm};
+
+    let key_left: [u8; 16] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
+        0x10,
+    ];
+    let key_right: [u8; 16] = [
+        0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
+        0xef,
+    ];
+    let nonce: [u8; 12] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b,
+    ];
+    let aad: [u8; 16] = [0xAA; 16];
+    let plaintext: [u8; 256] = [0u8; 256];
+
+    let (ct_left, tag_left) = mode_gcm::encrypt(&key_left, &nonce, &aad, &plaintext);
+    let (ct_right, tag_right) = mode_gcm::encrypt(&key_right, &nonce, &aad, &plaintext);
+
+    for _ in 0..sample_count() {
+        let (class, key, ct, tag) = if rng.random::<bool>() {
+            (Class::Left, &key_left, &ct_left, &tag_left)
+        } else {
+            (Class::Right, &key_right, &ct_right, &tag_right)
+        };
+        runner.run_one(class, || {
+            let mut dec = Sm4GcmDecryptor::new(key, &nonce, &aad);
+            // Two chunks: 100 bytes then the rest — straddles block
+            // boundaries so the partial-block GHASH path is exercised.
+            dec.update(&ct[..100]);
+            dec.update(&ct[100..]);
+            dec.finalize_verify(tag)
+                .expect("dudect: valid (ct, tag) must verify")
+        });
+    }
+}
+
 /// HMAC-SM3 diagnostic. Class-split by key bytes; fixed message.
 /// HMAC moves the secret key into both inner and outer SM3 hash
 /// invocations (`K' XOR ipad` and `K' XOR opad`), so a key-dependent
@@ -934,6 +982,17 @@ fn main() {
         name: BenchName("ct_sm4_ccm_decrypt"),
         seed: None,
         benchfn: ct_sm4_ccm_decrypt,
+    });
+
+    // v0.9 W3 — incremental-input buffered SM4-GCM decrypt target
+    // (Q9.5). Same class-split-by-key shape + `|tau| < 0.20` gate;
+    // drives `Sm4GcmDecryptor` (commit-on-verify) instead of the
+    // single-shot `mode_gcm::decrypt`.
+    #[cfg(feature = "sm4-aead")]
+    benches.push(BenchMetadata {
+        name: BenchName("ct_sm4_gcm_decrypt_buffered"),
+        seed: None,
+        benchfn: ct_sm4_gcm_decrypt_buffered,
     });
 
     let opts = BenchOpts {
