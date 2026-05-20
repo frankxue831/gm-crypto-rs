@@ -27,9 +27,10 @@ branches, and the SM2 sign retry loop runs a fixed number of iterations
 regardless of which (if any) candidate is valid.
 
 The in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
-(`benches/timing_leaks.rs`) ships **14 real `ct_*` targets** (12 always-on
-+ 2 cfg-gated under `sm4-bitsliced-simd`) plus a deliberately-leaky
-`negative_control`. Most real targets gate on `|tau| < 0.20`;
+(`benches/timing_leaks.rs`) ships **17 real `ct_*` targets** (12 always-on
++ 2 cfg-gated under `sm4-bitsliced-simd` + 3 cfg-gated under `sm4-aead`)
+plus a deliberately-leaky `negative_control`. Most real targets gate on
+`|tau| < 0.20`;
 `negative_control` gates the opposite direction (`|tau| > 1.0` **must**
 fire to prove harness wiring); `ct_sign_k_class` and the direct
 `ct_fn_invert` / `ct_fp_invert` invert diagnostics have target-specific
@@ -79,6 +80,23 @@ CLAUDE.md carries the canonical per-target gate table.
   (`decrypt_batch`) timed under load, class-split by master key (v0.6 W6).
   Exercises `sbox_x32` on `x86_64` AVX2 (8 blocks × 4 tau bytes = 32 bytes
   packed) and `sbox_x16` on `aarch64` NEON (4 blocks × 4 = 16 bytes).
+
+**Cfg-gated on `sm4-aead` (3):**
+
+- `ct_sm4_gcm_decrypt` — single-shot SM4-GCM decrypt over a fixed
+  256-byte plaintext + 16-byte AAD + 12-byte nonce, class-split by master
+  key (v0.8 W4). Both classes' `(ct, tag)` verify under their own key so
+  both reach the constant-time tag compare via identical control flow.
+  Exercises `H = SM4_E(key, 0^128)`, the GHASH chain (rides CLMUL on
+  `x86_64` / PMULL on `aarch64` / software Karatsuba elsewhere), GCTR,
+  and `subtle::ConstantTimeEq`.
+- `ct_sm4_ccm_decrypt` — single-shot SM4-CCM decrypt, same shape, fixed
+  `tag_len = 16` (v0.8 W4). Exercises the sequential CBC-MAC chain + CTR
+  stream + constant-time tag compare.
+- `ct_sm4_gcm_decrypt_buffered` — incremental-input buffered SM4-GCM
+  decrypt via `Sm4GcmDecryptor`, fed in two chunks to straddle block
+  boundaries (v0.9 W3). Exercises the running-GHASH accumulator + the
+  commit-on-verify path (plaintext released only after the tag verifies).
 
 **The harness detects leaks; it does not prove constant-time.** Low
 `|tau|` values mean the test could not detect a leak with the budget

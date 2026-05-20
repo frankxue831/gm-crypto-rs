@@ -4,11 +4,15 @@ name: CI
 #
 # The five jobs in this workflow (build / msrv / cabi / deny / wasm32)
 # all run on a self-hosted macOS aarch64 runner labelled `gmcrypto` —
-# privately-hosted to dodge GitHub Pro's 3000-min/month cap on private
-# repos. Register a runner at:
-#   https://github.com/frankxue831/gm-crypto-rs/settings/actions/runners/new
-# Runner setup instructions live in CLAUDE.md under the "Self-hosted
-# CI runner" section.
+# privately-hosted to dodge GitHub Pro's 3000-min/month cap while the
+# repo is PRIVATE. While private, only trusted users can trigger CI, so
+# the self-hosted runner is safe.
+#
+# >>> BEFORE MAKING THIS REPO PUBLIC (planned at v1.0): migrate all five
+# >>> jobs to GitHub-hosted `macos-14`. A self-hosted runner on a public
+# >>> repo is remote code execution — any fork PR would run on the host.
+# >>> The exact swap (runs-on + cache-setting changes) is staged as a
+# >>> ready-to-apply diff in docs/pre-opensource-audit.md (item C1).
 #
 # The dudect workflows (`dudect-pr.yml`, `dudect-nightly.yml`) DO NOT
 # move — they stay on `ubuntu-latest` because the `|tau|` gates were
@@ -166,6 +170,18 @@ jobs:
       # test pass here catches `cfg`-conditional code drift.
       - name: cargo test --features crypto-bigint-scalar
         run: cargo test -p gmcrypto-core --features crypto-bigint-scalar
+      # v0.8 W2-W3 / v0.9 — SM4-GCM + SM4-CCM AEAD (+ tag-len param +
+      # incremental-input buffered GCM). Exercise the feature alone and
+      # combined with the SIMD cipher path (the most-demanding stack).
+      # Previously uncovered by ci.yml — only the dudect matrix touched
+      # sm4-aead.
+      - name: cargo test --features sm4-aead
+        run: cargo test -p gmcrypto-core --features sm4-aead
+      - name: cargo test --features sm4-aead,sm4-bitsliced-simd
+        run: cargo test -p gmcrypto-core --features sm4-aead,sm4-bitsliced-simd
+      # v0.9 W4 — gmcrypto-c single-shot AEAD FFI (forwarding sm4-aead feature).
+      - name: cargo test -p gmcrypto-c --features sm4-aead
+        run: cargo test -p gmcrypto-c --features sm4-aead
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
       - name: cargo clippy
@@ -176,6 +192,10 @@ jobs:
         run: cargo clippy -p gmcrypto-core --features sm4-bitsliced --all-targets -- -D warnings
       - name: cargo clippy --features sm4-bitsliced-simd
         run: cargo clippy -p gmcrypto-core --features sm4-bitsliced-simd --all-targets -- -D warnings
+      - name: cargo clippy --features sm4-aead (full matrix)
+        run: cargo clippy -p gmcrypto-core --features sm4-aead,sm4-bitsliced-simd,digest-traits,cipher-traits,crypto-bigint-scalar --all-targets -- -D warnings
+      - name: cargo clippy -p gmcrypto-c --features sm4-aead
+        run: cargo clippy -p gmcrypto-c --features sm4-aead --all-targets -- -D warnings
       - name: cargo clippy --features crypto-bigint-scalar
         run: cargo clippy -p gmcrypto-core --features crypto-bigint-scalar --all-targets -- -D warnings
 
@@ -220,7 +240,7 @@ jobs:
       - name: cargo build (all targets)
         run: cargo build --workspace --all-targets
       - name: cargo build with opt-in features
-        run: cargo build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,crypto-bigint-scalar --all-targets
+        run: cargo build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,crypto-bigint-scalar --all-targets
 
   cabi:
     name: gmcrypto-c FFI build + header drift
@@ -261,6 +281,10 @@ jobs:
       # entry point).
       - name: cargo test -p gmcrypto-c
         run: cargo test -p gmcrypto-c
+      # v0.9 W4 — the single-shot AEAD FFI surface (gmcrypto_sm4_gcm_* /
+      # gmcrypto_sm4_ccm_*) behind the forwarding sm4-aead feature.
+      - name: cargo test -p gmcrypto-c --features sm4-aead
+        run: cargo test -p gmcrypto-c --features sm4-aead
 
   deny:
     name: cargo-deny (no forbidden runtime deps)
@@ -289,17 +313,17 @@ jobs:
       # default-features build.
       - name: Run cargo-deny (default features, excluding dev-deps)
         run: cargo deny check --exclude-dev
-      # v0.4 W2 / Q4.5 — second pass with the runtime opt-in feature
-      # flags (`digest-traits`, `cipher-traits`, and the v0.4 W3
-      # `sm4-bitsliced`). These are the features a downstream consumer
-      # might enable; gmcrypto-c's `regen-header` build-time feature
-      # is deliberately excluded (cbindgen + its ~30-crate transitive
-      # tree is build-tool noise, not runtime dep policy). Pulls
-      # `digest` / `cipher` / `crypto-common` / `inout` (allowlisted
-      # in deny.toml). Uses --features on the workspace-default crate
-      # (`gmcrypto-core`); `gmcrypto-c` has no runtime opt-in features.
+      # v0.4 W2 / Q4.5 + v0.8 W2-W3 — second pass with the runtime opt-in
+      # feature flags a downstream consumer might enable (digest/cipher
+      # traits, bitsliced, SIMD, AEAD, scalar). gmcrypto-c's build-time
+      # `regen-header` feature is deliberately excluded (cbindgen + its
+      # transitive tree is build-tool noise, not runtime dep policy).
+      # Pulls `digest` / `cipher` / `crypto-common` / `inout` (allowlisted
+      # in deny.toml); `sm4-aead` pulls gmcrypto-simd::ghash (no new
+      # transitive deps). Uses --features on the workspace-default crate
+      # (`gmcrypto-core`).
       - name: Run cargo-deny (runtime opt-in features, excluding dev-deps)
-        run: cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/crypto-bigint-scalar check --exclude-dev
+        run: cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/crypto-bigint-scalar check --exclude-dev
 
   wasm32:
     name: build wasm32-unknown-unknown (Rust ${{ matrix.toolchain }})
@@ -355,3 +379,7 @@ jobs:
       # value) — the second smoke build is dropped accordingly.
       - name: cargo +${{ matrix.toolchain }} build --target wasm32-unknown-unknown (no default features)
         run: cargo +${{ matrix.toolchain }} build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features
+      # v0.8 / v0.9 — AEAD must also compile on wasm32 (the GHASH
+      # dispatch falls back to the software path; no CLMUL/PMULL there).
+      - name: cargo +${{ matrix.toolchain }} build --target wasm32-unknown-unknown --features sm4-aead
+        run: cargo +${{ matrix.toolchain }} build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features --features sm4-aead

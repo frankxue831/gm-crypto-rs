@@ -1,0 +1,10 @@
+# Default owner for everything in the repo.
+* @frankxue831
+
+# Crypto-sensitive surfaces — flagged for extra scrutiny on review.
+/crates/gmcrypto-core/src/sm2/   @frankxue831
+/crates/gmcrypto-core/src/sm4/   @frankxue831
+/crates/gmcrypto-core/benches/   @frankxue831
+/crates/gmcrypto-simd/           @frankxue831
+/crates/gmcrypto-c/              @frankxue831
+SECURITY.md                      @frankxue831
