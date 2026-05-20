@@ -68,3 +68,7 @@ pub(crate) mod sbox_bitsliced_simd;
 pub use cbc_streaming::{Sm4CbcDecryptor, Sm4CbcEncryptor};
 pub use cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
 pub use ctr_streaming::Sm4CtrCipher;
+
+// v0.9 W1 — GCM tag-length parameterization newtype.
+#[cfg(feature = "sm4-aead")]
+pub use mode_gcm::GcmTagLen;

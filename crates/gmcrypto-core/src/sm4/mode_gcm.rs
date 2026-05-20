@@ -29,13 +29,14 @@
 //!
 //! # Tag length
 //!
-//! v0.8 W2 ships only the 128-bit (16-byte) tag length. Shorter tags
-//! (per NIST §5.2.1.2) are out of scope for v0.8; tag-truncation
-//! amounts to extra bookkeeping with no algorithmic novelty, and the
-//! shortened form (e.g. 32 bits, 64 bits) is more vulnerable to
-//! existential forgery — restricting to 128-bit tags is the safer
-//! default. A future v0.9+ may add tag-length parameterization
-//! alongside the streaming-AEAD work.
+//! [`encrypt`] / [`decrypt`] use the full 128-bit (16-byte) tag — the
+//! safest default. v0.9 W1 adds caller-chosen tag lengths via the
+//! [`GcmTagLen`] newtype and the [`encrypt_with_tag_len`] /
+//! [`decrypt_with_tag_len`] variants (NIST SP 800-38D §5.2.1.2
+//! permits `{4, 8, 12, 13, 14, 15, 16}` bytes; the truncated tag is
+//! `MSB_t(full_tag)`). Shorter tags reduce ciphertext expansion at
+//! the cost of weaker forgery resistance — prefer 16 bytes unless a
+//! protocol mandates a shorter tag.
 //!
 //! # Failure mode invariant
 //!
@@ -80,9 +81,44 @@ use subtle::ConstantTimeEq;
 
 use super::cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
 
-/// Tag length in bytes. v0.8 W2 fixes this at 128 bits; future
-/// versions may parameterize.
+/// Full GCM tag length in bytes (128 bits). [`encrypt`] / [`decrypt`]
+/// always use this; [`GcmTagLen`] selects a (possibly shorter)
+/// truncated length for [`encrypt_with_tag_len`] /
+/// [`decrypt_with_tag_len`].
 pub const TAG_SIZE: usize = 16;
+
+/// A validated GCM authentication-tag length, in bytes.
+///
+/// Per NIST SP 800-38D §5.2.1.2 the permitted tag lengths are
+/// `{4, 8, 12, 13, 14, 15, 16}` bytes (32, 64, 96, 104, 112, 120,
+/// 128 bits). Construct via [`GcmTagLen::new`]; an out-of-range
+/// length yields `None` (single failure mode — no distinguishing
+/// variant per the workspace invariant).
+///
+/// Shorter tags reduce ciphertext expansion at the cost of weaker
+/// forgery resistance (`2^(8·tag_len)` work per forgery attempt).
+/// 16 bytes is the safest default; lengths below 12 should be used
+/// only when a protocol mandates them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GcmTagLen(usize);
+
+impl GcmTagLen {
+    /// Construct from a byte length. Returns `Some` only for the
+    /// NIST-permitted set `{4, 8, 12, 13, 14, 15, 16}`.
+    #[must_use]
+    pub const fn new(bytes: usize) -> Option<Self> {
+        match bytes {
+            4 | 8 | 12 | 13 | 14 | 15 | 16 => Some(Self(bytes)),
+            _ => None,
+        }
+    }
+
+    /// The validated length in bytes.
+    #[must_use]
+    pub const fn as_usize(self) -> usize {
+        self.0
+    }
+}
 
 /// Encrypt `plaintext` under `(key, nonce)` with `aad` authenticated
 /// but not encrypted. Returns `(ciphertext, tag)` where
@@ -158,6 +194,68 @@ pub fn decrypt(
     let mut plaintext = vec![0u8; ciphertext.len()];
     gctr(&cipher, &inc32(&j0), ciphertext, &mut plaintext);
 
+    Some(plaintext)
+}
+
+/// Encrypt with a caller-chosen authentication-tag length.
+///
+/// Identical to [`encrypt`] except the returned tag is the first
+/// `tag_len.as_usize()` bytes of the full 128-bit tag (NIST SP
+/// 800-38D §5.2.1.2 truncation: `T = MSB_t(full_tag)`). The
+/// ciphertext is byte-identical to [`encrypt`]'s — only the tag
+/// length changes.
+#[must_use]
+pub fn encrypt_with_tag_len(
+    key: &[u8; KEY_SIZE],
+    nonce: &[u8],
+    aad: &[u8],
+    plaintext: &[u8],
+    tag_len: GcmTagLen,
+) -> (Vec<u8>, Vec<u8>) {
+    let (ciphertext, full_tag) = encrypt(key, nonce, aad, plaintext);
+    let tag = full_tag[..tag_len.as_usize()].to_vec();
+    (ciphertext, tag)
+}
+
+/// Decrypt where the authentication tag may be shorter than 128 bits.
+///
+/// The tag length is inferred from `tag.len()` and validated against
+/// the NIST-permitted set. `Some(plaintext)` only when the truncated
+/// recomputed tag constant-time-equals `tag`; `None` on any failure
+/// (tag mismatch, invalid tag length). Single `None` per the
+/// failure-mode invariant. As with [`decrypt`], CTR decryption is
+/// deferred until after tag verification so no failure-path plaintext
+/// is materialized.
+#[must_use]
+pub fn decrypt_with_tag_len(
+    key: &[u8; KEY_SIZE],
+    nonce: &[u8],
+    aad: &[u8],
+    ciphertext: &[u8],
+    tag: &[u8],
+) -> Option<Vec<u8>> {
+    let tag_len = GcmTagLen::new(tag.len())?;
+    let t = tag_len.as_usize();
+
+    let cipher = Sm4Cipher::new(key);
+    let mut h_block = [0u8; BLOCK_SIZE];
+    cipher.encrypt_block(&mut h_block);
+    let j0 = derive_j0(&h_block, nonce);
+
+    let s = ghash_a_c_lens(&h_block, aad, ciphertext);
+    let mut expected_full = [0u8; TAG_SIZE];
+    gctr(&cipher, &j0, &s, &mut expected_full);
+
+    // Constant-time compare over the first `t` bytes only. `t` is a
+    // public (non-secret) length, so indexing `expected_full[..t]` is
+    // not a secret-dependent access; `ct_eq` keeps the byte comparison
+    // itself constant-time.
+    if expected_full[..t].ct_eq(tag).unwrap_u8() != 1 {
+        return None;
+    }
+
+    let mut plaintext = vec![0u8; ciphertext.len()];
+    gctr(&cipher, &inc32(&j0), ciphertext, &mut plaintext);
     Some(plaintext)
 }
 
@@ -373,5 +471,77 @@ mod tests {
         let plaintext = b"original";
         let (ct, tag) = encrypt(&KEY, &NONCE_12, aad, plaintext);
         assert!(decrypt(&KEY, &NONCE_12, b"wrong-aad", &ct, &tag).is_none());
+    }
+
+    // ---- v0.9 W1: tag-length parameterization ----
+
+    #[test]
+    fn gcm_tag_len_accepts_valid_lengths() {
+        for &n in &[4usize, 8, 12, 13, 14, 15, 16] {
+            assert_eq!(GcmTagLen::new(n).map(GcmTagLen::as_usize), Some(n));
+        }
+    }
+
+    #[test]
+    fn gcm_tag_len_rejects_invalid_lengths() {
+        for &n in &[0usize, 1, 2, 3, 5, 6, 7, 9, 10, 11, 17, 32] {
+            assert!(GcmTagLen::new(n).is_none(), "len {n} must be rejected");
+        }
+    }
+
+    #[test]
+    fn tag_len_truncation_matches_full_tag_prefix() {
+        let aad = b"hdr";
+        let pt = b"truncate me to a short tag";
+        let (ct_full, tag_full) = encrypt(&KEY, &NONCE_12, aad, pt);
+        for &n in &[4usize, 8, 12, 13, 14, 15, 16] {
+            let tl = GcmTagLen::new(n).unwrap();
+            let (ct_t, tag_t) = encrypt_with_tag_len(&KEY, &NONCE_12, aad, pt, tl);
+            assert_eq!(ct_t, ct_full, "ciphertext invariant under tag_len {n}");
+            assert_eq!(tag_t.as_slice(), &tag_full[..n], "tag = MSB_n(full) at {n}");
+        }
+    }
+
+    #[test]
+    fn tag_len_round_trip() {
+        let aad = b"hdr";
+        let pt = b"round trip under every tag length";
+        for &n in &[4usize, 8, 12, 13, 14, 15, 16] {
+            let tl = GcmTagLen::new(n).unwrap();
+            let (ct, tag) = encrypt_with_tag_len(&KEY, &NONCE_12, aad, pt, tl);
+            let got = decrypt_with_tag_len(&KEY, &NONCE_12, aad, &ct, &tag);
+            assert_eq!(
+                got.as_deref(),
+                Some(pt.as_slice()),
+                "round trip at tag_len {n}"
+            );
+        }
+    }
+
+    #[test]
+    fn tag_len_decrypt_rejects_bad_tag_and_bad_len() {
+        let aad = b"hdr";
+        let pt = b"reject me";
+        let tl = GcmTagLen::new(12).unwrap();
+        let (ct, mut tag) = encrypt_with_tag_len(&KEY, &NONCE_12, aad, pt, tl);
+        tag[0] ^= 0x01;
+        assert!(decrypt_with_tag_len(&KEY, &NONCE_12, aad, &ct, &tag).is_none());
+        // Wrong-length tag (not in the valid set) → None.
+        assert!(decrypt_with_tag_len(&KEY, &NONCE_12, aad, &ct, &tag[..5]).is_none());
+    }
+
+    #[test]
+    fn tag_len_full_16_matches_plain_decrypt() {
+        // encrypt_with_tag_len(16) tag must verify through the plain
+        // fixed-16 decrypt path too (cross-API consistency).
+        let aad = b"hdr";
+        let pt = b"cross-API consistency";
+        let tl = GcmTagLen::new(16).unwrap();
+        let (ct, tag) = encrypt_with_tag_len(&KEY, &NONCE_12, aad, pt, tl);
+        let tag16: [u8; TAG_SIZE] = tag.as_slice().try_into().unwrap();
+        assert_eq!(
+            decrypt(&KEY, &NONCE_12, aad, &ct, &tag16).as_deref(),
+            Some(pt.as_slice()),
+        );
     }
 }
