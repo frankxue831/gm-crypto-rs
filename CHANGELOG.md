@@ -3,6 +3,95 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] — 2026-05-17
+
+v0.9.0 extends the v0.8 AEAD core with the three items v0.8 explicitly
+deferred: **GCM tag-length parameterization**, **incremental-input
+buffered SM4-GCM** (chunk-at-a-time input), and **single-shot AEAD C
+FFI**. **No public API breakage** — entirely additive behind the
+existing `sm4-aead` feature flag; v0.8.0 callers can `cargo update`
+without migration. Scope + design rationale in `docs/v0.9-scope.md`
+(Q9.1–Q9.10, codex-reviewed).
+
+**Terminology.** The streaming GCM types are deliberately named
+"incremental-input buffered" — NOT "streaming". The encryptor is
+output-streaming (each `update` emits its chunk's ciphertext); the
+decryptor is input-incremental but output-BUFFERED — it releases
+plaintext only after the tag verifies (commit-on-verify), the AEAD
+chosen-ciphertext-distinguisher defense. RustCrypto's segmented STREAM
+construction (`aead::stream`) is a distinct primitive and is not what
+this ships.
+
+**Hard contract validated.** `Sm4GcmEncryptor` / `Sm4GcmDecryptor`
+driven with arbitrary input chunking reproduce the single-shot
+`mode_gcm::encrypt` / `decrypt` output byte-for-byte (differential KAT
+across chunk sizes `{1,7,15,16,17,31,32,33,100,full}` + non-12-byte
+nonce). Truncated tags are `MSB_t(full_tag)` per NIST SP 800-38D
+§5.2.1.2, anchored on the gmssl-validated full tag.
+
+**Deferred to v0.10** (per `docs/v0.9-scope.md` §5/§6): CCM
+incremental input (CBC-MAC needs total length up-front), streaming
+AEAD FFI (ABI permanence before the Rust API settles), RustCrypto
+`aead` trait fit (upstream still on `0.6.0-rc`), pinned dudect runner,
+AVX-512 `sbox_x64`, SM4-XTS, Argon2-with-SM3.
+
+### Added
+
+- `gmcrypto-core::sm4::GcmTagLen` — validated GCM tag-length newtype.
+  `GcmTagLen::new(usize) -> Option<Self>` accepts `{4, 8, 12, 13, 14,
+  15, 16}` bytes (NIST SP 800-38D §5.2.1.2); `as_usize()`. Centralizes
+  the valid-length policy (single `None` failure mode).
+- `gmcrypto-core::sm4::mode_gcm::encrypt_with_tag_len(key, nonce, aad,
+  pt, tag_len) -> (Vec<u8>, Vec<u8>)` and `decrypt_with_tag_len(key,
+  nonce, aad, ct, tag) -> Option<Vec<u8>>` (tag length inferred from
+  `tag.len()`, validated). Ciphertext byte-identical to `encrypt`;
+  only the tag is truncated. Fixed-16-byte `encrypt` / `decrypt`
+  unchanged.
+- `gmcrypto-core::sm4::gcm_streaming::Sm4GcmEncryptor` — output-
+  streaming SM4-GCM. `new(key, nonce, aad)`, `update(chunk) ->
+  Option<Vec<u8>>` (emits ciphertext; `None` once the cumulative
+  plaintext would exceed the NIST §5.2.1.1 ceiling `2^36 − 32` bytes,
+  then poisoned), `finalize() -> [u8; 16]`,
+  `finalize_with_tag_len(GcmTagLen) -> Vec<u8>`.
+- `gmcrypto-core::sm4::gcm_streaming::Sm4GcmDecryptor` — input-
+  incremental, output-buffered SM4-GCM. `new(key, nonce, aad)`,
+  `update(chunk)` (buffers ciphertext + folds GHASH; no plaintext
+  emitted), `finalize_verify(tag) -> Option<Vec<u8>>` (constant-time
+  tag compare; releases plaintext only on success). Tag length
+  inferred from `tag.len()`. Re-exported at `sm4::`.
+- 6 single-shot AEAD C FFI entry points in `gmcrypto-c` behind a new
+  forwarding `sm4-aead` feature: `gmcrypto_sm4_gcm_encrypt` /
+  `_decrypt` / `_encrypt_with_tag_len` / `_decrypt_with_tag_len` and
+  `gmcrypto_sm4_ccm_encrypt` / `_decrypt`. Every error path returns
+  `GMCRYPTO_ERR` (single failure code). Streaming AEAD FFI deferred to
+  v0.10.
+- New dudect target `ct_sm4_gcm_decrypt_buffered` in
+  `gmcrypto-core/benches/timing_leaks.rs`, cfg-gated on `sm4-aead`.
+  Class-split by master key; drives `Sm4GcmDecryptor` in two chunks.
+  Same `|tau| < 0.20` gate. 5K-sample local smoke on aarch64:
+  `|τ| ≈ 0.029`.
+
+### Changed
+
+- `gmcrypto-core`'s `mode_gcm` module docstring "Tag length" section
+  now documents the parameterized variants.
+- `mode_gcm::{inc32, derive_j0}` widened from private to `pub(super)`
+  so `gcm_streaming` can reuse them.
+- Workspace version `0.8.0` → `0.9.0`; `gmcrypto-c` → `gmcrypto-core`
+  and `gmcrypto-core` → `gmcrypto-simd` path-dep versions bumped to
+  `0.9`.
+
+### Retrospective
+
+| Version | Theme |
+|---|---|
+| v0.5.0 | SIMD scaffolding (transparent delegate) |
+| v0.5.1 | AVX2 `sbox_x8` + runtime detect |
+| v0.6.0 | `sbox_x32` / `sbox_x16` + CBC-decrypt fanout |
+| v0.7.0 | Cipher modes (batch API + SM4-CTR + AEAD scope doc) |
+| v0.8.0 | AEAD core (GHASH + SM4-GCM + SM4-CCM single-shot) |
+| **v0.9.0** | **AEAD ergonomics (tag-len param + incremental-input buffered GCM + single-shot AEAD FFI)** |
+
 ## [0.8.0] — 2026-05-15
 
 v0.8.0 lands the **AEAD core** that v0.7's public batch API and

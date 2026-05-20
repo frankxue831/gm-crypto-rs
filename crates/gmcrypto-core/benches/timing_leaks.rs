@@ -536,8 +536,8 @@ fn ct_sm4_encrypt_block_bitsliced_simd(runner: &mut CtRunner, rng: &mut BenchRng
 /// `docs/v0.6-scope.md`).
 ///
 /// Exercises the new `Sm4CbcDecryptor::decrypt_batch` path: a
-/// fixed-size ciphertext (16 blocks = 2 × SIMD_BATCH on x86_64,
-/// 4 × SIMD_BATCH on aarch64, 16 × SIMD_BATCH elsewhere) is
+/// fixed-size ciphertext (16 blocks = 2 × `SIMD_BATCH` on `x86_64`,
+/// 4 × `SIMD_BATCH` on `aarch64`, 16 × `SIMD_BATCH` elsewhere) is
 /// stream-decrypted under a class-split master key. The dudect
 /// harness measures the full decrypt-stream-and-finalize timeline;
 /// the per-round `tau` is dispatched through `sbox_x32` (AVX2) or
