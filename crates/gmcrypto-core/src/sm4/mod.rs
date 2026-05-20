@@ -41,6 +41,14 @@ pub mod mode_gcm;
 #[cfg(feature = "sm4-aead")]
 pub mod mode_ccm;
 
+// v0.9 W2 — incremental-input buffered SM4-GCM. Same `sm4-aead` gate;
+// reuses `mode_gcm` internals (J0 derivation, inc32) and the
+// `gmcrypto-simd::ghash` primitive. The encryptor is output-streaming;
+// the decryptor is input-incremental / output-buffered (commit-on-
+// verify). Single-shot `mode_gcm` stays the simple path.
+#[cfg(feature = "sm4-aead")]
+pub mod gcm_streaming;
+
 // v0.4 W3 — Bitsliced (table-less, gate-only) SM4 S-box behind the
 // `sm4-bitsliced` feature flag (Q4.9 / Q4.10 / Q4.11 of
 // docs/v0.4-scope.md). The module is `pub(crate)` so `cipher.rs`'s
@@ -72,3 +80,7 @@ pub use ctr_streaming::Sm4CtrCipher;
 // v0.9 W1 — GCM tag-length parameterization newtype.
 #[cfg(feature = "sm4-aead")]
 pub use mode_gcm::GcmTagLen;
+
+// v0.9 W2 — incremental-input buffered SM4-GCM types.
+#[cfg(feature = "sm4-aead")]
+pub use gcm_streaming::{Sm4GcmDecryptor, Sm4GcmEncryptor};
