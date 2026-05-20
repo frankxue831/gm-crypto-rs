@@ -1164,3 +1164,274 @@ fn version_string_matches_crate() {
         "FFI version {v} should track crate version",
     );
 }
+
+// ============================================================
+// SM4 AEAD — single-shot (v0.9 W4). Gated on `sm4-aead`.
+// ============================================================
+
+#[cfg(feature = "sm4-aead")]
+use gmcrypto_c::{
+    gmcrypto_sm4_ccm_decrypt, gmcrypto_sm4_ccm_encrypt, gmcrypto_sm4_gcm_decrypt,
+    gmcrypto_sm4_gcm_decrypt_with_tag_len, gmcrypto_sm4_gcm_encrypt,
+    gmcrypto_sm4_gcm_encrypt_with_tag_len,
+};
+
+#[cfg(feature = "sm4-aead")]
+#[test]
+fn sm4_gcm_round_trip_matches_core() {
+    let key = [0x42u8; 16];
+    let nonce = [0x01u8; 12];
+    let aad = b"associated header";
+    let pt = b"the quick brown fox jumps over the lazy dog"; // 43 bytes
+
+    let mut ct = vec![0u8; pt.len()];
+    let mut ct_actual = 0usize;
+    let mut tag = [0u8; 16];
+    let r = unsafe {
+        gmcrypto_sm4_gcm_encrypt(
+            key.as_ptr(),
+            nonce.as_ptr(),
+            nonce.len(),
+            aad.as_ptr(),
+            aad.len(),
+            pt.as_ptr(),
+            pt.len(),
+            ct.as_mut_ptr(),
+            ct.len(),
+            &mut ct_actual,
+            tag.as_mut_ptr(),
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert_eq!(ct_actual, pt.len());
+
+    // Byte-equivalence with the core API.
+    let (core_ct, core_tag) = gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, pt);
+    assert_eq!(ct, core_ct);
+    assert_eq!(tag, core_tag);
+
+    // Round-trip decrypt through the FFI.
+    let mut pt_back = vec![0u8; ct.len()];
+    let mut pt_actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_gcm_decrypt(
+            key.as_ptr(),
+            nonce.as_ptr(),
+            nonce.len(),
+            aad.as_ptr(),
+            aad.len(),
+            ct.as_ptr(),
+            ct.len(),
+            tag.as_ptr(),
+            pt_back.as_mut_ptr(),
+            pt_back.len(),
+            &mut pt_actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    pt_back.truncate(pt_actual);
+    assert_eq!(pt_back.as_slice(), pt.as_slice());
+}
+
+#[cfg(feature = "sm4-aead")]
+#[test]
+fn sm4_gcm_tampered_tag_returns_err() {
+    let key = [0x42u8; 16];
+    let nonce = [0x01u8; 12];
+    let aad = b"h";
+    let pt = b"tamper target";
+    let (ct, mut tag) = gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, pt);
+    tag[0] ^= 0x01;
+    let mut pt_back = vec![0u8; ct.len()];
+    let mut pt_actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_gcm_decrypt(
+            key.as_ptr(),
+            nonce.as_ptr(),
+            nonce.len(),
+            aad.as_ptr(),
+            aad.len(),
+            ct.as_ptr(),
+            ct.len(),
+            tag.as_ptr(),
+            pt_back.as_mut_ptr(),
+            pt_back.len(),
+            &mut pt_actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_ERR);
+}
+
+#[cfg(feature = "sm4-aead")]
+#[test]
+fn sm4_gcm_tag_len_12_round_trip_matches_core() {
+    let key = [0x42u8; 16];
+    let nonce = [0x01u8; 12];
+    let aad = b"hdr";
+    let pt = b"truncated tag round trip";
+    let tag_len = 12usize;
+
+    let mut ct = vec![0u8; pt.len()];
+    let mut ct_actual = 0usize;
+    let mut tag = vec![0u8; tag_len];
+    let r = unsafe {
+        gmcrypto_sm4_gcm_encrypt_with_tag_len(
+            key.as_ptr(),
+            nonce.as_ptr(),
+            nonce.len(),
+            aad.as_ptr(),
+            aad.len(),
+            pt.as_ptr(),
+            pt.len(),
+            tag_len,
+            ct.as_mut_ptr(),
+            ct.len(),
+            &mut ct_actual,
+            tag.as_mut_ptr(),
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+
+    let tl = gmcrypto_core::sm4::GcmTagLen::new(tag_len).unwrap();
+    let (core_ct, core_tag) =
+        gmcrypto_core::sm4::mode_gcm::encrypt_with_tag_len(&key, &nonce, aad, pt, tl);
+    assert_eq!(ct, core_ct);
+    assert_eq!(tag, core_tag);
+
+    let mut pt_back = vec![0u8; ct.len()];
+    let mut pt_actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_gcm_decrypt_with_tag_len(
+            key.as_ptr(),
+            nonce.as_ptr(),
+            nonce.len(),
+            aad.as_ptr(),
+            aad.len(),
+            ct.as_ptr(),
+            ct.len(),
+            tag.as_ptr(),
+            tag_len,
+            pt_back.as_mut_ptr(),
+            pt_back.len(),
+            &mut pt_actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    pt_back.truncate(pt_actual);
+    assert_eq!(pt_back.as_slice(), pt.as_slice());
+}
+
+#[cfg(feature = "sm4-aead")]
+#[test]
+fn sm4_gcm_invalid_tag_len_returns_err() {
+    let key = [0x42u8; 16];
+    let nonce = [0x01u8; 12];
+    let aad = b"h";
+    let pt = b"x";
+    let mut ct = vec![0u8; pt.len()];
+    let mut ct_actual = 0usize;
+    let mut tag = vec![0u8; 5];
+    // tag_len = 5 is not in {4,8,12,13,14,15,16}.
+    let r = unsafe {
+        gmcrypto_sm4_gcm_encrypt_with_tag_len(
+            key.as_ptr(),
+            nonce.as_ptr(),
+            nonce.len(),
+            aad.as_ptr(),
+            aad.len(),
+            pt.as_ptr(),
+            pt.len(),
+            5,
+            ct.as_mut_ptr(),
+            ct.len(),
+            &mut ct_actual,
+            tag.as_mut_ptr(),
+        )
+    };
+    assert_eq!(r, GMCRYPTO_ERR);
+}
+
+#[cfg(feature = "sm4-aead")]
+#[test]
+fn sm4_ccm_round_trip_matches_core() {
+    let key = [0x42u8; 16];
+    let nonce = [0x01u8; 12];
+    let aad = b"associated header";
+    let pt = b"the quick brown fox"; // 19 bytes
+    let tag_len = 16usize;
+
+    // Output is ciphertext ‖ tag = pt.len() + tag_len.
+    let mut out = vec![0u8; pt.len() + tag_len];
+    let mut out_actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_ccm_encrypt(
+            key.as_ptr(),
+            nonce.as_ptr(),
+            nonce.len(),
+            aad.as_ptr(),
+            aad.len(),
+            pt.as_ptr(),
+            pt.len(),
+            tag_len,
+            out.as_mut_ptr(),
+            out.len(),
+            &mut out_actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert_eq!(out_actual, pt.len() + tag_len);
+
+    let core_out = gmcrypto_core::sm4::mode_ccm::encrypt(&key, &nonce, aad, pt, tag_len)
+        .expect("valid params");
+    assert_eq!(out, core_out);
+
+    // Round-trip decrypt through the FFI.
+    let mut pt_back = vec![0u8; pt.len()];
+    let mut pt_actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_ccm_decrypt(
+            key.as_ptr(),
+            nonce.as_ptr(),
+            nonce.len(),
+            aad.as_ptr(),
+            aad.len(),
+            out.as_ptr(),
+            out.len(),
+            tag_len,
+            pt_back.as_mut_ptr(),
+            pt_back.len(),
+            &mut pt_actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    pt_back.truncate(pt_actual);
+    assert_eq!(pt_back.as_slice(), pt.as_slice());
+}
+
+#[cfg(feature = "sm4-aead")]
+#[test]
+fn sm4_ccm_invalid_nonce_len_returns_err() {
+    let key = [0x42u8; 16];
+    let nonce = [0x01u8; 6]; // 6 < 7, out of range
+    let aad = b"h";
+    let pt = b"x";
+    let tag_len = 16usize;
+    let mut out = vec![0u8; pt.len() + tag_len];
+    let mut out_actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_ccm_encrypt(
+            key.as_ptr(),
+            nonce.as_ptr(),
+            nonce.len(),
+            aad.as_ptr(),
+            aad.len(),
+            pt.as_ptr(),
+            pt.len(),
+            tag_len,
+            out.as_mut_ptr(),
+            out.len(),
+            &mut out_actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_ERR);
+}

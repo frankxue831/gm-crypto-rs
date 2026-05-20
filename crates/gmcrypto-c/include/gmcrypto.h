@@ -365,6 +365,124 @@ int gmcrypto_sm4_cbc_decryptor_finalize(gmcrypto_sm4_cbc_decryptor_t *dec,
  void gmcrypto_sm4_cbc_decryptor_free(gmcrypto_sm4_cbc_decryptor_t *dec) ;
 
 /*
+ SM4-GCM single-shot encrypt. `ct_out` receives `pt_len` bytes (via
+ the capacity/actual-len convention); `tag_out` receives exactly 16
+ bytes. Returns [`GMCRYPTO_OK`] / [`GMCRYPTO_ERR`].
+ */
+
+int gmcrypto_sm4_gcm_encrypt(const uint8_t *key,
+                             const uint8_t *nonce,
+                             uintptr_t nonce_len,
+                             const uint8_t *aad,
+                             uintptr_t aad_len,
+                             const uint8_t *pt,
+                             uintptr_t pt_len,
+                             uint8_t *ct_out,
+                             uintptr_t ct_capacity,
+                             uintptr_t *ct_actual_len,
+                             uint8_t *tag_out)
+;
+
+/*
+ SM4-GCM single-shot decrypt with a 16-byte tag. `pt_out` receives
+ `ct_len` bytes. Returns [`GMCRYPTO_OK`] only if the tag verifies;
+ [`GMCRYPTO_ERR`] on any failure (single failure mode).
+ */
+
+int gmcrypto_sm4_gcm_decrypt(const uint8_t *key,
+                             const uint8_t *nonce,
+                             uintptr_t nonce_len,
+                             const uint8_t *aad,
+                             uintptr_t aad_len,
+                             const uint8_t *ct,
+                             uintptr_t ct_len,
+                             const uint8_t *tag,
+                             uint8_t *pt_out,
+                             uintptr_t pt_capacity,
+                             uintptr_t *pt_actual_len)
+;
+
+/*
+ SM4-GCM encrypt with a truncated tag. `tag_len` must be in
+ `{4, 8, 12, 13, 14, 15, 16}`; `tag_out` receives `tag_len` bytes.
+ Invalid `tag_len` → [`GMCRYPTO_ERR`].
+ */
+
+int gmcrypto_sm4_gcm_encrypt_with_tag_len(const uint8_t *key,
+                                          const uint8_t *nonce,
+                                          uintptr_t nonce_len,
+                                          const uint8_t *aad,
+                                          uintptr_t aad_len,
+                                          const uint8_t *pt,
+                                          uintptr_t pt_len,
+                                          uintptr_t tag_len,
+                                          uint8_t *ct_out,
+                                          uintptr_t ct_capacity,
+                                          uintptr_t *ct_actual_len,
+                                          uint8_t *tag_out)
+;
+
+/*
+ SM4-GCM decrypt with a truncated tag. `tag` is `tag_len` bytes;
+ `tag_len` must be in `{4, 8, 12, 13, 14, 15, 16}`. `pt_out`
+ receives `ct_len` bytes. [`GMCRYPTO_ERR`] on any failure.
+ */
+
+int gmcrypto_sm4_gcm_decrypt_with_tag_len(const uint8_t *key,
+                                          const uint8_t *nonce,
+                                          uintptr_t nonce_len,
+                                          const uint8_t *aad,
+                                          uintptr_t aad_len,
+                                          const uint8_t *ct,
+                                          uintptr_t ct_len,
+                                          const uint8_t *tag,
+                                          uintptr_t tag_len,
+                                          uint8_t *pt_out,
+                                          uintptr_t pt_capacity,
+                                          uintptr_t *pt_actual_len)
+;
+
+/*
+ SM4-CCM single-shot encrypt. `tag_len` must be in
+ `{4, 6, 8, 10, 12, 14, 16}`; `nonce_len` in `[7, 13]`. `out`
+ receives `pt_len + tag_len` bytes (`ciphertext ‖ tag`). Invalid
+ parameters → [`GMCRYPTO_ERR`].
+ */
+
+int gmcrypto_sm4_ccm_encrypt(const uint8_t *key,
+                             const uint8_t *nonce,
+                             uintptr_t nonce_len,
+                             const uint8_t *aad,
+                             uintptr_t aad_len,
+                             const uint8_t *pt,
+                             uintptr_t pt_len,
+                             uintptr_t tag_len,
+                             uint8_t *out,
+                             uintptr_t out_capacity,
+                             uintptr_t *out_actual_len)
+;
+
+/*
+ SM4-CCM single-shot decrypt. Input `ct` is `ct_len` bytes
+ (`ciphertext ‖ tag`); `tag_len` must match the value used at
+ encrypt time. `pt_out` receives `ct_len - tag_len` bytes.
+ [`GMCRYPTO_ERR`] on any failure (single failure mode).
+ */
+
+int gmcrypto_sm4_ccm_decrypt(const uint8_t *key,
+                             const uint8_t *nonce,
+                             uintptr_t nonce_len,
+                             const uint8_t *aad,
+                             uintptr_t aad_len,
+                             const uint8_t *ct,
+                             uintptr_t ct_len,
+                             uintptr_t tag_len,
+                             uint8_t *pt_out,
+                             uintptr_t pt_capacity,
+                             uintptr_t *pt_actual_len)
+;
+
+/*
  Construct an SM2 private key from a 32-byte big-endian scalar.
  Returns NULL on out-of-range scalar (must be in `[1, n-2]`).
  */
