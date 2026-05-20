@@ -266,7 +266,10 @@ pub fn decrypt_with_tag_len(
 /// `inc32` of a 128-bit block: increment the rightmost 32 bits as an
 /// unsigned big-endian integer, leaving the leftmost 96 bits alone.
 /// Per NIST SP 800-38D §6.2.
-const fn inc32(b: &[u8; BLOCK_SIZE]) -> [u8; BLOCK_SIZE] {
+///
+/// `pub(super)` (v0.9 W2): reused by [`super::gcm_streaming`] for the
+/// incremental GCTR counter advance.
+pub(super) const fn inc32(b: &[u8; BLOCK_SIZE]) -> [u8; BLOCK_SIZE] {
     let mut out = *b;
     let mut counter = u32::from_be_bytes([out[12], out[13], out[14], out[15]]);
     counter = counter.wrapping_add(1);
@@ -317,7 +320,10 @@ fn gctr(cipher: &Sm4Cipher, icb: &[u8; BLOCK_SIZE], input: &[u8], out: &mut [u8]
 /// - Else: `J0 = GHASH(H, nonce || 0^s || [nonce_len_bits]_64)` where
 ///   `s` is the zero-pad length that brings `nonce || 0^s` to a
 ///   multiple of 128 bits.
-fn derive_j0(h_block: &[u8; BLOCK_SIZE], nonce: &[u8]) -> [u8; BLOCK_SIZE] {
+///
+/// `pub(super)` (v0.9 W2): reused by [`super::gcm_streaming`] to derive
+/// the pre-counter block at constructor time.
+pub(super) fn derive_j0(h_block: &[u8; BLOCK_SIZE], nonce: &[u8]) -> [u8; BLOCK_SIZE] {
     if nonce.len() == 12 {
         let mut j0 = [0u8; BLOCK_SIZE];
         j0[..12].copy_from_slice(nonce);
