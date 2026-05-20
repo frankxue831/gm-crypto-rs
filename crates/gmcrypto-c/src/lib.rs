@@ -89,6 +89,10 @@ use gmcrypto_core::sm3::{Sm3 as InnerSm3, hash as sm3_hash};
 use gmcrypto_core::sm4::{
     Sm4CbcDecryptor as InnerSm4CbcDec, Sm4CbcEncryptor as InnerSm4CbcEnc, Sm4Cipher, mode_cbc,
 };
+// v0.9 W4 — single-shot AEAD (SM4-GCM / SM4-CCM) FFI, gated on the
+// forwarding `sm4-aead` feature.
+#[cfg(feature = "sm4-aead")]
+use gmcrypto_core::sm4::{GcmTagLen, mode_ccm, mode_gcm};
 use gmcrypto_core::{pem, pkcs8};
 use rand_core::TryRng;
 
@@ -920,6 +924,353 @@ pub unsafe extern "C" fn gmcrypto_sm4_cbc_decryptor_free(dec: *mut gmcrypto_sm4_
     }
     // SAFETY: dec came from Box::into_raw and has not been freed.
     drop(unsafe { Box::from_raw(dec) });
+}
+
+// ============================================================
+// SM4 AEAD — single-shot (v0.9 W4).
+//
+// Wraps `gmcrypto_core::sm4::{mode_gcm, mode_ccm}`. Six entry points:
+// GCM encrypt/decrypt (+ tag-len variants) and CCM encrypt/decrypt.
+// Every error path returns GMCRYPTO_ERR (single failure code per the
+// failure-mode invariant — no tag-mismatch vs. bad-length vs. invalid-
+// nonce distinction across the C boundary). Variable-length outputs
+// use the (out, out_capacity, out_actual_len) convention; the GCM tag
+// is a fixed-size bare output buffer the caller sizes (16 bytes, or
+// `tag_len` for the truncated variant). Streaming AEAD FFI is deferred
+// to v0.10 (see docs/v0.9-scope.md Q9.6).
+// ============================================================
+
+/// SM4-GCM single-shot encrypt. `ct_out` receives `pt_len` bytes (via
+/// the capacity/actual-len convention); `tag_out` receives exactly 16
+/// bytes. Returns [`GMCRYPTO_OK`] / [`GMCRYPTO_ERR`].
+#[cfg(feature = "sm4-aead")]
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_encrypt(
+    key: *const u8,
+    nonce: *const u8,
+    nonce_len: usize,
+    aad: *const u8,
+    aad_len: usize,
+    pt: *const u8,
+    pt_len: usize,
+    ct_out: *mut u8,
+    ct_capacity: usize,
+    ct_actual_len: *mut usize,
+    tag_out: *mut u8,
+) -> c_int {
+    ffi_guard(|| {
+        let k = match unsafe { try_slice(key, GMCRYPTO_SM4_KEY_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let n = match unsafe { try_slice(nonce, nonce_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let a = match unsafe { try_slice(aad, aad_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let p = match unsafe { try_slice(pt, pt_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let k_arr: &[u8; GMCRYPTO_SM4_KEY_SIZE] = match k.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        // SAFETY: caller guarantees `tag_out` is valid for 16 bytes.
+        let tag_dst = match unsafe { try_slice_mut(tag_out, GMCRYPTO_SM4_BLOCK_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let (ciphertext, tag) = mode_gcm::encrypt(k_arr, n, a, p);
+        // SAFETY: ct_out valid for ct_capacity bytes; ct_actual_len valid.
+        let rc = unsafe { write_output(&ciphertext, ct_out, ct_capacity, ct_actual_len) };
+        if rc != GMCRYPTO_OK {
+            return rc;
+        }
+        tag_dst.copy_from_slice(&tag);
+        GMCRYPTO_OK
+    })
+}
+
+/// SM4-GCM single-shot decrypt with a 16-byte tag. `pt_out` receives
+/// `ct_len` bytes. Returns [`GMCRYPTO_OK`] only if the tag verifies;
+/// [`GMCRYPTO_ERR`] on any failure (single failure mode).
+#[cfg(feature = "sm4-aead")]
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_decrypt(
+    key: *const u8,
+    nonce: *const u8,
+    nonce_len: usize,
+    aad: *const u8,
+    aad_len: usize,
+    ct: *const u8,
+    ct_len: usize,
+    tag: *const u8,
+    pt_out: *mut u8,
+    pt_capacity: usize,
+    pt_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        let k = match unsafe { try_slice(key, GMCRYPTO_SM4_KEY_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let n = match unsafe { try_slice(nonce, nonce_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let a = match unsafe { try_slice(aad, aad_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let c = match unsafe { try_slice(ct, ct_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let t = match unsafe { try_slice(tag, GMCRYPTO_SM4_BLOCK_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let k_arr: &[u8; GMCRYPTO_SM4_KEY_SIZE] = match k.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        let t_arr: &[u8; GMCRYPTO_SM4_BLOCK_SIZE] = match t.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        match mode_gcm::decrypt(k_arr, n, a, c, t_arr) {
+            // SAFETY: pt_out valid for pt_capacity bytes; pt_actual_len valid.
+            Some(plaintext) => unsafe {
+                write_output(&plaintext, pt_out, pt_capacity, pt_actual_len)
+            },
+            None => GMCRYPTO_ERR,
+        }
+    })
+}
+
+/// SM4-GCM encrypt with a truncated tag. `tag_len` must be in
+/// `{4, 8, 12, 13, 14, 15, 16}`; `tag_out` receives `tag_len` bytes.
+/// Invalid `tag_len` → [`GMCRYPTO_ERR`].
+#[cfg(feature = "sm4-aead")]
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_encrypt_with_tag_len(
+    key: *const u8,
+    nonce: *const u8,
+    nonce_len: usize,
+    aad: *const u8,
+    aad_len: usize,
+    pt: *const u8,
+    pt_len: usize,
+    tag_len: usize,
+    ct_out: *mut u8,
+    ct_capacity: usize,
+    ct_actual_len: *mut usize,
+    tag_out: *mut u8,
+) -> c_int {
+    ffi_guard(|| {
+        let tl = match GcmTagLen::new(tag_len) {
+            Some(t) => t,
+            None => return GMCRYPTO_ERR,
+        };
+        let k = match unsafe { try_slice(key, GMCRYPTO_SM4_KEY_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let n = match unsafe { try_slice(nonce, nonce_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let a = match unsafe { try_slice(aad, aad_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let p = match unsafe { try_slice(pt, pt_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let k_arr: &[u8; GMCRYPTO_SM4_KEY_SIZE] = match k.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        // SAFETY: caller guarantees `tag_out` is valid for `tag_len` bytes.
+        let tag_dst = match unsafe { try_slice_mut(tag_out, tag_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let (ciphertext, tag) = mode_gcm::encrypt_with_tag_len(k_arr, n, a, p, tl);
+        // SAFETY: ct_out valid for ct_capacity bytes; ct_actual_len valid.
+        let rc = unsafe { write_output(&ciphertext, ct_out, ct_capacity, ct_actual_len) };
+        if rc != GMCRYPTO_OK {
+            return rc;
+        }
+        tag_dst.copy_from_slice(&tag);
+        GMCRYPTO_OK
+    })
+}
+
+/// SM4-GCM decrypt with a truncated tag. `tag` is `tag_len` bytes;
+/// `tag_len` must be in `{4, 8, 12, 13, 14, 15, 16}`. `pt_out`
+/// receives `ct_len` bytes. [`GMCRYPTO_ERR`] on any failure.
+#[cfg(feature = "sm4-aead")]
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_decrypt_with_tag_len(
+    key: *const u8,
+    nonce: *const u8,
+    nonce_len: usize,
+    aad: *const u8,
+    aad_len: usize,
+    ct: *const u8,
+    ct_len: usize,
+    tag: *const u8,
+    tag_len: usize,
+    pt_out: *mut u8,
+    pt_capacity: usize,
+    pt_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        let k = match unsafe { try_slice(key, GMCRYPTO_SM4_KEY_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let n = match unsafe { try_slice(nonce, nonce_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let a = match unsafe { try_slice(aad, aad_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let c = match unsafe { try_slice(ct, ct_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // `decrypt_with_tag_len` validates `tag_len` (= t.len()) itself.
+        let t = match unsafe { try_slice(tag, tag_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let k_arr: &[u8; GMCRYPTO_SM4_KEY_SIZE] = match k.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        match mode_gcm::decrypt_with_tag_len(k_arr, n, a, c, t) {
+            // SAFETY: pt_out valid for pt_capacity bytes; pt_actual_len valid.
+            Some(plaintext) => unsafe {
+                write_output(&plaintext, pt_out, pt_capacity, pt_actual_len)
+            },
+            None => GMCRYPTO_ERR,
+        }
+    })
+}
+
+/// SM4-CCM single-shot encrypt. `tag_len` must be in
+/// `{4, 6, 8, 10, 12, 14, 16}`; `nonce_len` in `[7, 13]`. `out`
+/// receives `pt_len + tag_len` bytes (`ciphertext ‖ tag`). Invalid
+/// parameters → [`GMCRYPTO_ERR`].
+#[cfg(feature = "sm4-aead")]
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_ccm_encrypt(
+    key: *const u8,
+    nonce: *const u8,
+    nonce_len: usize,
+    aad: *const u8,
+    aad_len: usize,
+    pt: *const u8,
+    pt_len: usize,
+    tag_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        let k = match unsafe { try_slice(key, GMCRYPTO_SM4_KEY_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let n = match unsafe { try_slice(nonce, nonce_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let a = match unsafe { try_slice(aad, aad_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let p = match unsafe { try_slice(pt, pt_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let k_arr: &[u8; GMCRYPTO_SM4_KEY_SIZE] = match k.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        match mode_ccm::encrypt(k_arr, n, a, p, tag_len) {
+            // SAFETY: out valid for out_capacity bytes; out_actual_len valid.
+            Some(ct_with_tag) => unsafe {
+                write_output(&ct_with_tag, out, out_capacity, out_actual_len)
+            },
+            None => GMCRYPTO_ERR,
+        }
+    })
+}
+
+/// SM4-CCM single-shot decrypt. Input `ct` is `ct_len` bytes
+/// (`ciphertext ‖ tag`); `tag_len` must match the value used at
+/// encrypt time. `pt_out` receives `ct_len - tag_len` bytes.
+/// [`GMCRYPTO_ERR`] on any failure (single failure mode).
+#[cfg(feature = "sm4-aead")]
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_ccm_decrypt(
+    key: *const u8,
+    nonce: *const u8,
+    nonce_len: usize,
+    aad: *const u8,
+    aad_len: usize,
+    ct: *const u8,
+    ct_len: usize,
+    tag_len: usize,
+    pt_out: *mut u8,
+    pt_capacity: usize,
+    pt_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        let k = match unsafe { try_slice(key, GMCRYPTO_SM4_KEY_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let n = match unsafe { try_slice(nonce, nonce_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let a = match unsafe { try_slice(aad, aad_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let c = match unsafe { try_slice(ct, ct_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let k_arr: &[u8; GMCRYPTO_SM4_KEY_SIZE] = match k.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        match mode_ccm::decrypt(k_arr, n, a, c, tag_len) {
+            // SAFETY: pt_out valid for pt_capacity bytes; pt_actual_len valid.
+            Some(plaintext) => unsafe {
+                write_output(&plaintext, pt_out, pt_capacity, pt_actual_len)
+            },
+            None => GMCRYPTO_ERR,
+        }
+    })
 }
 
 // ============================================================

@@ -41,6 +41,12 @@ default = []
 # Default builds skip cbindgen entirely (saves ~5s per build and
 # avoids the cbindgen dependency on every consumer's machine).
 regen-header = ["dep:cbindgen"]
+# v0.9 W4 — forward the core AEAD gate so the single-shot SM4-GCM /
+# SM4-CCM FFI surface compiles. Streaming AEAD FFI is deferred to
+# v0.10 (ABI-permanence risk before the Rust streaming API settles —
+# see docs/v0.9-scope.md Q9.6). No new transitive deps: gmcrypto-core's
+# sm4-aead pulls gmcrypto-simd::ghash, which is already in the tree.
+sm4-aead = ["gmcrypto-core/sm4-aead"]
 
 [lints.rust]
 # v0.4 W4 / Q4.7 — `unsafe_code = "forbid"` is impossible on an FFI
@@ -59,6 +65,12 @@ must_use_candidate = "allow"
 # FFI surfaces use many u8 pointers / size_t pairs; the lint
 # generates noise without flagging real issues.
 similar_names = "allow"
+# v0.9 W4 — the single-shot AEAD entry points reconstruct several
+# slices in one scope (key / nonce / aad / pt / ct / tag); short
+# `k`/`n`/`a`/`p`/`c`/`t` bindings mirror the existing CBC entry
+# points and keep the uniform reconstruct-delegate shape readable.
+# Same rationale as `similar_names` above.
+many_single_char_names = "allow"
 # Pedantic/nursery lints that conflict with the FFI shim shape:
 # every entry point follows the same null-check + slice-reconstruct
 # + delegate + write_output pattern. Refactoring each `match` into
