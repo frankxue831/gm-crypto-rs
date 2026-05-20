@@ -150,3 +150,60 @@ fn tampered_aad_fails() {
         "AAD-tamper not detected for baseline",
     );
 }
+
+// ---- v0.9 W1: truncated-tag KAT ----
+//
+// gmssl 3.1.1's `sm4 -gcm` has no tag-length flag — it always emits a
+// 16-byte tag. So there is no external oracle for a shorter tag.
+// However, NIST SP 800-38D §5.2.1.2 *defines* the truncated tag as
+// exactly `MSB_t(full_tag)` — the first `t` bytes of the full 128-bit
+// tag. Since `encrypt_matches_gmssl_vectors` above already proves our
+// full 16-byte tag is byte-identical to gmssl for every vector, a
+// truncated-tag KAT anchored on those same vectors is sound by
+// composition: gmssl-validated full tag + spec-defined truncation =
+// validated truncated tag. No second oracle is required.
+
+use gmcrypto_core::sm4::mode_gcm::GcmTagLen;
+
+/// `encrypt_with_tag_len` must reproduce the first `t` bytes of every
+/// gmssl-validated full tag, for every permitted `t`, with byte-
+/// identical ciphertext.
+#[test]
+fn encrypt_with_tag_len_matches_truncated_gmssl_tag() {
+    for v in VECTORS {
+        for &t in &[4usize, 8, 12, 13, 14, 15, 16] {
+            let tl = GcmTagLen::new(t).unwrap();
+            let (ct, tag) = mode_gcm::encrypt_with_tag_len(&v.key, v.nonce, v.aad, v.plaintext, tl);
+            assert_eq!(
+                ct, v.ciphertext,
+                "ciphertext divergence for {:?} at tag_len {t}",
+                v.name,
+            );
+            assert_eq!(
+                tag.as_slice(),
+                &v.tag[..t],
+                "truncated tag != MSB_{t} of gmssl tag for {:?}",
+                v.name,
+            );
+        }
+    }
+}
+
+/// `decrypt_with_tag_len` round-trips every vector at every permitted
+/// truncated length.
+#[test]
+fn decrypt_with_tag_len_round_trips_every_vector() {
+    for v in VECTORS {
+        for &t in &[4usize, 8, 12, 13, 14, 15, 16] {
+            let truncated = &v.tag[..t];
+            let recovered =
+                mode_gcm::decrypt_with_tag_len(&v.key, v.nonce, v.aad, v.ciphertext, truncated);
+            assert_eq!(
+                recovered.as_deref(),
+                Some(v.plaintext),
+                "decrypt_with_tag_len failed for {:?} at tag_len {t}",
+                v.name,
+            );
+        }
+    }
+}
