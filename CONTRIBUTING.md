@@ -44,6 +44,9 @@ Verify:
 - For HMAC / PBKDF2 / encrypted-PKCS#8 work: `ct_hmac_sm3` and
   `ct_pkcs8_decrypt` each `|tau| < 0.20`.
 - For SM2 envelope encryption work: `ct_sm2_decrypt` `|tau| < 0.20`.
+- For SM4-GCM / SM4-CCM AEAD work (`--features sm4-aead`):
+  `ct_sm4_gcm_decrypt`, `ct_sm4_ccm_decrypt`, and
+  `ct_sm4_gcm_decrypt_buffered` each `|tau| < 0.20`.
 - `ct_sign_k_class`, `ct_fn_invert`, `ct_fp_invert` carry target-
   specific gate policy after the 2026-05-12 recalibration —
   telemetry at the PR-smoke 10K budget. See [`SECURITY.md`](SECURITY.md)
@@ -59,7 +62,11 @@ anything that makes errors more "helpful") will be rejected on sight. See
 
 ## Coding conventions
 
-- `unsafe_code = "forbid"` workspace-wide.
+- `unsafe_code = "forbid"` on `gmcrypto-core` (non-negotiable). The two
+  sibling crates are `"warn"` for unavoidable `unsafe`: `gmcrypto-c`
+  (raw-pointer FFI primitives) and `gmcrypto-simd` (SIMD intrinsics +
+  `#[target_feature]`). Every `unsafe` block in those two carries a
+  `// SAFETY:` comment. Don't add `unsafe` to `gmcrypto-core`.
 - All public items get rustdoc.
 - Constant-time primitives go through `subtle`, not Rust booleans.
 - `#![no_std]` is the baseline; `alloc` is OK; nothing else from `std` without
