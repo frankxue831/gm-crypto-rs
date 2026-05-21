@@ -45,7 +45,7 @@ use alloc::vec::Vec;
 use subtle::ConstantTimeEq;
 
 use super::cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
-use super::mode_gcm::{GcmTagLen, TAG_SIZE, derive_j0, inc32};
+use super::mode_gcm::{GcmTagLen, TAG_SIZE, derive_j0, gctr, inc32};
 
 /// NIST SP 800-38D §5.2.1.1 plaintext ceiling, in bytes:
 /// `2^39 − 256` bits = `2^36 − 32` bytes.
@@ -141,6 +141,33 @@ fn gctr_block(cipher: &Sm4Cipher, icb: &[u8; BLOCK_SIZE], s: &[u8; BLOCK_SIZE], 
     }
 }
 
+/// Shared GCM setup for both streaming directions: build the cipher,
+/// derive the hash subkey `H = E_K(0^128)` and pre-counter block `J0`,
+/// seed a [`GhashAcc`] with the (closed) AAD domain, and capture the
+/// AAD length. Identical to the prologue of [`super::mode_gcm::encrypt`].
+fn init_gcm(
+    key: &[u8; KEY_SIZE],
+    nonce: &[u8],
+    aad: &[u8],
+) -> (Sm4Cipher, [u8; BLOCK_SIZE], GhashAcc, u64) {
+    let cipher = Sm4Cipher::new(key);
+    let mut h = [0u8; BLOCK_SIZE];
+    cipher.encrypt_block(&mut h);
+    let j0 = derive_j0(&h, nonce);
+
+    debug_assert!(
+        u64::try_from(aad.len()).is_ok(),
+        "AAD length exceeds u64 — unreachable on real hardware",
+    );
+    let aad_len = u64::try_from(aad.len()).unwrap_or(u64::MAX);
+
+    let mut ghash = GhashAcc::new(&h);
+    ghash.update(aad);
+    ghash.pad_to_block(); // close the AAD domain
+
+    (cipher, j0, ghash, aad_len)
+}
+
 /// Incremental-input, output-streaming SM4-GCM encryptor.
 ///
 /// AAD is supplied at construction. Each [`update`](Self::update)
@@ -170,21 +197,7 @@ impl Sm4GcmEncryptor {
     /// contract — it applies identically here.
     #[must_use]
     pub fn new(key: &[u8; KEY_SIZE], nonce: &[u8], aad: &[u8]) -> Self {
-        let cipher = Sm4Cipher::new(key);
-        let mut h = [0u8; BLOCK_SIZE];
-        cipher.encrypt_block(&mut h);
-        let j0 = derive_j0(&h, nonce);
-
-        debug_assert!(
-            u64::try_from(aad.len()).is_ok(),
-            "AAD length exceeds u64 — unreachable on real hardware",
-        );
-        let aad_len = u64::try_from(aad.len()).unwrap_or(u64::MAX);
-
-        let mut ghash = GhashAcc::new(&h);
-        ghash.update(aad);
-        ghash.pad_to_block(); // close the AAD domain
-
+        let (cipher, j0, ghash, aad_len) = init_gcm(key, nonce, aad);
         Self {
             cipher,
             j0,
@@ -295,14 +308,7 @@ impl Sm4GcmDecryptor {
     /// Construct from key, nonce, and the full AAD.
     #[must_use]
     pub fn new(key: &[u8; KEY_SIZE], nonce: &[u8], aad: &[u8]) -> Self {
-        let cipher = Sm4Cipher::new(key);
-        let mut h = [0u8; BLOCK_SIZE];
-        cipher.encrypt_block(&mut h);
-        let j0 = derive_j0(&h, nonce);
-        let aad_len = u64::try_from(aad.len()).unwrap_or(u64::MAX);
-        let mut ghash = GhashAcc::new(&h);
-        ghash.update(aad);
-        ghash.pad_to_block();
+        let (cipher, j0, ghash, aad_len) = init_gcm(key, nonce, aad);
         Self {
             cipher,
             j0,
@@ -319,17 +325,21 @@ impl Sm4GcmDecryptor {
         if self.overflowed {
             return;
         }
-        let combined = u64::try_from(self.ct_buf.len())
+        // Running CT length must stay under the GCM ceiling. Mirrors the
+        // encryptor's checked-add guard; on a 64-bit target the
+        // `try_from`s never fail, but the checked path keeps the guard
+        // portable.
+        let within_ceiling = u64::try_from(self.ct_buf.len())
             .ok()
-            .and_then(|cur| u64::try_from(chunk.len()).ok().map(|c| (cur, c)))
-            .and_then(|(cur, c)| cur.checked_add(c));
-        match combined {
-            Some(n) if n <= GCM_MAX_PT_BYTES => {
-                self.ghash.update(chunk);
-                self.ct_buf.extend_from_slice(chunk);
-            }
-            _ => self.overflowed = true,
+            .zip(u64::try_from(chunk.len()).ok())
+            .and_then(|(cur, c)| cur.checked_add(c))
+            .is_some_and(|n| n <= GCM_MAX_PT_BYTES);
+        if !within_ceiling {
+            self.overflowed = true;
+            return;
         }
+        self.ghash.update(chunk);
+        self.ct_buf.extend_from_slice(chunk);
     }
 
     /// Verify `tag` (its length determines the tag length, validated
@@ -358,21 +368,12 @@ impl Sm4GcmDecryptor {
             return None;
         }
 
-        // Tag verified — produce the plaintext via full GCTR from
-        // inc32(J0), matching the single-shot decrypt path.
+        // Tag verified — produce the plaintext via the same canonical
+        // GCTR (from inc32(J0)) the single-shot decrypt uses, so the
+        // buffered path rides the v0.7 batch API / SIMD fanout instead
+        // of a hand-rolled per-block loop.
         let mut pt = vec![0u8; self.ct_buf.len()];
-        let mut counter = inc32(&self.j0);
-        let mut i = 0;
-        while i < self.ct_buf.len() {
-            let mut ks = counter;
-            self.cipher.encrypt_block(&mut ks);
-            counter = inc32(&counter);
-            let n = BLOCK_SIZE.min(self.ct_buf.len() - i);
-            for lane in 0..n {
-                pt[i + lane] = self.ct_buf[i + lane] ^ ks[lane];
-            }
-            i += n;
-        }
+        gctr(&self.cipher, &inc32(&self.j0), &self.ct_buf, &mut pt);
         Some(pt)
     }
 }

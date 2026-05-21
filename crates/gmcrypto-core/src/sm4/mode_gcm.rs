@@ -288,7 +288,12 @@ pub(super) const fn inc32(b: &[u8; BLOCK_SIZE]) -> [u8; BLOCK_SIZE] {
 /// Calls into [`Sm4Cipher::encrypt_blocks`] (v0.7 W1 batch API) for
 /// the keystream generation so SIMD fanout under `sm4-bitsliced-simd`
 /// rides automatically.
-fn gctr(cipher: &Sm4Cipher, icb: &[u8; BLOCK_SIZE], input: &[u8], out: &mut [u8]) {
+///
+/// `pub(super)` (v0.9 simplify pass): reused by
+/// [`super::gcm_streaming::Sm4GcmDecryptor`] so the buffered-decrypt
+/// path runs this same canonical (SIMD-fanned) GCTR rather than a
+/// hand-rolled per-block loop.
+pub(super) fn gctr(cipher: &Sm4Cipher, icb: &[u8; BLOCK_SIZE], input: &[u8], out: &mut [u8]) {
     debug_assert_eq!(out.len(), input.len());
     if input.is_empty() {
         return;
