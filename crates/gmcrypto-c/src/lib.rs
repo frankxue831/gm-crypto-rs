@@ -92,7 +92,10 @@ use gmcrypto_core::sm4::{
 // v0.9 W4 — single-shot AEAD (SM4-GCM / SM4-CCM) FFI, gated on the
 // forwarding `sm4-aead` feature.
 #[cfg(feature = "sm4-aead")]
-use gmcrypto_core::sm4::{GcmTagLen, mode_ccm, mode_gcm};
+use gmcrypto_core::sm4::{
+    GcmTagLen, Sm4GcmDecryptor as InnerSm4GcmDec, Sm4GcmEncryptor as InnerSm4GcmEnc, mode_ccm,
+    mode_gcm,
+};
 use gmcrypto_core::{pem, pkcs8};
 use rand_core::TryRng;
 
@@ -159,6 +162,29 @@ pub struct gmcrypto_sm4_cbc_encryptor_t {
 /// confirms it is the last block and validates the PKCS#7 padding.
 pub struct gmcrypto_sm4_cbc_decryptor_t {
     inner: InnerSm4CbcDec,
+}
+
+/// Opaque handle for a streaming (incremental-input) SM4-GCM encryptor
+/// (v0.10 W1). Output-streaming: each
+/// [`gmcrypto_sm4_gcm_encryptor_update`] emits the ciphertext for its
+/// chunk; [`gmcrypto_sm4_gcm_encryptor_finalize`] emits the 16-byte tag.
+/// Construct with [`gmcrypto_sm4_gcm_encryptor_new`]; pair with exactly
+/// one finalize (which frees the handle) **or** one
+/// [`gmcrypto_sm4_gcm_encryptor_free`].
+#[cfg(feature = "sm4-aead")]
+pub struct gmcrypto_sm4_gcm_encryptor_t {
+    inner: InnerSm4GcmEnc,
+}
+
+/// Opaque handle for a streaming (incremental-input, output-BUFFERED)
+/// SM4-GCM decryptor (v0.10 W2). Commit-on-verify:
+/// [`gmcrypto_sm4_gcm_decryptor_update`] buffers ciphertext and emits
+/// **nothing**; [`gmcrypto_sm4_gcm_decryptor_finalize_verify`] releases
+/// the full plaintext only after a constant-time tag check. Memory is
+/// `O(message)`. Construct with [`gmcrypto_sm4_gcm_decryptor_new`].
+#[cfg(feature = "sm4-aead")]
+pub struct gmcrypto_sm4_gcm_decryptor_t {
+    inner: InnerSm4GcmDec,
 }
 
 /// Opaque handle for an SM2 private key.
@@ -1271,6 +1297,284 @@ pub unsafe extern "C" fn gmcrypto_sm4_ccm_decrypt(
             None => GMCRYPTO_ERR,
         }
     })
+}
+
+// ============================================================
+// SM4-GCM AEAD — streaming / incremental-input (v0.10 W1+W2).
+//
+// Wraps gmcrypto_core::sm4::{Sm4GcmEncryptor, Sm4GcmDecryptor}.
+// Lifecycle mirrors the v0.5 CBC-streaming handles: `_new` ->
+// Box::into_raw; `_update` -> &mut *; `_finalize*` -> Box::from_raw
+// (consume + free); `_free` is the abort path (no-op on NULL). Single
+// GMCRYPTO_ERR on every error. Asymmetry: the encryptor `_update`
+// emits ciphertext (out triple); the decryptor `_update` emits NOTHING
+// (commit-on-verify) and plaintext is released only by
+// `_finalize_verify` after a constant-time tag check. Streaming CCM is
+// out of scope (CBC-MAC needs total length up-front). See
+// docs/v0.10-scope.md.
+// ============================================================
+
+/// Construct a streaming SM4-GCM encryptor. `key` is exactly 16 bytes;
+/// `nonce` is `nonce_len` bytes (12 = canonical; other lengths invoke
+/// the extra GHASH J0-derivation per NIST SP 800-38D §8.2.2); `aad` is
+/// the full associated data (the message header, supplied up-front).
+/// Returns NULL on invalid pointer/length input. **Nonce uniqueness is
+/// the caller's responsibility** — reusing `(key, nonce)` is
+/// catastrophic for GCM.
+#[cfg(feature = "sm4-aead")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_new(
+    key: *const u8,
+    nonce: *const u8,
+    nonce_len: usize,
+    aad: *const u8,
+    aad_len: usize,
+) -> *mut gmcrypto_sm4_gcm_encryptor_t {
+    let result = std::panic::catch_unwind(|| {
+        let k = unsafe { try_slice(key, GMCRYPTO_SM4_KEY_SIZE) }?;
+        let n = unsafe { try_slice(nonce, nonce_len) }?;
+        let a = unsafe { try_slice(aad, aad_len) }?;
+        let k_arr: &[u8; GMCRYPTO_SM4_KEY_SIZE] = k.try_into().ok()?;
+        Some(Box::into_raw(Box::new(gmcrypto_sm4_gcm_encryptor_t {
+            inner: InnerSm4GcmEnc::new(k_arr, n, a),
+        })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// Encrypt `pt_len` bytes of plaintext, emitting the ciphertext for
+/// this chunk (length == `pt_len`; GCM does not pad or buffer). The
+/// `out` buffer MUST be at least `pt_len` bytes; on insufficient
+/// capacity returns [`GMCRYPTO_ERR`] (and the required length is written
+/// to `*out_actual_len`), and the encryptor state is left mid-stream
+/// (the chunk's ciphertext is lost — size the buffer correctly).
+/// Returns [`GMCRYPTO_ERR`] once the cumulative plaintext would exceed
+/// the GCM ceiling (`2^36 − 32` bytes); the encryptor is poisoned and
+/// all later calls also return [`GMCRYPTO_ERR`].
+#[cfg(feature = "sm4-aead")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_update(
+    enc: *mut gmcrypto_sm4_gcm_encryptor_t,
+    pt: *const u8,
+    pt_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if enc.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let input = match unsafe { try_slice(pt, pt_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: enc non-null per the check; caller guarantees unique
+        // access for the duration of this call.
+        let e = unsafe { &mut *enc };
+        match e.inner.update(input) {
+            // SAFETY: out valid for out_capacity; out_actual_len valid.
+            Some(ct) => unsafe { write_output(&ct, out, out_capacity, out_actual_len) },
+            None => GMCRYPTO_ERR, // length-ceiling overflow → poisoned
+        }
+    })
+}
+
+/// Finish and emit the full 16-byte tag. **Consumes the encryptor —
+/// the handle is freed by this call** (even on error); do NOT call
+/// [`gmcrypto_sm4_gcm_encryptor_free`] on it afterwards. `tag_out`
+/// must be valid for exactly 16 bytes.
+#[cfg(feature = "sm4-aead")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_finalize(
+    enc: *mut gmcrypto_sm4_gcm_encryptor_t,
+    tag_out: *mut u8,
+) -> c_int {
+    ffi_guard(|| {
+        if enc.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        // SAFETY: enc came from Box::into_raw; take ownership + free
+        // (consumed even if tag_out is invalid, per the CBC precedent).
+        let boxed = unsafe { Box::from_raw(enc) };
+        let tag = boxed.inner.finalize();
+        // SAFETY: caller guarantees tag_out valid for 16 bytes.
+        let tag_dst = match unsafe { try_slice_mut(tag_out, GMCRYPTO_SM4_BLOCK_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        tag_dst.copy_from_slice(&tag);
+        GMCRYPTO_OK
+    })
+}
+
+/// Finish and emit a truncated tag of `tag_len` bytes (`MSB_t` per NIST
+/// SP 800-38D §5.2.1.2). `tag_len` must be in `{4, 8, 12, 13, 14, 15,
+/// 16}` (else [`GMCRYPTO_ERR`]). **Consumes the encryptor — the handle
+/// is freed by this call** (even on error); do NOT call
+/// [`gmcrypto_sm4_gcm_encryptor_free`] afterwards.
+#[cfg(feature = "sm4-aead")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_finalize_with_tag_len(
+    enc: *mut gmcrypto_sm4_gcm_encryptor_t,
+    tag_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if enc.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        // SAFETY: enc came from Box::into_raw; take ownership + free
+        // (consumed even on invalid tag_len — the handle is spent).
+        let boxed = unsafe { Box::from_raw(enc) };
+        let tl = match GcmTagLen::new(tag_len) {
+            Some(t) => t,
+            None => return GMCRYPTO_ERR, // boxed dropped here → freed
+        };
+        let tag = boxed.inner.finalize_with_tag_len(tl);
+        // SAFETY: out valid for out_capacity; out_actual_len valid.
+        unsafe { write_output(&tag, out, out_capacity, out_actual_len) }
+    })
+}
+
+/// Free a streaming SM4-GCM encryptor without finalizing (abort path).
+/// Passing NULL is a no-op. Do NOT call after any `_finalize*` — those
+/// already consumed the handle.
+#[cfg(feature = "sm4-aead")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_free(enc: *mut gmcrypto_sm4_gcm_encryptor_t) {
+    if enc.is_null() {
+        return;
+    }
+    // SAFETY: enc came from Box::into_raw and has not been freed.
+    drop(unsafe { Box::from_raw(enc) });
+}
+
+/// Construct a streaming SM4-GCM decryptor. Same parameter contract as
+/// [`gmcrypto_sm4_gcm_encryptor_new`]. Returns NULL on invalid input.
+#[cfg(feature = "sm4-aead")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_decryptor_new(
+    key: *const u8,
+    nonce: *const u8,
+    nonce_len: usize,
+    aad: *const u8,
+    aad_len: usize,
+) -> *mut gmcrypto_sm4_gcm_decryptor_t {
+    let result = std::panic::catch_unwind(|| {
+        let k = unsafe { try_slice(key, GMCRYPTO_SM4_KEY_SIZE) }?;
+        let n = unsafe { try_slice(nonce, nonce_len) }?;
+        let a = unsafe { try_slice(aad, aad_len) }?;
+        let k_arr: &[u8; GMCRYPTO_SM4_KEY_SIZE] = k.try_into().ok()?;
+        Some(Box::into_raw(Box::new(gmcrypto_sm4_gcm_decryptor_t {
+            inner: InnerSm4GcmDec::new(k_arr, n, a),
+        })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// Buffer `ct_len` bytes of ciphertext and fold them into the running
+/// GHASH. **Emits no plaintext** (commit-on-verify) — there is no
+/// output parameter. Returns [`GMCRYPTO_ERR`] only on null handle or
+/// invalid input pointer; a length-ceiling overflow is latched and
+/// surfaces as [`GMCRYPTO_ERR`] at
+/// [`gmcrypto_sm4_gcm_decryptor_finalize_verify`].
+#[cfg(feature = "sm4-aead")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_decryptor_update(
+    dec: *mut gmcrypto_sm4_gcm_decryptor_t,
+    ct: *const u8,
+    ct_len: usize,
+) -> c_int {
+    ffi_guard(|| {
+        if dec.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let input = match unsafe { try_slice(ct, ct_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: dec non-null per the check; unique access for the call.
+        let d = unsafe { &mut *dec };
+        d.inner.update(input);
+        GMCRYPTO_OK
+    })
+}
+
+/// Verify `tag` (`tag_len` bytes; the length is validated against the
+/// NIST-permitted set `{4, 8, 12, 13, 14, 15, 16}`) and, on success,
+/// write the full decrypted plaintext (length == total ciphertext fed)
+/// to `(out, out_capacity, out_actual_len)`.
+///
+/// Returns [`GMCRYPTO_ERR`] in two cases, both of which still **consume
+/// and free the handle** (do NOT call
+/// [`gmcrypto_sm4_gcm_decryptor_free`] afterwards):
+///
+/// - **Verification failure** (tag mismatch, invalid `tag_len`, or
+///   length-ceiling overflow): `*out_actual_len` is `0` and no
+///   plaintext is written (commit-on-verify; single failure mode).
+/// - **Tag verified but `out` too small**: `*out_actual_len` is set to
+///   the required plaintext length and no plaintext is written. The
+///   handle is consumed, so you cannot retry — size `out` to the total
+///   ciphertext length up-front (GCM plaintext is the same length).
+#[cfg(feature = "sm4-aead")]
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_decryptor_finalize_verify(
+    dec: *mut gmcrypto_sm4_gcm_decryptor_t,
+    tag: *const u8,
+    tag_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if dec.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        // Default the reported length to 0 up-front so *every* failure path
+        // (bad tag pointer, tag mismatch, invalid tag_len, overflow)
+        // satisfies the "finalize failure writes 0 to *out_actual_len"
+        // boundary invariant. On success / capacity-retry, write_output
+        // overwrites this with the produced / required length.
+        if !out_actual_len.is_null() {
+            // SAFETY: caller-asserted valid *mut usize.
+            unsafe { ptr::write(out_actual_len, 0) };
+        }
+        // SAFETY: dec came from Box::into_raw; take ownership + free.
+        let boxed = unsafe { Box::from_raw(dec) };
+        let t = match unsafe { try_slice(tag, tag_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR, // boxed dropped → freed; len already 0
+        };
+        if let Some(pt) = boxed.inner.finalize_verify(t) {
+            // SAFETY: out valid for out_capacity; out_actual_len valid.
+            unsafe { write_output(&pt, out, out_capacity, out_actual_len) }
+        } else {
+            GMCRYPTO_ERR // commit-on-verify failure; len already 0
+        }
+    })
+}
+
+/// Free a streaming SM4-GCM decryptor without verifying (abort path).
+/// NULL is a no-op. Do NOT call after
+/// [`gmcrypto_sm4_gcm_decryptor_finalize_verify`].
+#[cfg(feature = "sm4-aead")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_decryptor_free(dec: *mut gmcrypto_sm4_gcm_decryptor_t) {
+    if dec.is_null() {
+        return;
+    }
+    // SAFETY: dec came from Box::into_raw and has not been freed.
+    drop(unsafe { Box::from_raw(dec) });
 }
 
 // ============================================================
