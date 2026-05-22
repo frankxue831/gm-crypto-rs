@@ -1721,3 +1721,141 @@ fn sm4_gcm_decryptor_tamper_and_bad_len_return_err() {
     };
     assert_eq!(r2, GMCRYPTO_ERR);
 }
+
+#[cfg(feature = "sm4-aead")]
+#[test]
+fn sm4_gcm_streaming_c_encrypt_c_decrypt_with_truncated_tag() {
+    let key = [0x42u8; 16];
+    let nonce = [0x07u8; 12];
+    let aad = b"cross direction";
+    let pt: Vec<u8> = (0..137u8).map(|i| i.wrapping_mul(31)).collect();
+
+    // Encrypt via C streaming with a 12-byte tag, chunked by 13.
+    let enc = unsafe {
+        gmcrypto_sm4_gcm_encryptor_new(
+            key.as_ptr(),
+            nonce.as_ptr(),
+            nonce.len(),
+            aad.as_ptr(),
+            aad.len(),
+        )
+    };
+    let mut ct = Vec::new();
+    for chunk in pt.chunks(13) {
+        let mut buf = vec![0u8; chunk.len()];
+        let mut a = 0usize;
+        assert_eq!(
+            unsafe {
+                gmcrypto_sm4_gcm_encryptor_update(
+                    enc,
+                    chunk.as_ptr(),
+                    chunk.len(),
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    &mut a,
+                )
+            },
+            GMCRYPTO_OK
+        );
+        ct.extend_from_slice(&buf[..a]);
+    }
+    let mut tag = vec![0u8; 12];
+    let mut tl = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_gcm_encryptor_finalize_with_tag_len(
+                enc,
+                12,
+                tag.as_mut_ptr(),
+                tag.len(),
+                &mut tl,
+            )
+        },
+        GMCRYPTO_OK
+    );
+
+    // Decrypt via C streaming, different chunking (16).
+    let dec = unsafe {
+        gmcrypto_sm4_gcm_decryptor_new(
+            key.as_ptr(),
+            nonce.as_ptr(),
+            nonce.len(),
+            aad.as_ptr(),
+            aad.len(),
+        )
+    };
+    for chunk in ct.chunks(16) {
+        assert_eq!(
+            unsafe { gmcrypto_sm4_gcm_decryptor_update(dec, chunk.as_ptr(), chunk.len()) },
+            GMCRYPTO_OK
+        );
+    }
+    let mut out = vec![0u8; ct.len()];
+    let mut actual = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_gcm_decryptor_finalize_verify(
+                dec,
+                tag.as_ptr(),
+                tag.len(),
+                out.as_mut_ptr(),
+                out.len(),
+                &mut actual,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    out.truncate(actual);
+    assert_eq!(out, pt);
+}
+
+#[cfg(feature = "sm4-aead")]
+#[test]
+fn sm4_gcm_streaming_empty_plaintext() {
+    let key = [0x42u8; 16];
+    let nonce = [0x09u8; 12];
+    let aad = b"aad only";
+    let enc = unsafe {
+        gmcrypto_sm4_gcm_encryptor_new(
+            key.as_ptr(),
+            nonce.as_ptr(),
+            nonce.len(),
+            aad.as_ptr(),
+            aad.len(),
+        )
+    };
+    let mut tag = [0u8; 16];
+    assert_eq!(
+        unsafe { gmcrypto_sm4_gcm_encryptor_finalize(enc, tag.as_mut_ptr()) },
+        GMCRYPTO_OK
+    );
+    let dec = unsafe {
+        gmcrypto_sm4_gcm_decryptor_new(
+            key.as_ptr(),
+            nonce.as_ptr(),
+            nonce.len(),
+            aad.as_ptr(),
+            aad.len(),
+        )
+    };
+    let mut out = [0u8; 1];
+    let mut actual = 9usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_gcm_decryptor_finalize_verify(
+                dec,
+                tag.as_ptr(),
+                tag.len(),
+                out.as_mut_ptr(),
+                out.len(),
+                &mut actual,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(actual, 0);
+
+    // cross-check the tag matches core single-shot on empty plaintext.
+    let (_core_ct, core_tag) = gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, &[]);
+    assert_eq!(tag, core_tag);
+}
