@@ -92,7 +92,7 @@ use gmcrypto_core::sm4::{
 // v0.9 W4 — single-shot AEAD (SM4-GCM / SM4-CCM) FFI, gated on the
 // forwarding `sm4-aead` feature.
 #[cfg(feature = "sm4-aead")]
-use gmcrypto_core::sm4::{GcmTagLen, mode_ccm, mode_gcm};
+use gmcrypto_core::sm4::{GcmTagLen, Sm4GcmEncryptor as InnerSm4GcmEnc, mode_ccm, mode_gcm};
 use gmcrypto_core::{pem, pkcs8};
 use rand_core::TryRng;
 
@@ -159,6 +159,18 @@ pub struct gmcrypto_sm4_cbc_encryptor_t {
 /// confirms it is the last block and validates the PKCS#7 padding.
 pub struct gmcrypto_sm4_cbc_decryptor_t {
     inner: InnerSm4CbcDec,
+}
+
+/// Opaque handle for a streaming (incremental-input) SM4-GCM encryptor
+/// (v0.10 W1). Output-streaming: each
+/// [`gmcrypto_sm4_gcm_encryptor_update`] emits the ciphertext for its
+/// chunk; [`gmcrypto_sm4_gcm_encryptor_finalize`] emits the 16-byte tag.
+/// Construct with [`gmcrypto_sm4_gcm_encryptor_new`]; pair with exactly
+/// one finalize (which frees the handle) **or** one
+/// [`gmcrypto_sm4_gcm_encryptor_free`].
+#[cfg(feature = "sm4-aead")]
+pub struct gmcrypto_sm4_gcm_encryptor_t {
+    inner: InnerSm4GcmEnc,
 }
 
 /// Opaque handle for an SM2 private key.
@@ -1271,6 +1283,103 @@ pub unsafe extern "C" fn gmcrypto_sm4_ccm_decrypt(
             None => GMCRYPTO_ERR,
         }
     })
+}
+
+// ============================================================
+// SM4-GCM AEAD — streaming / incremental-input (v0.10 W1+W2).
+//
+// Wraps gmcrypto_core::sm4::{Sm4GcmEncryptor, Sm4GcmDecryptor}.
+// Lifecycle mirrors the v0.5 CBC-streaming handles: `_new` ->
+// Box::into_raw; `_update` -> &mut *; `_finalize*` -> Box::from_raw
+// (consume + free); `_free` is the abort path (no-op on NULL). Single
+// GMCRYPTO_ERR on every error. Asymmetry: the encryptor `_update`
+// emits ciphertext (out triple); the decryptor `_update` emits NOTHING
+// (commit-on-verify) and plaintext is released only by
+// `_finalize_verify` after a constant-time tag check. Streaming CCM is
+// out of scope (CBC-MAC needs total length up-front). See
+// docs/v0.10-scope.md.
+// ============================================================
+
+/// Construct a streaming SM4-GCM encryptor. `key` is exactly 16 bytes;
+/// `nonce` is `nonce_len` bytes (12 = canonical; other lengths invoke
+/// the extra GHASH J0-derivation per NIST SP 800-38D §8.2.2); `aad` is
+/// the full associated data (the message header, supplied up-front).
+/// Returns NULL on invalid pointer/length input. **Nonce uniqueness is
+/// the caller's responsibility** — reusing `(key, nonce)` is
+/// catastrophic for GCM.
+#[cfg(feature = "sm4-aead")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_new(
+    key: *const u8,
+    nonce: *const u8,
+    nonce_len: usize,
+    aad: *const u8,
+    aad_len: usize,
+) -> *mut gmcrypto_sm4_gcm_encryptor_t {
+    let result = std::panic::catch_unwind(|| {
+        let k = unsafe { try_slice(key, GMCRYPTO_SM4_KEY_SIZE) }?;
+        let n = unsafe { try_slice(nonce, nonce_len) }?;
+        let a = unsafe { try_slice(aad, aad_len) }?;
+        let k_arr: &[u8; GMCRYPTO_SM4_KEY_SIZE] = k.try_into().ok()?;
+        Some(Box::into_raw(Box::new(gmcrypto_sm4_gcm_encryptor_t {
+            inner: InnerSm4GcmEnc::new(k_arr, n, a),
+        })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// Encrypt `pt_len` bytes of plaintext, emitting the ciphertext for
+/// this chunk (length == `pt_len`; GCM does not pad or buffer). The
+/// `out` buffer MUST be at least `pt_len` bytes; on insufficient
+/// capacity returns [`GMCRYPTO_ERR`] (and the required length is written
+/// to `*out_actual_len`), and the encryptor state is left mid-stream
+/// (the chunk's ciphertext is lost — size the buffer correctly).
+/// Returns [`GMCRYPTO_ERR`] once the cumulative plaintext would exceed
+/// the GCM ceiling (`2^36 − 32` bytes); the encryptor is poisoned and
+/// all later calls also return [`GMCRYPTO_ERR`].
+#[cfg(feature = "sm4-aead")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_update(
+    enc: *mut gmcrypto_sm4_gcm_encryptor_t,
+    pt: *const u8,
+    pt_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if enc.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let input = match unsafe { try_slice(pt, pt_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: enc non-null per the check; caller guarantees unique
+        // access for the duration of this call.
+        let e = unsafe { &mut *enc };
+        match e.inner.update(input) {
+            // SAFETY: out valid for out_capacity; out_actual_len valid.
+            Some(ct) => unsafe { write_output(&ct, out, out_capacity, out_actual_len) },
+            None => GMCRYPTO_ERR, // length-ceiling overflow → poisoned
+        }
+    })
+}
+
+/// Free a streaming SM4-GCM encryptor without finalizing (abort path).
+/// Passing NULL is a no-op. Do NOT call after any `_finalize*` — those
+/// already consumed the handle.
+#[cfg(feature = "sm4-aead")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_free(enc: *mut gmcrypto_sm4_gcm_encryptor_t) {
+    if enc.is_null() {
+        return;
+    }
+    // SAFETY: enc came from Box::into_raw and has not been freed.
+    drop(unsafe { Box::from_raw(enc) });
 }
 
 // ============================================================
