@@ -54,11 +54,13 @@ int main(void) {
     size_t ct_len = 0, n = 0;
     size_t split = 20; /* first chunk 20 bytes, rest after */
     if (gmcrypto_sm4_gcm_encryptor_update(enc, pt, split, ct, sizeof ct, &n) != 0) {
+        gmcrypto_sm4_gcm_encryptor_free(enc); /* _update does NOT consume on error */
         return 1;
     }
     ct_len += n;
     if (gmcrypto_sm4_gcm_encryptor_update(enc, pt + split, pt_len - split, ct + ct_len,
                                           sizeof ct - ct_len, &n) != 0) {
+        gmcrypto_sm4_gcm_encryptor_free(enc);
         return 1;
     }
     ct_len += n;
@@ -77,6 +79,7 @@ int main(void) {
     for (size_t off = 0; off < ct_len; off += 16) {
         size_t take = (ct_len - off < 16) ? (ct_len - off) : 16;
         if (gmcrypto_sm4_gcm_decryptor_update(dec, ct + off, take) != 0) {
+            gmcrypto_sm4_gcm_decryptor_free(dec); /* _update does NOT consume on error */
             return 1;
         }
     }

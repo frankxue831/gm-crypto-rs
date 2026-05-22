@@ -1512,13 +1512,19 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_decryptor_update(
 /// Verify `tag` (`tag_len` bytes; the length is validated against the
 /// NIST-permitted set `{4, 8, 12, 13, 14, 15, 16}`) and, on success,
 /// write the full decrypted plaintext (length == total ciphertext fed)
-/// to `(out, out_capacity, out_actual_len)`. Returns [`GMCRYPTO_ERR`]
-/// on tag mismatch, invalid `tag_len`, or length-ceiling overflow —
-/// single failure mode; `*out_actual_len` is set to `0` and no
-/// plaintext is written on the failure path (commit-on-verify).
-/// **Consumes the decryptor — the handle is freed by this call** (even
-/// on error); do NOT call [`gmcrypto_sm4_gcm_decryptor_free`]
-/// afterwards.
+/// to `(out, out_capacity, out_actual_len)`.
+///
+/// Returns [`GMCRYPTO_ERR`] in two cases, both of which still **consume
+/// and free the handle** (do NOT call
+/// [`gmcrypto_sm4_gcm_decryptor_free`] afterwards):
+///
+/// - **Verification failure** (tag mismatch, invalid `tag_len`, or
+///   length-ceiling overflow): `*out_actual_len` is `0` and no
+///   plaintext is written (commit-on-verify; single failure mode).
+/// - **Tag verified but `out` too small**: `*out_actual_len` is set to
+///   the required plaintext length and no plaintext is written. The
+///   handle is consumed, so you cannot retry — size `out` to the total
+///   ciphertext length up-front (GCM plaintext is the same length).
 #[cfg(feature = "sm4-aead")]
 #[allow(clippy::too_many_arguments)]
 #[unsafe(no_mangle)]
