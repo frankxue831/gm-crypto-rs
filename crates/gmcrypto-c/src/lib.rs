@@ -1534,22 +1534,26 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_decryptor_finalize_verify(
         if dec.is_null() {
             return GMCRYPTO_ERR;
         }
+        // Default the reported length to 0 up-front so *every* failure path
+        // (bad tag pointer, tag mismatch, invalid tag_len, overflow)
+        // satisfies the "finalize failure writes 0 to *out_actual_len"
+        // boundary invariant. On success / capacity-retry, write_output
+        // overwrites this with the produced / required length.
+        if !out_actual_len.is_null() {
+            // SAFETY: caller-asserted valid *mut usize.
+            unsafe { ptr::write(out_actual_len, 0) };
+        }
         // SAFETY: dec came from Box::into_raw; take ownership + free.
         let boxed = unsafe { Box::from_raw(dec) };
         let t = match unsafe { try_slice(tag, tag_len) } {
             Some(s) => s,
-            None => return GMCRYPTO_ERR, // boxed dropped → freed
+            None => return GMCRYPTO_ERR, // boxed dropped → freed; len already 0
         };
         if let Some(pt) = boxed.inner.finalize_verify(t) {
             // SAFETY: out valid for out_capacity; out_actual_len valid.
             unsafe { write_output(&pt, out, out_capacity, out_actual_len) }
         } else {
-            // Single failure mode: zero the length, write no plaintext.
-            if !out_actual_len.is_null() {
-                // SAFETY: caller-asserted valid *mut usize.
-                unsafe { ptr::write(out_actual_len, 0) };
-            }
-            GMCRYPTO_ERR
+            GMCRYPTO_ERR // commit-on-verify failure; len already 0
         }
     })
 }
