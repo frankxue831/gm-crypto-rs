@@ -1173,7 +1173,8 @@ fn version_string_matches_crate() {
 use gmcrypto_c::{
     gmcrypto_sm4_ccm_decrypt, gmcrypto_sm4_ccm_encrypt, gmcrypto_sm4_gcm_decrypt,
     gmcrypto_sm4_gcm_decrypt_with_tag_len, gmcrypto_sm4_gcm_encrypt,
-    gmcrypto_sm4_gcm_encrypt_with_tag_len, gmcrypto_sm4_gcm_encryptor_free,
+    gmcrypto_sm4_gcm_encrypt_with_tag_len, gmcrypto_sm4_gcm_encryptor_finalize,
+    gmcrypto_sm4_gcm_encryptor_finalize_with_tag_len, gmcrypto_sm4_gcm_encryptor_free,
     gmcrypto_sm4_gcm_encryptor_new, gmcrypto_sm4_gcm_encryptor_update,
 };
 
@@ -1470,7 +1471,7 @@ fn sm4_gcm_encryptor_chunked_matches_core() {
     let key = [0x42u8; 16];
     let nonce = [0x01u8; 12];
     let aad = b"associated header";
-    let pt: Vec<u8> = (0..200u32).map(|i| (i ^ (i >> 3)) as u8).collect();
+    let pt: Vec<u8> = (0..200u8).map(|i| i ^ (i >> 3)).collect();
 
     let enc = unsafe {
         gmcrypto_sm4_gcm_encryptor_new(
@@ -1507,4 +1508,89 @@ fn sm4_gcm_encryptor_chunked_matches_core() {
 
     let (core_ct, _core_tag) = gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, &pt);
     assert_eq!(ct, core_ct);
+}
+
+#[cfg(feature = "sm4-aead")]
+#[test]
+fn sm4_gcm_encryptor_finalize_matches_core() {
+    let key = [0x42u8; 16];
+    let nonce = [0x01u8; 12];
+    let aad = b"hdr";
+    let pt = b"finalize emits the tag";
+
+    // full 16-byte tag
+    let enc = unsafe {
+        gmcrypto_sm4_gcm_encryptor_new(
+            key.as_ptr(),
+            nonce.as_ptr(),
+            nonce.len(),
+            aad.as_ptr(),
+            aad.len(),
+        )
+    };
+    let mut ct = vec![0u8; pt.len()];
+    let mut actual = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_gcm_encryptor_update(
+                enc,
+                pt.as_ptr(),
+                pt.len(),
+                ct.as_mut_ptr(),
+                ct.len(),
+                &mut actual,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    let mut tag = [0u8; 16];
+    assert_eq!(
+        unsafe { gmcrypto_sm4_gcm_encryptor_finalize(enc, tag.as_mut_ptr()) },
+        GMCRYPTO_OK
+    );
+    let (core_ct, core_tag) = gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, pt);
+    assert_eq!(ct, core_ct);
+    assert_eq!(tag, core_tag);
+
+    // truncated 12-byte tag
+    let enc = unsafe {
+        gmcrypto_sm4_gcm_encryptor_new(
+            key.as_ptr(),
+            nonce.as_ptr(),
+            nonce.len(),
+            aad.as_ptr(),
+            aad.len(),
+        )
+    };
+    let mut ct2 = vec![0u8; pt.len()];
+    let mut a2 = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_gcm_encryptor_update(
+                enc,
+                pt.as_ptr(),
+                pt.len(),
+                ct2.as_mut_ptr(),
+                ct2.len(),
+                &mut a2,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    let mut tag12 = vec![0u8; 12];
+    let mut tl_actual = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_gcm_encryptor_finalize_with_tag_len(
+                enc,
+                12,
+                tag12.as_mut_ptr(),
+                tag12.len(),
+                &mut tl_actual,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(tl_actual, 12);
+    assert_eq!(tag12.as_slice(), &core_tag[..12]);
 }

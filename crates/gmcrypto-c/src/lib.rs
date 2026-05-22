@@ -1369,6 +1369,65 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_update(
     })
 }
 
+/// Finish and emit the full 16-byte tag. **Consumes the encryptor —
+/// the handle is freed by this call** (even on error); do NOT call
+/// [`gmcrypto_sm4_gcm_encryptor_free`] on it afterwards. `tag_out`
+/// must be valid for exactly 16 bytes.
+#[cfg(feature = "sm4-aead")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_finalize(
+    enc: *mut gmcrypto_sm4_gcm_encryptor_t,
+    tag_out: *mut u8,
+) -> c_int {
+    ffi_guard(|| {
+        if enc.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        // SAFETY: enc came from Box::into_raw; take ownership + free
+        // (consumed even if tag_out is invalid, per the CBC precedent).
+        let boxed = unsafe { Box::from_raw(enc) };
+        let tag = boxed.inner.finalize();
+        // SAFETY: caller guarantees tag_out valid for 16 bytes.
+        let tag_dst = match unsafe { try_slice_mut(tag_out, GMCRYPTO_SM4_BLOCK_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        tag_dst.copy_from_slice(&tag);
+        GMCRYPTO_OK
+    })
+}
+
+/// Finish and emit a truncated tag of `tag_len` bytes (`MSB_t` per NIST
+/// SP 800-38D §5.2.1.2). `tag_len` must be in `{4, 8, 12, 13, 14, 15,
+/// 16}` (else [`GMCRYPTO_ERR`]). **Consumes the encryptor — the handle
+/// is freed by this call** (even on error); do NOT call
+/// [`gmcrypto_sm4_gcm_encryptor_free`] afterwards.
+#[cfg(feature = "sm4-aead")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_finalize_with_tag_len(
+    enc: *mut gmcrypto_sm4_gcm_encryptor_t,
+    tag_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if enc.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        // SAFETY: enc came from Box::into_raw; take ownership + free
+        // (consumed even on invalid tag_len — the handle is spent).
+        let boxed = unsafe { Box::from_raw(enc) };
+        let tl = match GcmTagLen::new(tag_len) {
+            Some(t) => t,
+            None => return GMCRYPTO_ERR, // boxed dropped here → freed
+        };
+        let tag = boxed.inner.finalize_with_tag_len(tl);
+        // SAFETY: out valid for out_capacity; out_actual_len valid.
+        unsafe { write_output(&tag, out, out_capacity, out_actual_len) }
+    })
+}
+
 /// Free a streaming SM4-GCM encryptor without finalizing (abort path).
 /// Passing NULL is a no-op. Do NOT call after any `_finalize*` — those
 /// already consumed the handle.
