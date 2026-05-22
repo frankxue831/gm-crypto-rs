@@ -3,6 +3,51 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] — 2026-05-21
+
+v0.10.0 cashes in the streaming AEAD FFI that v0.9 deferred (Q9.6): the
+v0.9 incremental-input buffered SM4-GCM encryptor/decryptor are now
+reachable from C / C++ / Go / Zig / Python. **No public API breakage** —
+entirely additive behind the existing `sm4-aead` feature; v0.9.0 callers
+can `cargo update` without migration. Scope + design rationale in
+`docs/v0.10-scope.md` (Q10.1–Q10.11).
+
+### Added
+
+- **Streaming AEAD FFI for SM4-GCM** (`gmcrypto-c`, behind `sm4-aead`) —
+  9 new symbols + 2 opaque handle types, mirroring the v0.5 CBC-streaming
+  lifecycle:
+  - `gmcrypto_sm4_gcm_encryptor_t` — output-streaming:
+    `gmcrypto_sm4_gcm_encryptor_{new, update, finalize,
+    finalize_with_tag_len, free}`. Each `update` emits its chunk's
+    ciphertext; `finalize` emits the 16-byte tag (or a truncated tag).
+  - `gmcrypto_sm4_gcm_decryptor_t` — input-incremental / output-buffered
+    (commit-on-verify): `gmcrypto_sm4_gcm_decryptor_{new, update,
+    finalize_verify, free}`. `update` emits **nothing**;
+    `finalize_verify` releases the full plaintext only after a
+    constant-time tag check — the AEAD chosen-ciphertext-distinguisher
+    defense, carried across the C boundary.
+  - `_finalize*` consume and free the handle; `_free` is the abort path.
+    Single `GMCRYPTO_ERR` on every failure (no tag-/length-oracle).
+  - C example: `crates/gmcrypto-c/examples/sm4_gcm_streaming.c`.
+
+### Changed
+
+- `gmcrypto-c`'s `regen-header` feature now implies `sm4-aead`. cbindgen
+  drops cfg-gated opaque struct types when the feature is inactive
+  (unlike the v0.9 primitive-only single-shot AEAD functions, which
+  appear unconditionally), so the header is only complete + deterministic
+  when `sm4-aead` is active during regen. Tying it to `regen-header`
+  keeps the documented regen command and the CI drift gate producing the
+  full, stable header.
+
+### Notes
+
+- No new `gmcrypto-core` API; no new dudect target (the FFI is a thin
+  wrapper over the v0.9 `ct_sm4_gcm_decrypt_buffered`-gated path).
+- Streaming **CCM** FFI and the RustCrypto `aead` trait fit remain
+  deferred (`aead` still `0.6.0-rc.10`); see `docs/v0.10-scope.md` §5.
+
 ## [0.9.0] — 2026-05-17
 
 v0.9.0 extends the v0.8 AEAD core with the three items v0.8 explicitly

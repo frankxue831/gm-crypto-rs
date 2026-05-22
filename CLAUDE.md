@@ -1,20 +1,36 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0–v0.8.0 published to crates.io
-2026-05-10 → 2026-05-17**. **v0.9.0 prep on `main` 2026-05-17** —
-**AEAD ergonomics** (extends the v0.8 AEAD core with the three items
-v0.8 deferred): GCM tag-length parameterization via `GcmTagLen` newtype
-+ `mode_gcm::encrypt_with_tag_len` / `decrypt_with_tag_len` (W1; NIST
-SP 800-38D §5.2.1.2 truncated tags `{4,8,12,13,14,15,16}`) +
-incremental-input buffered SM4-GCM `sm4::gcm_streaming::{Sm4GcmEncryptor,
-Sm4GcmDecryptor}` (W2; encryptor output-streaming, decryptor output-
-buffered / commit-on-verify; differential-KAT-equal to single-shot
-across arbitrary chunking) + new dudect target
-`ct_sm4_gcm_decrypt_buffered` (W3) + 6 single-shot AEAD C FFI symbols
-`gmcrypto_sm4_gcm_*` / `gmcrypto_sm4_ccm_*` behind a forwarding
-`sm4-aead` feature on `gmcrypto-c` (W4). Behind the existing `sm4-aead`
-feature flag. Scope doc `docs/v0.9-scope.md` (W0; Q9.1–Q9.10, codex-
-reviewed). No public API changes; no breaking changes — additive only.
+Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0–v0.9.0 published to crates.io
+2026-05-10 → 2026-05-21**. **v0.10.0 prep on `main` 2026-05-21** —
+**streaming AEAD FFI for SM4-GCM** (exposes the v0.9 incremental-input
+buffered encryptor/decryptor through the `gmcrypto-c` C ABI — the item
+v0.9 deferred per Q9.6, now that the Rust streaming API is proven):
+9 new FFI symbols + 2 opaque handle types —
+`gmcrypto_sm4_gcm_encryptor_{new,update,finalize,finalize_with_tag_len,
+free}` (output-streaming) +
+`gmcrypto_sm4_gcm_decryptor_{new,update,finalize_verify,free}`
+(commit-on-verify: `update` emits nothing; `finalize_verify` releases
+plaintext only after the constant-time tag check), behind the existing
+`sm4-aead` feature on `gmcrypto-c`. `_finalize*` consume+free; single
+`GMCRYPTO_ERR`. `regen-header` now **implies** `sm4-aead` (cbindgen drops
+cfg-gated opaque struct types otherwise — the v0.9 single-shot AEAD
+functions used only primitives so were feature-independent). C example
+`crates/gmcrypto-c/examples/sm4_gcm_streaming.c`. Scope doc
+`docs/v0.10-scope.md` (W0; Q10.1–Q10.11). No new `gmcrypto-core` API; no
+new dudect target (thin wrapper over the v0.9-gated path); no breaking
+changes — additive only.
+**v0.9.0** — **AEAD ergonomics** (extends the v0.8 AEAD core with the
+three items v0.8 deferred): GCM tag-length parameterization via
+`GcmTagLen` newtype + `mode_gcm::encrypt_with_tag_len` /
+`decrypt_with_tag_len` (W1; NIST SP 800-38D §5.2.1.2 truncated tags
+`{4,8,12,13,14,15,16}`) + incremental-input buffered SM4-GCM
+`sm4::gcm_streaming::{Sm4GcmEncryptor, Sm4GcmDecryptor}` (W2; encryptor
+output-streaming, decryptor output-buffered / commit-on-verify;
+differential-KAT-equal to single-shot across arbitrary chunking) + new
+dudect target `ct_sm4_gcm_decrypt_buffered` (W3) + 6 single-shot AEAD C
+FFI symbols `gmcrypto_sm4_gcm_*` / `gmcrypto_sm4_ccm_*` behind a
+forwarding `sm4-aead` feature on `gmcrypto-c` (W4). Scope doc
+`docs/v0.9-scope.md` (Q9.1–Q9.10, codex-reviewed).
 **v0.8.0 prep landed on `main` 2026-05-15** — AEAD core: SM4-GCM (NIST
 SP 800-38D / GM/T 0009 / RFC 8998; byte-identical to gmssl 3.1.1
 `sm4 -gcm`) + SM4-CCM (NIST SP 800-38C / RFC 3610 / GM/T 0009; byte-
@@ -30,14 +46,15 @@ Three-crate workspace:
 `crates/gmcrypto-simd/` (SIMD backend; rlib-only, opt-in via
 `gmcrypto-core`'s `sm4-bitsliced-simd` or `sm4-aead` feature).
 
-**Throughput-win + AEAD arc retrospective (v0.5 → v0.9):**
+**Throughput-win + AEAD arc retrospective (v0.5 → v0.10):**
 v0.5.0 = W4 phase 1 scaffolding (transparent delegate).
 v0.5.1 = W4 phase 2 (AVX2 `sbox_x8` in `gmcrypto-simd`, runtime detect).
 v0.6.0 = W4 phase 3 / W6 (`sbox_x32` AVX2 + `sbox_x16` NEON + CBC-decrypt fanout).
 v0.7.0 = cipher modes (public batch API + SM4-CTR + AEAD scope doc).
 v0.8.0 = AEAD core (GHASH primitive + SM4-GCM + SM4-CCM single-shot).
 v0.9.0 = AEAD ergonomics (GCM tag-len param + incremental-input buffered GCM + single-shot AEAD C FFI; per `docs/v0.9-scope.md` Q9.1–Q9.10).
-v0.10.0 = streaming AEAD FFI + CCM incremental input + RustCrypto aead trait fit (per `docs/v0.9-scope.md` §6 Q10.x; aead upstream still on 0.6.0-rc).
+v0.10.0 = streaming AEAD FFI for SM4-GCM (gmcrypto-c; 9 symbols + 2 opaque types exposing the v0.9 encryptor/decryptor to C; anchor-only per `docs/v0.10-scope.md` Q10.1–Q10.11).
+v0.11.0 = (candidate) CCM incremental input + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + pinned dudect runner + AVX-512 sbox_x64 (per `docs/v0.10-scope.md` §6 Q11.x).
 
 Read `README.md`, `SECURITY.md`, `CONTRIBUTING.md` for the user-facing posture.
 This file lists the constraints a coding agent will violate by default.
@@ -117,8 +134,8 @@ cargo build -p gmcrypto-c --release
 cargo build -p gmcrypto-c --features regen-header   # regenerates include/gmcrypto.h
 git diff --exit-code crates/gmcrypto-c/include/gmcrypto.h
 cargo test -p gmcrypto-c                            # c_smoke Rust-equivalence tests
-# v0.9 W4 — AEAD FFI surface (single-shot SM4-GCM / SM4-CCM).
-cargo test -p gmcrypto-c --features sm4-aead        # +6 AEAD c_smoke tests
+# v0.9 W4 / v0.10 — AEAD FFI surface (single-shot + streaming SM4-GCM).
+cargo test -p gmcrypto-c --features sm4-aead        # +14 AEAD c_smoke tests (6 single-shot + 8 streaming)
 cargo clippy -p gmcrypto-c --features sm4-aead --all-targets -- -D warnings
 
 # Dudect harness. Default 100K samples (~75s); CI smoke uses 10K.
@@ -280,12 +297,13 @@ crates/gmcrypto-core/
     data/                   # v0.3 W2 binary KAT fixtures + regen recipe (Q7.9 decision); v0.8 W3 adds sm4_ccm_oracle.c (OpenSSL EVP harness)
 
 crates/gmcrypto-c/          # v0.4 W4 — C ABI shim (cdylib + staticlib + rlib)
-  src/lib.rs                # 37 FFI entry points (31 + v0.9 W4's 6 single-shot AEAD): opaque handles, ffi_guard catch_unwind, GMCRYPTO_ERR on every error. AEAD symbols (gmcrypto_sm4_gcm_* / gmcrypto_sm4_ccm_*) cfg-gated on a forwarding `sm4-aead` feature (= ["gmcrypto-core/sm4-aead"]); streaming AEAD FFI deferred to v0.10
+  src/lib.rs                # 46 FFI entry points (31 + v0.9 W4's 6 single-shot AEAD + v0.10's 9 streaming AEAD): opaque handles, ffi_guard catch_unwind, GMCRYPTO_ERR on every error. AEAD symbols (gmcrypto_sm4_gcm_* / gmcrypto_sm4_ccm_*) cfg-gated on a forwarding `sm4-aead` feature (= ["gmcrypto-core/sm4-aead"]). v0.10 W1-W2 adds 2 opaque types gmcrypto_sm4_gcm_{encryptor,decryptor}_t + 9 symbols (encryptor new/update/finalize/finalize_with_tag_len/free output-streaming; decryptor new/update/finalize_verify/free commit-on-verify); _finalize* consume+free
   build.rs                  # cbindgen runs only under `regen-header` feature or GMCRYPTO_C_REGEN_HEADER=1
   cbindgen.toml             # cbindgen config (C language, include_guard = "GMCRYPTO_H_")
-  include/gmcrypto.h        # committed header (CI gates drift via `git diff --exit-code`). cbindgen does NOT evaluate #[cfg(feature)] so the AEAD prototypes appear unconditionally — regen with/without sm4-aead is identical, drift gate stays green
+  include/gmcrypto.h        # committed header (CI gates drift via `git diff --exit-code`). cbindgen does NOT evaluate #[cfg(feature)] for free functions (single-shot AEAD prototypes appear unconditionally) BUT it DROPS cfg-gated opaque struct types (v0.10's gmcrypto_sm4_gcm_{encryptor,decryptor}_t) when the feature is inactive. So v0.10 makes `regen-header` IMPLY `sm4-aead` — regen is then deterministic + complete and the drift gate stays green with the documented `--features regen-header` command
   examples/sm2_sign.c       # end-to-end C example
-  tests/c_smoke.rs          # 41 Rust-equivalence tests via extern "C" interop (35 default + 6 cfg-gated on sm4-aead)
+  examples/sm4_gcm_streaming.c # v0.10 — chunked SM4-GCM streaming AEAD round-trip via the C ABI (doc-only; CI does not build C examples)
+  tests/c_smoke.rs          # 49 Rust-equivalence tests via extern "C" interop (35 default + 14 cfg-gated on sm4-aead: 6 v0.9 single-shot + 8 v0.10 streaming)
   README.md                 # C/C++/Python/Go/Zig integration docs
 
 crates/gmcrypto-simd/       # v0.5 W4 phase 2 / v0.6 W6 / v0.8 W1 — SIMD backend crate (rlib-only, opt-in via gmcrypto-core's sm4-bitsliced-simd or sm4-aead feature)

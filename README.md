@@ -78,7 +78,36 @@ the design intent in isolation.
   x86, some embedded).
 - Not a comprehensive SM-crypto library yet — see the milestone roadmap.
 
-## v0.9 scope (shipping)
+## v0.10 scope (shipping)
+
+**Streaming AEAD FFI.** v0.10 exposes the v0.9 incremental-input buffered
+SM4-GCM encryptor/decryptor through the `gmcrypto-c` C ABI — the item
+v0.9 deferred (Q9.6) now that the Rust streaming API is proven. Additive
+behind the existing `sm4-aead` feature. Design rationale:
+[`docs/v0.10-scope.md`](docs/v0.10-scope.md).
+
+- **9 streaming AEAD C FFI symbols + 2 opaque handle types** —
+  `gmcrypto_sm4_gcm_encryptor_t` (output-streaming: `new` / `update` →
+  ciphertext per chunk / `finalize` + `finalize_with_tag_len` → tag /
+  `free`) and `gmcrypto_sm4_gcm_decryptor_t` (commit-on-verify: `new` /
+  `update` buffers and emits **nothing** / `finalize_verify` releases
+  plaintext only after the constant-time tag check / `free`).
+  `_finalize*` consume+free the handle; single `GMCRYPTO_ERR` on every
+  failure (no tag-/length-oracle across the boundary). Mirrors the v0.5
+  CBC-streaming lifecycle. C example:
+  [`examples/sm4_gcm_streaming.c`](crates/gmcrypto-c/examples/sm4_gcm_streaming.c).
+
+**No public API breakage — purely additive.** v0.9.0 callers can
+`cargo update` to v0.10.0 without migration. No new `gmcrypto-core` API;
+no new dudect target (the FFI is a thin wrapper over the v0.9
+`ct_sm4_gcm_decrypt_buffered`-gated path).
+
+**Deferred to v0.11** (per [`docs/v0.10-scope.md`](docs/v0.10-scope.md)
+§5/§6): streaming/incremental CCM, RustCrypto `aead` trait fit (upstream
+still `0.6.0-rc.10`), pinned dudect runner, AVX-512 `sbox_x64`, SM4-XTS,
+Argon2-with-SM3.
+
+## v0.9 scope (shipped)
 
 **AEAD ergonomics.** v0.9 extends the v0.8 AEAD core with the three
 items v0.8 deferred: GCM tag-length parameterization, incremental-input
@@ -267,8 +296,9 @@ Everything v0.2 shipped is unchanged:
 | v0.6.0 (shipped) | **W4 milestone close-out — the throughput-win release.** W4 phase 3: NEON 4-way bitsliced SM4 on `aarch64` (compile-time baseline) + AVX2 32-byte full-width packed S-box (`sbox_x32`) + `Sm4CbcDecryptor::process_chunk` SIMD fanout. Per round of the SM4 decrypt, batched blocks' `tau` inputs pack into one SIMD register (32 bytes on x86_64 / 8-block batch, 16 bytes on aarch64 / 4-block batch) — 32× fewer SIMD dispatches per 8-block batch than v0.5.1. CBC encryption stays single-block (chain-of-blocks defeats SIMD packing). New dudect target `ct_sm4_cbc_decrypt_fanout` (Q6.7) gates the fanout path at `\|tau\| < 0.20`. Exhaustive lane-position-shifted SIMD tests (8192 + 4096 cases) per Q6.8. **No public API changes; no breaking changes — additive only.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.6.0]` and `docs/v0.6-scope.md`. |
 | v0.7.0 (shipped) | **Cipher-mode surface expansion.** First version where v0.6's SIMD machinery is callable from user code outside the CBC-decrypt internal path. New: public length-flexible `Sm4Cipher::encrypt_blocks` / `decrypt_blocks` (W1; Q7.7); single-shot `sm4::mode_ctr::encrypt` / `decrypt` (W2; GM/T 0002-2012 §5.4); streaming `sm4::ctr_streaming::Sm4CtrCipher` (W3); new dudect target `ct_sm4_ctr_encrypt` (gates `\|tau\| < 0.20` on every cipher path). Plus the v0.8 AEAD scope doc (`docs/v0.7-aead-scope.md`, Q8.1–Q8.8 sign-off + v0.9 candidate Q-list). **No public API breakage — additive only.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.7.0]`. |
 | v0.8.0 (shipped) | **AEAD core — SM4-GCM + SM4-CCM.** Per `docs/v0.7-aead-scope.md` Q8.1–Q8.8. New: `gmcrypto_simd::ghash::ghash_mul` constant-time GHASH primitive (CLMUL on `x86_64` / PMULL on `aarch64` / software Karatsuba fallback; W1); `sm4::mode_gcm::encrypt` / `decrypt` byte-identical to gmssl 3.1.1 `sm4 -gcm` with bidirectional interop (W2); `sm4::mode_ccm::encrypt` / `decrypt` byte-identical to OpenSSL 3.x EVP `SM4-CCM` across 8 KAT scenarios (W3; gmssl 3.1.1 lacks `sm4 -ccm` so OpenSSL is the oracle — see `docs/v0.8-ccm-kat-sourcing.md`); new dudect targets `ct_sm4_gcm_decrypt` + `ct_sm4_ccm_decrypt` + new CI matrix slot `sm4-bitsliced-simd,sm4-aead` (W4). Behind opt-in `sm4-aead` feature flag (additive; default-off). **No public API breakage — additive only.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.8.0]`. |
-| v0.9.0 (shipping) | **AEAD ergonomics.** Per `docs/v0.9-scope.md` Q9.1–Q9.10. New: `sm4::GcmTagLen` + `mode_gcm::encrypt_with_tag_len` / `decrypt_with_tag_len` (NIST SP 800-38D §5.2.1.2 truncated tags; W1); incremental-input buffered `sm4::Sm4GcmEncryptor` (output-streaming) / `Sm4GcmDecryptor` (output-buffered, commit-on-verify) — differential-KAT-equal to single-shot across arbitrary chunking (W2); new dudect target `ct_sm4_gcm_decrypt_buffered` (W3); 6 single-shot AEAD C FFI symbols (`gmcrypto_sm4_gcm_*` / `gmcrypto_sm4_ccm_*`) behind a forwarding `sm4-aead` feature on `gmcrypto-c` (W4). Behind the existing `sm4-aead` flag. **No public API breakage — additive only.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.9.0]`. |
-| v0.10+ | Per `docs/v0.9-scope.md` §6 (Q10.x): streaming AEAD FFI; CCM incremental input (consumer-driven); RustCrypto `aead` trait fit (upstream still on `0.6.0-rc`); pinned / noise-isolated dudect runner; AVX-512 16-way `sbox_x64`; SM4-XTS for disk encryption; Argon2-with-SM3 alternative KDF (research-only); `digest` / `cipher` upstream-blocked migrations; `wasm-bindgen-test` KAT runner. Each lands behind its own scope-doc cycle. |
+| v0.9.0 (shipped) | **AEAD ergonomics.** Per `docs/v0.9-scope.md` Q9.1–Q9.10. New: `sm4::GcmTagLen` + `mode_gcm::encrypt_with_tag_len` / `decrypt_with_tag_len` (NIST SP 800-38D §5.2.1.2 truncated tags; W1); incremental-input buffered `sm4::Sm4GcmEncryptor` (output-streaming) / `Sm4GcmDecryptor` (output-buffered, commit-on-verify) — differential-KAT-equal to single-shot across arbitrary chunking (W2); new dudect target `ct_sm4_gcm_decrypt_buffered` (W3); 6 single-shot AEAD C FFI symbols (`gmcrypto_sm4_gcm_*` / `gmcrypto_sm4_ccm_*`) behind a forwarding `sm4-aead` feature on `gmcrypto-c` (W4). Behind the existing `sm4-aead` flag. **No public API breakage — additive only.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.9.0]`. |
+| v0.10.0 (shipping) | **Streaming AEAD FFI — SM4-GCM.** Per `docs/v0.10-scope.md` Q10.1–Q10.11. New: 9 `gmcrypto-c` FFI symbols + 2 opaque handle types exposing the v0.9 incremental-input buffered SM4-GCM encryptor (output-streaming) / decryptor (commit-on-verify) to C/C++/Go/Zig/Python — `gmcrypto_sm4_gcm_encryptor_{new,update,finalize,finalize_with_tag_len,free}` + `gmcrypto_sm4_gcm_decryptor_{new,update,finalize_verify,free}`, behind the existing `sm4-aead` feature on `gmcrypto-c`; `_finalize*` consume+free, single `GMCRYPTO_ERR`; C example `examples/sm4_gcm_streaming.c`. `regen-header` now implies `sm4-aead` (cbindgen drops cfg-gated opaque structs otherwise). No new `gmcrypto-core` API; no new dudect target. **No public API breakage — additive only.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.10.0]`. |
+| v0.11+ | Per `docs/v0.10-scope.md` §6 (Q11.x): streaming / incremental CCM (consumer-driven); RustCrypto `aead` trait fit (upstream still on `0.6.0-rc.10`); pinned / noise-isolated dudect runner; AVX-512 16-way `sbox_x64`; SM4-XTS for disk encryption; Argon2-with-SM3 alternative KDF (research-only); `digest` / `cipher` upstream-blocked migrations; `wasm-bindgen-test` KAT runner. Each lands behind its own scope-doc cycle. |
 | v1.0 | API stabilization. |
 
 ## Quick-start
