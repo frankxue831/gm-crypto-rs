@@ -40,7 +40,18 @@ default = []
 # Opt-in: regenerate `include/gmcrypto.h` via cbindgen on build.
 # Default builds skip cbindgen entirely (saves ~5s per build and
 # avoids the cbindgen dependency on every consumer's machine).
-regen-header = ["dep:cbindgen"]
+#
+# v0.10: regen-header IMPLIES sm4-aead. cbindgen does not evaluate
+# `#[cfg(feature)]` for free functions (so the AEAD prototypes appear
+# unconditionally), BUT it *does* drop cfg-gated opaque struct types
+# (and the functions referencing them) when the feature is inactive.
+# The v0.10 streaming AEAD FFI adds such structs
+# (gmcrypto_sm4_gcm_encryptor_t / _decryptor_t), so the header is only
+# complete + deterministic when sm4-aead is active during regen. Tying
+# it to regen-header keeps the documented `--features regen-header`
+# command (and the CI drift gate) producing the full, stable header
+# with no extra flags.
+regen-header = ["dep:cbindgen", "sm4-aead"]
 # v0.9 W4 — forward the core AEAD gate so the single-shot SM4-GCM /
 # SM4-CCM FFI surface compiles. Streaming AEAD FFI is deferred to
 # v0.10 (ABI-permanence risk before the Rust streaming API settles —

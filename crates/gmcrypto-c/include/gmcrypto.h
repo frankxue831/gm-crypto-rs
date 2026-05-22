@@ -99,6 +99,27 @@ typedef struct gmcrypto_sm4_cbc_decryptor_t gmcrypto_sm4_cbc_decryptor_t;
 typedef struct gmcrypto_sm4_cbc_encryptor_t gmcrypto_sm4_cbc_encryptor_t;
 
 /*
+ Opaque handle for a streaming (incremental-input, output-BUFFERED)
+ SM4-GCM decryptor (v0.10 W2). Commit-on-verify:
+ [`gmcrypto_sm4_gcm_decryptor_update`] buffers ciphertext and emits
+ **nothing**; [`gmcrypto_sm4_gcm_decryptor_finalize_verify`] releases
+ the full plaintext only after a constant-time tag check. Memory is
+ `O(message)`. Construct with [`gmcrypto_sm4_gcm_decryptor_new`].
+ */
+typedef struct gmcrypto_sm4_gcm_decryptor_t gmcrypto_sm4_gcm_decryptor_t;
+
+/*
+ Opaque handle for a streaming (incremental-input) SM4-GCM encryptor
+ (v0.10 W1). Output-streaming: each
+ [`gmcrypto_sm4_gcm_encryptor_update`] emits the ciphertext for its
+ chunk; [`gmcrypto_sm4_gcm_encryptor_finalize`] emits the 16-byte tag.
+ Construct with [`gmcrypto_sm4_gcm_encryptor_new`]; pair with exactly
+ one finalize (which frees the handle) **or** one
+ [`gmcrypto_sm4_gcm_encryptor_free`].
+ */
+typedef struct gmcrypto_sm4_gcm_encryptor_t gmcrypto_sm4_gcm_encryptor_t;
+
+/*
  Opaque handle for an SM4 cipher (key-scheduled).
  */
 typedef struct gmcrypto_sm4_t gmcrypto_sm4_t;
@@ -481,6 +502,127 @@ int gmcrypto_sm4_ccm_decrypt(const uint8_t *key,
                              uintptr_t pt_capacity,
                              uintptr_t *pt_actual_len)
 ;
+
+/*
+ Construct a streaming SM4-GCM encryptor. `key` is exactly 16 bytes;
+ `nonce` is `nonce_len` bytes (12 = canonical; other lengths invoke
+ the extra GHASH J0-derivation per NIST SP 800-38D §8.2.2); `aad` is
+ the full associated data (the message header, supplied up-front).
+ Returns NULL on invalid pointer/length input. **Nonce uniqueness is
+ the caller's responsibility** — reusing `(key, nonce)` is
+ catastrophic for GCM.
+ */
+
+gmcrypto_sm4_gcm_encryptor_t *gmcrypto_sm4_gcm_encryptor_new(const uint8_t *key,
+                                                             const uint8_t *nonce,
+                                                             uintptr_t nonce_len,
+                                                             const uint8_t *aad,
+                                                             uintptr_t aad_len)
+;
+
+/*
+ Encrypt `pt_len` bytes of plaintext, emitting the ciphertext for
+ this chunk (length == `pt_len`; GCM does not pad or buffer). The
+ `out` buffer MUST be at least `pt_len` bytes; on insufficient
+ capacity returns [`GMCRYPTO_ERR`] (and the required length is written
+ to `*out_actual_len`), and the encryptor state is left mid-stream
+ (the chunk's ciphertext is lost — size the buffer correctly).
+ Returns [`GMCRYPTO_ERR`] once the cumulative plaintext would exceed
+ the GCM ceiling (`2^36 − 32` bytes); the encryptor is poisoned and
+ all later calls also return [`GMCRYPTO_ERR`].
+ */
+
+int gmcrypto_sm4_gcm_encryptor_update(gmcrypto_sm4_gcm_encryptor_t *enc,
+                                      const uint8_t *pt,
+                                      uintptr_t pt_len,
+                                      uint8_t *out,
+                                      uintptr_t out_capacity,
+                                      uintptr_t *out_actual_len)
+;
+
+/*
+ Finish and emit the full 16-byte tag. **Consumes the encryptor —
+ the handle is freed by this call** (even on error); do NOT call
+ [`gmcrypto_sm4_gcm_encryptor_free`] on it afterwards. `tag_out`
+ must be valid for exactly 16 bytes.
+ */
+ int gmcrypto_sm4_gcm_encryptor_finalize(gmcrypto_sm4_gcm_encryptor_t *enc, uint8_t *tag_out) ;
+
+/*
+ Finish and emit a truncated tag of `tag_len` bytes (`MSB_t` per NIST
+ SP 800-38D §5.2.1.2). `tag_len` must be in `{4, 8, 12, 13, 14, 15,
+ 16}` (else [`GMCRYPTO_ERR`]). **Consumes the encryptor — the handle
+ is freed by this call** (even on error); do NOT call
+ [`gmcrypto_sm4_gcm_encryptor_free`] afterwards.
+ */
+
+int gmcrypto_sm4_gcm_encryptor_finalize_with_tag_len(gmcrypto_sm4_gcm_encryptor_t *enc,
+                                                     uintptr_t tag_len,
+                                                     uint8_t *out,
+                                                     uintptr_t out_capacity,
+                                                     uintptr_t *out_actual_len)
+;
+
+/*
+ Free a streaming SM4-GCM encryptor without finalizing (abort path).
+ Passing NULL is a no-op. Do NOT call after any `_finalize*` — those
+ already consumed the handle.
+ */
+ void gmcrypto_sm4_gcm_encryptor_free(gmcrypto_sm4_gcm_encryptor_t *enc) ;
+
+/*
+ Construct a streaming SM4-GCM decryptor. Same parameter contract as
+ [`gmcrypto_sm4_gcm_encryptor_new`]. Returns NULL on invalid input.
+ */
+
+gmcrypto_sm4_gcm_decryptor_t *gmcrypto_sm4_gcm_decryptor_new(const uint8_t *key,
+                                                             const uint8_t *nonce,
+                                                             uintptr_t nonce_len,
+                                                             const uint8_t *aad,
+                                                             uintptr_t aad_len)
+;
+
+/*
+ Buffer `ct_len` bytes of ciphertext and fold them into the running
+ GHASH. **Emits no plaintext** (commit-on-verify) — there is no
+ output parameter. Returns [`GMCRYPTO_ERR`] only on null handle or
+ invalid input pointer; a length-ceiling overflow is latched and
+ surfaces as [`GMCRYPTO_ERR`] at
+ [`gmcrypto_sm4_gcm_decryptor_finalize_verify`].
+ */
+
+int gmcrypto_sm4_gcm_decryptor_update(gmcrypto_sm4_gcm_decryptor_t *dec,
+                                      const uint8_t *ct,
+                                      uintptr_t ct_len)
+;
+
+/*
+ Verify `tag` (`tag_len` bytes; the length is validated against the
+ NIST-permitted set `{4, 8, 12, 13, 14, 15, 16}`) and, on success,
+ write the full decrypted plaintext (length == total ciphertext fed)
+ to `(out, out_capacity, out_actual_len)`. Returns [`GMCRYPTO_ERR`]
+ on tag mismatch, invalid `tag_len`, or length-ceiling overflow —
+ single failure mode; `*out_actual_len` is set to `0` and no
+ plaintext is written on the failure path (commit-on-verify).
+ **Consumes the decryptor — the handle is freed by this call** (even
+ on error); do NOT call [`gmcrypto_sm4_gcm_decryptor_free`]
+ afterwards.
+ */
+
+int gmcrypto_sm4_gcm_decryptor_finalize_verify(gmcrypto_sm4_gcm_decryptor_t *dec,
+                                               const uint8_t *tag,
+                                               uintptr_t tag_len,
+                                               uint8_t *out,
+                                               uintptr_t out_capacity,
+                                               uintptr_t *out_actual_len)
+;
+
+/*
+ Free a streaming SM4-GCM decryptor without verifying (abort path).
+ NULL is a no-op. Do NOT call after
+ [`gmcrypto_sm4_gcm_decryptor_finalize_verify`].
+ */
+ void gmcrypto_sm4_gcm_decryptor_free(gmcrypto_sm4_gcm_decryptor_t *dec) ;
 
 /*
  Construct an SM2 private key from a 32-byte big-endian scalar.
