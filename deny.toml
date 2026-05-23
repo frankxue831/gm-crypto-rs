@@ -59,14 +59,16 @@ allow = [
     # the consumer; default-features build pulls none of them in.
     # CI runs `cargo deny check --exclude-dev` (default features) AND
     # `cargo deny check --all-features --exclude-dev` (this path).
-    # Pin major+minor; future 0.11 / 0.5 lines are a v0.5+ candidate.
+    # Migrated to the digest 0.11 / cipher 0.5 line in v0.11 (the
+    # crypto-common 0.2 / hybrid-array generation).
     { name = "digest" },
     { name = "cipher" },
-    # Transitive deps shared by digest / cipher via crypto_common.
+    # Transitive deps shared by digest / cipher via crypto-common 0.2.
     { name = "crypto-common" },
     { name = "inout" },
-    # Build-time helper of generic-array (the digest/cipher path picks
-    # it up in addition to crypto-bigint's tree).
+    # Build-time helper of generic-array. Post-v0.11 the digest/cipher
+    # path uses hybrid-array, not generic-array; generic-array (and this
+    # helper) now reach the tree only via crypto-bigint.
     { name = "version_check" },
 
     # v0.4 W4 — `gmcrypto-c` workspace member (FFI shim crate).

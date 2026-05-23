@@ -215,8 +215,10 @@ fn sm4_cipher_trait_matches_inherent() {
 }
 
 /// cipher 0.5 multi-block trait path (`encrypt_blocks` / `decrypt_blocks`)
-/// exercises the backend's tail loop (`ParBlocksSize` = `U1`) — invisible to the
-/// single-block KATs. Ground truth is the inherent per-block encrypt.
+/// drives the new backend once per block (`ParBlocksSize` = `U1`, so cipher
+/// 0.5's `BlocksCtx` calls `encrypt_block` per block) — a path the
+/// single-block KATs don't reach. Ground truth is the inherent per-block
+/// encrypt.
 #[test]
 fn sm4_cipher_trait_multiblock_matches_inherent() {
     let key = [0x11u8; 16];
