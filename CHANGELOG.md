@@ -3,6 +3,51 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.12.0] — 2026-05-23
+
+v0.12.0 adds **SM4-XTS** — a tweakable block-cipher mode for disk/sector
+encryption (GB/T 17964-2021, GM-T OID `1.2.156.10197.1.104.10`) — behind the
+new opt-in `sm4-xts` feature. Single-shot, **full ciphertext stealing**,
+byte-identical to OpenSSL 3.x EVP `SM4-XTS` (`xts_standard=GB`). **Default-features
+users are unaffected** — additive, no API or behavior change, no new dependency.
+Scope + design rationale in `docs/v0.12-scope.md` (Q12.1–Q12.13); KAT sourcing
+in `docs/v0.12-xts-kat-sourcing.md`.
+
+### Added
+
+- **SM4-XTS single-shot mode** (`sm4::mode_xts::{encrypt, decrypt}`,
+  `sm4::mode_xts::XTS_KEY_SIZE`) behind the opt-in `sm4-xts` feature:
+  - GB/T 17964-2021 (**not** IEEE 1619 — the two differ in the GF(2¹²⁸) tweak
+    doubling; GB uses the bit-reflected / GHASH-style convention). Byte-identical
+    to OpenSSL 3.x EVP `SM4-XTS` with `xts_standard=GB`, validated by KAT across
+    16/32/48/64 B whole-block and 17/20/31 B ciphertext-stealing lengths.
+  - 32-byte key (`Key1 ‖ Key2`) + raw 16-byte tweak; data units of any length
+    in `[16 B, 16 MiB]` (the NIST SP 800-38E 2²⁰-block ceiling). Single `None`
+    failure mode (`len` out of range or `Key1 == Key2`).
+  - **Confidentiality only — no authentication.** Callers needing integrity use
+    an AEAD mode (GCM/CCM). The per-data-unit tweak-uniqueness contract is the
+    caller's responsibility.
+  - Pure `gmcrypto-core` — **no new dependency** (the α-doubling is a trivial
+    bit-reflected multiply-by-x, not GHASH); the whole-block bulk rides the
+    `Sm4Cipher::encrypt_blocks` batch API and picks up the SIMD fanout under
+    `sm4-bitsliced-simd`. Constant-time tweak doubling (masked carry) +
+    `subtle` weak-key compare.
+  - New dudect target `ct_sm4_xts_decrypt` (cfg-gated on `sm4-xts`, gated at a
+    CTS data-unit length, `|tau| < 0.20`).
+
+### Fixed
+
+- **CI dudect feature-conditional gates now actually fire.** `MATRIX_FEATURES`
+  was `env`-scoped to the bench step only, so the "Parse and gate" step saw an
+  empty value and the `sm4-bitsliced-simd` / `sm4-aead` / `sm4-xts` conditional
+  `|tau|` gates never applied. Re-declared on the parse step in both dudect
+  workflows (latent since v0.5/v0.8).
+
+### Deferred
+
+- **C FFI for SM4-XTS** (`gmcrypto_sm4_xts_*`) — to v0.13 (the v0.8 AEAD-core
+  precedent: land the Rust core, let the API soak, add the C ABI next cycle).
+
 ## [0.11.0] — 2026-05-23
 
 v0.11.0 modernizes the opt-in RustCrypto trait fit, migrating from

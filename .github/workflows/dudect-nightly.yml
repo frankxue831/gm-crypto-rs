@@ -55,11 +55,14 @@ jobs:
         # path. The new `ct_sm4_gcm_decrypt` and `ct_sm4_ccm_decrypt`
         # targets are cfg-gated on `sm4-aead`; same `|tau| < 0.20`
         # gate at the 100K-sample budget.
+        # v0.12 W3 — the fourth entry also carries `sm4-xts`, gating the
+        # `ct_sm4_xts_decrypt` target (cfg-gated on `sm4-xts`) at a CTS
+        # data-unit length; same `|tau| < 0.20` gate.
         features:
           - "default"
           - "sm4-bitsliced"
           - "sm4-bitsliced-simd"
-          - "sm4-bitsliced-simd,sm4-aead"
+          - "sm4-bitsliced-simd,sm4-aead,sm4-xts"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -109,6 +112,11 @@ jobs:
           fi
 
       - name: Parse and gate
+        env:
+          # Must be re-declared here: `env` is step-scoped, so without this the
+          # parse step sees an empty MATRIX_FEATURES and the feature-conditional
+          # gates (sm4-bitsliced-simd / sm4-aead / sm4-xts) would never fire.
+          MATRIX_FEATURES: ${{ matrix.features }}
         run: |
           python3 - <<'PY'
           # Same |tau| gate as the PR-smoke job. Nightly's value is the
@@ -217,6 +225,11 @@ jobs:
               # 0.20 gate at the 100K-sample budget.
               required_low["ct_sm4_gcm_decrypt"] = 0.20
               required_low["ct_sm4_ccm_decrypt"] = 0.20
+          if "sm4-xts" in matrix_features:
+              # v0.12 W3 — SM4-XTS decrypt target (Q12.9 of
+              # docs/v0.12-scope.md). Class-split by master key at a CTS
+              # (non-block-multiple) length; same 0.20 gate at 100K.
+              required_low["ct_sm4_xts_decrypt"] = 0.20
 
           # v0.5 W4 phase 2 prep — gross-regression sentinel for
           # targets too noisy for a 0.20 gate on the current
