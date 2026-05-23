@@ -132,9 +132,17 @@ fn split_keys(key: &[u8; XTS_KEY_SIZE], len: usize) -> Option<(Sm4Cipher, Sm4Cip
     if bool::from(key[..KEY_SIZE].ct_eq(&key[KEY_SIZE..])) {
         return None;
     }
-    let key1: &[u8; KEY_SIZE] = key[..KEY_SIZE].try_into().expect("16-byte half");
-    let key2: &[u8; KEY_SIZE] = key[KEY_SIZE..].try_into().expect("16-byte half");
-    Some((Sm4Cipher::new(key1), Sm4Cipher::new(key2)))
+    // Copy each half into a fixed array (no fallible `try_into`, no panic
+    // path) and zeroize the copies once the ciphers have absorbed them
+    // (`Sm4Cipher` is itself `ZeroizeOnDrop`).
+    let mut key1 = [0u8; KEY_SIZE];
+    let mut key2 = [0u8; KEY_SIZE];
+    key1.copy_from_slice(&key[..KEY_SIZE]);
+    key2.copy_from_slice(&key[KEY_SIZE..]);
+    let ciphers = (Sm4Cipher::new(&key1), Sm4Cipher::new(&key2));
+    key1.zeroize();
+    key2.zeroize();
+    Some(ciphers)
 }
 
 /// Encrypt `data_unit` under (`key`, `tweak`) in SM4-XTS mode with full
@@ -196,7 +204,7 @@ fn xts_encrypt(c1: &Sm4Cipher, c2: &Sm4Cipher, tweak: &[u8; BLOCK_SIZE], data: &
 
     if rem != 0 {
         // CTS. `t` is now T_{q-1} (tweak for the last full block).
-        let t_last = t;
+        let mut t_last = t;
         let mut t_steal = t;
         mul_alpha(&mut t_steal); // T_q
 
@@ -219,9 +227,19 @@ fn xts_encrypt(c1: &Sm4Cipher, c2: &Sm4Cipher, tweak: &[u8; BLOCK_SIZE], data: &
         // Output: [normal blocks] ‖ C_{q-1} (pp) ‖ CC[..rem].
         out.extend_from_slice(&pp);
         out.extend_from_slice(&cc[..rem]);
+
+        // Wipe the secret-derived CTS tweak copies.
+        t_last.zeroize();
+        t_steal.zeroize();
     }
 
+    // Wipe all secret-derived tweak material (the running tweak + the stored
+    // per-block tweaks). The returned plaintext/ciphertext is the caller's to
+    // manage, as in the other modes; `Sm4Cipher` zeroizes its keys on drop.
     t.zeroize();
+    for tw in &mut tweaks {
+        tw.zeroize();
+    }
     out
 }
 
@@ -257,7 +275,7 @@ fn xts_decrypt(c1: &Sm4Cipher, c2: &Sm4Cipher, tweak: &[u8; BLOCK_SIZE], data: &
 
     if rem != 0 {
         // `t` is now T_{q-1}.
-        let t_last = t;
+        let mut t_last = t;
         let mut t_steal = t;
         mul_alpha(&mut t_steal); // T_q
 
@@ -280,9 +298,19 @@ fn xts_decrypt(c1: &Sm4Cipher, c2: &Sm4Cipher, tweak: &[u8; BLOCK_SIZE], data: &
         // Output: [normal blocks] ‖ P_{q-1} (cc) ‖ PP[..rem].
         out.extend_from_slice(&cc);
         out.extend_from_slice(&pp[..rem]);
+
+        // Wipe the secret-derived CTS tweak copies.
+        t_last.zeroize();
+        t_steal.zeroize();
     }
 
+    // Wipe all secret-derived tweak material (the running tweak + the stored
+    // per-block tweaks). The returned plaintext is the caller's to manage, as
+    // in the other modes; `Sm4Cipher` zeroizes its keys on drop.
     t.zeroize();
+    for tw in &mut tweaks {
+        tw.zeroize();
+    }
     out
 }
 

@@ -56,6 +56,49 @@ const VECTORS: &[XtsVector] = &[
         pt: &hex!("00112233445566778899aabbccddeeff00112233"),
         ct: &hex!("e42c1aff8629401515f2edac4eedbe69b3fbef63"),
     },
+    // >2 blocks: exercises the T_1, T_2 tweak sequence (a doubling bug past
+    // block 1 cannot hide behind round-trip tests).
+    XtsVector {
+        name: "whole-block 48 (3 blocks)",
+        key: KEY,
+        tweak: TWEAK,
+        pt: &hex!(
+            "000102030405060708090a0b0c0d0e0f"
+            "101112131415161718191a1b1c1d1e1f"
+            "202122232425262728292a2b2c2d2e2f"
+        ),
+        ct: &hex!(
+            "0ea2682c092266e7addac59e91188142"
+            "5f738553a8ad568ed5a9969c4ff1c14a"
+            "a19e80d3e8873192572d8df108e30c2d"
+        ),
+    },
+    XtsVector {
+        name: "whole-block 64 (4 blocks)",
+        key: KEY,
+        tweak: TWEAK,
+        pt: &hex!(
+            "000102030405060708090a0b0c0d0e0f"
+            "101112131415161718191a1b1c1d1e1f"
+            "202122232425262728292a2b2c2d2e2f"
+            "303132333435363738393a3b3c3d3e3f"
+        ),
+        ct: &hex!(
+            "0ea2682c092266e7addac59e91188142"
+            "5f738553a8ad568ed5a9969c4ff1c14a"
+            "a19e80d3e8873192572d8df108e30c2d"
+            "0151521712dca84cb19bbb52bff04474"
+        ),
+    },
+    // CTS with the largest possible remainder (r=15): exercises the steal at
+    // a different boundary than r=1/r=4.
+    XtsVector {
+        name: "cts 31 (r=15)",
+        key: KEY,
+        tweak: TWEAK,
+        pt: &hex!("00112233445566778899aabbccddeeff00112233445566778899aabbccddee"),
+        ct: &hex!("96417b649229dd800d4904e1914cb4dfb3fbef63165a03942ea2b4b7bc67af"),
+    },
 ];
 
 #[test]
