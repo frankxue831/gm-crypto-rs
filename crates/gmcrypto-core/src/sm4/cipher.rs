@@ -342,25 +342,27 @@ impl crate::traits::BlockCipher for Sm4Cipher {
 
 #[cfg(feature = "cipher-traits")]
 mod cipher_impl {
-    //! `cipher::BlockEncrypt` / `cipher::BlockDecrypt`-compatible impl
-    //! for [`Sm4Cipher`] (v0.4 W2; Q4.3).
+    //! `cipher::BlockCipherEncrypt` / `cipher::BlockCipherDecrypt`-compatible
+    //! impl for [`Sm4Cipher`] (v0.4 W2; cipher 0.5 backend reshape in v0.11).
     //!
-    //! Behind the `cipher-traits` feature flag. The cipher 0.4 trait
-    //! surface uses a rank-2 backend pattern: callers invoke
-    //! `encrypt_with_backend` / `decrypt_with_backend` with a
-    //! `BlockClosure`, and the impl calls the closure with a
-    //! `BlockBackend`. Following the `aes` crate's pattern.
+    //! Behind the `cipher-traits` feature flag. cipher 0.5 uses a rank-2
+    //! backend pattern with *separate* encrypt/decrypt backend traits:
+    //! callers invoke `encrypt_with_backend` / `decrypt_with_backend` with a
+    //! closure, and the impl calls the closure with a `BlockCipherEncBackend`
+    //! / `BlockCipherDecBackend`. (cipher 0.4's single `BlockBackend` +
+    //! `BlockClosure` and the `BlockCipher` marker are gone.)
     //!
-    //! Block size = 16 bytes; key size = 16 bytes. Output is byte-
-    //! identical to the inherent
+    //! Block size = 16 bytes; key size = 16 bytes. Output is byte-identical
+    //! to the inherent
     //! [`Sm4Cipher::encrypt_block`] / [`Sm4Cipher::decrypt_block`].
 
     use super::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
     use cipher::consts::{U1, U16};
-    use cipher::crypto_common::{Key, KeyInit, KeySizeUser, ParBlocksSizeUser};
     use cipher::inout::InOut;
     use cipher::{
-        BlockBackend, BlockCipher, BlockClosure, BlockDecrypt, BlockEncrypt, BlockSizeUser,
+        Block, BlockCipherDecBackend, BlockCipherDecClosure, BlockCipherDecrypt,
+        BlockCipherEncBackend, BlockCipherEncClosure, BlockCipherEncrypt, BlockSizeUser, Key,
+        KeyInit, KeySizeUser, ParBlocksSizeUser,
     };
 
     const _: () = assert!(BLOCK_SIZE == 16, "cipher trait fit assumes U16 block");
@@ -381,52 +383,61 @@ mod cipher_impl {
         }
     }
 
-    impl BlockCipher for Sm4Cipher {}
-
-    struct Sm4Backend<'a> {
+    struct Sm4EncBackend<'a> {
         cipher: &'a Sm4Cipher,
-        decrypt: bool,
     }
 
-    impl BlockSizeUser for Sm4Backend<'_> {
+    impl BlockSizeUser for Sm4EncBackend<'_> {
         type BlockSize = U16;
     }
 
-    impl ParBlocksSizeUser for Sm4Backend<'_> {
+    impl ParBlocksSizeUser for Sm4EncBackend<'_> {
         type ParBlocksSize = U1;
     }
 
-    impl BlockBackend for Sm4Backend<'_> {
+    impl BlockCipherEncBackend for Sm4EncBackend<'_> {
         #[inline]
-        fn proc_block(&mut self, mut block: InOut<'_, '_, cipher::Block<Self>>) {
+        fn encrypt_block(&self, mut block: InOut<'_, '_, Block<Self>>) {
             let mut buf = [0u8; BLOCK_SIZE];
-            buf.copy_from_slice(block.get_in().as_slice());
-            if self.decrypt {
-                self.cipher.decrypt_block(&mut buf);
-            } else {
-                self.cipher.encrypt_block(&mut buf);
-            }
+            buf.copy_from_slice(block.get_in());
+            self.cipher.encrypt_block(&mut buf);
             block.get_out().copy_from_slice(&buf);
         }
-        // ParBlocksSize = U1, so the default `proc_par_blocks` falls back
-        // to `proc_block` for each block. No override needed.
+        // ParBlocksSize = U1, so the default `encrypt_par_blocks` /
+        // `encrypt_tail_blocks` fall back to `encrypt_block` per block.
     }
 
-    impl BlockEncrypt for Sm4Cipher {
-        fn encrypt_with_backend(&self, f: impl BlockClosure<BlockSize = Self::BlockSize>) {
-            f.call(&mut Sm4Backend {
-                cipher: self,
-                decrypt: false,
-            });
+    struct Sm4DecBackend<'a> {
+        cipher: &'a Sm4Cipher,
+    }
+
+    impl BlockSizeUser for Sm4DecBackend<'_> {
+        type BlockSize = U16;
+    }
+
+    impl ParBlocksSizeUser for Sm4DecBackend<'_> {
+        type ParBlocksSize = U1;
+    }
+
+    impl BlockCipherDecBackend for Sm4DecBackend<'_> {
+        #[inline]
+        fn decrypt_block(&self, mut block: InOut<'_, '_, Block<Self>>) {
+            let mut buf = [0u8; BLOCK_SIZE];
+            buf.copy_from_slice(block.get_in());
+            self.cipher.decrypt_block(&mut buf);
+            block.get_out().copy_from_slice(&buf);
         }
     }
 
-    impl BlockDecrypt for Sm4Cipher {
-        fn decrypt_with_backend(&self, f: impl BlockClosure<BlockSize = Self::BlockSize>) {
-            f.call(&mut Sm4Backend {
-                cipher: self,
-                decrypt: true,
-            });
+    impl BlockCipherEncrypt for Sm4Cipher {
+        fn encrypt_with_backend(&self, f: impl BlockCipherEncClosure<BlockSize = Self::BlockSize>) {
+            f.call(&Sm4EncBackend { cipher: self });
+        }
+    }
+
+    impl BlockCipherDecrypt for Sm4Cipher {
+        fn decrypt_with_backend(&self, f: impl BlockCipherDecClosure<BlockSize = Self::BlockSize>) {
+            f.call(&Sm4DecBackend { cipher: self });
         }
     }
 }
