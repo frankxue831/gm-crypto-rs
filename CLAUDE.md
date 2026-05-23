@@ -1,24 +1,41 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0–v0.9.0 published to crates.io
-2026-05-10 → 2026-05-21**. **v0.10.0 prep on `main` 2026-05-21** —
-**streaming AEAD FFI for SM4-GCM** (exposes the v0.9 incremental-input
-buffered encryptor/decryptor through the `gmcrypto-c` C ABI — the item
-v0.9 deferred per Q9.6, now that the Rust streaming API is proven):
-9 new FFI symbols + 2 opaque handle types —
-`gmcrypto_sm4_gcm_encryptor_{new,update,finalize,finalize_with_tag_len,
-free}` (output-streaming) +
-`gmcrypto_sm4_gcm_decryptor_{new,update,finalize_verify,free}`
-(commit-on-verify: `update` emits nothing; `finalize_verify` releases
-plaintext only after the constant-time tag check), behind the existing
-`sm4-aead` feature on `gmcrypto-c`. `_finalize*` consume+free; single
-`GMCRYPTO_ERR`. `regen-header` now **implies** `sm4-aead` (cbindgen drops
-cfg-gated opaque struct types otherwise — the v0.9 single-shot AEAD
-functions used only primitives so were feature-independent). C example
+Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0–v0.10.0 published to crates.io
+2026-05-10 → 2026-05-23**. **v0.11.0 prep on `main` 2026-05-23** —
+**RustCrypto trait-fit modernization**: migrate the opt-in
+`digest-traits` / `cipher-traits` impls from `digest 0.10` / `cipher 0.4`
+to `digest 0.11` / `cipher 0.5` (the `crypto-common 0.2` / `hybrid-array`
+generation), in-place, both deps together (per `docs/v0.11-scope.md`
+Q11.1–Q11.11, codex-reviewed). `sm3.rs` `Digest` impl **unchanged**;
+`hmac.rs` `crypto_common`→`common` re-export, and `Mac` is now a blanket
+impl over `Update+FixedOutput+MacMarker` so HMAC construction moves to
+`KeyInit::new_from_slice` (`digest 0.11`'s `Mac` dropped the `KeyInit`
+supertrait — `HmacSm3` still impls `KeyInit`); `sm4/cipher.rs` backend
+reshaped to cipher 0.5's **separate** `BlockCipherEncBackend` /
+`BlockCipherDecBackend` (`BlockEncrypt`/`BlockDecrypt` →
+`BlockCipherEncrypt`/`BlockCipherDecrypt`; `BlockCipher` marker removed;
+`generic-array` → `hybrid-array` `Array`; `Sm4{Enc,Dec}Backend` re-wrap
+the unchanged inherent `encrypt_block`/`decrypt_block`). Two new
+trait-surface tests in `rustcrypto_traits.rs` (cipher-0.5 multi-block
+backend + HMAC `KeyInit` key-length). **Default-features build unaffected;
+byte-identical output** (full KAT + gmssl 3.1.1 interop 11/11). MSRV
+stays 1.85 (whole new line declares `rust-version 1.85`); single
+`crypto-common 0.2` in tree, **no `generic-array`** on the digest/cipher
+path. No new `gmcrypto-core` public API; no new dudect target; opt-in
+features only. **BREAKING for trait-fit consumers** (bump your own
+`digest`/`cipher`). `aead 0.6` trait fit re-deferred (still 0.6.0-rc.10);
+v0.11 lands the `crypto-common 0.2` line it will need.
+**v0.10.0** — **streaming AEAD FFI for SM4-GCM** (exposes the v0.9
+incremental-input buffered encryptor/decryptor through the `gmcrypto-c` C
+ABI per Q9.6): 9 FFI symbols + 2 opaque handle types
+(`gmcrypto_sm4_gcm_encryptor_{new,update,finalize,finalize_with_tag_len,
+free}` output-streaming + `gmcrypto_sm4_gcm_decryptor_{new,update,
+finalize_verify,free}` commit-on-verify), behind the `sm4-aead` feature
+on `gmcrypto-c`. `_finalize*` consume+free; single `GMCRYPTO_ERR`;
+`regen-header` **implies** `sm4-aead` (cbindgen drops cfg-gated opaque
+struct types otherwise). C example
 `crates/gmcrypto-c/examples/sm4_gcm_streaming.c`. Scope doc
-`docs/v0.10-scope.md` (W0; Q10.1–Q10.11). No new `gmcrypto-core` API; no
-new dudect target (thin wrapper over the v0.9-gated path); no breaking
-changes — additive only.
+`docs/v0.10-scope.md` (Q10.1–Q10.11). Additive only.
 **v0.9.0** — **AEAD ergonomics** (extends the v0.8 AEAD core with the
 three items v0.8 deferred): GCM tag-length parameterization via
 `GcmTagLen` newtype + `mode_gcm::encrypt_with_tag_len` /
@@ -46,7 +63,7 @@ Three-crate workspace:
 `crates/gmcrypto-simd/` (SIMD backend; rlib-only, opt-in via
 `gmcrypto-core`'s `sm4-bitsliced-simd` or `sm4-aead` feature).
 
-**Throughput-win + AEAD arc retrospective (v0.5 → v0.10):**
+**Throughput-win + AEAD arc retrospective (v0.5 → v0.11):**
 v0.5.0 = W4 phase 1 scaffolding (transparent delegate).
 v0.5.1 = W4 phase 2 (AVX2 `sbox_x8` in `gmcrypto-simd`, runtime detect).
 v0.6.0 = W4 phase 3 / W6 (`sbox_x32` AVX2 + `sbox_x16` NEON + CBC-decrypt fanout).
@@ -54,7 +71,8 @@ v0.7.0 = cipher modes (public batch API + SM4-CTR + AEAD scope doc).
 v0.8.0 = AEAD core (GHASH primitive + SM4-GCM + SM4-CCM single-shot).
 v0.9.0 = AEAD ergonomics (GCM tag-len param + incremental-input buffered GCM + single-shot AEAD C FFI; per `docs/v0.9-scope.md` Q9.1–Q9.10).
 v0.10.0 = streaming AEAD FFI for SM4-GCM (gmcrypto-c; 9 symbols + 2 opaque types exposing the v0.9 encryptor/decryptor to C; anchor-only per `docs/v0.10-scope.md` Q10.1–Q10.11).
-v0.11.0 = (candidate) CCM incremental input + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + pinned dudect runner + AVX-512 sbox_x64 (per `docs/v0.10-scope.md` §6 Q11.x).
+v0.11.0 = RustCrypto trait-fit modernization (digest 0.10→0.11 / cipher 0.4→0.5; crypto-common 0.2 / hybrid-array; opt-in features only, byte-identical output; per `docs/v0.11-scope.md` Q11.1–Q11.11).
+v0.12.0 = (candidate) RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10; v0.11 landed the crypto-common 0.2 line it needs) + pinned dudect runner + AVX-512 sbox_x64 + SM4-XTS + CCM incremental input (per `docs/v0.11-scope.md` §5/§6 Q12.x).
 
 Read `README.md`, `SECURITY.md`, `CONTRIBUTING.md` for the user-facing posture.
 This file lists the constraints a coding agent will violate by default.
@@ -262,7 +280,7 @@ crates/gmcrypto-core/
       decrypt.rs            # v0.2 Phase 3 — decrypt() with constant-time MAC compare, zeroize on fail
       raw_ciphertext.rs     # v0.3 W4 — encode_c1c3c2 / decode_c1c3c2 / decode_c1c2c3_legacy
     sm4/                    # v0.2 W1
-      cipher.rs             # Sm4Cipher (block cipher) + subtle linear-scan S-box; v0.3 W5 impls in-crate BlockCipher trait; v0.4 W2 impls cipher::BlockEncrypt/BlockDecrypt under `cipher-traits`
+      cipher.rs             # Sm4Cipher (block cipher) + subtle linear-scan S-box; v0.3 W5 impls in-crate BlockCipher trait; v0.4 W2 impls cipher BlockEncrypt/Decrypt under `cipher-traits` (v0.11: cipher 0.5 BlockCipherEncrypt/Decrypt via separate Sm4Enc/DecBackend)
       sbox_bitsliced.rs     # v0.4 W3 — bitsliced GF(2^8) Itoh-Tsujii inversion; opt-in via `sm4-bitsliced`; byte-identical to linear-scan
       sbox_bitsliced_simd.rs # v0.5 W4 phase 1 — SIMD-packed dispatch path (scaffolding); opt-in via `sm4-bitsliced-simd`; phase 1 transparently delegates to sbox_bitsliced. Phase 2 (AVX2) / phase 3 (NEON) swap in real intrinsics behind the same path.
       mode_cbc.rs           # encrypt/decrypt with PKCS#7 padding; caller-supplied unpredictable IV
@@ -675,12 +693,18 @@ Operational notes:
   find crate for `core`). Always pair it with an explicit
   `rustup target add wasm32-unknown-unknown --toolchain ${MSRV}`
   step. See ci.yml's wasm32 job.
-- **RustCrypto trait method resolution**: inherent methods like
-  `HmacSm3::finalize` collide with `digest::Mac::finalize` when both
-  are in scope. Use UFCS in tests:
+- **RustCrypto trait method resolution** (digest 0.11 / cipher 0.5 since
+  v0.11): inherent methods like `HmacSm3::finalize` collide with
+  `digest::Mac::finalize` when both are in scope. Use UFCS in tests:
   `<HmacSm3 as DigestMac>::finalize(chained).into_bytes()` and
-  `<Sm4Cipher as CipherBlockEncrypt>::encrypt_block(&cipher, &mut block)`.
-  See `crates/gmcrypto-core/tests/rustcrypto_traits.rs`.
+  `<Sm4Cipher as CipherBlockEncrypt>::encrypt_block(&cipher, &mut block)`
+  (the cipher trait is now `cipher::BlockCipherEncrypt`/`BlockCipherDecrypt`,
+  not the old `BlockEncrypt`/`BlockDecrypt`). **HMAC construction** is via
+  `<HmacSm3 as digest::KeyInit>::new_from_slice(key)` — `digest 0.11`'s `Mac`
+  no longer carries `KeyInit`, so `Mac::new_from_slice` does not exist. Block
+  values use `cipher::array::Array` (`hybrid-array`); prefer
+  `KeyInit::new_from_slice` + `Array::from([u8; N])` over the deprecated
+  `Array::from_slice`. See `crates/gmcrypto-core/tests/rustcrypto_traits.rs`.
 - **cbindgen 0.27 doesn't recognize Rust 2024 `#[unsafe(no_mangle)]`**.
   Pin at `0.29` or later (see `gmcrypto-c/Cargo.toml`).
 - **CI workflow only fires on PRs targeting `main`.** For stacked

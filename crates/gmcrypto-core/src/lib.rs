@@ -22,18 +22,19 @@
 //! - [`pkcs8`] — RFC 5958 `OneAsymmetricKey` + RFC 8018 PBES2 (v0.3 W2).
 //! - [`traits`] — in-crate `Hash` / `Mac` / `BlockCipher` traits
 //!   (v0.3 W5). v0.4 W2 adds RustCrypto-trait fit (`digest::Digest`,
-//!   `digest::Mac`, `cipher::BlockEncrypt`/`BlockDecrypt`) behind the
-//!   opt-in `digest-traits` / `cipher-traits` features.
+//!   `digest::Mac`, `cipher::BlockCipherEncrypt`/`BlockCipherDecrypt`)
+//!   behind the opt-in `digest-traits` / `cipher-traits` features
+//!   (migrated to `digest 0.11` / `cipher 0.5` in v0.11).
 //!
 //! # Crate features
 //!
 //! - `default` — `no_std`, `alloc`-only. No optional dependencies.
 //! - `digest-traits` — opt-in (v0.4 W2). Implements `digest::Digest` for
 //!   [`sm3::Sm3`] and `digest::Mac` for [`hmac::HmacSm3`]. Pulls
-//!   `digest = "0.10"`.
+//!   `digest = "0.11"`.
 //! - `cipher-traits` — opt-in (v0.4 W2). Implements
-//!   `cipher::{BlockEncrypt, BlockDecrypt, BlockSizeUser, KeySizeUser,
-//!   KeyInit}` for [`sm4::Sm4Cipher`]. Pulls `cipher = "0.4"`.
+//!   `cipher::{BlockCipherEncrypt, BlockCipherDecrypt, BlockSizeUser,
+//!   KeySizeUser, KeyInit}` for [`sm4::Sm4Cipher`]. Pulls `cipher = "0.5"`.
 //! - `sm4-bitsliced` — opt-in (v0.4 W3). Routes the SM4 S-box through
 //!   a bitsliced (table-less, gate-only) Itoh-Tsujii inversion in
 //!   GF(2^8). Byte-identical output to the default linear-scan path;

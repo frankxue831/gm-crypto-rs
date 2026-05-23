@@ -2,8 +2,8 @@
 //!
 //! These tests verify that `Sm3` / `HmacSm3` / `Sm4Cipher` produce
 //! byte-identical output through their `digest::Digest` /
-//! `digest::Mac` / `cipher::BlockEncrypt` / `cipher::BlockDecrypt`
-//! impls vs. the inherent methods. Gated on
+//! `digest::Mac` / `cipher::BlockCipherEncrypt` /
+//! `cipher::BlockCipherDecrypt` impls vs. the inherent methods. Gated on
 //! `--features digest-traits,cipher-traits`.
 //!
 //! The whole file is `#![cfg(all(...))]`-gated so a default-features
@@ -11,12 +11,16 @@
 
 #![cfg(all(feature = "digest-traits", feature = "cipher-traits"))]
 
-use cipher::generic_array::GenericArray;
+extern crate alloc;
+
+use cipher::array::Array;
+use cipher::consts::U16;
 use cipher::{
-    BlockDecrypt as CipherBlockDecrypt, BlockEncrypt as CipherBlockEncrypt,
+    BlockCipherDecrypt as CipherBlockDecrypt, BlockCipherEncrypt as CipherBlockEncrypt,
     KeyInit as CipherKeyInit,
 };
 use digest::Digest;
+use digest::KeyInit as DigestKeyInit;
 use digest::Mac as DigestMac;
 use gmcrypto_core::hmac::{HmacSm3, hmac_sm3};
 use gmcrypto_core::kdf::pbkdf2_hmac_sm3;
@@ -67,15 +71,16 @@ fn sm3_digest_trait_streaming_equivalence() {
 
 // -------- HMAC-SM3 / digest::Mac ------------------------------------------
 
-/// RFC-4231-shaped HMAC-SM3 KAT via the `Mac` trait + `new_from_slice`
-/// variable-key path.
+/// RFC-4231-shaped HMAC-SM3 KAT via `KeyInit::new_from_slice` construction +
+/// the `Mac` finalize/verify path (variable-length key).
 #[test]
 fn hmac_sm3_mac_trait_basic() {
     let key = [0x0bu8; 20];
     let msg = b"Hi There";
     let expected = hmac_sm3(&key, msg);
 
-    let mac = <HmacSm3 as DigestMac>::new_from_slice(&key).expect("variable-length key accepted");
+    let mac =
+        <HmacSm3 as DigestKeyInit>::new_from_slice(&key).expect("variable-length key accepted");
     let chained = DigestMac::chain_update(mac, msg);
     let tag = DigestMac::finalize(chained).into_bytes();
 
@@ -100,7 +105,7 @@ fn hmac_sm3_mac_trait_variable_keys() {
     for (key, msg) in cases {
         let inherent = hmac_sm3(key, msg);
         let mac =
-            <HmacSm3 as DigestMac>::new_from_slice(key).expect("variable-length key accepted");
+            <HmacSm3 as DigestKeyInit>::new_from_slice(key).expect("variable-length key accepted");
         let chained = DigestMac::chain_update(mac, msg);
         let tag = DigestMac::finalize(chained).into_bytes();
         assert_eq!(tag.as_slice(), inherent.as_slice());
@@ -114,7 +119,7 @@ fn hmac_sm3_mac_trait_verify() {
     let msg = b"Hi There";
     let tag_inherent = hmac_sm3(&key, msg);
 
-    let mac = <HmacSm3 as DigestMac>::new_from_slice(&key).unwrap();
+    let mac = <HmacSm3 as DigestKeyInit>::new_from_slice(&key).unwrap();
     let chained = DigestMac::chain_update(mac, msg);
     DigestMac::verify_slice(chained, &tag_inherent).expect("trait verify matches");
 }
@@ -139,7 +144,7 @@ fn hmac_sm3_drives_external_pbkdf2_shape() {
             salt_int.extend_from_slice(&i.to_be_bytes());
 
             // U_1 = PRF(password, salt || INT(i))
-            let mac = <HmacSm3 as DigestMac>::new_from_slice(password)
+            let mac = <HmacSm3 as DigestKeyInit>::new_from_slice(password)
                 .expect("variable-length key accepted");
             let chained = DigestMac::chain_update(mac, &salt_int);
             let u1 = DigestMac::finalize(chained).into_bytes();
@@ -150,7 +155,7 @@ fn hmac_sm3_drives_external_pbkdf2_shape() {
             let mut u = [0u8; 32];
             u.copy_from_slice(u1.as_slice());
             for _ in 1..iters {
-                let mac = <HmacSm3 as DigestMac>::new_from_slice(password).unwrap();
+                let mac = <HmacSm3 as DigestKeyInit>::new_from_slice(password).unwrap();
                 let chained = DigestMac::chain_update(mac, u);
                 let u_next = DigestMac::finalize(chained).into_bytes();
                 u.copy_from_slice(u_next.as_slice());
@@ -161,7 +166,6 @@ fn hmac_sm3_drives_external_pbkdf2_shape() {
             block.copy_from_slice(&t[..block.len()]);
         }
     }
-    extern crate alloc;
 
     let pw = b"password";
     let salt = b"salt";
@@ -173,9 +177,9 @@ fn hmac_sm3_drives_external_pbkdf2_shape() {
     assert_eq!(via_trait, via_inherent);
 }
 
-// -------- SM4 / cipher::BlockEncrypt/Decrypt ------------------------------
+// -------- SM4 / cipher::BlockCipherEncrypt/Decrypt ------------------------
 
-/// GB/T 32907-2016 Appendix A.1 single-block KAT via the `BlockEncrypt`
+/// GB/T 32907-2016 Appendix A.1 single-block KAT via the `BlockCipherEncrypt`
 /// trait.
 #[test]
 fn sm4_cipher_trait_single_block() {
@@ -183,12 +187,12 @@ fn sm4_cipher_trait_single_block() {
     let pt = hex!("0123456789abcdeffedcba9876543210");
     let expected_ct = hex!("681edf34d206965e86b3e94f536e4246");
 
-    let cipher: Sm4Cipher = <Sm4Cipher as CipherKeyInit>::new(GenericArray::from_slice(&key));
-    let mut block = GenericArray::clone_from_slice(&pt);
+    let cipher: Sm4Cipher = <Sm4Cipher as CipherKeyInit>::new_from_slice(&key).unwrap();
+    let mut block = Array::from(pt);
     <Sm4Cipher as CipherBlockEncrypt>::encrypt_block(&cipher, &mut block);
     assert_eq!(block.as_slice(), &expected_ct);
 
-    // Round-trip via the BlockDecrypt trait.
+    // Round-trip via the BlockCipherDecrypt trait.
     <Sm4Cipher as CipherBlockDecrypt>::decrypt_block(&cipher, &mut block);
     assert_eq!(block.as_slice(), &pt);
 }
@@ -203,9 +207,59 @@ fn sm4_cipher_trait_matches_inherent() {
     let inherent_cipher = Sm4Cipher::new(&key);
     inherent_cipher.encrypt_block(&mut buf_inherent);
 
-    let trait_cipher: Sm4Cipher = <Sm4Cipher as CipherKeyInit>::new(GenericArray::from_slice(&key));
-    let mut buf_trait = GenericArray::clone_from_slice(&pt);
+    let trait_cipher: Sm4Cipher = <Sm4Cipher as CipherKeyInit>::new_from_slice(&key).unwrap();
+    let mut buf_trait = Array::from(pt);
     <Sm4Cipher as CipherBlockEncrypt>::encrypt_block(&trait_cipher, &mut buf_trait);
 
     assert_eq!(buf_inherent.as_slice(), buf_trait.as_slice());
+}
+
+/// cipher 0.5 multi-block trait path (`encrypt_blocks` / `decrypt_blocks`)
+/// drives the new backend once per block (`ParBlocksSize` = `U1`, so cipher
+/// 0.5's `BlocksCtx` calls `encrypt_block` per block) — a path the
+/// single-block KATs don't reach. Ground truth is the inherent per-block
+/// encrypt.
+#[test]
+fn sm4_cipher_trait_multiblock_matches_inherent() {
+    let key = [0x11u8; 16];
+    let blocks_pt: [[u8; 16]; 5] = [[0xA0; 16], [0xA1; 16], [0xA2; 16], [0xA3; 16], [0xA4; 16]];
+
+    // Ground truth: inherent single-block encrypt, applied per block.
+    let inherent = Sm4Cipher::new(&key);
+    let mut expected = blocks_pt;
+    for b in &mut expected {
+        inherent.encrypt_block(b);
+    }
+
+    // Trait multi-block path.
+    let tc: Sm4Cipher = <Sm4Cipher as CipherKeyInit>::new_from_slice(&key).unwrap();
+    let mut trait_blocks: alloc::vec::Vec<Array<u8, U16>> =
+        blocks_pt.iter().map(|b| Array::from(*b)).collect();
+    <Sm4Cipher as CipherBlockEncrypt>::encrypt_blocks(&tc, &mut trait_blocks);
+    for (got, exp) in trait_blocks.iter().zip(expected.iter()) {
+        assert_eq!(got.as_slice(), exp);
+    }
+
+    // Decrypt round-trip via the trait multi-block path.
+    <Sm4Cipher as CipherBlockDecrypt>::decrypt_blocks(&tc, &mut trait_blocks);
+    for (got, exp) in trait_blocks.iter().zip(blocks_pt.iter()) {
+        assert_eq!(got.as_slice(), exp);
+    }
+}
+
+/// HMAC-SM3 construction through `digest::KeyInit::new_from_slice` (the
+/// post-0.11 path) across empty / short / block-length / over-block-length
+/// keys, each byte-equal to the inherent `hmac_sm3`.
+#[test]
+fn hmac_sm3_keyinit_construction_key_lengths() {
+    let cases: &[&[u8]] = &[&[], &[0x01], &[0x0b; 20], &[0xaa; 64], &[0xaa; 131]];
+    let msg = b"v0.11 KeyInit split";
+    for key in cases {
+        let inherent = hmac_sm3(key, msg);
+        let mac =
+            <HmacSm3 as DigestKeyInit>::new_from_slice(key).expect("variable-length key accepted");
+        let chained = DigestMac::chain_update(mac, msg);
+        let tag = DigestMac::finalize(chained).into_bytes();
+        assert_eq!(tag.as_slice(), inherent.as_slice());
+    }
 }
