@@ -732,10 +732,10 @@ fn ct_sm4_gcm_decrypt_buffered(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// under their own 32-byte key, so both decrypt via identical control flow.
 /// Uses a CTS (non-block-multiple) length (100 B = 6 blocks + 4) so the
 /// final-pair ciphertext-stealing path — the riskiest tweak arithmetic — is
-/// exercised, not just whole-block. Exercises key schedule, T_0 = SM4_E(Key2,
-/// tweak), the constant-time bit-reflected α-doubling chain, the
-/// `encrypt_blocks` batch path (rides SIMD fanout under sm4-bitsliced-simd),
-/// and the CTS tail. `|tau| < 0.20`.
+/// exercised, not just whole-block. Exercises key schedule,
+/// `T_0 = SM4_E(Key2, tweak)`, the constant-time bit-reflected α-doubling
+/// chain, the `encrypt_blocks` batch path (rides SIMD fanout under
+/// `sm4-bitsliced-simd`), and the CTS tail. `|tau| < 0.20`.
 #[cfg(feature = "sm4-xts")]
 fn ct_sm4_xts_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
     use gmcrypto_core::sm4::mode_xts;
