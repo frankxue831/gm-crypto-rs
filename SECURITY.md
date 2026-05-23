@@ -27,8 +27,9 @@ branches, and the SM2 sign retry loop runs a fixed number of iterations
 regardless of which (if any) candidate is valid.
 
 The in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
-(`benches/timing_leaks.rs`) ships **17 real `ct_*` targets** (12 always-on
-+ 2 cfg-gated under `sm4-bitsliced-simd` + 3 cfg-gated under `sm4-aead`)
+(`benches/timing_leaks.rs`) ships **18 real `ct_*` targets** (12 always-on
++ 2 cfg-gated under `sm4-bitsliced-simd` + 3 cfg-gated under `sm4-aead`
++ 1 cfg-gated under `sm4-xts`)
 plus a deliberately-leaky `negative_control`. Most real targets gate on
 `|tau| < 0.20`;
 `negative_control` gates the opposite direction (`|tau| > 1.0` **must**
@@ -97,6 +98,18 @@ CLAUDE.md carries the canonical per-target gate table.
   decrypt via `Sm4GcmDecryptor`, fed in two chunks to straddle block
   boundaries (v0.9 W3). Exercises the running-GHASH accumulator + the
   commit-on-verify path (plaintext released only after the tag verifies).
+
+**Cfg-gated on `sm4-xts` (1):**
+
+- `ct_sm4_xts_decrypt` — single-shot SM4-XTS decrypt via `mode_xts::decrypt`
+  over a fixed CTS (non-block-multiple) data unit (100 B = 6 blocks + 4) so
+  the ciphertext-stealing tail — the riskiest tweak arithmetic — gates, not
+  just whole-block (v0.12 W3). Class-split by master key; both classes' data
+  units are valid encrypts under their own 32-byte key so both decrypt via
+  identical control flow. Exercises the key schedule, `T_0 = SM4_E(Key2,
+  tweak)`, the constant-time bit-reflected α-doubling chain (right-shift +
+  masked `0xE1`), the `decrypt_blocks` batch path (rides SIMD fanout under
+  `sm4-bitsliced-simd`), and the CTS tail.
 
 **The harness detects leaks; it does not prove constant-time.** Low
 `|tau|` values mean the test could not detect a leak with the budget

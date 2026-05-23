@@ -18,5 +18,8 @@ perf.data*
 # CCD / Claude Code session metadata (worktrees, etc.)
 .claude/
 
+# Superpowers plan/spec scratch (local working notes; not published)
+docs/superpowers/
+
 # RepoLens scan output (derived data: packs, session state, wiki index)
 .repolens/
