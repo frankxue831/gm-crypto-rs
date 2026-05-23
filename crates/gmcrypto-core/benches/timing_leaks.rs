@@ -734,7 +734,7 @@ fn ct_sm4_gcm_decrypt_buffered(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// final-pair ciphertext-stealing path — the riskiest tweak arithmetic — is
 /// exercised, not just whole-block. Exercises key schedule,
 /// `T_0 = SM4_E(Key2, tweak)`, the constant-time bit-reflected α-doubling
-/// chain, the `encrypt_blocks` batch path (rides SIMD fanout under
+/// chain, the `decrypt_blocks` batch path (rides SIMD fanout under
 /// `sm4-bitsliced-simd`), and the CTS tail. `|tau| < 0.20`.
 #[cfg(feature = "sm4-xts")]
 fn ct_sm4_xts_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {

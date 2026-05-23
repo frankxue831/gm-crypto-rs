@@ -112,6 +112,11 @@ jobs:
           fi
 
       - name: Parse and gate
+        env:
+          # Must be re-declared here: `env` is step-scoped, so without this the
+          # parse step sees an empty MATRIX_FEATURES and the feature-conditional
+          # gates (sm4-bitsliced-simd / sm4-aead / sm4-xts) would never fire.
+          MATRIX_FEATURES: ${{ matrix.features }}
         run: |
           python3 - <<'PY'
           # Same |tau| gate as the PR-smoke job. Nightly's value is the
