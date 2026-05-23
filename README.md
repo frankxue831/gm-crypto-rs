@@ -20,9 +20,10 @@ or vendor.
 A small, auditable, pure-Rust SM2 / SM3 / SM4 SDK whose central
 differentiating commitment is that secret-touching code paths are
 **constant-time-designed and guarded by an in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/)
-detectable-leak regression harness**: 17 real `ct_*` targets (12
+detectable-leak regression harness**: 18 real `ct_*` targets (12
 always-on + 2 cfg-gated under `sm4-bitsliced-simd` + 3 cfg-gated under
-`sm4-aead`) plus a deliberately-leaky `negative_control` that proves
+`sm4-aead` + 1 cfg-gated under `sm4-xts`) plus a deliberately-leaky
+`negative_control` that proves
 the harness can detect leaks. Most real targets gate at `|tau| < 0.20`;
 `ct_sign_k_class` and the direct `ct_fn_invert` / `ct_fp_invert` invert
 diagnostics carry target-specific gate policy after the 2026-05-12
@@ -319,11 +320,12 @@ Everything v0.2 shipped is unchanged:
 - `gmssl` CLI cross-validation for HMAC-SM3, PBKDF2-HMAC-SM3, and
   (new in v0.3) SM2 sign/verify, SM2 encrypt/decrypt, and SM4-CBC
   in both directions. Gated on `GMCRYPTO_GMSSL=1`.
-- `dudect-bencher` harness — 17 real `ct_*` targets (12 always-on + 2
-  cfg-gated under `sm4-bitsliced-simd` + 3 cfg-gated under `sm4-aead`)
-  plus a deliberately-leaky `negative_control` that proves the harness
-  can detect leaks. Matrix-run under `features=default`,
-  `sm4-bitsliced`, `sm4-bitsliced-simd`, and `sm4-bitsliced-simd,sm4-aead`
+- `dudect-bencher` harness — 18 real `ct_*` targets (12 always-on + 2
+  cfg-gated under `sm4-bitsliced-simd` + 3 cfg-gated under `sm4-aead` + 1
+  cfg-gated under `sm4-xts`) plus a deliberately-leaky `negative_control`
+  that proves the harness can detect leaks. Matrix-run under
+  `features=default`, `sm4-bitsliced`, `sm4-bitsliced-simd`, and
+  `sm4-bitsliced-simd,sm4-aead,sm4-xts`
   — PR-smoke 10⁴ samples; nightly 10⁵ samples (more samples = tighter
   empirical confidence at the same threshold). Most real targets gate
   at `|tau| < 0.20`; per-target policy in [`SECURITY.md`](SECURITY.md).
