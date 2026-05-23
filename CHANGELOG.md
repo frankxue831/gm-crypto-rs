@@ -3,6 +3,45 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.11.0] — 2026-05-23
+
+v0.11.0 modernizes the opt-in RustCrypto trait fit, migrating from
+`digest 0.10` / `cipher 0.4` to `digest 0.11` / `cipher 0.5` (the
+`crypto-common 0.2` / `hybrid-array` generation). **Default-features users are
+unaffected** — no API or behavior change, and every SM2 / SM3 / SM4 / HMAC /
+AEAD output is byte-identical (validated against the full KAT suite + gmssl
+3.1.1 interop). Scope + design rationale in `docs/v0.11-scope.md`
+(Q11.1–Q11.11).
+
+### Changed
+
+- **RustCrypto trait fit migrated to `digest 0.11` / `cipher 0.5`** (behind the
+  opt-in `digest-traits` / `cipher-traits` features). The `cipher` block
+  backend was reshaped to cipher 0.5's separate
+  `BlockCipherEncBackend` / `BlockCipherDecBackend` traits; arrays moved from
+  `generic-array` to `hybrid-array`.
+  - **BREAKING (trait-fit consumers only):** code that enabled
+    `digest-traits` / `cipher-traits` and composed `gmcrypto`'s impls against
+    `digest 0.10` / `cipher 0.4` must bump its own `digest` / `cipher` deps to
+    the `0.11` / `0.5` line. Two concrete shifts: (1) HMAC construction via the
+    `Mac` trait moves to `digest::KeyInit::new_from_slice` — `digest 0.11`'s
+    `Mac` no longer carries `KeyInit`; (2) the `cipher` block traits renamed
+    `BlockEncrypt` / `BlockDecrypt` → `BlockCipherEncrypt` /
+    `BlockCipherDecrypt`.
+  - **Default-features users are unaffected** — `generic-array` /
+    `hybrid-array` never enter the default dep graph.
+- Feature-flag names unchanged (`digest-traits` / `cipher-traits`); only the
+  underlying pinned versions move.
+
+### Notes
+
+- MSRV stays **1.85** — the whole new dep line (`digest 0.11.3`,
+  `cipher 0.5.2`, `crypto-common 0.2.2`, `inout 0.2.2`, `hybrid-array 0.4.x`)
+  declares `rust-version 1.85`.
+- The RustCrypto `aead 0.6` trait fit remains deferred (still `0.6.0-rc.10`);
+  v0.11 lands the `crypto-common 0.2` line it will require, shrinking that
+  future work to a small delta.
+
 ## [0.10.0] — 2026-05-21
 
 v0.10.0 cashes in the streaming AEAD FFI that v0.9 deferred (Q9.6): the
