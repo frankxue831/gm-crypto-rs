@@ -71,8 +71,8 @@ fn sm3_digest_trait_streaming_equivalence() {
 
 // -------- HMAC-SM3 / digest::Mac ------------------------------------------
 
-/// RFC-4231-shaped HMAC-SM3 KAT via the `Mac` trait + `new_from_slice`
-/// variable-key path.
+/// RFC-4231-shaped HMAC-SM3 KAT via `KeyInit::new_from_slice` construction +
+/// the `Mac` finalize/verify path (variable-length key).
 #[test]
 fn hmac_sm3_mac_trait_basic() {
     let key = [0x0bu8; 20];

@@ -26,9 +26,9 @@ zeroize.workspace = true
 rand_core.workspace = true
 spin.workspace = true
 # v0.4 W2 — optional RustCrypto-trait fit. Default-features-off build
-# does NOT pull these in. Pinned at major+minor per Q4.4
-# (docs/v0.4-scope.md) — digest 0.10.x and cipher 0.4.x are the
-# current stable lines; future major-bumps are a v0.5 candidate.
+# does NOT pull these in. v0.11 migrated to digest 0.11 / cipher 0.5
+# (the crypto-common 0.2 / hybrid-array generation; see
+# docs/v0.11-scope.md). Default builds are unaffected.
 digest = { version = "0.11", default-features = false, features = ["mac"], optional = true }
 cipher = { version = "0.5", default-features = false, optional = true }
 # v0.5 W4 phase 2 — sibling crate carrying the AVX2 8-way packed
