@@ -61,11 +61,14 @@ jobs:
         # SIMD-packed-bitsliced SM4 under SM4-GCM and SM4-CCM. New
         # targets `ct_sm4_gcm_decrypt` and `ct_sm4_ccm_decrypt` are
         # cfg-gated on `sm4-aead`; same `|tau| < 0.20` gate.
+        # v0.12 W3 — the fourth pass also carries `sm4-xts`, gating the
+        # `ct_sm4_xts_decrypt` target (cfg-gated on `sm4-xts`) at a CTS
+        # data-unit length; same `|tau| < 0.20` gate.
         features:
           - "default"
           - "sm4-bitsliced"
           - "sm4-bitsliced-simd"
-          - "sm4-bitsliced-simd,sm4-aead"
+          - "sm4-bitsliced-simd,sm4-aead,sm4-xts"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -236,6 +239,12 @@ jobs:
               # 0.20 gate.
               required_low["ct_sm4_gcm_decrypt"] = 0.20
               required_low["ct_sm4_ccm_decrypt"] = 0.20
+          if "sm4-xts" in matrix_features:
+              # v0.12 W3 — SM4-XTS decrypt target (Q12.9 of
+              # docs/v0.12-scope.md). Class-split by master key at a CTS
+              # (non-block-multiple) length so the final-pair ciphertext-
+              # stealing path gates. Same 0.20 gate.
+              required_low["ct_sm4_xts_decrypt"] = 0.20
 
           # v0.5 W4 phase 2 prep — telemetry-only targets. The data
           # lands in the CI log for trend tracking but doesn't gate
