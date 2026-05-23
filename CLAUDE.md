@@ -1,8 +1,31 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0–v0.10.0 published to crates.io
-2026-05-10 → 2026-05-23**. **v0.11.0 prep on `main` 2026-05-23** —
-**RustCrypto trait-fit modernization**: migrate the opt-in
+Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0–v0.11.0 published to crates.io
+2026-05-10 → 2026-05-23**. **v0.12.0 prep on `main` 2026-05-23** —
+**SM4-XTS** (tweakable disk/sector mode): new `sm4::mode_xts::{encrypt,
+decrypt}` + `XTS_KEY_SIZE` behind the opt-in **`sm4-xts`** feature
+(pure-core, **no new dep**), per `docs/v0.12-scope.md` Q12.1–Q12.13
+(codex-reviewed). **GB/T 17964-2021** (GM-T OID 1.2.156.10197.1.104.10),
+**not IEEE 1619** — the two differ in the GF(2¹²⁸) tweak doubling: GB is
+the **bit-reflected (GHASH-style)** convention (right-shift, reduce
+`0xE1` into byte 0, masked-carry constant-time); IEEE is `<<1`/`0x87`.
+Byte-identical to OpenSSL 3.x EVP `SM4-XTS` `xts_standard=GB` (KAT 16/32/
+48/64 whole + 17/20/31 CTS; gmssl 3.1.1 lacks XTS → no interop test, the
+v0.8 CCM-sourcing posture; oracle `crates/gmcrypto-core/tests/data/
+sm4_xts_oracle.c` pins `xts_standard=GB`). 32-byte key `Key1‖Key2` + raw
+16-byte tweak; **full ciphertext stealing** (CTS, lengths `[16 B,16 MiB]`
+= NIST SP 800-38E 2²⁰-block ceiling); single `None` (len out of range or
+`Key1==Key2`, stricter than OpenSSL's default provider which permits
+equal halves); **confidentiality only — no auth tag**. Whole-block bulk
+rides `Sm4Cipher::encrypt_blocks` (SIMD fanout under `sm4-bitsliced-simd`);
+α-doubling is multiply-by-x in-core (not GHASH → no `gmcrypto-simd` dep).
+New dudect `ct_sm4_xts_decrypt` (cfg `sm4-xts`, CTS-length, `|tau|<0.20`).
+Also **fixed a latent CI bug**: `MATRIX_FEATURES` was `env`-scoped to the
+dudect bench step only, so the parse step's `sm4-bitsliced-simd`/`sm4-aead`/
+`sm4-xts` conditional gates never fired (since v0.5/v0.8) — re-declared on
+the parse step in both dudect workflows. C FFI for XTS deferred to v0.13.
+Additive; default-features build unaffected.
+**v0.11.0** — **RustCrypto trait-fit modernization**: migrate the opt-in
 `digest-traits` / `cipher-traits` impls from `digest 0.10` / `cipher 0.4`
 to `digest 0.11` / `cipher 0.5` (the `crypto-common 0.2` / `hybrid-array`
 generation), in-place, both deps together (per `docs/v0.11-scope.md`
@@ -63,7 +86,7 @@ Three-crate workspace:
 `crates/gmcrypto-simd/` (SIMD backend; rlib-only, opt-in via
 `gmcrypto-core`'s `sm4-bitsliced-simd` or `sm4-aead` feature).
 
-**Throughput-win + AEAD arc retrospective (v0.5 → v0.11):**
+**Throughput-win + AEAD arc retrospective (v0.5 → v0.12):**
 v0.5.0 = W4 phase 1 scaffolding (transparent delegate).
 v0.5.1 = W4 phase 2 (AVX2 `sbox_x8` in `gmcrypto-simd`, runtime detect).
 v0.6.0 = W4 phase 3 / W6 (`sbox_x32` AVX2 + `sbox_x16` NEON + CBC-decrypt fanout).
@@ -72,7 +95,8 @@ v0.8.0 = AEAD core (GHASH primitive + SM4-GCM + SM4-CCM single-shot).
 v0.9.0 = AEAD ergonomics (GCM tag-len param + incremental-input buffered GCM + single-shot AEAD C FFI; per `docs/v0.9-scope.md` Q9.1–Q9.10).
 v0.10.0 = streaming AEAD FFI for SM4-GCM (gmcrypto-c; 9 symbols + 2 opaque types exposing the v0.9 encryptor/decryptor to C; anchor-only per `docs/v0.10-scope.md` Q10.1–Q10.11).
 v0.11.0 = RustCrypto trait-fit modernization (digest 0.10→0.11 / cipher 0.4→0.5; crypto-common 0.2 / hybrid-array; opt-in features only, byte-identical output; per `docs/v0.11-scope.md` Q11.1–Q11.11).
-v0.12.0 = (candidate) RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10; v0.11 landed the crypto-common 0.2 line it needs) + pinned dudect runner + AVX-512 sbox_x64 + SM4-XTS + CCM incremental input (per `docs/v0.11-scope.md` §5/§6 Q12.x).
+v0.12.0 = SM4-XTS single-shot tweakable disk/sector mode (GB/T 17964-2021 / GM-T OID 1.2.156.10197.1.104.10, **not** IEEE 1619 — bit-reflected α-doubling; full ciphertext stealing; byte-identical to OpenSSL EVP SM4-XTS xts_standard=GB; pure-core opt-in `sm4-xts`, no new dep; per `docs/v0.12-scope.md` Q12.1–Q12.13). Also fixed the latent dudect CI gate bug (MATRIX_FEATURES env scoping).
+v0.13.0 = (candidate) C FFI for SM4-XTS + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + pinned dudect runner + AVX-512 sbox_x64 + CCM incremental input (per `docs/v0.12-scope.md` §5/§6 Q13.x).
 
 Read `README.md`, `SECURITY.md`, `CONTRIBUTING.md` for the user-facing posture.
 This file lists the constraints a coding agent will violate by default.
@@ -131,21 +155,26 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo clippy -p gmcrypto-core --features digest-traits,cipher-traits --all-targets -- -D warnings
 cargo clippy -p gmcrypto-core --features sm4-bitsliced --all-targets -- -D warnings
 cargo clippy -p gmcrypto-core --features sm4-aead --all-targets -- -D warnings
+# v0.12 — SM4-XTS opt-in clippy pass.
+cargo clippy -p gmcrypto-core --features sm4-xts --all-targets -- -D warnings
 
 # Supply chain — note: --exclude-dev (dev-deps are exempt from the ban list).
 cargo deny check --exclude-dev
-# v0.4 W2 / W3 / v0.8 W2-W3 — second pass under the opt-in runtime feature flags
-# (digest/cipher/inout/crypto-common allowlisted in deny.toml; sm4-aead pulls
-# gmcrypto-simd::ghash which has no new transitive deps).
-cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/crypto-bigint-scalar check --exclude-dev
+# v0.4 W2 / W3 / v0.8 W2-W3 / v0.12 — second pass under the opt-in runtime
+# feature flags (digest/cipher/inout/crypto-common allowlisted in deny.toml;
+# sm4-aead pulls gmcrypto-simd::ghash which has no new transitive deps; sm4-xts
+# adds NO new dep — pure-core).
+cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar check --exclude-dev
 
 # MSRV reproducibility.
 cargo +1.85 build -p gmcrypto-core
-cargo +1.85 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,crypto-bigint-scalar
+cargo +1.85 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar
 cargo build -p gmcrypto-core --no-default-features  # confirms no_std posture
 
 # v0.4 W1 — wasm32 build (caller-supplied RNG only).
 cargo build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features
+# v0.12 — sm4-xts is pure-core/no_std, so it must build on wasm32 too.
+cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features sm4-xts --no-default-features
 
 # v0.4 W4 — C ABI shim build + header drift check.
 cargo build -p gmcrypto-c --release
@@ -168,6 +197,9 @@ DUDECT_SAMPLES=100000 cargo bench --bench timing_leaks --features crypto-bigint-
 # (also runnable standalone via `--features sm4-aead,crypto-bigint-scalar`).
 DUDECT_SAMPLES=10000  cargo bench --bench timing_leaks --features sm4-aead,sm4-bitsliced-simd,crypto-bigint-scalar
 # Gate: |tau| < 0.20 on ct_sm4_gcm_decrypt + ct_sm4_ccm_decrypt.
+# v0.12 W3 — SM4-XTS dudect (the CI matrix's 4th slot carries all three).
+DUDECT_SAMPLES=10000  cargo bench --bench timing_leaks --features sm4-xts,sm4-aead,sm4-bitsliced-simd,crypto-bigint-scalar
+# Gate: |tau| < 0.20 on ct_sm4_xts_decrypt (CTS-length data unit).
 
 # gmssl interop (gated; needs gmssl 3.1.1 installed).
 GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
@@ -177,21 +209,26 @@ GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
 
 Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. **Thirteen
 targets at the default / `sm4-bitsliced` budget; fifteen under
-`sm4-bitsliced-simd`; eighteen under
-`sm4-bitsliced-simd,sm4-aead`** (v0.3 added `ct_pkcs8_decrypt`;
-v0.5 W4 phase 1 added `ct_sm4_encrypt_block_bitsliced_simd`
-cfg-gated on `sm4-bitsliced-simd`; v0.6 W6 added
-`ct_sm4_cbc_decrypt_fanout` cfg-gated on the same feature per
-Q6.7 of `docs/v0.6-scope.md`; v0.7 W3 added `ct_sm4_ctr_encrypt`
+`sm4-bitsliced-simd`; eighteen under `sm4-bitsliced-simd,sm4-aead`;
+nineteen under `sm4-bitsliced-simd,sm4-aead,sm4-xts`** (v0.3 added
+`ct_pkcs8_decrypt`; v0.5 W4 phase 1 added
+`ct_sm4_encrypt_block_bitsliced_simd` cfg-gated on `sm4-bitsliced-simd`;
+v0.6 W6 added `ct_sm4_cbc_decrypt_fanout` cfg-gated on the same feature
+per Q6.7 of `docs/v0.6-scope.md`; v0.7 W3 added `ct_sm4_ctr_encrypt`
 NOT cfg-gated — runs under all three pre-W4 matrix entries per
 Q7.2; v0.8 W4 added `ct_sm4_gcm_decrypt` and `ct_sm4_ccm_decrypt`
 cfg-gated on `sm4-aead` per Q8.7 of `docs/v0.7-aead-scope.md`;
 v0.9 W3 added `ct_sm4_gcm_decrypt_buffered` cfg-gated on `sm4-aead`
-per Q9.5 of `docs/v0.9-scope.md`).
+per Q9.5 of `docs/v0.9-scope.md`; v0.12 W3 added `ct_sm4_xts_decrypt`
+cfg-gated on `sm4-xts` per Q12.9 of `docs/v0.12-scope.md`).
+**v0.12 W3 also fixed a latent bug**: `MATRIX_FEATURES` was `env`-scoped
+to the dudect bench step, so the parse step's feature-conditional gates
+(`sm4-bitsliced-simd` / `sm4-aead` / `sm4-xts`) never fired — now
+re-declared on the parse step in both workflows.
 The PR-smoke and nightly workflows run the harness under a matrix
 over
 `features=[default, sm4-bitsliced, sm4-bitsliced-simd,
-sm4-bitsliced-simd,sm4-aead]` so the `ct_sm4_key_schedule`,
+sm4-bitsliced-simd,sm4-aead,sm4-xts]` so the `ct_sm4_key_schedule`,
 `ct_sm4_encrypt_block`, and `ct_sm4_ctr_encrypt` targets gate
 under every cipher dispatch path:
 
@@ -215,6 +252,7 @@ under every cipher dispatch path:
 | `ct_sm4_gcm_decrypt` | `\|tau\| < 0.20` (cfg-gated on `sm4-aead`) | v0.8 W4 — SM4-GCM decrypt timed over a fixed 256-byte plaintext + 16-byte AAD + 12-byte canonical nonce. Class-split by master key; both classes' `(ct, tag)` tuples are valid encrypts under their own keys so both decrypt paths reach tag-compare via identical control flow. Exercises key schedule, H = SM4_E(key, 0^128), GHASH chain (rides CLMUL on x86_64 / PMULL on aarch64 / software Karatsuba elsewhere), GCTR, `subtle::ConstantTimeEq`. 5K-sample local smoke on aarch64: `\|tau\| ≈ 0.073`. Per Q8.7 of `docs/v0.7-aead-scope.md`. |
 | `ct_sm4_ccm_decrypt` | `\|tau\| < 0.20` (cfg-gated on `sm4-aead`) | v0.8 W4 — SM4-CCM decrypt timed under the same shape as `ct_sm4_gcm_decrypt`, fixed `tag_len = 16` and 12-byte nonce. Class-split by master key; valid `(ct‖tag)` pair per class. Exercises CBC-MAC chain (sequential `Sm4Cipher::encrypt_block` loop) + CTR stream (rides v0.7 W1 batch API + v0.6 SIMD fanout under `sm4-bitsliced-simd`) + constant-time tag compare. 5K-sample local smoke on aarch64: `\|tau\| ≈ 0.063`. Per Q8.7 of `docs/v0.7-aead-scope.md`. |
 | `ct_sm4_gcm_decrypt_buffered` | `\|tau\| < 0.20` (cfg-gated on `sm4-aead`) | v0.9 W3 — incremental-input buffered SM4-GCM decrypt via `Sm4GcmDecryptor`, timed over a fixed 256-byte plaintext + 16-byte AAD + 12-byte nonce fed in two chunks (100 bytes + rest) to straddle block boundaries. Class-split by master key; both classes' `(chunked ct, tag)` verify under their own keys so both reach `finalize_verify` (commit-on-verify) via identical control flow. Exercises the running-GHASH accumulator (`GhashAcc`) + the buffered-then-decrypt path. 5K-sample local smoke on aarch64: `\|tau\| ≈ 0.029`. Per Q9.5 of `docs/v0.9-scope.md`. |
+| `ct_sm4_xts_decrypt` | `\|tau\| < 0.20` (cfg-gated on `sm4-xts`) | v0.12 W3 — SM4-XTS decrypt via `mode_xts::decrypt`, timed over a fixed **CTS (non-block-multiple) data unit** (100 B = 6 blocks + 4) so the final-pair ciphertext-stealing path — the riskiest tweak arithmetic — gates, not just whole-block. Class-split by master key; both classes' data units are valid encrypts under their own 32-byte key so both decrypt via identical control flow. Exercises key schedule, `T_0 = SM4_E(Key2, tweak)`, the constant-time bit-reflected α-doubling chain (`mul_alpha`: right-shift + masked `0xE1`), the `decrypt_blocks` batch path (rides SIMD fanout under `sm4-bitsliced-simd`), and the CTS tail. 10K-sample local smoke on aarch64: `\|tau\| ≈ 0.03`. Per Q12.9 of `docs/v0.12-scope.md`. |
 
 Gate on **`|tau|`** (scale-free), not `|t|` (grows as `tau · sqrt(N)` so any
 fixed `|t|` threshold is budget-dependent). Same gate at every sample budget;
@@ -290,6 +328,7 @@ crates/gmcrypto-core/
       mode_gcm.rs           # v0.8 W2 — SM4-GCM single-shot AEAD (NIST SP 800-38D / GM/T 0009 / RFC 8998; cfg-gated on `sm4-aead`); (Vec<u8>, [u8; 16]) encrypt + Option<Vec<u8>> decrypt; 12-byte canonical + arbitrary-length nonce paths; constant-time tag compare via subtle; byte-identical to gmssl 3.1.1 `sm4 -gcm`. v0.9 W1 adds GcmTagLen newtype + encrypt_with_tag_len/decrypt_with_tag_len (NIST §5.2.1.2 truncated tags {4,8,12,13,14,15,16}); inc32/derive_j0 widened to pub(super) for gcm_streaming
       mode_ccm.rs           # v0.8 W3 — SM4-CCM single-shot AEAD (NIST SP 800-38C / RFC 3610 / GM/T 0009 OID 1.2.156.10197.1.104.9; cfg-gated on `sm4-aead`); Option<Vec<u8>> encrypt (output: ct||tag) + Option<Vec<u8>> decrypt; tag_len ∈ {4,6,8,10,12,14,16}; nonce.len() ∈ [7,13]; pure-Rust CBC-MAC + CTR (no GHASH); byte-identical to OpenSSL 3.x EVP `SM4-CCM`
       gcm_streaming.rs      # v0.9 W2 — incremental-input buffered SM4-GCM (cfg-gated on `sm4-aead`). Sm4GcmEncryptor (output-streaming: update->Option<Vec<u8>>, None on >2^36-32-byte ceiling + poison; finalize/finalize_with_tag_len) + Sm4GcmDecryptor (input-incremental/output-BUFFERED: update buffers + folds GHASH, finalize_verify releases plaintext only after constant-time tag check = commit-on-verify). AAD at construction. GhashAcc incremental accumulator == single-shot ghash_a_c_lens. Differential-KAT-equal to mode_gcm across arbitrary chunking. NOT "streaming" (decryptor is O(message) memory)
+      mode_xts.rs           # v0.12 — SM4-XTS single-shot tweakable mode (GB/T 17964-2021 / GM-T OID 1.2.156.10197.1.104.10; cfg-gated on `sm4-xts`; pure-core, no gmcrypto-simd dep). encrypt/decrypt(&[u8;32] Key1‖Key2, &[u8;16] tweak, &[u8] data_unit) -> Option<Vec<u8>>; full ciphertext stealing; lengths [16 B,16 MiB]; single None (len out of range or Key1==Key2). GB α-doubling = mul_alpha (bit-reflected: right-shift, masked 0xE1 into byte0 — NOT IEEE's <<1/0x87, NOT GHASH's full multiply). Whole-block bulk via Sm4Cipher::encrypt_blocks/decrypt_blocks (rides SIMD fanout). Confidentiality only, no auth. Byte-identical to OpenSSL EVP SM4-XTS xts_standard=GB. XTS_KEY_SIZE=32 re-exported
     hmac.rs                 # v0.2 W3 — single-shot hmac_sm3; v0.3 W5 — streaming HmacSm3 (impls in-crate Mac trait); v0.4 W2 impls digest::Mac under `digest-traits` (v0.11: digest 0.11 — Mac is a blanket impl over Update+FixedOutput+MacMarker; HmacSm3 keeps KeyInit, construct via KeyInit::new_from_slice; crypto_common→common import)
     kdf.rs                  # v0.2 W4 — PBKDF2-HMAC-SM3 (caller-supplied output buffer)
     asn1/
@@ -657,6 +696,31 @@ Operational notes:
   `rand_core::Rng` impl by enabling `getrandom`'s `wasm_js` feature
   in *their own* `Cargo.toml`. Adding it to ours hides the contract
   from callers and bloats the no-wasm target.
+- Don't implement SM4-XTS (`sm4::mode_xts`) per **IEEE 1619**. v0.12
+  targets **GB/T 17964-2021** (`xts_standard=GB`, OpenSSL's default for
+  SM4-XTS, the SM4 national standard). The two differ in the GF(2¹²⁸)
+  tweak doubling: GB is **bit-reflected** (`mul_alpha` = right-shift,
+  reduce `0xE1` into byte 0); IEEE is `<<1` / `0x87`. They produce
+  identical block-0 output but diverge from block 1 onward. The KAT
+  oracle pins `xts_standard=GB`; an IEEE impl fails it.
+- Don't branch on the XTS tweak in `mul_alpha` — `T = SM4_E(Key2, ·)` is
+  secret-derived. The carry reduction must stay a masked XOR
+  (`t[0] ^= 0xE1 & carry.wrapping_neg()`), never an `if`.
+- Don't add `gmcrypto-simd` (or any dep) to the `sm4-xts` feature. The
+  XTS α-doubling is a trivial multiply-by-x, **not** GHASH's full
+  carryless multiply — it lives in `gmcrypto-core`. `sm4-xts = []`.
+- Don't relax `Key1 == Key2 → None` in `mode_xts`. It's a GB/T 17964 /
+  FIPS weak-key guard (stricter than OpenSSL's default provider, which
+  permits equal halves). The compare is constant-time (`subtle`); only
+  the equal/not-equal *outcome* gates the reject.
+- Don't let the XTS API generate or reuse tweaks. Per-data-unit
+  tweak-uniqueness under a key is the caller's contract (the tweak is
+  the sector number); reuse leaks equality structure. And XTS is
+  **confidentiality only** — never imply it authenticates.
+- Don't forget `MATRIX_FEATURES` must be re-declared on the dudect
+  "Parse and gate" step (`env` is step-scoped). Without it the
+  feature-conditional `|tau|` gates silently never fire (the v0.12 W3
+  latent-bug fix).
 
 ## Agent gotchas
 
