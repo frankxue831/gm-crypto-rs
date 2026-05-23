@@ -60,6 +60,13 @@ pub mod gcm_streaming;
 // non-test build path, but its `tests::bitsliced_matches_table` is
 // still useful as an algorithmic correctness gate and as a
 // reference for `sbox_bitsliced_simd::tests::simd_sbox_matches_single_block`.
+// v0.12 — SM4-XTS single-shot tweakable mode (GB/T 17964-2021 / GM-T OID
+// 1.2.156.10197.1.104.10) behind the `sm4-xts` feature. Pure-core; full
+// ciphertext stealing; byte-identical to OpenSSL 3.x EVP SM4-XTS
+// (xts_standard=GB). The whole-block bulk rides the Sm4Cipher batch API.
+#[cfg(feature = "sm4-xts")]
+pub mod mode_xts;
+
 #[cfg(feature = "sm4-bitsliced")]
 #[cfg_attr(feature = "sm4-bitsliced-simd", allow(dead_code))]
 pub(crate) mod sbox_bitsliced;
@@ -84,3 +91,7 @@ pub use mode_gcm::GcmTagLen;
 // v0.9 W2 — incremental-input buffered SM4-GCM types.
 #[cfg(feature = "sm4-aead")]
 pub use gcm_streaming::{Sm4GcmDecryptor, Sm4GcmEncryptor};
+
+// v0.12 — SM4-XTS combined key size (Key1 ‖ Key2 = 2×16 bytes).
+#[cfg(feature = "sm4-xts")]
+pub use mode_xts::XTS_KEY_SIZE;

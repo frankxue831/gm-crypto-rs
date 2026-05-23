@@ -119,6 +119,14 @@ sm4-bitsliced-simd = ["sm4-bitsliced", "dep:gmcrypto-simd"]
 # elsewhere. See the module docstrings on `sm4::mode_gcm` and
 # `sm4::mode_ccm` for nonce-uniqueness and tag-length contracts.
 sm4-aead = ["dep:gmcrypto-simd"]
+# v0.12 — SM4-XTS (tweakable mode for disk/sector encryption) per
+# GB/T 17964-2021 (GM-T OID 1.2.156.10197.1.104.10). Pure-core (no
+# gmcrypto-simd dep — the XTS tweak update is a trivial GF(2^128)
+# doubling in the bit-reflected convention, not GHASH's full multiply);
+# whole-block bulk rides the Sm4Cipher batch API (picks up SIMD fanout
+# under sm4-bitsliced-simd). Default-off; byte-identical to OpenSSL 3.x
+# EVP SM4-XTS (xts_standard=GB). See docs/v0.12-scope.md.
+sm4-xts = []
 
 [lints.rust]
 unsafe_code = "forbid"
