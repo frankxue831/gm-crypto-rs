@@ -268,8 +268,8 @@ mod digest_impl {
     use super::{BLOCK_SIZE, DIGEST_SIZE, HmacSm3};
     use digest::{
         FixedOutput, MacMarker, Output, OutputSizeUser, Reset, Update,
+        common::{InvalidLength, Key, KeyInit, KeySizeUser},
         consts::{U32, U64},
-        crypto_common::{InvalidLength, Key, KeyInit, KeySizeUser},
     };
 
     const _: () = assert!(BLOCK_SIZE == 64, "U64 KeySize matches SM3 BLOCK_SIZE");
