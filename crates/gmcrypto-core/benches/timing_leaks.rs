@@ -727,6 +727,48 @@ fn ct_sm4_gcm_decrypt_buffered(runner: &mut CtRunner, rng: &mut BenchRng) {
     }
 }
 
+/// v0.12 W3 — SM4-XTS decrypt diagnostic (Q12.9 of docs/v0.12-scope.md).
+/// Class-split by master key; both classes' data units are valid encrypts
+/// under their own 32-byte key, so both decrypt via identical control flow.
+/// Uses a CTS (non-block-multiple) length (100 B = 6 blocks + 4) so the
+/// final-pair ciphertext-stealing path — the riskiest tweak arithmetic — is
+/// exercised, not just whole-block. Exercises key schedule, T_0 = SM4_E(Key2,
+/// tweak), the constant-time bit-reflected α-doubling chain, the
+/// `encrypt_blocks` batch path (rides SIMD fanout under sm4-bitsliced-simd),
+/// and the CTS tail. `|tau| < 0.20`.
+#[cfg(feature = "sm4-xts")]
+fn ct_sm4_xts_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
+    use gmcrypto_core::sm4::mode_xts;
+
+    // 32-byte keys; Key1 != Key2 within each (required by XTS).
+    let key_left: [u8; 32] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
+        0x10, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+        0x0e, 0x0f,
+    ];
+    let key_right: [u8; 32] = [
+        0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
+        0xef, 0x0f, 0x0e, 0x0d, 0x0c, 0x0b, 0x0a, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02,
+        0x01, 0x00,
+    ];
+    let tweak: [u8; 16] = [0x11; 16];
+    let data: [u8; 100] = [0u8; 100];
+
+    let ct_left = mode_xts::encrypt(&key_left, &tweak, &data).expect("valid params");
+    let ct_right = mode_xts::encrypt(&key_right, &tweak, &data).expect("valid params");
+
+    for _ in 0..sample_count() {
+        let (class, key, ct) = if rng.random::<bool>() {
+            (Class::Left, &key_left, &ct_left)
+        } else {
+            (Class::Right, &key_right, &ct_right)
+        };
+        runner.run_one(class, || {
+            mode_xts::decrypt(key, &tweak, ct).expect("dudect: valid data unit must decrypt")
+        });
+    }
+}
+
 /// HMAC-SM3 diagnostic. Class-split by key bytes; fixed message.
 /// HMAC moves the secret key into both inner and outer SM3 hash
 /// invocations (`K' XOR ipad` and `K' XOR opad`), so a key-dependent
@@ -993,6 +1035,16 @@ fn main() {
         name: BenchName("ct_sm4_gcm_decrypt_buffered"),
         seed: None,
         benchfn: ct_sm4_gcm_decrypt_buffered,
+    });
+
+    // v0.12 W3 — SM4-XTS decrypt target (Q12.9). Cfg-gated on `sm4-xts`;
+    // class-split by master key at a CTS (non-block-multiple) length so the
+    // final-pair ciphertext-stealing path gates. Same `|tau| < 0.20` gate.
+    #[cfg(feature = "sm4-xts")]
+    benches.push(BenchMetadata {
+        name: BenchName("ct_sm4_xts_decrypt"),
+        seed: None,
+        benchfn: ct_sm4_xts_decrypt,
     });
 
     let opts = BenchOpts {
