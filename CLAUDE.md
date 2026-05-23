@@ -266,7 +266,7 @@ The three secret-touching `invert` sites:
 crates/gmcrypto-core/
   src/
     lib.rs
-    sm3.rs                  # single-file SM3 hash (impls v0.3 W5 in-crate Hash trait; v0.4 W2 impls digest::Digest under `digest-traits`)
+    sm3.rs                  # single-file SM3 hash (impls v0.3 W5 in-crate Hash trait; v0.4 W2 impls digest::Digest under `digest-traits` — v0.11: digest 0.11, impl unchanged (Output is hybrid_array::Array))
     sm2/
       curve.rs              # Fp, Fn (ConstMontyForm wrappers), curve constants
       point.rs              # ProjectivePoint + RCB add/double (eprint 2015/1060)
@@ -290,7 +290,7 @@ crates/gmcrypto-core/
       mode_gcm.rs           # v0.8 W2 — SM4-GCM single-shot AEAD (NIST SP 800-38D / GM/T 0009 / RFC 8998; cfg-gated on `sm4-aead`); (Vec<u8>, [u8; 16]) encrypt + Option<Vec<u8>> decrypt; 12-byte canonical + arbitrary-length nonce paths; constant-time tag compare via subtle; byte-identical to gmssl 3.1.1 `sm4 -gcm`. v0.9 W1 adds GcmTagLen newtype + encrypt_with_tag_len/decrypt_with_tag_len (NIST §5.2.1.2 truncated tags {4,8,12,13,14,15,16}); inc32/derive_j0 widened to pub(super) for gcm_streaming
       mode_ccm.rs           # v0.8 W3 — SM4-CCM single-shot AEAD (NIST SP 800-38C / RFC 3610 / GM/T 0009 OID 1.2.156.10197.1.104.9; cfg-gated on `sm4-aead`); Option<Vec<u8>> encrypt (output: ct||tag) + Option<Vec<u8>> decrypt; tag_len ∈ {4,6,8,10,12,14,16}; nonce.len() ∈ [7,13]; pure-Rust CBC-MAC + CTR (no GHASH); byte-identical to OpenSSL 3.x EVP `SM4-CCM`
       gcm_streaming.rs      # v0.9 W2 — incremental-input buffered SM4-GCM (cfg-gated on `sm4-aead`). Sm4GcmEncryptor (output-streaming: update->Option<Vec<u8>>, None on >2^36-32-byte ceiling + poison; finalize/finalize_with_tag_len) + Sm4GcmDecryptor (input-incremental/output-BUFFERED: update buffers + folds GHASH, finalize_verify releases plaintext only after constant-time tag check = commit-on-verify). AAD at construction. GhashAcc incremental accumulator == single-shot ghash_a_c_lens. Differential-KAT-equal to mode_gcm across arbitrary chunking. NOT "streaming" (decryptor is O(message) memory)
-    hmac.rs                 # v0.2 W3 — single-shot hmac_sm3; v0.3 W5 — streaming HmacSm3 (impls in-crate Mac trait); v0.4 W2 impls digest::Mac under `digest-traits`
+    hmac.rs                 # v0.2 W3 — single-shot hmac_sm3; v0.3 W5 — streaming HmacSm3 (impls in-crate Mac trait); v0.4 W2 impls digest::Mac under `digest-traits` (v0.11: digest 0.11 — Mac is a blanket impl over Update+FixedOutput+MacMarker; HmacSm3 keeps KeyInit, construct via KeyInit::new_from_slice; crypto_common→common import)
     kdf.rs                  # v0.2 W4 — PBKDF2-HMAC-SM3 (caller-supplied output buffer)
     asn1/
       reader.rs             # v0.3 W1 — strict-canonical DER reader primitives
@@ -307,7 +307,7 @@ crates/gmcrypto-core/
   tests/                    # integration tests
     interop_gmssl.rs        # v0.2 HMAC/PBKDF2 + v0.3 W3 bidirectional SM2 sign/verify, SM2 encrypt/decrypt, SM4-CBC; v0.7 W2 adds SM4-CTR bidirectional
     v0_3_pkcs8_kat.rs       # v0.3 W2 — gmssl 3.1.1 PKCS#8/SPKI fixture round-trip
-    rustcrypto_traits.rs    # v0.4 W2 — required-features-gated (digest-traits + cipher-traits); 9 trait integration tests using UFCS
+    rustcrypto_traits.rs    # v0.4 W2 — required-features-gated (digest-traits + cipher-traits); 11 trait integration tests using UFCS (v0.4 base 9 + v0.11's cipher-0.5 multi-block backend + HMAC KeyInit key-length)
     sm4_batch_api.rs        # v0.7 W1 — encrypt_blocks/decrypt_blocks byte-equivalence vs per-block + round-trip; exhaustive 0..=33
     sm4_ctr_kat.rs          # v0.7 W2 — CTR derived from SM4-ECB primitive; counter-wrap KAT; encrypt/decrypt symmetry
     sm4_gcm_kat.rs          # v0.8 W2 — SM4-GCM byte-identical to gmssl 3.1.1 across 4 KAT scenarios + tamper detection (cfg-gated on `sm4-aead`)
