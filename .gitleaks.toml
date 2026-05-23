@@ -1,0 +1,41 @@
+# gitleaks configuration for gm-crypto-rs
+#
+# An authoritative `gitleaks git` pass over the full history (2026-05-24)
+# found NO real secrets. The only matches are intentional, published test
+# vectors / parser-rejection test strings — documented and allowlisted
+# below so future automated runs (pre-flip sweep or CI) stay green and
+# reviewers can see the matches are deliberate. See the
+# "2026-05-24 pre-flip dry-run" note in docs/pre-opensource-audit.md.
+#
+# This crate is a cryptography library: KAT (Known-Answer-Test) sourcing
+# docs embed published oracle test-vector hex, and the PEM parser's unit
+# tests necessarily contain key-shaped strings. None are real keys.
+
+title = "gm-crypto-rs gitleaks config"
+
+# Start from gitleaks' built-in ruleset; we only ADD allowlists.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Intentional test vectors and parser-rejection fixtures (no real keys)."
+# Match on file path: every entry below is, by nature, test material.
+paths = [
+  # gmssl-generated throwaway KAT fixtures (the .pem is a *password-encrypted*
+  # PKCS#8 blob whose password is also in the test; never a production key).
+  '''crates/gmcrypto-core/tests/data/.*\.pem$''',
+  # The PEM parser's own unit tests use deliberately malformed
+  # "-----BEGIN PRIVATE KEY-----" strings to exercise rejection paths.
+  '''crates/gmcrypto-core/src/pem\.rs$''',
+  # AEAD / XTS KAT sourcing docs embed published oracle test-vector hex
+  # (keys, nonces, ciphertexts) in their reproduce recipes.
+  '''docs/v0\.8-ccm-kat-sourcing\.md$''',
+  '''docs/v0\.12-xts-kat-sourcing\.md$''',
+  # Local, gitignored, never-published paths (only relevant to a working-tree
+  # `gitleaks dir` scan — the publication-relevant `gitleaks git` history scan
+  # never touches them). Build artifacts bake KAT hex into test binaries;
+  # .repolens/ and docs/superpowers/ are local scan/plan scratch.
+  '''^target/''',
+  '''^\.repolens/''',
+  '''^docs/superpowers/''',
+]
