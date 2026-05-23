@@ -113,6 +113,179 @@ fn mul_alpha(t: &mut [u8; BLOCK_SIZE]) {
     t[0] ^= 0xE1 & carry.wrapping_neg();
 }
 
+/// XOR `b` into `a`, 16 bytes.
+fn xor16(a: &mut [u8; BLOCK_SIZE], b: &[u8; BLOCK_SIZE]) {
+    for (x, y) in a.iter_mut().zip(b.iter()) {
+        *x ^= *y;
+    }
+}
+
+/// Validate the key/length and construct the two ciphers. Returns `None`
+/// on out-of-range length or weak key (`Key1 == Key2`).
+fn split_keys(key: &[u8; XTS_KEY_SIZE], len: usize) -> Option<(Sm4Cipher, Sm4Cipher)> {
+    if !(BLOCK_SIZE..=MAX_LEN).contains(&len) {
+        return None;
+    }
+    // Constant-time compare of the two 16-byte halves; the equal/not-equal
+    // *outcome* gates the reject (a usage error, fine to reveal), but the
+    // comparison leaks no byte positions.
+    if bool::from(key[..KEY_SIZE].ct_eq(&key[KEY_SIZE..])) {
+        return None;
+    }
+    let key1: &[u8; KEY_SIZE] = key[..KEY_SIZE].try_into().expect("16-byte half");
+    let key2: &[u8; KEY_SIZE] = key[KEY_SIZE..].try_into().expect("16-byte half");
+    Some((Sm4Cipher::new(key1), Sm4Cipher::new(key2)))
+}
+
+/// Encrypt `data_unit` under (`key`, `tweak`) in SM4-XTS mode with full
+/// ciphertext stealing. See the module docstring for the contracts.
+#[must_use]
+pub fn encrypt(
+    key: &[u8; XTS_KEY_SIZE],
+    tweak: &[u8; BLOCK_SIZE],
+    data_unit: &[u8],
+) -> Option<Vec<u8>> {
+    let (c1, c2) = split_keys(key, data_unit.len())?;
+    Some(xts_encrypt(&c1, &c2, tweak, data_unit))
+}
+
+/// Decrypt `data_unit` under (`key`, `tweak`) in SM4-XTS mode with full
+/// ciphertext stealing. XTS is unauthenticated — see the module docstring.
+#[must_use]
+pub fn decrypt(
+    key: &[u8; XTS_KEY_SIZE],
+    tweak: &[u8; BLOCK_SIZE],
+    data_unit: &[u8],
+) -> Option<Vec<u8>> {
+    let (c1, c2) = split_keys(key, data_unit.len())?;
+    Some(xts_decrypt(&c1, &c2, tweak, data_unit))
+}
+
+fn xts_encrypt(c1: &Sm4Cipher, c2: &Sm4Cipher, tweak: &[u8; BLOCK_SIZE], data: &[u8]) -> Vec<u8> {
+    let len = data.len();
+    let full = len / BLOCK_SIZE;
+    let rem = len % BLOCK_SIZE;
+    // Blocks processed by the "normal" (non-CTS) path. When there is a partial
+    // tail, the last *full* block is consumed by CTS instead.
+    let normal = if rem == 0 { full } else { full - 1 };
+
+    // T_0 = SM4_E(Key2, tweak).
+    let mut t = *tweak;
+    c2.encrypt_block(&mut t);
+
+    // Normal blocks: PP_j = P_j ⊕ T_j, one batch encrypt, then ⊕ T_j back.
+    let mut tweaks: Vec<[u8; BLOCK_SIZE]> = Vec::with_capacity(normal);
+    let mut blocks: Vec<[u8; BLOCK_SIZE]> = Vec::with_capacity(normal);
+    for j in 0..normal {
+        let mut blk = [0u8; BLOCK_SIZE];
+        blk.copy_from_slice(&data[j * BLOCK_SIZE..j * BLOCK_SIZE + BLOCK_SIZE]);
+        xor16(&mut blk, &t);
+        blocks.push(blk);
+        tweaks.push(t);
+        mul_alpha(&mut t);
+    }
+    c1.encrypt_blocks(&mut blocks);
+    for (blk, tw) in blocks.iter_mut().zip(tweaks.iter()) {
+        xor16(blk, tw);
+    }
+
+    let mut out = Vec::with_capacity(len);
+    for blk in &blocks {
+        out.extend_from_slice(blk);
+    }
+
+    if rem != 0 {
+        // CTS. `t` is now T_{q-1} (tweak for the last full block).
+        let t_last = t;
+        let mut t_steal = t;
+        mul_alpha(&mut t_steal); // T_q
+
+        // CC = SM4_E(Key1, P_{q-1} ⊕ T_{q-1}) ⊕ T_{q-1}.
+        let mut cc = [0u8; BLOCK_SIZE];
+        cc.copy_from_slice(&data[normal * BLOCK_SIZE..normal * BLOCK_SIZE + BLOCK_SIZE]);
+        xor16(&mut cc, &t_last);
+        c1.encrypt_block(&mut cc);
+        xor16(&mut cc, &t_last);
+
+        // PP = P_partial ‖ CC[rem..]; C_{q-1} = SM4_E(Key1, PP ⊕ T_q) ⊕ T_q.
+        let mut pp = [0u8; BLOCK_SIZE];
+        let partial = &data[normal * BLOCK_SIZE + BLOCK_SIZE..];
+        pp[..rem].copy_from_slice(partial);
+        pp[rem..].copy_from_slice(&cc[rem..]);
+        xor16(&mut pp, &t_steal);
+        c1.encrypt_block(&mut pp);
+        xor16(&mut pp, &t_steal);
+
+        // Output: [normal blocks] ‖ C_{q-1} (pp) ‖ CC[..rem].
+        out.extend_from_slice(&pp);
+        out.extend_from_slice(&cc[..rem]);
+    }
+
+    t.zeroize();
+    out
+}
+
+fn xts_decrypt(c1: &Sm4Cipher, c2: &Sm4Cipher, tweak: &[u8; BLOCK_SIZE], data: &[u8]) -> Vec<u8> {
+    let len = data.len();
+    let full = len / BLOCK_SIZE;
+    let rem = len % BLOCK_SIZE;
+    let normal = if rem == 0 { full } else { full - 1 };
+
+    // Tweak is ENCRYPTED with Key2 even on decrypt: T_0 = SM4_E(Key2, tweak).
+    let mut t = *tweak;
+    c2.encrypt_block(&mut t);
+
+    let mut tweaks: Vec<[u8; BLOCK_SIZE]> = Vec::with_capacity(normal);
+    let mut blocks: Vec<[u8; BLOCK_SIZE]> = Vec::with_capacity(normal);
+    for j in 0..normal {
+        let mut blk = [0u8; BLOCK_SIZE];
+        blk.copy_from_slice(&data[j * BLOCK_SIZE..j * BLOCK_SIZE + BLOCK_SIZE]);
+        xor16(&mut blk, &t);
+        blocks.push(blk);
+        tweaks.push(t);
+        mul_alpha(&mut t);
+    }
+    c1.decrypt_blocks(&mut blocks);
+    for (blk, tw) in blocks.iter_mut().zip(tweaks.iter()) {
+        xor16(blk, tw);
+    }
+
+    let mut out = Vec::with_capacity(len);
+    for blk in &blocks {
+        out.extend_from_slice(blk);
+    }
+
+    if rem != 0 {
+        // `t` is now T_{q-1}.
+        let t_last = t;
+        let mut t_steal = t;
+        mul_alpha(&mut t_steal); // T_q
+
+        // PP = SM4_D(Key1, C_{q-1} ⊕ T_q) ⊕ T_q (the stolen 16-byte block).
+        let mut pp = [0u8; BLOCK_SIZE];
+        pp.copy_from_slice(&data[normal * BLOCK_SIZE..normal * BLOCK_SIZE + BLOCK_SIZE]);
+        xor16(&mut pp, &t_steal);
+        c1.decrypt_block(&mut pp);
+        xor16(&mut pp, &t_steal);
+
+        // CC = C_partial ‖ PP[rem..]; P_{q-1} = SM4_D(Key1, CC ⊕ T_{q-1}) ⊕ T_{q-1}.
+        let mut cc = [0u8; BLOCK_SIZE];
+        let partial = &data[normal * BLOCK_SIZE + BLOCK_SIZE..];
+        cc[..rem].copy_from_slice(partial);
+        cc[rem..].copy_from_slice(&pp[rem..]);
+        xor16(&mut cc, &t_last);
+        c1.decrypt_block(&mut cc);
+        xor16(&mut cc, &t_last);
+
+        // Output: [normal blocks] ‖ P_{q-1} (cc) ‖ PP[..rem].
+        out.extend_from_slice(&cc);
+        out.extend_from_slice(&pp[..rem]);
+    }
+
+    t.zeroize();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,5 +310,40 @@ mod tests {
         let mut expected = [0u8; 16];
         expected[0] = 0xE1;
         assert_eq!(t, expected);
+    }
+
+    const KEY: [u8; XTS_KEY_SIZE] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
+        0x10, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+        0x0e, 0x0f,
+    ];
+    const TWEAK: [u8; 16] = [0x11; 16];
+
+    #[test]
+    #[allow(clippy::cast_possible_truncation)]
+    fn xts_round_trip_all_lengths() {
+        for len in 16..=80usize {
+            let pt: Vec<u8> = (0..len).map(|i| (i as u8) ^ 0xA5).collect();
+            let ct = encrypt(&KEY, &TWEAK, &pt).expect("valid");
+            assert_eq!(ct.len(), pt.len(), "len-preserving at {len}");
+            let rt = decrypt(&KEY, &TWEAK, &ct).expect("valid");
+            assert_eq!(rt, pt, "round-trip at length {len}");
+        }
+    }
+
+    #[test]
+    fn xts_rejects_short_long_and_weak_key() {
+        assert!(encrypt(&KEY, &TWEAK, &[0u8; 15]).is_none(), "len 15 < 16");
+        assert!(encrypt(&KEY, &TWEAK, &[]).is_none(), "len 0");
+        // len > 16 MiB rejected (the length check short-circuits before any
+        // encryption, so the oversized buffer is never processed).
+        assert!(
+            encrypt(&KEY, &TWEAK, &alloc::vec![0u8; MAX_LEN + 1]).is_none(),
+            "len > 16 MiB"
+        );
+        let mut weak = KEY;
+        weak.copy_within(0..16, 16); // Key2 := Key1
+        assert!(encrypt(&weak, &TWEAK, &[0u8; 16]).is_none(), "Key1 == Key2");
+        assert!(decrypt(&weak, &TWEAK, &[0u8; 16]).is_none(), "Key1 == Key2");
     }
 }
