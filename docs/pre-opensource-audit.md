@@ -185,25 +185,44 @@ test material, never reused as real keys. Safe.
 - [ ] Decommission the self-hosted runner (remove it in
       Settings → Actions → Runners; wipe `~ghrunner/actions-runner/_work`).
 
-**In the GitHub UI (cannot be set from inside the repo):**
+**In the GitHub UI / via API** (see the 2026-05-24 dry-run note below):
 
+- [x] **Dependabot** alerts + automated security fixes — **enabled
+      2026-05-24** (free on private repos; applied via the REST API).
+- [x] **Workflow permissions** = *Read repository contents* — **already
+      least-privilege** (`default_workflow_permissions: read`; no workflow
+      declares `permissions:` or uses a write token). No change needed.
 - [ ] **Settings → Code security:** enable **Secret scanning** + **Push
-      protection**, and **Dependabot** alerts + security updates (all free on
-      public repos). Forward-looking cover for S1.
+      protection**. **Confirmed BLOCKED while private** (API returns
+      *"Secret scanning is not available for this repository"* — needs paid
+      GitHub Advanced Security on private repos; **free the moment the repo
+      is public**). Must be done at the flip. Forward-looking cover for S1.
 - [ ] **Settings → Actions → General:** set **Fork pull request workflows
       from outside collaborators** to *Require approval for all outside
-      collaborators* (defence in depth even on hosted runners), and set
-      **Workflow permissions** to *Read repository contents* (least
-      privilege; the workflows need no write token).
-- [ ] **Settings → Branches:** add a branch-protection rule on `main` —
-      require the CI checks (build / msrv / cabi / deny / wasm32) + at least
-      one approving review; disallow force-push.
+      collaborators*. **Confirmed BLOCKED while private** (API: *"Fork PR
+      approval is not allowed for private repositories"* — private repos
+      can't be forked publicly). Do at the flip.
+- [ ] **Settings → Branches:** add a branch-protection rule on `main`.
+      **Deferred to the flip** (decision 2026-05-24): set it together with
+      the C1 CI swap so the required status-check names match the
+      *hosted-runner* jobs, with a **solo-maintainer-friendly** config —
+      block force-push + deletion, require the CI checks (build / msrv /
+      cabi / deny / wasm32) once they run on hosted runners, admin bypass
+      on, **no review requirement** (a lone maintainer can't approve their
+      own PR). The audit's original "+ 1 approving review" is impractical
+      for a single-maintainer repo unless a second account/bot is added.
 
 **Final sweep:**
 
-- [ ] Run one authoritative `gitleaks detect` over history + working tree
-      (no scanner was installed at audit time; the manual high-signal sweep
-      was clean — S1).
+- [x] **`gitleaks` authoritative pass — done 2026-05-24, CLEAN.**
+      `gitleaks` 8.30.1 over the full history (174 content commits): **0
+      real secrets.** The only matches are intentional published test
+      vectors / parser-rejection fixtures (the two `*-kat-sourcing.md`
+      oracle recipes' hex keys, the gmssl encrypted-PKCS#8 KAT `.pem`, and
+      `pem.rs`'s malformed-`BEGIN PRIVATE KEY` test string) — now codified
+      in `.gitleaks.toml` so `gitleaks git` **and** `gitleaks dir` both
+      report *no leaks found*. Strengthens S1 (the at-audit sweep had eyes
+      on only 2 of the 4; both new hits are benign KAT hex).
 - [ ] (Optional) Add a `.mailmap` to unify the two author display names (S2).
 - [ ] (Optional) Add a one-line "not independently audited" banner near the
       top of the README (L1).
@@ -220,3 +239,41 @@ test material, never reused as real keys. Safe.
   the migration is staged, not applied — see C1.
 - `CLAUDE.md` retained as the internal/agent guide; only the self-hosted
   runbook is slated for removal at the flip (S3).
+
+---
+
+## 2026-05-24 pre-flip dry-run (item 2 — GitHub settings)
+
+A dry-run of the "GitHub UI" pre-flip items, to apply what is safe now and
+empirically confirm what GitHub blocks on a private repo (rather than
+assume). Repo state: v0.12.0 on `main`, still **private**. Auth: `repo` +
+`workflow` scopes.
+
+**Applied now (safe + reversible, available on private repos):**
+
+- **Dependabot alerts** — `PUT /repos/{o}/{r}/vulnerability-alerts` → `204`.
+- **Dependabot automated security fixes** — `PUT …/automated-security-fixes`
+  → `204`; verified `{"enabled":true}`.
+- **`.gitleaks.toml`** added (codifies the 4 benign test-vector matches; both
+  scan modes now clean).
+
+**Confirmed already-correct (no change):**
+
+- **Workflow token** is already `default_workflow_permissions: read` and
+  `can_approve_pull_request_reviews: false`; no workflow needs a write token.
+
+**Confirmed BLOCKED while private** (GitHub API errors — these can only be
+enabled at/after the public flip):
+
+- Secret scanning — `422 "Secret scanning is not available for this
+  repository"` (needs paid GHAS on private; free on public).
+- Push protection — depends on secret scanning → same wall.
+- Fork-PR approval — `422 "Fork PR approval is not allowed for private
+  repositories"`.
+
+**Deferred by decision:** branch protection on `main` → set at the flip with
+the C1 CI swap, solo-maintainer-friendly config (see the pre-flip checklist).
+
+Net: item 2 is as complete as it can be while private. The three blocked
+settings + branch protection are the only GitHub-side actions left for the
+flip, all enumerated in the pre-flip checklist above.
