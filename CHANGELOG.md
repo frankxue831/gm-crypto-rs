@@ -3,6 +3,45 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.13.0] — 2026-05-24
+
+v0.13.0 exposes the v0.12 **SM4-XTS** core through the `gmcrypto-c` C ABI —
+the deferred FFI half of v0.12 (the v0.8-core → v0.10-FFI cadence) — behind a
+new forwarding `sm4-xts` feature on `gmcrypto-c`. **Additive only; no public
+API breakage, no new dependency.** The default-features build of both crates is
+byte-unchanged. Scope + design rationale in `docs/v0.13-scope.md`
+(Q13.1–Q13.12).
+
+### Added
+
+- **C ABI for SM4-XTS** (behind the `gmcrypto-c` `sm4-xts` feature =
+  `["gmcrypto-core/sm4-xts"]`, forwarding — no new transitive dependency):
+  - `gmcrypto_sm4_xts_encrypt` / `gmcrypto_sm4_xts_decrypt` — single-shot,
+    mirroring the single-shot SM4-GCM shape minus nonce/AAD/tag: 32-byte key
+    (`Key1 ‖ Key2`), 16-byte raw tweak, `data` ptr+len → length-preserving
+    output via the `(out, out_capacity, out_actual_len)` convention. Byte-
+    identical to `gmcrypto_core::sm4::mode_xts`. **Confidentiality only — no
+    authentication tag.**
+  - `GMCRYPTO_SM4_XTS_KEY_SIZE` (= 32) constant in the header (always-on).
+  - Single `GMCRYPTO_ERR` failure mode (`data_len` ∉ `[16, 16 MiB]`,
+    `Key1 == Key2`, null pointer, or buffer too small — in which case
+    `*out_actual_len` receives the required length), per the failure-mode
+    invariant.
+  - 5 new `c_smoke` Rust-equivalence tests (whole-block + CTS equivalence vs
+    core + round-trip; short / weak-key / small-buffer → `GMCRYPTO_ERR`).
+  - Doc-only C example `crates/gmcrypto-c/examples/sm4_xts_sector.c` (512-byte
+    sector round-trip, sector number as the tweak).
+  - Regenerated `include/gmcrypto.h` (additions only; `regen-header` did **not**
+    need to imply `sm4-xts` — cbindgen emits free-function prototypes + the
+    always-on `#define` from source regardless of cfg, unlike v0.10's cfg-gated
+    opaque streaming-handle structs).
+
+### Notes
+
+- No new `gmcrypto-core` API, no new dudect target (the FFI is a thin shim;
+  the core path is already gated by `ct_sm4_xts_decrypt` from v0.12). MSRV
+  stays 1.85.
+
 ## [0.12.0] — 2026-05-23
 
 v0.12.0 adds **SM4-XTS** — a tweakable block-cipher mode for disk/sector

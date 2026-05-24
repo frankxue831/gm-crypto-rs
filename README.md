@@ -79,7 +79,32 @@ the design intent in isolation.
   x86, some embedded).
 - Not a comprehensive SM-crypto library yet — see the milestone roadmap.
 
-## v0.12 scope (shipping)
+## v0.13 scope (shipping)
+
+**C ABI for SM4-XTS.** v0.13 exposes the v0.12 `sm4::mode_xts` core through the
+`gmcrypto-c` C ABI (`gmcrypto_sm4_xts_encrypt` / `_decrypt`) behind a new
+forwarding `sm4-xts` feature — the deferred FFI half of v0.12, on the
+established core-then-FFI cadence (SM4-GCM/CCM core in v0.8 → FFI in v0.10).
+Design rationale: [`docs/v0.13-scope.md`](docs/v0.13-scope.md).
+
+- **Additive only — no public API breakage, no new dependency.** The default
+  build of both crates is byte-unchanged; `sm4-xts` forwards to the pure-core
+  `gmcrypto-core/sm4-xts`.
+- Single-shot, mirroring the single-shot SM4-GCM FFI shape minus nonce/AAD/tag:
+  32-byte key (`Key1 ‖ Key2`), 16-byte tweak, length-preserving output via the
+  `(out, out_capacity, out_actual_len)` convention. Byte-identical to
+  `gmcrypto_core::sm4::mode_xts`. New `GMCRYPTO_SM4_XTS_KEY_SIZE` header
+  constant; single `GMCRYPTO_ERR` failure mode. **Confidentiality only.**
+- Doc-only C example `crates/gmcrypto-c/examples/sm4_xts_sector.c`; 5 new
+  `c_smoke` Rust-equivalence tests. No new `gmcrypto-core` API, no new dudect
+  target (the FFI is a thin shim over the v0.12 core path).
+
+**Deferred to v0.14** (per [`docs/v0.13-scope.md`](docs/v0.13-scope.md) §5/§6):
+parser fuzzing (`cargo-fuzz` on the untrusted-input decode surface — the
+recommended pre-v1.0 assurance gate), RustCrypto `aead` trait fit (still
+`0.6.0-rc.10`), pinned/noise-isolated dudect runner, AVX-512 `sbox_x64`.
+
+## v0.12 scope (shipped)
 
 **SM4-XTS — tweakable mode for disk/sector encryption.** v0.12 adds
 `sm4::mode_xts` behind the new opt-in `sm4-xts` feature: single-shot, full
@@ -354,8 +379,9 @@ Everything v0.2 shipped is unchanged:
 | v0.9.0 (shipped) | **AEAD ergonomics.** Per `docs/v0.9-scope.md` Q9.1–Q9.10. New: `sm4::GcmTagLen` + `mode_gcm::encrypt_with_tag_len` / `decrypt_with_tag_len` (NIST SP 800-38D §5.2.1.2 truncated tags; W1); incremental-input buffered `sm4::Sm4GcmEncryptor` (output-streaming) / `Sm4GcmDecryptor` (output-buffered, commit-on-verify) — differential-KAT-equal to single-shot across arbitrary chunking (W2); new dudect target `ct_sm4_gcm_decrypt_buffered` (W3); 6 single-shot AEAD C FFI symbols (`gmcrypto_sm4_gcm_*` / `gmcrypto_sm4_ccm_*`) behind a forwarding `sm4-aead` feature on `gmcrypto-c` (W4). Behind the existing `sm4-aead` flag. **No public API breakage — additive only.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.9.0]`. |
 | v0.10.0 (shipped) | **Streaming AEAD FFI — SM4-GCM.** Per `docs/v0.10-scope.md` Q10.1–Q10.11. New: 9 `gmcrypto-c` FFI symbols + 2 opaque handle types exposing the v0.9 incremental-input buffered SM4-GCM encryptor (output-streaming) / decryptor (commit-on-verify) to C/C++/Go/Zig/Python — `gmcrypto_sm4_gcm_encryptor_{new,update,finalize,finalize_with_tag_len,free}` + `gmcrypto_sm4_gcm_decryptor_{new,update,finalize_verify,free}`, behind the existing `sm4-aead` feature on `gmcrypto-c`; `_finalize*` consume+free, single `GMCRYPTO_ERR`; C example `examples/sm4_gcm_streaming.c`. `regen-header` now implies `sm4-aead` (cbindgen drops cfg-gated opaque structs otherwise). No new `gmcrypto-core` API; no new dudect target. **No public API breakage — additive only.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.10.0]`. |
 | v0.11.0 (shipped) | **RustCrypto trait-fit modernization.** Per `docs/v0.11-scope.md` Q11.1–Q11.11. Migrates the opt-in `digest-traits` / `cipher-traits` impls from `digest 0.10` / `cipher 0.4` to `digest 0.11` / `cipher 0.5` (the `crypto-common 0.2` / `hybrid-array` generation), in-place: `cipher` block backend reshaped to cipher 0.5's separate `BlockCipherEncBackend` / `BlockCipherDecBackend`; HMAC construction via `digest::KeyInit::new_from_slice` (`digest 0.11` `Mac` dropped `KeyInit`). **BREAKING for trait-fit consumers only** (bump your own `digest`/`cipher`); default-features users unaffected, output byte-identical (full KAT + gmssl interop). MSRV stays 1.85; no new dudect target. See [`CHANGELOG.md`](CHANGELOG.md) `[0.11.0]`. |
-| v0.12.0 (shipping) | **SM4-XTS — tweakable disk/sector mode.** Per `docs/v0.12-scope.md` Q12.1–Q12.13. New: `sm4::mode_xts::{encrypt, decrypt}` + `XTS_KEY_SIZE` behind the opt-in `sm4-xts` feature — GB/T 17964-2021 (GM-T OID `1.2.156.10197.1.104.10`), full ciphertext stealing, byte-identical to OpenSSL 3.x EVP `SM4-XTS` (`xts_standard=GB`; **not** IEEE 1619 — they differ in the GF(2¹²⁸) tweak doubling). 32-byte key (`Key1 ‖ Key2`) + raw 16-byte tweak, lengths `[16 B, 16 MiB]`, single `None` failure mode, confidentiality-only (no auth). Pure-core (**no new dependency**); rides the `Sm4Cipher::encrypt_blocks` batch API + SIMD fanout. New dudect target `ct_sm4_xts_decrypt`. Also fixes a latent CI bug where the feature-conditional dudect gates never fired. C FFI deferred to v0.13. **Additive — no public API breakage.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.12.0]`. |
-| v0.13+ | Per `docs/v0.12-scope.md` §5/§6 (Q13.x): C FFI for SM4-XTS (`gmcrypto_sm4_xts_*`); RustCrypto `aead` trait fit (upstream still on `0.6.0-rc.10`; v0.11 landed the `crypto-common 0.2` line it needs); pinned / noise-isolated dudect runner; AVX-512 16-way `sbox_x64`; CCM incremental input (consumer-driven); Argon2-with-SM3 alternative KDF (research-only); `wasm-bindgen-test` KAT runner. Each lands behind its own scope-doc cycle. |
+| v0.12.0 (shipped) | **SM4-XTS — tweakable disk/sector mode.** Per `docs/v0.12-scope.md` Q12.1–Q12.13. New: `sm4::mode_xts::{encrypt, decrypt}` + `XTS_KEY_SIZE` behind the opt-in `sm4-xts` feature — GB/T 17964-2021 (GM-T OID `1.2.156.10197.1.104.10`), full ciphertext stealing, byte-identical to OpenSSL 3.x EVP `SM4-XTS` (`xts_standard=GB`; **not** IEEE 1619 — they differ in the GF(2¹²⁸) tweak doubling). 32-byte key (`Key1 ‖ Key2`) + raw 16-byte tweak, lengths `[16 B, 16 MiB]`, single `None` failure mode, confidentiality-only (no auth). Pure-core (**no new dependency**); rides the `Sm4Cipher::encrypt_blocks` batch API + SIMD fanout. New dudect target `ct_sm4_xts_decrypt`. Also fixes a latent CI bug where the feature-conditional dudect gates never fired. C FFI deferred to v0.13. **Additive — no public API breakage.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.12.0]`. |
+| v0.13.0 (shipping) | **C ABI for SM4-XTS.** Per `docs/v0.13-scope.md` Q13.1–Q13.12. New: `gmcrypto_sm4_xts_encrypt` / `_decrypt` + `GMCRYPTO_SM4_XTS_KEY_SIZE` in `gmcrypto-c`, behind a forwarding `sm4-xts` feature — single-shot, mirroring the single-shot SM4-GCM FFI shape minus nonce/AAD/tag (32-byte key, 16-byte tweak, length-preserving `(out, out_capacity, out_actual_len)` output), byte-identical to `gmcrypto_core::sm4::mode_xts`, single `GMCRYPTO_ERR`, confidentiality-only. The deferred FFI half of v0.12 (the v0.8-core → v0.10-FFI cadence). 5 new `c_smoke` tests + doc-only C example `examples/sm4_xts_sector.c`; regenerated header (no `regen-header` change needed — free fns + always-on const). No new `gmcrypto-core` API, no new dudect target, **no new dependency**. **Additive — no public API breakage.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.13.0]`. |
+| v0.14+ | Per `docs/v0.13-scope.md` §5/§6 (Q14.x): parser fuzzing (`cargo-fuzz` on the DER/PEM/PKCS#8 + AEAD/XTS decode surface — the recommended pre-v1.0 assurance gate); RustCrypto `aead` trait fit (upstream still on `0.6.0-rc.10`); pinned / noise-isolated dudect runner; AVX-512 16-way `sbox_x64`; SM4-XTS streaming / per-sector batch helper (consumer-driven); CCM incremental input; Argon2-with-SM3 (research-only); `wasm-bindgen-test` KAT runner. Each lands behind its own scope-doc cycle. |
 | v1.0 | API stabilization. |
 
 ## Quick-start

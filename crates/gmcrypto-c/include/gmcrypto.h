@@ -51,6 +51,11 @@
 #define GMCRYPTO_SM4_KEY_SIZE 16
 
 /*
+ SM4-XTS key size in bytes (32 = `Key1 ‖ Key2`, two 128-bit keys).
+ */
+#define GMCRYPTO_SM4_XTS_KEY_SIZE (2 * GMCRYPTO_SM4_KEY_SIZE)
+
+/*
  SEC1 uncompressed-point size for SM2 public keys
  (`04 || X || Y` = 65 bytes).
  */
@@ -501,6 +506,46 @@ int gmcrypto_sm4_ccm_decrypt(const uint8_t *key,
                              uint8_t *pt_out,
                              uintptr_t pt_capacity,
                              uintptr_t *pt_actual_len)
+;
+
+/*
+ SM4-XTS single-shot encrypt (GB/T 17964-2021, `xts_standard=GB`).
+ `key` is exactly [`GMCRYPTO_SM4_XTS_KEY_SIZE`] (32) bytes (`Key1 ‖
+ Key2`); `tweak` is exactly [`GMCRYPTO_SM4_BLOCK_SIZE`] (16) raw bytes
+ (the data-unit/sector identifier — caller-unique per key). `out`
+ receives `data_len` bytes (length-preserving) via the
+ capacity/actual-len convention. Returns [`GMCRYPTO_OK`] /
+ [`GMCRYPTO_ERR`] (single failure mode: `data_len` outside
+ `[16, 16 MiB]`, `Key1 == Key2`, null pointer, or buffer too small —
+ in which case `*out_actual_len` is set to the required length).
+ **Confidentiality only — SM4-XTS does not authenticate.**
+ */
+
+int gmcrypto_sm4_xts_encrypt(const uint8_t *key,
+                             const uint8_t *tweak,
+                             const uint8_t *data,
+                             uintptr_t data_len,
+                             uint8_t *out,
+                             uintptr_t out_capacity,
+                             uintptr_t *out_actual_len)
+;
+
+/*
+ SM4-XTS single-shot decrypt (GB/T 17964-2021, `xts_standard=GB`).
+ Inverse of [`gmcrypto_sm4_xts_encrypt`] with the same argument shape;
+ `out` receives `data_len` bytes. Returns [`GMCRYPTO_OK`] /
+ [`GMCRYPTO_ERR`] (same single failure mode). XTS is unauthenticated,
+ so decrypt cannot detect tampering — it only fails on invalid
+ parameters (length / weak key / buffer).
+ */
+
+int gmcrypto_sm4_xts_decrypt(const uint8_t *key,
+                             const uint8_t *tweak,
+                             const uint8_t *data,
+                             uintptr_t data_len,
+                             uint8_t *out,
+                             uintptr_t out_capacity,
+                             uintptr_t *out_actual_len)
 ;
 
 /*
