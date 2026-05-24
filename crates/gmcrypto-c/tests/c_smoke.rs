@@ -1859,3 +1859,181 @@ fn sm4_gcm_streaming_empty_plaintext() {
     let (_core_ct, core_tag) = gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, &[]);
     assert_eq!(tag, core_tag);
 }
+
+// ============================================================
+// v0.13 — SM4-XTS single-shot FFI (cfg-gated on `sm4-xts`).
+// ============================================================
+
+#[cfg(feature = "sm4-xts")]
+use gmcrypto_c::{GMCRYPTO_SM4_XTS_KEY_SIZE, gmcrypto_sm4_xts_decrypt, gmcrypto_sm4_xts_encrypt};
+
+#[cfg(feature = "sm4-xts")]
+fn xts_key() -> [u8; GMCRYPTO_SM4_XTS_KEY_SIZE] {
+    let mut k = [0u8; GMCRYPTO_SM4_XTS_KEY_SIZE];
+    k[..16].fill(0x11);
+    k[16..].fill(0x22);
+    k
+}
+
+/// Encrypt via FFI == core `mode_xts::encrypt`, then FFI decrypt round-trips,
+/// on a whole-block (48-byte = 3-block) data unit.
+#[cfg(feature = "sm4-xts")]
+#[test]
+fn sm4_xts_round_trip_whole_block_matches_core() {
+    let key = xts_key();
+    let tweak = [0x33u8; 16];
+    let pt: Vec<u8> = (0u8..48).collect();
+
+    let mut ct = vec![0u8; pt.len()];
+    let mut ct_actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_xts_encrypt(
+            key.as_ptr(),
+            tweak.as_ptr(),
+            pt.as_ptr(),
+            pt.len(),
+            ct.as_mut_ptr(),
+            ct.len(),
+            &mut ct_actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert_eq!(ct_actual, pt.len());
+
+    let core_ct = gmcrypto_core::sm4::mode_xts::encrypt(&key, &tweak, &pt).expect("valid params");
+    assert_eq!(ct, core_ct);
+
+    let mut pt_back = vec![0u8; ct.len()];
+    let mut pt_actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_xts_decrypt(
+            key.as_ptr(),
+            tweak.as_ptr(),
+            ct.as_ptr(),
+            ct.len(),
+            pt_back.as_mut_ptr(),
+            pt_back.len(),
+            &mut pt_actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    pt_back.truncate(pt_actual);
+    assert_eq!(pt_back, pt);
+}
+
+/// Same equivalence + round-trip on a CTS (non-block-multiple, 50-byte) data
+/// unit — exercises the ciphertext-stealing tail across the FFI boundary.
+#[cfg(feature = "sm4-xts")]
+#[test]
+fn sm4_xts_round_trip_cts_matches_core() {
+    let key = xts_key();
+    let tweak = [0x33u8; 16];
+    let pt: Vec<u8> = (0u8..50).collect();
+
+    let mut ct = vec![0u8; pt.len()];
+    let mut ct_actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_xts_encrypt(
+            key.as_ptr(),
+            tweak.as_ptr(),
+            pt.as_ptr(),
+            pt.len(),
+            ct.as_mut_ptr(),
+            ct.len(),
+            &mut ct_actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert_eq!(ct_actual, pt.len());
+
+    let core_ct = gmcrypto_core::sm4::mode_xts::encrypt(&key, &tweak, &pt).expect("valid params");
+    assert_eq!(ct, core_ct);
+
+    let mut pt_back = vec![0u8; ct.len()];
+    let mut pt_actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_xts_decrypt(
+            key.as_ptr(),
+            tweak.as_ptr(),
+            ct.as_ptr(),
+            ct.len(),
+            pt_back.as_mut_ptr(),
+            pt_back.len(),
+            &mut pt_actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    pt_back.truncate(pt_actual);
+    assert_eq!(pt_back, pt);
+}
+
+/// Data unit shorter than one block (15 bytes) → single `GMCRYPTO_ERR`.
+#[cfg(feature = "sm4-xts")]
+#[test]
+fn sm4_xts_short_data_returns_err() {
+    let key = xts_key();
+    let tweak = [0x33u8; 16];
+    let pt = [0u8; 15];
+    let mut out = [0u8; 15];
+    let mut actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_xts_encrypt(
+            key.as_ptr(),
+            tweak.as_ptr(),
+            pt.as_ptr(),
+            pt.len(),
+            out.as_mut_ptr(),
+            out.len(),
+            &mut actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_ERR);
+}
+
+/// Weak key (`Key1 == Key2`) → single `GMCRYPTO_ERR` (stricter than OpenSSL's
+/// default provider; matches the core GB/T 17964 guard).
+#[cfg(feature = "sm4-xts")]
+#[test]
+fn sm4_xts_weak_key_returns_err() {
+    let key = [0x11u8; GMCRYPTO_SM4_XTS_KEY_SIZE]; // both halves identical
+    let tweak = [0x33u8; 16];
+    let pt = [0u8; 32];
+    let mut out = [0u8; 32];
+    let mut actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_xts_encrypt(
+            key.as_ptr(),
+            tweak.as_ptr(),
+            pt.as_ptr(),
+            pt.len(),
+            out.as_mut_ptr(),
+            out.len(),
+            &mut actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_ERR);
+}
+
+/// Too-small output buffer → `GMCRYPTO_ERR`, with `*out_actual_len` set to the
+/// required (== data) length.
+#[cfg(feature = "sm4-xts")]
+#[test]
+fn sm4_xts_small_buffer_returns_err_with_required_len() {
+    let key = xts_key();
+    let tweak = [0x33u8; 16];
+    let pt = [0u8; 32];
+    let mut actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_xts_encrypt(
+            key.as_ptr(),
+            tweak.as_ptr(),
+            pt.as_ptr(),
+            pt.len(),
+            ptr::null_mut(),
+            0,
+            &mut actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_ERR);
+    assert_eq!(actual, pt.len());
+}

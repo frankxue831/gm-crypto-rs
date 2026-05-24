@@ -58,6 +58,14 @@ regen-header = ["dep:cbindgen", "sm4-aead"]
 # see docs/v0.9-scope.md Q9.6). No new transitive deps: gmcrypto-core's
 # sm4-aead pulls gmcrypto-simd::ghash, which is already in the tree.
 sm4-aead = ["gmcrypto-core/sm4-aead"]
+# v0.13 — forward the core SM4-XTS gate so the single-shot XTS FFI
+# (gmcrypto_sm4_xts_encrypt / _decrypt) compiles. No new transitive dep:
+# gmcrypto-core's sm4-xts is pure-core (the GF(2^128) tweak doubling is a
+# trivial multiply-by-x, not GHASH). Unlike sm4-aead's streaming handles,
+# XTS adds only free functions + an always-on const (no opaque struct
+# types), so `regen-header` does NOT need to imply sm4-xts — cbindgen
+# emits free-fn prototypes + `#define`s from source regardless of cfg.
+sm4-xts = ["gmcrypto-core/sm4-xts"]
 
 [lints.rust]
 # v0.4 W4 / Q4.7 — `unsafe_code = "forbid"` is impossible on an FFI

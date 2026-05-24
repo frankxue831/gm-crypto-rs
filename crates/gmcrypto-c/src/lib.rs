@@ -96,6 +96,9 @@ use gmcrypto_core::sm4::{
     GcmTagLen, Sm4GcmDecryptor as InnerSm4GcmDec, Sm4GcmEncryptor as InnerSm4GcmEnc, mode_ccm,
     mode_gcm,
 };
+// v0.13 — single-shot SM4-XTS FFI, gated on the forwarding `sm4-xts` feature.
+#[cfg(feature = "sm4-xts")]
+use gmcrypto_core::sm4::mode_xts;
 use gmcrypto_core::{pem, pkcs8};
 use rand_core::TryRng;
 
@@ -120,6 +123,9 @@ pub const GMCRYPTO_SM4_BLOCK_SIZE: usize = 16;
 
 /// SM4 key size in bytes (16 = 128 bits).
 pub const GMCRYPTO_SM4_KEY_SIZE: usize = 16;
+
+/// SM4-XTS key size in bytes (32 = `Key1 ‖ Key2`, two 128-bit keys).
+pub const GMCRYPTO_SM4_XTS_KEY_SIZE: usize = 2 * GMCRYPTO_SM4_KEY_SIZE;
 
 /// SEC1 uncompressed-point size for SM2 public keys
 /// (`04 || X || Y` = 65 bytes).
@@ -1294,6 +1300,114 @@ pub unsafe extern "C" fn gmcrypto_sm4_ccm_decrypt(
             Some(plaintext) => unsafe {
                 write_output(&plaintext, pt_out, pt_capacity, pt_actual_len)
             },
+            None => GMCRYPTO_ERR,
+        }
+    })
+}
+
+// ============================================================
+// SM4-XTS — single-shot tweakable mode (v0.13; GB/T 17964-2021).
+//
+// Wraps gmcrypto_core::sm4::mode_xts (cfg-gated on the forwarding
+// `sm4-xts` feature). Stateless per call: key = 32 bytes (Key1‖Key2),
+// tweak = 16 raw bytes, output length == data_len (length-preserving).
+// Confidentiality only — NO authentication tag. Single GMCRYPTO_ERR on
+// every failure (data_len ∉ [16, 16 MiB], Key1==Key2, null, or buffer
+// too small). The constant-time Key1==Key2 reject + α-doubling live in
+// core; this shim only reconstructs slices and forwards `None`.
+// ============================================================
+
+/// SM4-XTS single-shot encrypt (GB/T 17964-2021, `xts_standard=GB`).
+/// `key` is exactly [`GMCRYPTO_SM4_XTS_KEY_SIZE`] (32) bytes (`Key1 ‖
+/// Key2`); `tweak` is exactly [`GMCRYPTO_SM4_BLOCK_SIZE`] (16) raw bytes
+/// (the data-unit/sector identifier — caller-unique per key). `out`
+/// receives `data_len` bytes (length-preserving) via the
+/// capacity/actual-len convention. Returns [`GMCRYPTO_OK`] /
+/// [`GMCRYPTO_ERR`] (single failure mode: `data_len` outside
+/// `[16, 16 MiB]`, `Key1 == Key2`, null pointer, or buffer too small —
+/// in which case `*out_actual_len` is set to the required length).
+/// **Confidentiality only — SM4-XTS does not authenticate.**
+#[cfg(feature = "sm4-xts")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_xts_encrypt(
+    key: *const u8,
+    tweak: *const u8,
+    data: *const u8,
+    data_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        let k = match unsafe { try_slice(key, GMCRYPTO_SM4_XTS_KEY_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let tw = match unsafe { try_slice(tweak, GMCRYPTO_SM4_BLOCK_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let d = match unsafe { try_slice(data, data_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let k_arr: &[u8; GMCRYPTO_SM4_XTS_KEY_SIZE] = match k.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        let tw_arr: &[u8; GMCRYPTO_SM4_BLOCK_SIZE] = match tw.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        match mode_xts::encrypt(k_arr, tw_arr, d) {
+            // SAFETY: out valid for out_capacity bytes; out_actual_len valid.
+            Some(ct) => unsafe { write_output(&ct, out, out_capacity, out_actual_len) },
+            None => GMCRYPTO_ERR,
+        }
+    })
+}
+
+/// SM4-XTS single-shot decrypt (GB/T 17964-2021, `xts_standard=GB`).
+/// Inverse of [`gmcrypto_sm4_xts_encrypt`] with the same argument shape;
+/// `out` receives `data_len` bytes. Returns [`GMCRYPTO_OK`] /
+/// [`GMCRYPTO_ERR`] (same single failure mode). XTS is unauthenticated,
+/// so decrypt cannot detect tampering — it only fails on invalid
+/// parameters (length / weak key / buffer).
+#[cfg(feature = "sm4-xts")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_xts_decrypt(
+    key: *const u8,
+    tweak: *const u8,
+    data: *const u8,
+    data_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        let k = match unsafe { try_slice(key, GMCRYPTO_SM4_XTS_KEY_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let tw = match unsafe { try_slice(tweak, GMCRYPTO_SM4_BLOCK_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let d = match unsafe { try_slice(data, data_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let k_arr: &[u8; GMCRYPTO_SM4_XTS_KEY_SIZE] = match k.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        let tw_arr: &[u8; GMCRYPTO_SM4_BLOCK_SIZE] = match tw.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        match mode_xts::decrypt(k_arr, tw_arr, d) {
+            // SAFETY: out valid for out_capacity bytes; out_actual_len valid.
+            Some(pt) => unsafe { write_output(&pt, out, out_capacity, out_actual_len) },
             None => GMCRYPTO_ERR,
         }
     })
