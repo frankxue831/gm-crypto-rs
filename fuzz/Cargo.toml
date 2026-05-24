@@ -30,11 +30,88 @@ features = ["sm4-aead", "sm4-xts"]
 debug = 1
 
 # --- targets (one [[bin]] per fuzz_targets/*.rs) -----------------------
-# W1 lands fuzz_pem; W2 adds the wire-format parsers; W3 the SM4 decrypts.
+# W1: fuzz_pem. W2: the wire-format parsers. W3 adds the SM4 decrypts.
 
 [[bin]]
 name = "fuzz_pem"
 path = "fuzz_targets/fuzz_pem.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_pkcs8_decode"
+path = "fuzz_targets/fuzz_pkcs8_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_pkcs8_decrypt"
+path = "fuzz_targets/fuzz_pkcs8_decrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_spki"
+path = "fuzz_targets/fuzz_spki.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sec1"
+path = "fuzz_targets/fuzz_sec1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sig"
+path = "fuzz_targets/fuzz_sig.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_asn1_reader"
+path = "fuzz_targets/fuzz_asn1_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm2_ciphertext_der"
+path = "fuzz_targets/fuzz_sm2_ciphertext_der.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm2_raw_ciphertext"
+path = "fuzz_targets/fuzz_sm2_raw_ciphertext.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm2_pubkey_sec1"
+path = "fuzz_targets/fuzz_sm2_pubkey_sec1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm2_decrypt"
+path = "fuzz_targets/fuzz_sm2_decrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm2_verify"
+path = "fuzz_targets/fuzz_sm2_verify.rs"
 test = false
 doc = false
 bench = false

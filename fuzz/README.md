@@ -58,6 +58,24 @@ cargo +nightly fuzz build
 | Target | Entry point under test |
 |---|---|
 | `fuzz_pem` | `pem::decode` (RFC 7468 armor + base64) |
+| `fuzz_pkcs8_decode` | `pkcs8::decode` (OneAsymmetricKey) |
+| `fuzz_pkcs8_decrypt` | `pkcs8::decrypt` (PBES2; fixed password) |
+| `fuzz_spki` | `spki::decode` (SubjectPublicKeyInfo) |
+| `fuzz_sec1` | `sec1::decode` (ECPrivateKey) |
+| `fuzz_sig` | `asn1::sig::decode_sig` (SEQUENCE { r, s }) |
+| `fuzz_asn1_reader` | low-level DER reader primitives |
+| `fuzz_sm2_ciphertext_der` | `asn1::ciphertext::decode` (GM/T 0009) |
+| `fuzz_sm2_raw_ciphertext` | `decode_c1c3c2` + `decode_c1c2c3_legacy` |
+| `fuzz_sm2_pubkey_sec1` | `Sm2PublicKey::from_sec1_bytes` |
+| `fuzz_sm2_decrypt` | `sm2::decrypt` (fixed key; parse + KDF + MAC) |
+| `fuzz_sm2_verify` | `verify_with_id` (fixed key; sig DER parse) |
 
-(W2 adds the wire-format parsers; W3 adds the SM4 decrypts. See
-`docs/v0.14-scope.md` Q14.3 for the full 16-target list.)
+(W3 adds the SM4 decrypts: `fuzz_sm4_cbc_decrypt` / `_gcm_decrypt` /
+`_ccm_decrypt` / `_xts_decrypt`. See `docs/v0.14-scope.md` Q14.3.)
+
+### Regenerating seeds
+
+The curated seeds in `fuzz/seeds/<target>/` are cryptographically-valid
+encodings produced by a one-time generator using gmcrypto-core's public
+encode/sign/encrypt APIs under a fixed test private key. They bootstrap
+coverage off real structure. To regenerate, see `docs/v0.14-scope.md` Q14.6.
