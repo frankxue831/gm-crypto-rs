@@ -1,8 +1,30 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0–v0.11.0 published to crates.io
-2026-05-10 → 2026-05-23**. **v0.12.0 prep on `main` 2026-05-23** —
-**SM4-XTS** (tweakable disk/sector mode): new `sm4::mode_xts::{encrypt,
+Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0–v0.12.0 published to crates.io
+2026-05-10 → 2026-05-23**. **v0.13.0 prep on `main` 2026-05-24** —
+**C FFI for SM4-XTS**: expose the v0.12 `sm4::mode_xts` core through the
+`gmcrypto-c` C ABI behind a forwarding **`sm4-xts`** feature
+(`= ["gmcrypto-core/sm4-xts"]`, no new dep), per `docs/v0.13-scope.md`
+Q13.1–Q13.12 (codex-reviewed W0+W1+W2). Two new symbols
+`gmcrypto_sm4_xts_encrypt`/`_decrypt` mirror the single-shot SM4-GCM FFI
+shape minus nonce/AAD/tag: 32-byte key `Key1‖Key2` (via the new
+always-on `GMCRYPTO_SM4_XTS_KEY_SIZE`=32 const), raw 16-byte tweak,
+`data` ptr+len → length-preserving `(out,out_capacity,out_actual_len)`
+output, byte-identical to core `mode_xts`. Single `GMCRYPTO_ERR`
+(data_len ∉ [16,16MiB], `Key1==Key2`, null, or buffer-too-small →
+`*out_actual_len`=required len). **Confidentiality only — no auth.**
+`regen-header` does **NOT** need to imply `sm4-xts` (unlike v0.10's
+cfg-gated opaque streaming structs): cbindgen emits free-fn prototypes +
+the always-on `#define` from source regardless of cfg, so the committed
+header just gains the 2 protos + 1 const and the drift gate stays green
+under the existing `--features regen-header` command. 5 new c_smoke
+tests (whole-block + CTS equivalence vs core + round-trip;
+short/weak-key/small-buffer → ERR); doc-only example
+`crates/gmcrypto-c/examples/sm4_xts_sector.c`. No new `gmcrypto-core`
+API, **no new dudect target** (thin shim — core's `ct_sm4_xts_decrypt`
+covers it), no new dep. Additive; default build of both crates
+byte-unchanged.
+**v0.12.0** — **SM4-XTS** (tweakable disk/sector mode): new `sm4::mode_xts::{encrypt,
 decrypt}` + `XTS_KEY_SIZE` behind the opt-in **`sm4-xts`** feature
 (pure-core, **no new dep**), per `docs/v0.12-scope.md` Q12.1–Q12.13
 (codex-reviewed). **GB/T 17964-2021** (GM-T OID 1.2.156.10197.1.104.10),
@@ -96,7 +118,8 @@ v0.9.0 = AEAD ergonomics (GCM tag-len param + incremental-input buffered GCM + s
 v0.10.0 = streaming AEAD FFI for SM4-GCM (gmcrypto-c; 9 symbols + 2 opaque types exposing the v0.9 encryptor/decryptor to C; anchor-only per `docs/v0.10-scope.md` Q10.1–Q10.11).
 v0.11.0 = RustCrypto trait-fit modernization (digest 0.10→0.11 / cipher 0.4→0.5; crypto-common 0.2 / hybrid-array; opt-in features only, byte-identical output; per `docs/v0.11-scope.md` Q11.1–Q11.11).
 v0.12.0 = SM4-XTS single-shot tweakable disk/sector mode (GB/T 17964-2021 / GM-T OID 1.2.156.10197.1.104.10, **not** IEEE 1619 — bit-reflected α-doubling; full ciphertext stealing; byte-identical to OpenSSL EVP SM4-XTS xts_standard=GB; pure-core opt-in `sm4-xts`, no new dep; per `docs/v0.12-scope.md` Q12.1–Q12.13). Also fixed the latent dudect CI gate bug (MATRIX_FEATURES env scoping).
-v0.13.0 = (candidate) C FFI for SM4-XTS + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + pinned dudect runner + AVX-512 sbox_x64 + CCM incremental input (per `docs/v0.12-scope.md` §5/§6 Q13.x).
+v0.13.0 = C FFI for SM4-XTS (`gmcrypto_sm4_xts_encrypt`/`_decrypt` + `GMCRYPTO_SM4_XTS_KEY_SIZE` in `gmcrypto-c` behind a forwarding `sm4-xts` feature; single-shot, byte-identical to core `mode_xts`, single `GMCRYPTO_ERR`, confidentiality-only; the deferred v0.12 FFI half on the v0.8-core→v0.10-FFI cadence; per `docs/v0.13-scope.md` Q13.1–Q13.12). No new `gmcrypto-core` API, no new dudect target, no new dep; additive.
+v0.14.0 = (candidate) parser fuzzing (`cargo-fuzz` on DER/PEM/PKCS#8 + AEAD/XTS decode — recommended pre-v1.0 assurance gate) + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + pinned dudect runner + AVX-512 sbox_x64 + SM4-XTS streaming/per-sector batch helper + CCM incremental input (per `docs/v0.13-scope.md` §5/§6 Q14.x).
 
 Read `README.md`, `SECURITY.md`, `CONTRIBUTING.md` for the user-facing posture.
 This file lists the constraints a coding agent will violate by default.
@@ -184,6 +207,9 @@ cargo test -p gmcrypto-c                            # c_smoke Rust-equivalence t
 # v0.9 W4 / v0.10 — AEAD FFI surface (single-shot + streaming SM4-GCM).
 cargo test -p gmcrypto-c --features sm4-aead        # +14 AEAD c_smoke tests (6 single-shot + 8 streaming)
 cargo clippy -p gmcrypto-c --features sm4-aead --all-targets -- -D warnings
+# v0.13 — SM4-XTS C FFI surface.
+cargo test -p gmcrypto-c --features sm4-xts         # +5 XTS c_smoke tests (whole-block/CTS equivalence + errors)
+cargo clippy -p gmcrypto-c --features sm4-xts --all-targets -- -D warnings
 
 # Dudect harness. Default 100K samples (~75s); CI smoke uses 10K.
 # v0.5 W5 — the bench uses Sm2PrivateKey::from_scalar (renamed from
@@ -354,13 +380,14 @@ crates/gmcrypto-core/
     data/                   # v0.3 W2 binary KAT fixtures + regen recipe (Q7.9 decision); v0.8 W3 adds sm4_ccm_oracle.c (OpenSSL EVP harness)
 
 crates/gmcrypto-c/          # v0.4 W4 — C ABI shim (cdylib + staticlib + rlib)
-  src/lib.rs                # 46 FFI entry points (31 + v0.9 W4's 6 single-shot AEAD + v0.10's 9 streaming AEAD): opaque handles, ffi_guard catch_unwind, GMCRYPTO_ERR on every error. AEAD symbols (gmcrypto_sm4_gcm_* / gmcrypto_sm4_ccm_*) cfg-gated on a forwarding `sm4-aead` feature (= ["gmcrypto-core/sm4-aead"]). v0.10 W1-W2 adds 2 opaque types gmcrypto_sm4_gcm_{encryptor,decryptor}_t + 9 symbols (encryptor new/update/finalize/finalize_with_tag_len/free output-streaming; decryptor new/update/finalize_verify/free commit-on-verify); _finalize* consume+free
+  src/lib.rs                # 61 FFI entry points (44 base + v0.9 W4's 6 single-shot AEAD + v0.10's 9 streaming AEAD + v0.13's 2 single-shot XTS): opaque handles, ffi_guard catch_unwind, GMCRYPTO_ERR on every error. AEAD symbols (gmcrypto_sm4_gcm_* / gmcrypto_sm4_ccm_*) cfg-gated on a forwarding `sm4-aead` feature (= ["gmcrypto-core/sm4-aead"]). v0.10 W1-W2 adds 2 opaque types gmcrypto_sm4_gcm_{encryptor,decryptor}_t + 9 symbols (encryptor new/update/finalize/finalize_with_tag_len/free output-streaming; decryptor new/update/finalize_verify/free commit-on-verify); _finalize* consume+free. v0.13 adds gmcrypto_sm4_xts_encrypt/_decrypt (single-shot, no handles, no opaque struct) + always-on const GMCRYPTO_SM4_XTS_KEY_SIZE=32, cfg-gated on a forwarding `sm4-xts` feature (= ["gmcrypto-core/sm4-xts"]); regen-header need NOT imply sm4-xts (free fns + const emit from source regardless of cfg)
   build.rs                  # cbindgen runs only under `regen-header` feature or GMCRYPTO_C_REGEN_HEADER=1
   cbindgen.toml             # cbindgen config (C language, include_guard = "GMCRYPTO_H_")
   include/gmcrypto.h        # committed header (CI gates drift via `git diff --exit-code`). cbindgen does NOT evaluate #[cfg(feature)] for free functions (single-shot AEAD prototypes appear unconditionally) BUT it DROPS cfg-gated opaque struct types (v0.10's gmcrypto_sm4_gcm_{encryptor,decryptor}_t) when the feature is inactive. So v0.10 makes `regen-header` IMPLY `sm4-aead` — regen is then deterministic + complete and the drift gate stays green with the documented `--features regen-header` command
   examples/sm2_sign.c       # end-to-end C example
   examples/sm4_gcm_streaming.c # v0.10 — chunked SM4-GCM streaming AEAD round-trip via the C ABI (doc-only; CI does not build C examples)
-  tests/c_smoke.rs          # 49 Rust-equivalence tests via extern "C" interop (35 default + 14 cfg-gated on sm4-aead: 6 v0.9 single-shot + 8 v0.10 streaming)
+  examples/sm4_xts_sector.c # v0.13 — 512-byte SM4-XTS sector encrypt/decrypt round-trip via the C ABI (sector# as tweak; doc-only)
+  tests/c_smoke.rs          # 54 Rust-equivalence tests via extern "C" interop (35 default + 14 cfg-gated on sm4-aead: 6 v0.9 single-shot + 8 v0.10 streaming; + 5 cfg-gated on sm4-xts: whole-block/CTS equivalence + round-trip + short/weak-key/small-buffer errors)
   README.md                 # C/C++/Python/Go/Zig integration docs
 
 crates/gmcrypto-simd/       # v0.5 W4 phase 2 / v0.6 W6 / v0.8 W1 — SIMD backend crate (rlib-only, opt-in via gmcrypto-core's sm4-bitsliced-simd or sm4-aead feature)
