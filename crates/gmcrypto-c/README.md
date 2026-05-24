@@ -23,6 +23,29 @@ Output artifacts land in `target/release/`:
 - `libgmcrypto_c.a` (Linux/macOS) / `gmcrypto_c.lib` (Windows) —
   static library.
 
+## Optional features
+
+The default build exposes SM2 / SM3 / SM4-ECB+CBC / HMAC-SM3 /
+PBKDF2-HMAC-SM3. Two opt-in features add the symmetric-cipher modes
+(each forwards to the corresponding `gmcrypto-core` feature; no extra
+build flags are needed by C consumers beyond rebuilding the library):
+
+| Feature | Adds | Example |
+|---|---|---|
+| `sm4-aead` | SM4-GCM / SM4-CCM single-shot + streaming SM4-GCM AEAD (`gmcrypto_sm4_gcm_*` / `gmcrypto_sm4_ccm_*`) | [`examples/sm4_gcm_streaming.c`](examples/sm4_gcm_streaming.c) |
+| `sm4-xts` | SM4-XTS single-shot tweakable disk/sector mode (`gmcrypto_sm4_xts_encrypt` / `_decrypt`; GB/T 17964-2021) | [`examples/sm4_xts_sector.c`](examples/sm4_xts_sector.c) |
+
+```bash
+cargo build -p gmcrypto-c --release --features sm4-aead,sm4-xts
+```
+
+**SM4-XTS** takes a 32-byte key (`Key1 ‖ Key2`; `Key1 == Key2` is
+rejected) and a 16-byte tweak (the per-sector data-unit identifier,
+caller-unique per key). It is length-preserving and **confidentiality
+only — it does not authenticate**; use an AEAD mode if you need
+integrity. Sizes are exported as `GMCRYPTO_SM4_XTS_KEY_SIZE` (32) and
+`GMCRYPTO_SM4_BLOCK_SIZE` (16).
+
 ## Header
 
 The committed header at [`include/gmcrypto.h`](include/gmcrypto.h)
