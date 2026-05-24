@@ -14,6 +14,11 @@ resolver = "2"
 # builds never compile it.
 members = ["crates/gmcrypto-core", "crates/gmcrypto-c", "crates/gmcrypto-simd"]
 default-members = ["crates/gmcrypto-core"]
+# v0.14 — the cargo-fuzz crate is its own workspace (it carries its own
+# empty `[workspace]` table) so its nightly/libFuzzer deps never enter the
+# published dependency graph. Excluded here too (belt-and-suspenders) so a
+# stray `cargo build --workspace` on stable never tries to compile it.
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.13.0"

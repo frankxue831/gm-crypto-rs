@@ -1,0 +1,43 @@
+# v0.14 — cargo-fuzz (libFuzzer) harness crate for gmcrypto-core.
+#
+# This is its OWN workspace (note the empty `[workspace]` table at the
+# bottom): the nightly-only `libfuzzer-sys` / `arbitrary` deps stay out of
+# the published 3-crate workspace entirely. NOT a member of the parent
+# workspace (which also `exclude`s it). Unpublished dev tool — `publish =
+# false`, no MSRV obligation (built with nightly), no `cargo deny` coverage.
+[package]
+name = "gmcrypto-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+# Structured input carving for the symmetric-decrypt targets (W3).
+arbitrary = { version = "1", features = ["derive"] }
+
+# The crate under test. AEAD + XTS features always on so every target
+# compiles without per-target feature juggling (scope Q14.2/§2).
+[dependencies.gmcrypto-core]
+path = "../crates/gmcrypto-core"
+features = ["sm4-aead", "sm4-xts"]
+
+# Fuzz binaries are not unit-tested / doc-tested / benched.
+[profile.release]
+debug = 1
+
+# --- targets (one [[bin]] per fuzz_targets/*.rs) -----------------------
+# W1 lands fuzz_pem; W2 adds the wire-format parsers; W3 the SM4 decrypts.
+
+[[bin]]
+name = "fuzz_pem"
+path = "fuzz_targets/fuzz_pem.rs"
+test = false
+doc = false
+bench = false
+
+# v0.14 — its own workspace so it is excluded from the parent.
+[workspace]
