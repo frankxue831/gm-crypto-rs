@@ -17,8 +17,7 @@ const FIXED_D: [u8; 32] = [
 fn fixed_pub() -> &'static Sm2PublicKey {
     static P: OnceLock<Sm2PublicKey> = OnceLock::new();
     P.get_or_init(|| {
-        let priv_key: Sm2PrivateKey =
-            Option::from(Sm2PrivateKey::from_bytes_be(&FIXED_D)).unwrap();
+        let priv_key: Sm2PrivateKey = Option::from(Sm2PrivateKey::from_bytes_be(&FIXED_D)).unwrap();
         Sm2PublicKey::from_point(priv_key.public_key())
     })
 }

@@ -500,6 +500,11 @@ rustup toolchain install 1.85
 rustup target add wasm32-unknown-unknown --toolchain stable
 rustup target add wasm32-unknown-unknown --toolchain 1.85
 rustup component add clippy rustfmt --toolchain stable
+# v0.14 — parser fuzzing (.github/workflows/fuzz-nightly.yml). cargo-fuzz
+# needs nightly + libFuzzer (Apple clang on macOS provides it). Pin
+# cargo-fuzz for reproducibility (same posture as the cbindgen 0.29 pin).
+rustup toolchain install nightly
+cargo install cargo-fuzz --version 0.13.1 --locked
 
 # 2b. Pre-empt git's macOS keychain credential helper. The system
 #     gitconfig that ships with Xcode CLT configures `credential.helper =

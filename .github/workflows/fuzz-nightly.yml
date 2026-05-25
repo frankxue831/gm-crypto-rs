@@ -1,0 +1,118 @@
+name: fuzz nightly (cargo-fuzz)
+
+# v0.14 — parser fuzzing (docs/v0.14-scope.md Q14.8). A capped nightly
+# cargo-fuzz (libFuzzer) sweep over the untrusted-input decode/decrypt
+# surface of gmcrypto-core. The invariant under test is the failure-mode
+# invariant on adversarial bytes: no panic / no OOM / no hang — every
+# malformed input collapses to the single safe None / Failed return.
+#
+# Runner: the SAME self-hosted macOS aarch64 runner as ci.yml
+# (`[self-hosted, macos, arm64, gmcrypto]`). Safe while the repo is
+# PRIVATE — only trusted users can trigger it.
+#
+# >>> BEFORE MAKING THIS REPO PUBLIC (planned at v1.0): a self-hosted
+# >>> runner on a public repo is remote code execution, and fuzzing
+# >>> *runs adversarial native code by design* — even more reason to
+# >>> isolate. Migrate to a GitHub-hosted runner (or a sandboxed/
+# >>> ephemeral self-hosted one) before the flip. See
+# >>> docs/pre-opensource-audit.md and docs/v0.14-scope.md Q14.8.
+#
+# This is NOT a PR gate — fuzzing does not block PRs (ci.yml / the
+# dudect workflows do). A real crash here is a failure-mode-invariant
+# violation → fix in core + commit the minimized input as a regression
+# seed (docs/v0.14-scope.md Q14.10).
+#
+# Prereqs on the runner (one-time, see CLAUDE.md runner setup):
+#   rustup toolchain install nightly
+#   cargo install cargo-fuzz --version 0.13.1 --locked
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # 06:00 UTC daily (after the 05:00 dudect cron)
+  workflow_dispatch:
+    inputs:
+      max_total_time:
+        description: 'Seconds to fuzz each target'
+        required: false
+        default: '120'
+
+# A partial fuzz run is still useful signal — queue behind an in-flight
+# run rather than discarding it (same posture as dudect-nightly.yml).
+concurrency:
+  group: fuzz-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # Pinned for reproducibility (W0 codex finding; same posture as the
+  # cbindgen 0.29 pin in gmcrypto-c).
+  CARGO_FUZZ_VERSION: '0.13.1'
+
+jobs:
+  fuzz:
+    name: cargo-fuzz nightly sweep
+    runs-on: [self-hosted, macos, arm64, gmcrypto]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # nightly is pre-installed on the runner (CLAUDE.md runner setup).
+      # We deliberately do NOT use dtolnay/rust-toolchain@master here —
+      # it was observed prompting for sudo on this self-hosted macOS
+      # runner (see ci.yml header). Just confirm nightly is present.
+      - name: Confirm nightly toolchain
+        run: rustc +nightly --version
+
+      # Idempotent: install the pinned cargo-fuzz only if missing /
+      # version-mismatched. Pre-installed at runner setup; this guards
+      # against a wiped CARGO_HOME.
+      - name: Ensure pinned cargo-fuzz
+        run: |
+          if ! cargo fuzz --version 2>/dev/null | grep -q "$CARGO_FUZZ_VERSION"; then
+            cargo install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
+          fi
+          cargo fuzz --version
+
+      - name: Build all fuzz targets
+        run: cargo +nightly fuzz build
+
+      - name: Fuzz each target (capped)
+        run: |
+          BUDGET="${{ github.event.inputs.max_total_time || '120' }}"
+          TARGETS="
+            fuzz_pem
+            fuzz_pkcs8_decode fuzz_pkcs8_decrypt
+            fuzz_spki fuzz_sec1 fuzz_sig fuzz_asn1_reader
+            fuzz_sm2_ciphertext_der fuzz_sm2_raw_ciphertext
+            fuzz_sm2_pubkey_sec1 fuzz_sm2_decrypt fuzz_sm2_verify
+            fuzz_sm4_cbc_decrypt fuzz_sm4_gcm_decrypt
+            fuzz_sm4_ccm_decrypt fuzz_sm4_xts_decrypt
+          "
+          failed=""
+          for t in $TARGETS; do
+            echo "::group::$t"
+            mkdir -p "fuzz/corpus/$t"
+            if cargo +nightly fuzz run "$t" "fuzz/corpus/$t" "fuzz/seeds/$t" -- \
+                 -max_len=16384 -rss_limit_mb=2048 -timeout=25 \
+                 -max_total_time="$BUDGET"; then
+              echo "PASS $t"
+            else
+              echo "CRASH $t"
+              failed="$failed $t"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::fuzz crash(es) in:$failed"
+            exit 1
+          fi
+
+      # On a crash, libFuzzer wrote a reproducer under fuzz/artifacts/.
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+          retention-days: 30
+          if-no-files-found: ignore

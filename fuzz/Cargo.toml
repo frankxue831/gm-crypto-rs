@@ -116,5 +116,33 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "fuzz_sm4_cbc_decrypt"
+path = "fuzz_targets/fuzz_sm4_cbc_decrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm4_gcm_decrypt"
+path = "fuzz_targets/fuzz_sm4_gcm_decrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm4_ccm_decrypt"
+path = "fuzz_targets/fuzz_sm4_ccm_decrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm4_xts_decrypt"
+path = "fuzz_targets/fuzz_sm4_xts_decrypt.rs"
+test = false
+doc = false
+bench = false
+
 # v0.14 — its own workspace so it is excluded from the parent.
 [workspace]
