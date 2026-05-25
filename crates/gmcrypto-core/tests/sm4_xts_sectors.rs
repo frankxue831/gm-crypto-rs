@@ -123,6 +123,13 @@ fn empty_buffer_is_vacuous_success() {
     let mut buf: [u8; 0] = [];
     assert!(mode_xts::encrypt_sectors(&KEY, 512, 0, &mut buf).is_some());
     assert!(mode_xts::decrypt_sectors(&KEY, 512, 0, &mut buf).is_some());
+
+    // ...but the key is still validated even with zero sectors: an empty buffer
+    // under a weak key (Key1 == Key2) is still `None` (W0 codex finding —
+    // "valid sector_size AND key" is the vacuous-success precondition).
+    let mut weak = KEY;
+    weak.copy_within(0..16, 16);
+    assert!(mode_xts::encrypt_sectors(&weak, 512, 0, &mut buf).is_none());
 }
 
 #[test]
