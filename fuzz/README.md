@@ -79,3 +79,10 @@ The curated seeds in `fuzz/seeds/<target>/` are cryptographically-valid
 encodings produced by a one-time generator using gmcrypto-core's public
 encode/sign/encrypt APIs under a fixed test private key. They bootstrap
 coverage off real structure. To regenerate, see `docs/v0.14-scope.md` Q14.6.
+
+**Seed-layout pin (W3 codex note):** the SM4 decrypt targets carve their
+`key/iv/nonce/aad/tag/...` fields from the fuzz buffer with `arbitrary`'s
+**front-consuming** reads, so the committed `fuzz_sm4_*` seeds are plain
+field concatenations that depend on `arbitrary 1.4.2`'s consumption order
+(pinned in `fuzz/Cargo.lock`). If you ever bump `arbitrary`, re-verify the
+front-vs-tail consumption order and regenerate those four seeds.

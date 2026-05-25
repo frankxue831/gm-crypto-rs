@@ -276,6 +276,37 @@ wherever a distinguishing failure could leak information. Specifically:
 
 PRs that distinguish failure modes — even "helpfully" — will be rejected.
 
+## Parser fuzzing (v0.14)
+
+The failure-mode invariant above is enforced not only by the type system and
+KAT/interop tests over curated inputs, but by **coverage-guided fuzzing over
+adversarial inputs**. v0.14 adds a `cargo-fuzz` (libFuzzer) harness
+(`fuzz/`, a workspace-excluded nightly-only crate — never in the published
+dependency graph) with **16 targets covering the entire untrusted-input
+decode/decrypt boundary**:
+
+- **Wire formats:** PEM, PKCS#8 (`decode` + PBES2 `decrypt`), SPKI, SEC1, the
+  ASN.1 `SEQUENCE { r, s }` signature, the low-level strict-canonical DER reader
+  primitives, the GM/T 0009 SM2 DER ciphertext, and the raw SM2 ciphertext
+  (`C1‖C3‖C2` + legacy `C1‖C2‖C3`).
+- **Public-key / composite paths:** `Sm2PublicKey::from_sec1_bytes`,
+  `sm2::decrypt` (DER parse + KDF + MAC) and `verify_with_id` (DER signature
+  parse + verify), both under a fixed test key.
+- **Symmetric decrypts:** SM4-CBC, SM4-GCM (incl. truncated-tag
+  `decrypt_with_tag_len`), SM4-CCM, SM4-XTS.
+
+The property under test is exactly the failure-mode invariant on hostile bytes:
+**every malformed input collapses to the single safe `None` / `Error::Failed`
+(or `false`) — no panic, no unbounded allocation, no hang.** This is *negative-
+input* fuzzing, not a correctness oracle (correctness is KAT/interop's job) and
+not a constant-time check (that is `dudect`'s job — see above).
+
+A capped nightly job (`.github/workflows/fuzz-nightly.yml`) runs the targets on
+a schedule; a crash uploads a minimized reproducer, which becomes a committed
+regression seed under `fuzz/seeds/`. The **initial v0.14 sweep found zero
+crashes** across all 16 targets. Reproduce locally per
+[`fuzz/README.md`](fuzz/README.md).
+
 ## Compliance posture
 
 This is a personal open-source project. It is not a certified cryptographic

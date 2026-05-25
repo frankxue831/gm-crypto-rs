@@ -1,7 +1,23 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0–v0.12.0 published to crates.io
-2026-05-10 → 2026-05-23**. **v0.13.0 prep on `main` 2026-05-24** —
+Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0–v0.13.0 published to crates.io
+2026-05-10 → 2026-05-24**. **v0.14 = parser-fuzzing assurance on `main`
+2026-05-25 — NOT a crates.io release** (the initial `cargo-fuzz` sweep
+found zero crashes, so the published crates are byte-unchanged; per
+`docs/v0.14-scope.md` Q14.11 a clean run merges as infra/assurance and is
+not published). New **workspace-excluded `fuzz/` crate** (`cargo-fuzz` /
+libFuzzer, nightly-only, never in the published dep graph): **16 targets**
+over the full untrusted-input decode/decrypt surface of `gmcrypto-core`
+(PEM, PKCS#8 decode/decrypt, SPKI, SEC1, DER reader primitives, SM2 DER +
+raw ciphertext, SM2 decrypt + verify, SM4-CBC/GCM/CCM/XTS decrypt), each
+proving the failure-mode invariant on adversarial bytes — **no panic / no
+OOM / no hang**. Capped nightly job `.github/workflows/fuzz-nightly.yml`
+(cron + `workflow_dispatch`, self-hosted, pinned `cargo-fuzz 0.13.1`, NOT
+a PR gate). Codex-reviewed W0+W1+W2+W3. Workspace `version` stays
+**0.13.0** (no bump). The 3 published crates' default builds are
+byte-identical; `cargo {build,test,clippy} --workspace`, `cargo deny`,
+MSRV-1.85, and `cargo publish` are all unaffected by `fuzz/`.
+**Earlier — v0.13.0 published 2026-05-24** —
 **C FFI for SM4-XTS**: expose the v0.12 `sm4::mode_xts` core through the
 `gmcrypto-c` C ABI behind a forwarding **`sm4-xts`** feature
 (`= ["gmcrypto-core/sm4-xts"]`, no new dep), per `docs/v0.13-scope.md`
@@ -119,7 +135,8 @@ v0.10.0 = streaming AEAD FFI for SM4-GCM (gmcrypto-c; 9 symbols + 2 opaque types
 v0.11.0 = RustCrypto trait-fit modernization (digest 0.10→0.11 / cipher 0.4→0.5; crypto-common 0.2 / hybrid-array; opt-in features only, byte-identical output; per `docs/v0.11-scope.md` Q11.1–Q11.11).
 v0.12.0 = SM4-XTS single-shot tweakable disk/sector mode (GB/T 17964-2021 / GM-T OID 1.2.156.10197.1.104.10, **not** IEEE 1619 — bit-reflected α-doubling; full ciphertext stealing; byte-identical to OpenSSL EVP SM4-XTS xts_standard=GB; pure-core opt-in `sm4-xts`, no new dep; per `docs/v0.12-scope.md` Q12.1–Q12.13). Also fixed the latent dudect CI gate bug (MATRIX_FEATURES env scoping).
 v0.13.0 = C FFI for SM4-XTS (`gmcrypto_sm4_xts_encrypt`/`_decrypt` + `GMCRYPTO_SM4_XTS_KEY_SIZE` in `gmcrypto-c` behind a forwarding `sm4-xts` feature; single-shot, byte-identical to core `mode_xts`, single `GMCRYPTO_ERR`, confidentiality-only; the deferred v0.12 FFI half on the v0.8-core→v0.10-FFI cadence; per `docs/v0.13-scope.md` Q13.1–Q13.12). No new `gmcrypto-core` API, no new dudect target, no new dep; additive.
-v0.14.0 = (candidate) parser fuzzing (`cargo-fuzz` on DER/PEM/PKCS#8 + AEAD/XTS decode — recommended pre-v1.0 assurance gate) + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + pinned dudect runner + AVX-512 sbox_x64 + SM4-XTS streaming/per-sector batch helper + CCM incremental input (per `docs/v0.13-scope.md` §5/§6 Q14.x).
+v0.14 = parser fuzzing (`cargo-fuzz`/libFuzzer over the full untrusted-input decode/decrypt surface; 16 targets; failure-mode-invariant assurance — no panic/OOM/hang; per `docs/v0.14-scope.md` Q14.1–Q14.12). **Assurance/infra only — NOT a crates.io release** (initial sweep found zero crashes → published crates byte-unchanged → no version bump, no publish, per Q14.11). New workspace-excluded `fuzz/` crate + nightly CI; codex-reviewed W0–W3.
+v0.15+ = (candidate) round-trip/differential parser fuzzing + streaming-decryptor fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + pinned dudect runner + `cargo fuzz coverage` in CI + AVX-512 sbox_x64 + SM4-XTS streaming/per-sector batch helper + CCM incremental input + a v1.0 readiness pass (per `docs/v0.14-scope.md` §5/§6 Q15.x).
 
 Read `README.md`, `SECURITY.md`, `CONTRIBUTING.md` for the user-facing posture.
 This file lists the constraints a coding agent will violate by default.
@@ -229,6 +246,19 @@ DUDECT_SAMPLES=10000  cargo bench --bench timing_leaks --features sm4-xts,sm4-ae
 
 # gmssl interop (gated; needs gmssl 3.1.1 installed).
 GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
+
+# v0.14 — parser fuzzing (cargo-fuzz / libFuzzer). NIGHTLY-ONLY toolchain.
+# One-time: rustup toolchain install nightly && cargo install cargo-fuzz --version 0.13.1 --locked
+# Run from the REPO ROOT (the dir containing fuzz/). The fuzz crate is its
+# OWN workspace + parent exclude=["fuzz"], so it does NOT affect any
+# `cargo ... --workspace` / `cargo deny` / publish of the 3 crates.
+cargo +nightly fuzz build                          # build all 16 targets
+cargo +nightly fuzz run fuzz_pem fuzz/corpus/fuzz_pem fuzz/seeds/fuzz_pem -- \
+    -max_len=16384 -rss_limit_mb=2048 -timeout=25 -max_total_time=60
+# Dir order: corpus FIRST (gitignored, libFuzzer writes new units here),
+# seeds SECOND (committed, read-only). A crash → fuzz/artifacts/<target>/;
+# minimize with `cargo +nightly fuzz tmin <target> <crash>` and commit the
+# minimized input under fuzz/seeds/<target>/ as a regression seed.
 ```
 
 ## Dudect harness gate
@@ -409,10 +439,17 @@ crates/gmcrypto-simd/       # v0.5 W4 phase 2 / v0.6 W6 / v0.8 W1 — SIMD backe
   tests/ghash_kat.rs        # v0.8 W1 — NIST-derived GHASH triple (H, X, Y) regression KAT across all three dispatch paths
   tests/ghash_lane_equivalence.rs # v0.8 W1 — software vs CLMUL vs PMULL byte-equivalence sweep over 75 inputs (random + structural edges)
 
+fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN WORKSPACE (empty [workspace] table) + parent exclude=["fuzz"] → nightly-only libfuzzer-sys/arbitrary deps never enter the published 3-crate graph; unpublished, NOT MSRV-bound, NOT in cargo deny. fuzz/Cargo.lock IS committed (.gitignore anchors /Cargo.lock to root so it isn't swallowed). 16 targets prove the failure-mode invariant (no panic/OOM/hang) on adversarial bytes; initial sweep zero crashes.
+  Cargo.toml                # gmcrypto-core path dep w/ features=["sm4-aead","sm4-xts"] always on (no per-target feature juggling); 16 [[bin]] entries; empty [workspace]
+  fuzz_targets/             # fuzz_pem, fuzz_pkcs8_{decode,decrypt}, fuzz_spki, fuzz_sec1, fuzz_sig, fuzz_asn1_reader, fuzz_sm2_{ciphertext_der,raw_ciphertext,pubkey_sec1,decrypt,verify}, fuzz_sm4_{cbc,gcm,ccm,xts}_decrypt. SM4 targets carve key/iv/nonce/aad/tag via FRONT-consuming arbitrary::Unstructured (so seeds are plain concatenations; pinned to arbitrary 1.4.2 order). sm2_decrypt/verify use a fixed test key via OnceLock.
+  seeds/<target>/           # committed curated valid seeds (from a one-time generator using gmcrypto-core's encode/sign/encrypt). corpus/, target/, artifacts/ are gitignored.
+  README.md                 # build/run/repro runbook + seed-regen recipe
+
 .github/workflows/
-  ci.yml                    # 5 jobs on self-hosted macOS aarch64: build/test (stable, full) + msrv (1.85, build-only) + cabi + cargo-deny + wasm32 matrix. Per-feature clippy passes (digest-traits, cipher-traits, sm4-bitsliced, sm4-bitsliced-simd, crypto-bigint-scalar). concurrency: cancel-in-progress.
+  ci.yml                    # 5 jobs on self-hosted macOS aarch64: build/test (stable, full) + msrv (1.85, build-only) + cabi + cargo-deny + wasm32 matrix. Per-feature clippy passes (digest-traits, cipher-traits, sm4-bitsliced, sm4-bitsliced-simd, crypto-bigint-scalar). concurrency: cancel-in-progress. UNAFFECTED by fuzz/ (excluded).
   dudect-pr.yml             # 10K samples on ubuntu-latest, |tau| gate, matrix on features=[default, sm4-bitsliced, sm4-bitsliced-simd], path-allowlisted, concurrency: cancel-in-progress
   dudect-nightly.yml        # 100K samples on ubuntu-latest, same gate + matrix, 30-day artifact retention; concurrency: cancel-in-progress=false (a partial 100K run is wasted compute). PR #38 drops the push:main trigger in favour of cron-only (regression watch) + workflow_dispatch (manual reruns).
+  fuzz-nightly.yml          # v0.14 — capped cargo-fuzz sweep over all 16 targets on the self-hosted runner (cron 06:00 UTC + workflow_dispatch w/ max_total_time input; pinned cargo-fuzz 0.13.1; -max_total_time/-rss_limit_mb/-timeout caps; crash-artifact upload 30d; concurrency cancel-in-progress=false). NOT a PR gate. >>> BEFORE PUBLIC FLIP: fuzzing runs adversarial native code — isolate/move off the self-hosted personal Mac.
 
 docs/
   v0.1.0-release-review.md      # pre-publish reviewer checklist (template)
@@ -424,6 +461,8 @@ docs/
   v0.6-scope.md                 # v0.6 scope doc + Q6.1–Q6.10 sign-off decisions (W4 phase 3 / W6)
   v0.7-aead-scope.md            # v0.7 W4 — design cycle scope doc for v0.8 SM4-GCM + SM4-CCM (Q8.1–Q8.8 + v0.9 candidate Q-list); Q8.4 backref to W0 resolution
   v0.8-ccm-kat-sourcing.md      # v0.8 W0 — sourcing decision for SM4-CCM KAT vectors (OpenSSL 3.x EVP `SM4-CCM`; gmssl 3.1.1 lacks `-ccm`); embedded C harness + parametric coverage matrix
+  v0.14-scope.md                # v0.14 W0 — parser-fuzzing scope (Q14.1–Q14.12, codex-reviewed); 16 cargo-fuzz targets over the untrusted-input decode/decrypt surface; assurance-only (clean run ⇒ no crates.io release per Q14.11); §6 v0.15 candidate Q-list
+  (scope docs for v0.9–v0.13 live alongside; not all relisted here)
 ```
 
 `getrandom` is a direct workspace dep (`0.4.2`, `sys_rng` feature) — added
@@ -759,6 +798,37 @@ Operational notes:
 - **MSRV 1.85** — don't use `Integer::is_multiple_of` (stable in 1.87).
   Use `n % m == 0` / `% m != 0`. Clippy catches it at PR time, but
   the detour wastes a fmt+clippy cycle.
+- **Fuzz crate (`fuzz/`) is a SEPARATE workspace.** `cargo fmt --all` /
+  `cargo clippy --workspace` / `cargo test --workspace` do **NOT** touch
+  it (parent `exclude=["fuzz"]` + its own empty `[workspace]`). To
+  fmt/lint it, target it explicitly:
+  `cargo fmt --manifest-path fuzz/Cargo.toml --all` and (nightly)
+  `cargo +nightly fuzz build`. Don't expect workspace-wide commands to
+  cover it.
+- **`cargo fuzz run <target> <dir>` WRITES new corpus units into the
+  FIRST dir.** Never pass `fuzz/seeds/<target>` as the first (write)
+  dir — it pollutes the committed curated seeds with machine-generated
+  files (happened in v0.14 W1; had to amend). Always
+  `cargo +nightly fuzz run <t> fuzz/corpus/<t> fuzz/seeds/<t>` —
+  corpus (gitignored) first, seeds (read-only) second.
+- **`.gitignore` `Cargo.lock` must stay anchored as `/Cargo.lock`** (root
+  only), NOT a bare `Cargo.lock` — a bare pattern also ignores
+  `fuzz/Cargo.lock`, which the cargo-fuzz binary workspace pins and
+  commits. (W0 codex finding.)
+- **SM4 fuzz-target seed layouts are pinned to `arbitrary 1.4.2`'s
+  front-consuming read order** (key/iv/nonce/aad/tag carved with
+  `arbitrary::<[u8;N]>()` / `arbitrary::<u8>()` / `bytes(n)` / `take_rest`
+  — all front; only `int_in_range` / collection-length read from the
+  tail, which these targets avoid). Bumping `arbitrary` ⇒ re-verify the
+  order and regenerate the four `fuzz_sm4_*` seeds. Pin is held by
+  `fuzz/Cargo.lock`.
+- **A new minor cycle does NOT always mean a crates.io release.** v0.14
+  was an *assurance* cycle (parser fuzzing): clean fuzz run ⇒ published
+  crates byte-unchanged ⇒ **no version bump, no publish** (per
+  `docs/v0.14-scope.md` Q14.11). Don't reflexively bump
+  `[workspace.package].version` or run `cargo publish` for a cycle that
+  doesn't change a published crate. Workspace `version` stays `0.13.0`
+  until the next code change.
 - **`gmssl sm2keygen -out priv.pem`** writes the encrypted PKCS#8 to
   the file **and** prints the SPKI public key to stdout by default.
   Use `-pubout pub.pem` to capture it separately.
