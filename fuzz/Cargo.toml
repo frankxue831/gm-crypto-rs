@@ -1,0 +1,148 @@
+# v0.14 — cargo-fuzz (libFuzzer) harness crate for gmcrypto-core.
+#
+# This is its OWN workspace (note the empty `[workspace]` table at the
+# bottom): the nightly-only `libfuzzer-sys` / `arbitrary` deps stay out of
+# the published 3-crate workspace entirely. NOT a member of the parent
+# workspace (which also `exclude`s it). Unpublished dev tool — `publish =
+# false`, no MSRV obligation (built with nightly), no `cargo deny` coverage.
+[package]
+name = "gmcrypto-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+# Structured input carving for the symmetric-decrypt targets (W3).
+arbitrary = { version = "1", features = ["derive"] }
+
+# The crate under test. AEAD + XTS features always on so every target
+# compiles without per-target feature juggling (scope Q14.2/§2).
+[dependencies.gmcrypto-core]
+path = "../crates/gmcrypto-core"
+features = ["sm4-aead", "sm4-xts"]
+
+# Fuzz binaries are not unit-tested / doc-tested / benched.
+[profile.release]
+debug = 1
+
+# --- targets (one [[bin]] per fuzz_targets/*.rs) -----------------------
+# W1: fuzz_pem. W2: the wire-format parsers. W3 adds the SM4 decrypts.
+
+[[bin]]
+name = "fuzz_pem"
+path = "fuzz_targets/fuzz_pem.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_pkcs8_decode"
+path = "fuzz_targets/fuzz_pkcs8_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_pkcs8_decrypt"
+path = "fuzz_targets/fuzz_pkcs8_decrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_spki"
+path = "fuzz_targets/fuzz_spki.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sec1"
+path = "fuzz_targets/fuzz_sec1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sig"
+path = "fuzz_targets/fuzz_sig.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_asn1_reader"
+path = "fuzz_targets/fuzz_asn1_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm2_ciphertext_der"
+path = "fuzz_targets/fuzz_sm2_ciphertext_der.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm2_raw_ciphertext"
+path = "fuzz_targets/fuzz_sm2_raw_ciphertext.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm2_pubkey_sec1"
+path = "fuzz_targets/fuzz_sm2_pubkey_sec1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm2_decrypt"
+path = "fuzz_targets/fuzz_sm2_decrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm2_verify"
+path = "fuzz_targets/fuzz_sm2_verify.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm4_cbc_decrypt"
+path = "fuzz_targets/fuzz_sm4_cbc_decrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm4_gcm_decrypt"
+path = "fuzz_targets/fuzz_sm4_gcm_decrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm4_ccm_decrypt"
+path = "fuzz_targets/fuzz_sm4_ccm_decrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm4_xts_decrypt"
+path = "fuzz_targets/fuzz_sm4_xts_decrypt.rs"
+test = false
+doc = false
+bench = false
+
+# v0.14 — its own workspace so it is excluded from the parent.
+[workspace]

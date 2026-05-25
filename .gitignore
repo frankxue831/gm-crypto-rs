@@ -1,8 +1,19 @@
 # Rust
 target/
 **/*.rs.bk
-# Workspace policy: lib crate, do NOT commit lock file.
-Cargo.lock
+# Workspace policy: lib crate, do NOT commit the workspace lock file.
+# v0.14 — anchored to the repo root (`/Cargo.lock`, not a bare `Cargo.lock`)
+# so it does NOT also swallow `fuzz/Cargo.lock`: the cargo-fuzz binary
+# workspace pins its lockfile for reproducible fuzzing, so that one IS
+# committed (W0 codex finding).
+/Cargo.lock
+
+# v0.14 — cargo-fuzz derived output (build dir, grown corpus, crash repros).
+# The committed surface is fuzz/Cargo.toml, fuzz/Cargo.lock,
+# fuzz/fuzz_targets/, and the curated fuzz/seeds/.
+fuzz/target/
+fuzz/corpus/
+fuzz/artifacts/
 
 # Editor / OS
 .idea/

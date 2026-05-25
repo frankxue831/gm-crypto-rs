@@ -3,6 +3,36 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added (assurance / infra — no published-crate change)
+
+- **Parser fuzzing (v0.14).** A `cargo-fuzz` (libFuzzer) harness in a new
+  workspace-excluded `fuzz/` crate (nightly-only; never enters the published
+  dependency graph), with **16 targets** over the full untrusted-input
+  decode/decrypt surface of `gmcrypto-core`: PEM, PKCS#8 `decode` + PBES2
+  `decrypt`, SPKI, SEC1, the DER `SEQUENCE { r, s }` signature, the low-level
+  DER reader primitives, the GM/T 0009 SM2 DER ciphertext, raw SM2 ciphertext
+  (`C1‖C3‖C2` + legacy), `Sm2PublicKey::from_sec1_bytes`, `sm2::decrypt`,
+  `verify_with_id`, and the SM4-CBC/GCM/CCM/XTS decrypts. Each target proves the
+  failure-mode invariant on adversarial bytes — no panic / no OOM / no hang —
+  with cryptographically-valid committed seeds (`fuzz/seeds/`).
+- **Nightly fuzz CI** (`.github/workflows/fuzz-nightly.yml`): a capped,
+  `workflow_dispatch`-able `cargo-fuzz` sweep on the self-hosted runner with
+  crash-artifact upload. Not a PR gate.
+- `SECURITY.md` documents the fuzzing posture; `fuzz/README.md` is the local
+  runbook. Scope + design in `docs/v0.14-scope.md` (Q14.1–Q14.12).
+
+### Notes
+
+- **No crates.io release.** The initial fuzz sweep found **zero crashes** across
+  all 16 targets, so the published crates are byte-unchanged and v0.14 is **not**
+  cut as a release (per `docs/v0.14-scope.md` Q14.11 — publishing byte-identical
+  crypto is release noise). The next *code* change carries the next version.
+- The fuzz crate is **not** subject to MSRV 1.85 (nightly-only) and is excluded
+  from `cargo deny` (its `libfuzzer-sys` / `arbitrary` deps are not in the
+  published graph).
+
 ## [0.13.0] — 2026-05-24
 
 v0.13.0 exposes the v0.12 **SM4-XTS** core through the `gmcrypto-c` C ABI —
