@@ -3,9 +3,35 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.15.0] — 2026-05-26
 
-### Added (assurance / infra — no published-crate change)
+SM4-XTS gains an **in-place multi-sector (disk) helper**. The v0.14
+parser-fuzzing assurance harness — which landed on `main` without its own
+release — ships in the same window. crates.io goes **0.13.0 → 0.15.0**:
+`0.14.0` names the unpublished fuzzing cycle and is intentionally never
+published (SemVer permits the gap).
+
+### Added
+
+- **SM4-XTS multi-sector helper** (opt-in `sm4-xts` feature):
+  `mode_xts::{encrypt_sectors, decrypt_sectors}` encrypt/decrypt a contiguous run
+  of equal-size disk sectors **in place** (`&mut [u8] -> Option<()>`), deriving
+  sector `i`'s tweak as the **little-endian 128-bit** encoding of
+  `start_sector + i` (the standard disk-XTS data-unit convention — owns the
+  encoding the single-shot API left to the caller). Byte-identical to looping the
+  single-shot `encrypt`/`decrypt` per sector with LE-128 tweaks (transitively
+  OpenSSL `xts_standard=GB`-pinned). Whole-block sectors (no ciphertext
+  stealing); ciphers built once and reused; reused scratch (no per-sector
+  allocation). Single `None` for all validation (`sector_size` not a multiple of
+  16 / outside `[16, 16 MiB]`; `buf.len()` not a whole multiple of `sector_size`;
+  `Key1 == Key2`; sector-number overflow) with `buf` left untouched;
+  `buf.len() == 0` is a vacuous `Some(())`. **Confidentiality only — no
+  authentication.** **Pure-core: no new dependency, no new feature flag, no new
+  SIMD, no new dudect target** (the existing `ct_sm4_xts_decrypt` covers the
+  per-sector path). Scope + decisions in `docs/v0.15-scope.md` (Q15.1–Q15.12);
+  C FFI deferred to v0.16.
+
+### Added (assurance / infra — landed in the v0.14 cycle, no separate release)
 
 - **Parser fuzzing (v0.14).** A `cargo-fuzz` (libFuzzer) harness in a new
   workspace-excluded `fuzz/` crate (nightly-only; never enters the published
@@ -25,10 +51,14 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ### Notes
 
-- **No crates.io release.** The initial fuzz sweep found **zero crashes** across
-  all 16 targets, so the published crates are byte-unchanged and v0.14 is **not**
-  cut as a release (per `docs/v0.14-scope.md` Q14.11 — publishing byte-identical
-  crypto is release noise). The next *code* change carries the next version.
+- **crates.io skips `0.14.0`.** The v0.14 parser-fuzzing sweep found **zero
+  crashes** across all 16 targets, so it merged as assurance/infra with no
+  version bump and no publish (per `docs/v0.14-scope.md` Q14.11 — publishing
+  byte-identical crypto is release noise). v0.15.0 — the next *code* change — is
+  the next published version; `0.14.0` is never released.
+- **The default-features build is byte-identical to 0.13.0.** The sector helper
+  is behind the opt-in `sm4-xts` feature; the three published crates' default
+  builds are unchanged.
 - The fuzz crate is **not** subject to MSRV 1.85 (nightly-only) and is excluded
   from `cargo deny` (its `libfuzzer-sys` / `arbitrary` deps are not in the
   published graph).
