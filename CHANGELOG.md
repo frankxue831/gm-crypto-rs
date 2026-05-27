@@ -3,7 +3,7 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
-## [0.15.0] — 2026-05-26
+## [0.15.0] — 2026-05-28
 
 SM4-XTS gains an **in-place multi-sector (disk) helper**. The v0.14
 parser-fuzzing assurance harness — which landed on `main` without its own

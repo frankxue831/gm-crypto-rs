@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3/SM4 SDK. **v0.15.0 published to crates.io 2026-05-26**
+Pure-Rust SM2/SM3/SM4 SDK. **v0.15.0 published to crates.io 2026-05-28**
 — **SM4-XTS multi-sector (disk) helper**: `sm4::mode_xts::{encrypt_sectors,
 decrypt_sectors}` encrypt/decrypt a contiguous run of equal-size disk
 sectors **in place** (`&mut [u8] -> Option<()>`), sector `i` under
