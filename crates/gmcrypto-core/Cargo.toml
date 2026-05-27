@@ -37,7 +37,7 @@ cipher = { version = "0.5", default-features = false, optional = true }
 # can keep `unsafe_code = "forbid"`. Mirrors the established
 # `gmcrypto-c` precedent for FFI primitives. Only pulled in when
 # `sm4-bitsliced-simd` is enabled — default builds never touch it.
-gmcrypto-simd = { path = "../gmcrypto-simd", version = "0.13", default-features = false, optional = true }
+gmcrypto-simd = { path = "../gmcrypto-simd", version = "0.15", default-features = false, optional = true }
 
 [dev-dependencies]
 hex-literal.workspace = true

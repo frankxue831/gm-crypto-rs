@@ -1,7 +1,29 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3/SM4 SDK. **v0.1.0–v0.13.0 published to crates.io
-2026-05-10 → 2026-05-24**. **v0.14 = parser-fuzzing assurance on `main`
+Pure-Rust SM2/SM3/SM4 SDK. **v0.15.0 published to crates.io 2026-05-28**
+— **SM4-XTS multi-sector (disk) helper**: `sm4::mode_xts::{encrypt_sectors,
+decrypt_sectors}` encrypt/decrypt a contiguous run of equal-size disk
+sectors **in place** (`&mut [u8] -> Option<()>`), sector `i` under
+tweak = **little-endian-128(`start_sector + i`)** (the standard disk-XTS
+data-unit convention — matches the shipped `sm4_xts_sector.c` LE example +
+IEEE 1619 / SP 800-38E; owns the encoding the v0.12 single-shot API left
+to the caller). Byte-identical to looping the single-shot `encrypt`/
+`decrypt` per sector (transitively OpenSSL `xts_standard=GB`-pinned); whole-
+block sectors (no ciphertext stealing); ciphers built **once** via
+`split_keys` + reused `[[u8;16]]` scratch (no per-sector alloc, no unsafe /
+no `as_chunks_mut`); single `None` for **all** validation (`sector_size`
+not a multiple of 16 / outside `[16,16 MiB]`; `buf.len()` not a whole
+multiple; `Key1==Key2`; sector-number overflow) with **`buf` untouched**
+(all validation pre-flighted before the loop); `buf.len()==0` → vacuous
+`Some(())` (but key still validated, so empty + weak key → `None`).
+**Confidentiality only — no auth.** Under the existing **`sm4-xts`**
+feature: **no new dep, no new feature flag, no new SIMD, no new dudect
+target** (`ct_sm4_xts_decrypt` covers the per-sector path — τ≈0.025).
+Per `docs/v0.15-scope.md` Q15.1–Q15.12 (codex-reviewed W0+W1). C FFI
+deferred to v0.16 (core-in-vN / FFI-in-vN+1 cadence). **crates.io skips
+`0.14.0`** (the unpublished fuzzing cycle); workspace `version`
+**0.13.0 → 0.15.0**. Default-features build byte-identical to 0.13.0.
+**Earlier — v0.14 = parser-fuzzing assurance on `main`
 2026-05-25 — NOT a crates.io release** (the initial `cargo-fuzz` sweep
 found zero crashes, so the published crates are byte-unchanged; per
 `docs/v0.14-scope.md` Q14.11 a clean run merges as infra/assurance and is
@@ -136,7 +158,8 @@ v0.11.0 = RustCrypto trait-fit modernization (digest 0.10→0.11 / cipher 0.4→
 v0.12.0 = SM4-XTS single-shot tweakable disk/sector mode (GB/T 17964-2021 / GM-T OID 1.2.156.10197.1.104.10, **not** IEEE 1619 — bit-reflected α-doubling; full ciphertext stealing; byte-identical to OpenSSL EVP SM4-XTS xts_standard=GB; pure-core opt-in `sm4-xts`, no new dep; per `docs/v0.12-scope.md` Q12.1–Q12.13). Also fixed the latent dudect CI gate bug (MATRIX_FEATURES env scoping).
 v0.13.0 = C FFI for SM4-XTS (`gmcrypto_sm4_xts_encrypt`/`_decrypt` + `GMCRYPTO_SM4_XTS_KEY_SIZE` in `gmcrypto-c` behind a forwarding `sm4-xts` feature; single-shot, byte-identical to core `mode_xts`, single `GMCRYPTO_ERR`, confidentiality-only; the deferred v0.12 FFI half on the v0.8-core→v0.10-FFI cadence; per `docs/v0.13-scope.md` Q13.1–Q13.12). No new `gmcrypto-core` API, no new dudect target, no new dep; additive.
 v0.14 = parser fuzzing (`cargo-fuzz`/libFuzzer over the full untrusted-input decode/decrypt surface; 16 targets; failure-mode-invariant assurance — no panic/OOM/hang; per `docs/v0.14-scope.md` Q14.1–Q14.12). **Assurance/infra only — NOT a crates.io release** (initial sweep found zero crashes → published crates byte-unchanged → no version bump, no publish, per Q14.11). New workspace-excluded `fuzz/` crate + nightly CI; codex-reviewed W0–W3.
-v0.15+ = (candidate) round-trip/differential parser fuzzing + streaming-decryptor fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + pinned dudect runner + `cargo fuzz coverage` in CI + AVX-512 sbox_x64 + SM4-XTS streaming/per-sector batch helper + CCM incremental input + a v1.0 readiness pass (per `docs/v0.14-scope.md` §5/§6 Q15.x).
+v0.15.0 = SM4-XTS multi-sector (disk) helper (`sm4::mode_xts::{encrypt_sectors, decrypt_sectors}`: in-place `&mut [u8] -> Option<()>` over a run of equal-size sectors, tweak_i = LE-128(start_sector + i); byte-identical to looping the v0.12 single-shot per sector; whole-block / no CTS; ciphers built once + reused scratch; single None with buf untouched; confidentiality-only; per `docs/v0.15-scope.md` Q15.1–Q15.12, codex-reviewed W0+W1). **Pure-core: no new dep/feature/SIMD/dudect target** (`ct_sm4_xts_decrypt` covers the per-sector path). C FFI deferred to v0.16. crates.io skips 0.14.0; workspace version 0.13.0 → 0.15.0; default build byte-identical.
+v0.16+ = (candidate) C FFI for the SM4-XTS sector helper + round-trip/differential parser fuzzing + streaming-decryptor fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + pinned dudect runner + `cargo fuzz coverage` in CI + AVX-512 sbox_x64 + CCM buffered input + a v1.0 readiness pass (per `docs/v0.15-scope.md` §5/§6 Q16.x).
 
 Read `README.md`, `SECURITY.md`, `CONTRIBUTING.md` for the user-facing posture.
 This file lists the constraints a coding agent will violate by default.
@@ -308,7 +331,7 @@ under every cipher dispatch path:
 | `ct_sm4_gcm_decrypt` | `\|tau\| < 0.20` (cfg-gated on `sm4-aead`) | v0.8 W4 — SM4-GCM decrypt timed over a fixed 256-byte plaintext + 16-byte AAD + 12-byte canonical nonce. Class-split by master key; both classes' `(ct, tag)` tuples are valid encrypts under their own keys so both decrypt paths reach tag-compare via identical control flow. Exercises key schedule, H = SM4_E(key, 0^128), GHASH chain (rides CLMUL on x86_64 / PMULL on aarch64 / software Karatsuba elsewhere), GCTR, `subtle::ConstantTimeEq`. 5K-sample local smoke on aarch64: `\|tau\| ≈ 0.073`. Per Q8.7 of `docs/v0.7-aead-scope.md`. |
 | `ct_sm4_ccm_decrypt` | `\|tau\| < 0.20` (cfg-gated on `sm4-aead`) | v0.8 W4 — SM4-CCM decrypt timed under the same shape as `ct_sm4_gcm_decrypt`, fixed `tag_len = 16` and 12-byte nonce. Class-split by master key; valid `(ct‖tag)` pair per class. Exercises CBC-MAC chain (sequential `Sm4Cipher::encrypt_block` loop) + CTR stream (rides v0.7 W1 batch API + v0.6 SIMD fanout under `sm4-bitsliced-simd`) + constant-time tag compare. 5K-sample local smoke on aarch64: `\|tau\| ≈ 0.063`. Per Q8.7 of `docs/v0.7-aead-scope.md`. |
 | `ct_sm4_gcm_decrypt_buffered` | `\|tau\| < 0.20` (cfg-gated on `sm4-aead`) | v0.9 W3 — incremental-input buffered SM4-GCM decrypt via `Sm4GcmDecryptor`, timed over a fixed 256-byte plaintext + 16-byte AAD + 12-byte nonce fed in two chunks (100 bytes + rest) to straddle block boundaries. Class-split by master key; both classes' `(chunked ct, tag)` verify under their own keys so both reach `finalize_verify` (commit-on-verify) via identical control flow. Exercises the running-GHASH accumulator (`GhashAcc`) + the buffered-then-decrypt path. 5K-sample local smoke on aarch64: `\|tau\| ≈ 0.029`. Per Q9.5 of `docs/v0.9-scope.md`. |
-| `ct_sm4_xts_decrypt` | `\|tau\| < 0.20` (cfg-gated on `sm4-xts`) | v0.12 W3 — SM4-XTS decrypt via `mode_xts::decrypt`, timed over a fixed **CTS (non-block-multiple) data unit** (100 B = 6 blocks + 4) so the final-pair ciphertext-stealing path — the riskiest tweak arithmetic — gates, not just whole-block. Class-split by master key; both classes' data units are valid encrypts under their own 32-byte key so both decrypt via identical control flow. Exercises key schedule, `T_0 = SM4_E(Key2, tweak)`, the constant-time bit-reflected α-doubling chain (`mul_alpha`: right-shift + masked `0xE1`), the `decrypt_blocks` batch path (rides SIMD fanout under `sm4-bitsliced-simd`), and the CTS tail. 10K-sample local smoke on aarch64: `\|tau\| ≈ 0.03`. Per Q12.9 of `docs/v0.12-scope.md`. |
+| `ct_sm4_xts_decrypt` | `\|tau\| < 0.20` (cfg-gated on `sm4-xts`) | v0.12 W3 — SM4-XTS decrypt via `mode_xts::decrypt`, timed over a fixed **CTS (non-block-multiple) data unit** (100 B = 6 blocks + 4) so the final-pair ciphertext-stealing path — the riskiest tweak arithmetic — gates, not just whole-block. Class-split by master key; both classes' data units are valid encrypts under their own 32-byte key so both decrypt via identical control flow. Exercises key schedule, `T_0 = SM4_E(Key2, tweak)`, the constant-time bit-reflected α-doubling chain (`mul_alpha`: right-shift + masked `0xE1`), the `decrypt_blocks` batch path (rides SIMD fanout under `sm4-bitsliced-simd`), and the CTS tail. 10K-sample local smoke on aarch64: `\|tau\| ≈ 0.03`. Per Q12.9 of `docs/v0.12-scope.md`. **v0.15** reuses this target for the multi-sector helper (`encrypt_sectors`/`decrypt_sectors`) — the per-sector secret-dependent work is the same `split_keys`/`encrypt_blocks`/`mul_alpha` path; the only new logic is the sector-number→LE-128-tweak arithmetic, which is on **public** sector addresses, so no new target (Q15.9). |
 
 Gate on **`|tau|`** (scale-free), not `|t|` (grows as `tau · sqrt(N)` so any
 fixed `|t|` threshold is budget-dependent). Same gate at every sample budget;
@@ -384,7 +407,7 @@ crates/gmcrypto-core/
       mode_gcm.rs           # v0.8 W2 — SM4-GCM single-shot AEAD (NIST SP 800-38D / GM/T 0009 / RFC 8998; cfg-gated on `sm4-aead`); (Vec<u8>, [u8; 16]) encrypt + Option<Vec<u8>> decrypt; 12-byte canonical + arbitrary-length nonce paths; constant-time tag compare via subtle; byte-identical to gmssl 3.1.1 `sm4 -gcm`. v0.9 W1 adds GcmTagLen newtype + encrypt_with_tag_len/decrypt_with_tag_len (NIST §5.2.1.2 truncated tags {4,8,12,13,14,15,16}); inc32/derive_j0 widened to pub(super) for gcm_streaming
       mode_ccm.rs           # v0.8 W3 — SM4-CCM single-shot AEAD (NIST SP 800-38C / RFC 3610 / GM/T 0009 OID 1.2.156.10197.1.104.9; cfg-gated on `sm4-aead`); Option<Vec<u8>> encrypt (output: ct||tag) + Option<Vec<u8>> decrypt; tag_len ∈ {4,6,8,10,12,14,16}; nonce.len() ∈ [7,13]; pure-Rust CBC-MAC + CTR (no GHASH); byte-identical to OpenSSL 3.x EVP `SM4-CCM`
       gcm_streaming.rs      # v0.9 W2 — incremental-input buffered SM4-GCM (cfg-gated on `sm4-aead`). Sm4GcmEncryptor (output-streaming: update->Option<Vec<u8>>, None on >2^36-32-byte ceiling + poison; finalize/finalize_with_tag_len) + Sm4GcmDecryptor (input-incremental/output-BUFFERED: update buffers + folds GHASH, finalize_verify releases plaintext only after constant-time tag check = commit-on-verify). AAD at construction. GhashAcc incremental accumulator == single-shot ghash_a_c_lens. Differential-KAT-equal to mode_gcm across arbitrary chunking. NOT "streaming" (decryptor is O(message) memory)
-      mode_xts.rs           # v0.12 — SM4-XTS single-shot tweakable mode (GB/T 17964-2021 / GM-T OID 1.2.156.10197.1.104.10; cfg-gated on `sm4-xts`; pure-core, no gmcrypto-simd dep). encrypt/decrypt(&[u8;32] Key1‖Key2, &[u8;16] tweak, &[u8] data_unit) -> Option<Vec<u8>>; full ciphertext stealing; lengths [16 B,16 MiB]; single None (len out of range or Key1==Key2). GB α-doubling = mul_alpha (bit-reflected: right-shift, masked 0xE1 into byte0 — NOT IEEE's <<1/0x87, NOT GHASH's full multiply). Whole-block bulk via Sm4Cipher::encrypt_blocks/decrypt_blocks (rides SIMD fanout). Confidentiality only, no auth. Byte-identical to OpenSSL EVP SM4-XTS xts_standard=GB. XTS_KEY_SIZE=32 re-exported
+      mode_xts.rs           # v0.12 — SM4-XTS single-shot tweakable mode (GB/T 17964-2021 / GM-T OID 1.2.156.10197.1.104.10; cfg-gated on `sm4-xts`; pure-core, no gmcrypto-simd dep). encrypt/decrypt(&[u8;32] Key1‖Key2, &[u8;16] tweak, &[u8] data_unit) -> Option<Vec<u8>>; full ciphertext stealing; lengths [16 B,16 MiB]; single None (len out of range or Key1==Key2). GB α-doubling = mul_alpha (bit-reflected: right-shift, masked 0xE1 into byte0 — NOT IEEE's <<1/0x87, NOT GHASH's full multiply). Whole-block bulk via Sm4Cipher::encrypt_blocks/decrypt_blocks (rides SIMD fanout). Confidentiality only, no auth. Byte-identical to OpenSSL EVP SM4-XTS xts_standard=GB. XTS_KEY_SIZE=32 re-exported. v0.15 adds encrypt_sectors/decrypt_sectors (in-place &mut [u8] -> Option<()> over a run of equal-size sectors, tweak_i = LE-128(start_sector+i); ciphers built once via split_keys + reused [[u8;16]] scratch via xts_sector_in_place; whole-block / no CTS; all validation pre-flighted so buf untouched on None; empty buf -> Some(()); no new dep/dudect target) — byte-identical to looping the single-shot per sector
     hmac.rs                 # v0.2 W3 — single-shot hmac_sm3; v0.3 W5 — streaming HmacSm3 (impls in-crate Mac trait); v0.4 W2 impls digest::Mac under `digest-traits` (v0.11: digest 0.11 — Mac is a blanket impl over Update+FixedOutput+MacMarker; HmacSm3 keeps KeyInit, construct via KeyInit::new_from_slice; crypto_common→common import)
     kdf.rs                  # v0.2 W4 — PBKDF2-HMAC-SM3 (caller-supplied output buffer)
     asn1/
@@ -827,8 +850,22 @@ Operational notes:
   crates byte-unchanged ⇒ **no version bump, no publish** (per
   `docs/v0.14-scope.md` Q14.11). Don't reflexively bump
   `[workspace.package].version` or run `cargo publish` for a cycle that
-  doesn't change a published crate. Workspace `version` stays `0.13.0`
-  until the next code change.
+  doesn't change a published crate. **v0.15.0 was that next code change**
+  (the SM4-XTS sector helper), so workspace `version` went `0.13.0 →
+  0.15.0` — **crates.io skips `0.14.0`** entirely (the unpublished fuzzing
+  cycle named v0.14 in the docs is never a release; SemVer permits the gap).
+  Don't try to publish a `0.14.0`.
+- **SM4-XTS sector tweak is LE-128 of the sector number, not raw bytes.**
+  `mode_xts::{encrypt_sectors,decrypt_sectors}` (v0.15) take a
+  `start_sector: u128` and derive sector `i`'s 16-byte tweak as
+  `(start_sector + i).to_le_bytes()` — the disk-XTS convention (matches the
+  shipped `sm4_xts_sector.c` LE example). The single-shot `encrypt`/`decrypt`
+  still take a **raw** `&[u8; 16]` tweak (caller-encoded). Don't conflate the
+  two. The helper is **in-place** (`&mut [u8] -> Option<()>`); all validation
+  is pre-flighted before the loop so `buf` is untouched on `None` — don't move
+  a `checked_add(...)?` into the per-sector loop (it'd partially mutate `buf`
+  before failing). No new dudect target (the per-sector path rides
+  `ct_sm4_xts_decrypt`; sector numbers are public).
 - **`gmssl sm2keygen -out priv.pem`** writes the encrypted PKCS#8 to
   the file **and** prints the SPKI public key to stdout by default.
   Use `-pubout pub.pem` to capture it separately.

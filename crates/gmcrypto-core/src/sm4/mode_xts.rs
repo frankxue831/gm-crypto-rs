@@ -77,6 +77,42 @@
 //! assert_eq!(pt, plaintext);
 //! # }
 //! ```
+//!
+//! # Multi-sector (whole-disk) helper
+//!
+//! [`encrypt_sectors`] / [`decrypt_sectors`] process a contiguous run of
+//! equal-size sectors **in place**, deriving sector `i`'s tweak as the
+//! **little-endian 128-bit encoding** of `start_sector + i` (the standard
+//! disk-XTS data-unit convention). This owns the sector-number → tweak encoding
+//! the single-shot API leaves to the caller, removing the easy-to-get-wrong
+//! step. Sectors are whole-block, so ciphertext stealing never triggers; the
+//! result is byte-identical to looping the single-shot API per sector. The
+//! **tweak-namespace contract** (sector numbers unique within the key namespace;
+//! confidentiality only, no authentication) is the same as for the single-shot
+//! API — see [`encrypt_sectors`].
+//!
+//! ```rust
+//! # #[cfg(feature = "sm4-xts")] {
+//! use gmcrypto_core::sm4::mode_xts::{self, XTS_KEY_SIZE};
+//!
+//! // Key1 ‖ Key2 — the two halves MUST differ (GB/T 17964 weak-key guard).
+//! let mut key = [0u8; XTS_KEY_SIZE];
+//! for (i, b) in key.iter_mut().enumerate() {
+//!     *b = i as u8;
+//! }
+//!
+//! let sector_size = 512;
+//! let start_sector = 0x1000u128; // first logical block address in this run
+//!
+//! // A 2-sector (1 KiB) region, encrypted then decrypted back in place.
+//! let mut region = [0xABu8; 1024];
+//! let original = region;
+//! mode_xts::encrypt_sectors(&key, sector_size, start_sector, &mut region).unwrap();
+//! assert_ne!(region, original);
+//! mode_xts::decrypt_sectors(&key, sector_size, start_sector, &mut region).unwrap();
+//! assert_eq!(region, original);
+//! # }
+//! ```
 
 use alloc::vec::Vec;
 
@@ -167,6 +203,149 @@ pub fn decrypt(
 ) -> Option<Vec<u8>> {
     let (c1, c2) = split_keys(key, data_unit.len())?;
     Some(xts_decrypt(&c1, &c2, tweak, data_unit))
+}
+
+/// Encrypt a contiguous run of equal-size sectors **in place** in SM4-XTS mode.
+///
+/// `buf` holds `buf.len() / sector_size` sectors back-to-back; sector `i`
+/// (0-based) is encrypted independently under tweak = the **little-endian
+/// 128-bit encoding** of `start_sector + i` (the standard disk-XTS data-unit
+/// convention — see the module docstring). Because `sector_size` is a whole
+/// number of 16-byte blocks, ciphertext stealing never occurs and the output is
+/// byte-identical to looping [`encrypt`] over each sector with the corresponding
+/// LE-128 tweak.
+///
+/// Returns `None` — **leaving `buf` untouched** — on any input-validation
+/// failure: `sector_size` not a multiple of 16, `< 16`, or `> 16 MiB`;
+/// `buf.len()` not a whole multiple of `sector_size`; `Key1 == Key2`; or
+/// `start_sector + i` overflowing `u128`. `buf.len() == 0` (zero sectors) with a
+/// valid `sector_size` and key is a vacuous `Some(())`.
+///
+/// **Confidentiality only** — XTS has no authentication tag; `Some(())` does not
+/// imply integrity. **Tweak-namespace contract (caller-owned):** sector numbers
+/// must be unique within the XTS-key namespace — do not encrypt multiple
+/// devices / partitions / snapshots under one key all starting at sector 0
+/// (use absolute LBAs or a separate key per device); reuse leaks block-equality
+/// structure.
+#[must_use]
+pub fn encrypt_sectors(
+    key: &[u8; XTS_KEY_SIZE],
+    sector_size: usize,
+    start_sector: u128,
+    buf: &mut [u8],
+) -> Option<()> {
+    process_sectors(key, sector_size, start_sector, buf, true)
+}
+
+/// Decrypt a contiguous run of equal-size sectors **in place** in SM4-XTS mode.
+///
+/// The inverse of [`encrypt_sectors`] under the same `(key, sector_size,
+/// start_sector)`. Same validation, failure mode (single `None`, `buf`
+/// untouched), and caveats as [`encrypt_sectors`]. XTS is unauthenticated.
+#[must_use]
+pub fn decrypt_sectors(
+    key: &[u8; XTS_KEY_SIZE],
+    sector_size: usize,
+    start_sector: u128,
+    buf: &mut [u8],
+) -> Option<()> {
+    process_sectors(key, sector_size, start_sector, buf, false)
+}
+
+/// Shared core for [`encrypt_sectors`] / [`decrypt_sectors`]. **All validation
+/// runs before `buf` is touched** (W0 codex finding): on any `None` path `buf`
+/// is left unmodified, and the per-sector loop can never hit a mid-run overflow.
+fn process_sectors(
+    key: &[u8; XTS_KEY_SIZE],
+    sector_size: usize,
+    start_sector: u128,
+    buf: &mut [u8],
+    encrypt: bool,
+) -> Option<()> {
+    // 1. sector_size: a whole number of blocks within [16, 16 MiB].
+    if !(BLOCK_SIZE..=MAX_LEN).contains(&sector_size) || sector_size % BLOCK_SIZE != 0 {
+        return None;
+    }
+    // 2. buf must be a whole multiple of sector_size (0 sectors allowed).
+    if buf.len() % sector_size != 0 {
+        return None;
+    }
+    let sector_count = buf.len() / sector_size;
+    // 3. The highest sector number (start_sector + sector_count - 1) must not
+    //    overflow u128. Pre-checked here so the loop never overflows mid-run.
+    if let Some(last) = sector_count.checked_sub(1) {
+        start_sector.checked_add(last as u128)?;
+    }
+    // 4. Build both ciphers ONCE (validates key length + the constant-time
+    //    Key1 == Key2 weak-key reject); reused across every sector. Does not
+    //    touch buf, so a weak-key `None` still leaves buf unmodified.
+    let (c1, c2) = split_keys(key, sector_size)?;
+
+    // Scratch reused across all sectors (allocated once, not per sector).
+    let nblocks = sector_size / BLOCK_SIZE;
+    let mut blocks: Vec<[u8; BLOCK_SIZE]> = Vec::with_capacity(nblocks);
+    let mut tweaks: Vec<[u8; BLOCK_SIZE]> = Vec::with_capacity(nblocks);
+
+    for (i, sector) in buf.chunks_mut(sector_size).enumerate() {
+        // Overflow was pre-validated in step 3, so this never wraps.
+        let sector_num = start_sector.wrapping_add(i as u128);
+        let tweak = sector_num.to_le_bytes();
+        xts_sector_in_place(&c1, &c2, &tweak, sector, &mut blocks, &mut tweaks, encrypt);
+    }
+    Some(())
+}
+
+/// Transform one whole-block sector in place (no ciphertext stealing). Mirrors
+/// the `rem == 0` path of [`xts_encrypt`] / [`xts_decrypt`] but writes back into
+/// `sector` and reuses the caller-owned `blocks` / `tweaks` scratch (cleared on
+/// entry) to avoid per-sector allocation. `encrypt` selects the direction; the
+/// tweak sequence is identical either way.
+fn xts_sector_in_place(
+    c1: &Sm4Cipher,
+    c2: &Sm4Cipher,
+    tweak: &[u8; BLOCK_SIZE],
+    sector: &mut [u8],
+    blocks: &mut Vec<[u8; BLOCK_SIZE]>,
+    tweaks: &mut Vec<[u8; BLOCK_SIZE]>,
+    encrypt: bool,
+) {
+    // T_0 = SM4_E(Key2, tweak) — the tweak is encrypted with Key2 in both
+    // directions.
+    let mut t = *tweak;
+    c2.encrypt_block(&mut t);
+
+    blocks.clear();
+    tweaks.clear();
+    for chunk in sector.chunks_exact(BLOCK_SIZE) {
+        let mut blk = [0u8; BLOCK_SIZE];
+        blk.copy_from_slice(chunk);
+        xor16(&mut blk, &t);
+        blocks.push(blk);
+        tweaks.push(t);
+        mul_alpha(&mut t);
+    }
+
+    if encrypt {
+        c1.encrypt_blocks(blocks);
+    } else {
+        c1.decrypt_blocks(blocks);
+    }
+
+    for (blk, tw) in blocks.iter_mut().zip(tweaks.iter()) {
+        xor16(blk, tw);
+    }
+    // Scatter the transformed blocks back into the sector in place.
+    for (chunk, blk) in sector.chunks_exact_mut(BLOCK_SIZE).zip(blocks.iter()) {
+        chunk.copy_from_slice(blk);
+    }
+
+    // Wipe secret-derived tweak material (the data in `blocks` is the caller's
+    // plaintext/ciphertext — already written back to `buf` — and is left as-is,
+    // matching the single-shot path).
+    t.zeroize();
+    for tw in tweaks.iter_mut() {
+        tw.zeroize();
+    }
 }
 
 fn xts_encrypt(c1: &Sm4Cipher, c2: &Sm4Cipher, tweak: &[u8; BLOCK_SIZE], data: &[u8]) -> Vec<u8> {

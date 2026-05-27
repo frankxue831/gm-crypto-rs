@@ -79,6 +79,31 @@ the design intent in isolation.
   x86, some embedded).
 - Not a comprehensive SM-crypto library yet — see the milestone roadmap.
 
+## v0.15 scope (shipped)
+
+**SM4-XTS multi-sector (disk) helper.** v0.15 adds
+`sm4::mode_xts::{encrypt_sectors, decrypt_sectors}` (opt-in `sm4-xts` feature):
+encrypt/decrypt a contiguous run of equal-size disk sectors **in place**
+(`&mut [u8] -> Option<()>`), deriving sector `i`'s tweak as the **little-endian
+128-bit** encoding of `start_sector + i` (the standard disk-XTS data-unit
+convention). It owns the sector-number → tweak encoding the single-shot v0.12 API
+left to the caller, and is byte-identical to looping that API per sector. Single
+`None` failure mode (`buf` untouched on validation failure); confidentiality
+only (no authentication). **Pure-core: no new dependency, no new feature flag, no
+new SIMD, no new dudect target.** Design rationale:
+[`docs/v0.15-scope.md`](docs/v0.15-scope.md) (Q15.1–Q15.12). The C FFI for the
+sector helper is deferred to v0.16 (the established core-in-vN / FFI-in-vN+1
+cadence).
+
+crates.io goes **0.13.0 → 0.15.0**: `0.14.0` names the unpublished
+parser-fuzzing assurance cycle (below) and is intentionally never published.
+
+**Deferred to v0.16** (per [`docs/v0.15-scope.md`](docs/v0.15-scope.md) §5/§6):
+the sector-helper C FFI; round-trip / streaming-decryptor parser fuzzing;
+RustCrypto `aead` trait fit (still `0.6.0-rc.10`); pinned dudect runner;
+`cargo fuzz coverage`; AVX-512 `sbox_x64`; CCM buffered input; a v1.0 readiness
+pass.
+
 ## v0.14 — parser fuzzing (assurance; not a crates.io release)
 
 **Pre-v1.0 hardening.** v0.14 adds a `cargo-fuzz` (libFuzzer) harness over the
@@ -97,10 +122,11 @@ assurance/infra change. The fuzz crate lives in a workspace-excluded `fuzz/`
 [`docs/v0.14-scope.md`](docs/v0.14-scope.md). Run it yourself:
 [`fuzz/README.md`](fuzz/README.md).
 
-**Deferred to v0.15** (per [`docs/v0.14-scope.md`](docs/v0.14-scope.md) §5/§6):
-round-trip / differential parser fuzzing, streaming-decryptor fuzzing,
-RustCrypto `aead` trait fit (still `0.6.0-rc.10`), pinned dudect runner,
-`cargo fuzz coverage` in CI, AVX-512 `sbox_x64`, a v1.0 readiness pass.
+**Deferred to v0.15+** (per [`docs/v0.14-scope.md`](docs/v0.14-scope.md) §5/§6):
+the SM4-XTS per-sector helper (**shipped in v0.15**, above); round-trip /
+differential parser fuzzing, streaming-decryptor fuzzing, RustCrypto `aead`
+trait fit (still `0.6.0-rc.10`), pinned dudect runner, `cargo fuzz coverage` in
+CI, AVX-512 `sbox_x64`, a v1.0 readiness pass (now v0.16+).
 
 ## v0.13 scope (shipped)
 
@@ -405,7 +431,8 @@ Everything v0.2 shipped is unchanged:
 | v0.12.0 (shipped) | **SM4-XTS — tweakable disk/sector mode.** Per `docs/v0.12-scope.md` Q12.1–Q12.13. New: `sm4::mode_xts::{encrypt, decrypt}` + `XTS_KEY_SIZE` behind the opt-in `sm4-xts` feature — GB/T 17964-2021 (GM-T OID `1.2.156.10197.1.104.10`), full ciphertext stealing, byte-identical to OpenSSL 3.x EVP `SM4-XTS` (`xts_standard=GB`; **not** IEEE 1619 — they differ in the GF(2¹²⁸) tweak doubling). 32-byte key (`Key1 ‖ Key2`) + raw 16-byte tweak, lengths `[16 B, 16 MiB]`, single `None` failure mode, confidentiality-only (no auth). Pure-core (**no new dependency**); rides the `Sm4Cipher::encrypt_blocks` batch API + SIMD fanout. New dudect target `ct_sm4_xts_decrypt`. Also fixes a latent CI bug where the feature-conditional dudect gates never fired. C FFI deferred to v0.13. **Additive — no public API breakage.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.12.0]`. |
 | v0.13.0 (shipped) | **C ABI for SM4-XTS.** Per `docs/v0.13-scope.md` Q13.1–Q13.12. New: `gmcrypto_sm4_xts_encrypt` / `_decrypt` + `GMCRYPTO_SM4_XTS_KEY_SIZE` in `gmcrypto-c`, behind a forwarding `sm4-xts` feature — single-shot, mirroring the single-shot SM4-GCM FFI shape minus nonce/AAD/tag (32-byte key, 16-byte tweak, length-preserving `(out, out_capacity, out_actual_len)` output), byte-identical to `gmcrypto_core::sm4::mode_xts`, single `GMCRYPTO_ERR`, confidentiality-only. The deferred FFI half of v0.12 (the v0.8-core → v0.10-FFI cadence). 5 new `c_smoke` tests + doc-only C example `examples/sm4_xts_sector.c`; regenerated header (no `regen-header` change needed — free fns + always-on const). No new `gmcrypto-core` API, no new dudect target, **no new dependency**. **Additive — no public API breakage.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.13.0]`. |
 | v0.14 (assurance; not published) | **Parser fuzzing.** Per `docs/v0.14-scope.md` Q14.1–Q14.12. A `cargo-fuzz` (libFuzzer) harness over the full untrusted-input decode/decrypt surface of `gmcrypto-core` (16 targets: PEM, PKCS#8 decode/decrypt, SPKI, SEC1, DER reader primitives, SM2 DER + raw ciphertext, SM2 decrypt + verify, SM4-CBC/GCM/CCM/XTS decrypt) proving the failure-mode invariant on adversarial bytes — no panic / no OOM / no hang. Workspace-excluded `fuzz/` crate (nightly-only; never in the published dep graph) + a capped nightly CI job (`.github/workflows/fuzz-nightly.yml`). Initial sweep: **zero crashes** → no published-crate change, **not a crates.io release** (assurance/infra only). See [`fuzz/README.md`](fuzz/README.md). |
-| v0.15+ | Per `docs/v0.14-scope.md` §5/§6 (Q15.x): round-trip / differential parser fuzzing; streaming-decryptor fuzzing; RustCrypto `aead` trait fit (upstream still on `0.6.0-rc.10`); pinned / noise-isolated dudect runner; `cargo fuzz coverage` reporting; AVX-512 16-way `sbox_x64`; SM4-XTS streaming / per-sector batch helper; CCM incremental input; Argon2-with-SM3 (research-only); `wasm-bindgen-test` KAT runner; a v1.0 readiness pass. Each lands behind its own scope-doc cycle. |
+| v0.15.0 (shipped) | **SM4-XTS multi-sector (disk) helper.** Per `docs/v0.15-scope.md` Q15.1–Q15.12. New: `sm4::mode_xts::{encrypt_sectors, decrypt_sectors}` (opt-in `sm4-xts`) — encrypt/decrypt a contiguous run of equal-size disk sectors **in place** (`&mut [u8] -> Option<()>`), sector `i` under tweak = little-endian-128(`start_sector + i`) (the standard disk-XTS data-unit convention; owns the encoding the single-shot v0.12 API left to the caller). Byte-identical to looping the single-shot per sector (transitively OpenSSL `xts_standard=GB`-pinned); whole-block sectors (no ciphertext stealing); ciphers built once + reused scratch (no per-sector allocation); single `None` for all validation with `buf` untouched; confidentiality-only. **Pure-core: no new dependency, no new feature flag, no new SIMD, no new dudect target** (the existing `ct_sm4_xts_decrypt` covers it). C FFI deferred to v0.16. crates.io skips `0.14.0` (the unpublished fuzzing cycle). **Additive — no public API breakage.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.15.0]`. |
+| v0.16+ | Per `docs/v0.15-scope.md` §5/§6 (Q16.x): C FFI for the SM4-XTS sector helper; round-trip / differential parser fuzzing; streaming-decryptor fuzzing; RustCrypto `aead` trait fit (upstream still on `0.6.0-rc.10`); pinned / noise-isolated dudect runner; `cargo fuzz coverage` reporting; AVX-512 16-way `sbox_x64`; CCM buffered input; Argon2-with-SM3 (research-only); `wasm-bindgen-test` KAT runner; a v1.0 readiness pass. Each lands behind its own scope-doc cycle. |
 | v1.0 | API stabilization. |
 
 ## Quick-start
