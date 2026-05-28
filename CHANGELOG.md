@@ -29,9 +29,10 @@ build of both crates is byte-unchanged.
   (but the key is still validated). **Confidentiality only — no authentication.**
 - New doc-only C example
   [`crates/gmcrypto-c/examples/sm4_xts_multisector.c`](crates/gmcrypto-c/examples/sm4_xts_multisector.c)
-  (in-place 8-sector region round-trip). 10 new `c_smoke` tests (cfg-gated on
+  (in-place 8-sector region round-trip). 11 new `c_smoke` tests (cfg-gated on
   `sm4-xts`): multi-sector equivalence vs core + round-trip, byte-boundary and
-  high-64-bit-LBA starts, and the full error matrix (each with `buf` untouched).
+  high-64-bit-LBA starts, the full error matrix (each with `buf` untouched), and
+  a raw-pointer key/buf-overlap regression test.
 
 ### Notes
 
