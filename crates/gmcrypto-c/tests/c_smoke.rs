@@ -2295,3 +2295,44 @@ fn sm4_xts_sectors_decrypt_errors_buf_untouched() {
         "buf must be untouched on bad sector_size decrypt reject"
     );
 }
+
+/// Regression test for the W0 key/buf aliasing fix: pass `key` and `buf` as
+/// **overlapping** views into one backing buffer (a caller error, but it must
+/// not be UB). The shim copies the 32-byte key into an owned array before
+/// constructing `&mut buf`, so the result equals encrypting the original
+/// plaintext under the original key — captured here from non-overlapping
+/// copies taken before the call.
+#[cfg(feature = "sm4-xts")]
+#[test]
+fn sm4_xts_sectors_key_buf_overlap_ok() {
+    // backing[0..32] is the key view (Key1 = [0..16], Key2 = [16..32], which
+    // differ under this pattern); backing[16..48] is the buf view (2 × 16-byte
+    // sectors). The two views overlap on bytes [16..32].
+    let mut backing = [0u8; 48];
+    backing.copy_from_slice(&xts_pattern(48));
+    let start_sector = 7u64;
+
+    // Reference under NON-overlapping copies, captured before any mutation.
+    let key_ref: [u8; GMCRYPTO_SM4_XTS_KEY_SIZE] = backing[0..32].try_into().unwrap();
+    let mut buf_ref = backing[16..48].to_vec();
+    gmcrypto_core::sm4::mode_xts::encrypt_sectors(
+        &key_ref,
+        16,
+        u128::from(start_sector),
+        &mut buf_ref,
+    )
+    .expect("valid params");
+
+    // FFI with overlapping key/buf views into `backing` (both raw pointers are
+    // derived from one base; the shim copies the key before mutating buf).
+    let base = backing.as_mut_ptr();
+    let key_ptr: *const u8 = base;
+    let buf_ptr: *mut u8 = unsafe { base.add(16) };
+    let r = unsafe { gmcrypto_sm4_xts_encrypt_sectors(key_ptr, 16, start_sector, buf_ptr, 32) };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert_eq!(
+        &backing[16..48],
+        &buf_ref[..],
+        "overlap result must match the non-overlap reference"
+    );
+}
