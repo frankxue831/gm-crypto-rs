@@ -1,6 +1,39 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3/SM4 SDK. **v0.15.0 published to crates.io 2026-05-28**
+Pure-Rust SM2/SM3/SM4 SDK. **v0.16.0 published to crates.io 2026-05-29**
+— **C FFI for the SM4-XTS multi-sector (disk) helper**: expose the v0.15
+`sm4::mode_xts::{encrypt_sectors, decrypt_sectors}` through the `gmcrypto-c`
+C ABI behind the existing forwarding **`sm4-xts`** feature
+(`= ["gmcrypto-core/sm4-xts"]`, no new dep), per `docs/v0.16-scope.md`
+Q16.1–Q16.12 (codex-reviewed W0+W1). Two new symbols
+`gmcrypto_sm4_xts_encrypt_sectors` / `_decrypt_sectors` transform a
+contiguous run of equal-size sectors **in place** (`buf: *mut u8` +
+`buf_len`; sector `i` under tweak = **LE-128(`start_sector + i`)**),
+byte-identical to core `mode_xts::{encrypt,decrypt}_sectors`. **In-place is
+a deliberate divergence** from the uniformly out-of-place single-shot XTS
+FFI: it mirrors the core's `&mut [u8]` so disk callers never
+double-allocate, and the transform is length-preserving so no
+`out`/`out_capacity`/`out_actual_len` is needed. **`start_sector` is a
+`uint64_t`** (block-layer `sector_t` width; C has no portable u128 — the
+core's u128 range stays Rust-only; a consequence is the sector-number
+overflow `None` is unreachable from the FFI). Single `GMCRYPTO_ERR` (bad
+`sector_size`/`buf_len`-multiple/`Key1==Key2`/null) with **`buf` untouched**
+on error (core pre-flights validation); `buf_len==0` → vacuous
+`GMCRYPTO_OK` (key still validated). **W0 codex fix**: the in-place path is
+the only FFI surface holding a `&mut` over caller memory **alongside** the
+`&` key borrow, so the 32-byte key is **copied into an owned `[u8;32]`**
+before the `&mut [u8]` is built (a caller `key`/`buf` overlap becomes a
+benign copy, not `&`/`&mut` aliasing UB — locked in by the
+`sm4_xts_sectors_key_buf_overlap_ok` test). **Confidentiality only — no
+auth.** `regen-header` need **NOT** imply `sm4-xts` (two free-fn prototypes
+emit unconditionally; no new opaque structs). 11 new c_smoke tests +
+doc-only example `crates/gmcrypto-c/examples/sm4_xts_multisector.c`. **No
+new `gmcrypto-core` API, no new dudect target** (thin shim — core's
+`ct_sm4_xts_decrypt` covers it; the sector→tweak arithmetic is on **public**
+addresses), no new dep. Workspace `version` **0.15.0 → 0.16.0**;
+default-features build of both crates byte-unchanged. Every cipher mode is
+now FFI-complete.
+**Earlier — v0.15.0 (crates.io 2026-05-28)**
 — **SM4-XTS multi-sector (disk) helper**: `sm4::mode_xts::{encrypt_sectors,
 decrypt_sectors}` encrypt/decrypt a contiguous run of equal-size disk
 sectors **in place** (`&mut [u8] -> Option<()>`), sector `i` under
@@ -159,7 +192,8 @@ v0.12.0 = SM4-XTS single-shot tweakable disk/sector mode (GB/T 17964-2021 / GM-T
 v0.13.0 = C FFI for SM4-XTS (`gmcrypto_sm4_xts_encrypt`/`_decrypt` + `GMCRYPTO_SM4_XTS_KEY_SIZE` in `gmcrypto-c` behind a forwarding `sm4-xts` feature; single-shot, byte-identical to core `mode_xts`, single `GMCRYPTO_ERR`, confidentiality-only; the deferred v0.12 FFI half on the v0.8-core→v0.10-FFI cadence; per `docs/v0.13-scope.md` Q13.1–Q13.12). No new `gmcrypto-core` API, no new dudect target, no new dep; additive.
 v0.14 = parser fuzzing (`cargo-fuzz`/libFuzzer over the full untrusted-input decode/decrypt surface; 16 targets; failure-mode-invariant assurance — no panic/OOM/hang; per `docs/v0.14-scope.md` Q14.1–Q14.12). **Assurance/infra only — NOT a crates.io release** (initial sweep found zero crashes → published crates byte-unchanged → no version bump, no publish, per Q14.11). New workspace-excluded `fuzz/` crate + nightly CI; codex-reviewed W0–W3.
 v0.15.0 = SM4-XTS multi-sector (disk) helper (`sm4::mode_xts::{encrypt_sectors, decrypt_sectors}`: in-place `&mut [u8] -> Option<()>` over a run of equal-size sectors, tweak_i = LE-128(start_sector + i); byte-identical to looping the v0.12 single-shot per sector; whole-block / no CTS; ciphers built once + reused scratch; single None with buf untouched; confidentiality-only; per `docs/v0.15-scope.md` Q15.1–Q15.12, codex-reviewed W0+W1). **Pure-core: no new dep/feature/SIMD/dudect target** (`ct_sm4_xts_decrypt` covers the per-sector path). C FFI deferred to v0.16. crates.io skips 0.14.0; workspace version 0.13.0 → 0.15.0; default build byte-identical.
-v0.16+ = (candidate) C FFI for the SM4-XTS sector helper + round-trip/differential parser fuzzing + streaming-decryptor fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + pinned dudect runner + `cargo fuzz coverage` in CI + AVX-512 sbox_x64 + CCM buffered input + a v1.0 readiness pass (per `docs/v0.15-scope.md` §5/§6 Q16.x).
+v0.16.0 = C FFI for the SM4-XTS multi-sector helper (`gmcrypto_sm4_xts_encrypt_sectors`/`_decrypt_sectors` in `gmcrypto-c` behind the existing forwarding `sm4-xts` feature; **in-place** `buf: *mut u8 + buf_len` mirroring the core `&mut [u8]` — a deliberate divergence from the uniformly out-of-place single-shot XTS FFI, so disk callers never double-allocate; `start_sector: uint64_t`, tweak = LE-128(start_sector+i); byte-identical to core `mode_xts::{encrypt,decrypt}_sectors`; single `GMCRYPTO_ERR` with buf untouched; W0 codex key-copy fix for caller key/buf overlap; confidentiality-only; per `docs/v0.16-scope.md` Q16.1–Q16.12, codex-reviewed W0+W1). The deferred v0.15 FFI half on the core-in-vN/FFI-in-vN+1 cadence — every cipher mode now FFI-complete. No new `gmcrypto-core` API, no new dudect target, no new dep; additive; default build byte-unchanged. Workspace version 0.15.0 → 0.16.0.
+v0.17+ = (candidate) round-trip/differential parser fuzzing + streaming-decryptor fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + pinned dudect runner + `cargo fuzz coverage` in CI + AVX-512 sbox_x64 + CCM buffered input + a v1.0 readiness pass (per `docs/v0.16-scope.md` §5/§6 Q17.x).
 
 Read `README.md`, `SECURITY.md`, `CONTRIBUTING.md` for the user-facing posture.
 This file lists the constraints a coding agent will violate by default.
@@ -247,8 +281,8 @@ cargo test -p gmcrypto-c                            # c_smoke Rust-equivalence t
 # v0.9 W4 / v0.10 — AEAD FFI surface (single-shot + streaming SM4-GCM).
 cargo test -p gmcrypto-c --features sm4-aead        # +14 AEAD c_smoke tests (6 single-shot + 8 streaming)
 cargo clippy -p gmcrypto-c --features sm4-aead --all-targets -- -D warnings
-# v0.13 — SM4-XTS C FFI surface.
-cargo test -p gmcrypto-c --features sm4-xts         # +5 XTS c_smoke tests (whole-block/CTS equivalence + errors)
+# v0.13 + v0.16 — SM4-XTS C FFI surface (single-shot + multi-sector).
+cargo test -p gmcrypto-c --features sm4-xts         # +16 XTS c_smoke tests (5 v0.13 single-shot + 11 v0.16 multi-sector)
 cargo clippy -p gmcrypto-c --features sm4-xts --all-targets -- -D warnings
 
 # Dudect harness. Default 100K samples (~75s); CI smoke uses 10K.
@@ -433,14 +467,15 @@ crates/gmcrypto-core/
     data/                   # v0.3 W2 binary KAT fixtures + regen recipe (Q7.9 decision); v0.8 W3 adds sm4_ccm_oracle.c (OpenSSL EVP harness)
 
 crates/gmcrypto-c/          # v0.4 W4 — C ABI shim (cdylib + staticlib + rlib)
-  src/lib.rs                # 61 FFI entry points (44 base + v0.9 W4's 6 single-shot AEAD + v0.10's 9 streaming AEAD + v0.13's 2 single-shot XTS): opaque handles, ffi_guard catch_unwind, GMCRYPTO_ERR on every error. AEAD symbols (gmcrypto_sm4_gcm_* / gmcrypto_sm4_ccm_*) cfg-gated on a forwarding `sm4-aead` feature (= ["gmcrypto-core/sm4-aead"]). v0.10 W1-W2 adds 2 opaque types gmcrypto_sm4_gcm_{encryptor,decryptor}_t + 9 symbols (encryptor new/update/finalize/finalize_with_tag_len/free output-streaming; decryptor new/update/finalize_verify/free commit-on-verify); _finalize* consume+free. v0.13 adds gmcrypto_sm4_xts_encrypt/_decrypt (single-shot, no handles, no opaque struct) + always-on const GMCRYPTO_SM4_XTS_KEY_SIZE=32, cfg-gated on a forwarding `sm4-xts` feature (= ["gmcrypto-core/sm4-xts"]); regen-header need NOT imply sm4-xts (free fns + const emit from source regardless of cfg)
+  src/lib.rs                # 63 FFI entry points (44 base + v0.9 W4's 6 single-shot AEAD + v0.10's 9 streaming AEAD + v0.13's 2 single-shot XTS + v0.16's 2 multi-sector XTS): opaque handles, ffi_guard catch_unwind, GMCRYPTO_ERR on every error. AEAD symbols (gmcrypto_sm4_gcm_* / gmcrypto_sm4_ccm_*) cfg-gated on a forwarding `sm4-aead` feature (= ["gmcrypto-core/sm4-aead"]). v0.10 W1-W2 adds 2 opaque types gmcrypto_sm4_gcm_{encryptor,decryptor}_t + 9 symbols (encryptor new/update/finalize/finalize_with_tag_len/free output-streaming; decryptor new/update/finalize_verify/free commit-on-verify); _finalize* consume+free. v0.13 adds gmcrypto_sm4_xts_encrypt/_decrypt (single-shot, no handles, no opaque struct) + always-on const GMCRYPTO_SM4_XTS_KEY_SIZE=32, cfg-gated on a forwarding `sm4-xts` feature (= ["gmcrypto-core/sm4-xts"]); regen-header need NOT imply sm4-xts (free fns + const emit from source regardless of cfg). v0.16 adds gmcrypto_sm4_xts_encrypt_sectors/_decrypt_sectors (in-place buf: *mut u8 + buf_len, start_sector: u64, tweak = LE-128(start_sector+i); NO out/out_capacity/out_actual_len — deliberate in-place divergence mirroring core's &mut [u8]; key copied into owned [u8;32] before &mut buf is built to avoid &/&mut aliasing UB on a caller key/buf overlap), same forwarding sm4-xts feature
   build.rs                  # cbindgen runs only under `regen-header` feature or GMCRYPTO_C_REGEN_HEADER=1
   cbindgen.toml             # cbindgen config (C language, include_guard = "GMCRYPTO_H_")
   include/gmcrypto.h        # committed header (CI gates drift via `git diff --exit-code`). cbindgen does NOT evaluate #[cfg(feature)] for free functions (single-shot AEAD prototypes appear unconditionally) BUT it DROPS cfg-gated opaque struct types (v0.10's gmcrypto_sm4_gcm_{encryptor,decryptor}_t) when the feature is inactive. So v0.10 makes `regen-header` IMPLY `sm4-aead` — regen is then deterministic + complete and the drift gate stays green with the documented `--features regen-header` command
   examples/sm2_sign.c       # end-to-end C example
   examples/sm4_gcm_streaming.c # v0.10 — chunked SM4-GCM streaming AEAD round-trip via the C ABI (doc-only; CI does not build C examples)
   examples/sm4_xts_sector.c # v0.13 — 512-byte SM4-XTS sector encrypt/decrypt round-trip via the C ABI (sector# as tweak; doc-only)
-  tests/c_smoke.rs          # 54 Rust-equivalence tests via extern "C" interop (35 default + 14 cfg-gated on sm4-aead: 6 v0.9 single-shot + 8 v0.10 streaming; + 5 cfg-gated on sm4-xts: whole-block/CTS equivalence + round-trip + short/weak-key/small-buffer errors)
+  examples/sm4_xts_multisector.c # v0.16 — in-place 8-sector ("disk region") SM4-XTS round-trip via the C ABI (start_sector: u64, auto-incrementing tweak; doc-only)
+  tests/c_smoke.rs          # 65 Rust-equivalence tests via extern "C" interop (35 default + 14 cfg-gated on sm4-aead: 6 v0.9 single-shot + 8 v0.10 streaming; + 16 cfg-gated on sm4-xts: 5 v0.13 single-shot whole-block/CTS equivalence + round-trip + short/weak-key/small-buffer errors, + 11 v0.16 multi-sector: equivalence-vs-core + round-trip + byte-boundary/high-LBA starts + bad sector_size/buf-multiple/weak-key/null-key/null-buf/empty + decrypt-side errors + key/buf-overlap regression)
   README.md                 # C/C++/Python/Go/Zig integration docs
 
 crates/gmcrypto-simd/       # v0.5 W4 phase 2 / v0.6 W6 / v0.8 W1 — SIMD backend crate (rlib-only, opt-in via gmcrypto-core's sm4-bitsliced-simd or sm4-aead feature)
@@ -865,7 +900,18 @@ Operational notes:
   is pre-flighted before the loop so `buf` is untouched on `None` — don't move
   a `checked_add(...)?` into the per-sector loop (it'd partially mutate `buf`
   before failing). No new dudect target (the per-sector path rides
-  `ct_sm4_xts_decrypt`; sector numbers are public).
+  `ct_sm4_xts_decrypt`; sector numbers are public). **The v0.16 C FFI**
+  (`gmcrypto_sm4_xts_{encrypt,decrypt}_sectors`) takes `start_sector` as a
+  **`uint64_t`** (not raw bytes, not u128 — C has no portable u128; widened to
+  u128 internally; a consequence is the overflow `None` is unreachable from the
+  FFI) and is **in-place** (`buf: *mut u8 + buf_len`, NO
+  `out`/`out_capacity`/`out_actual_len` — the only XTS FFI that diverges from
+  the out-of-place convention). **Copy the 32-byte key into an owned `[u8;32]`
+  before reconstructing `&mut buf`** — the in-place path holds a `&mut` over
+  caller memory alongside the `&` key borrow, so a caller `key`/`buf` overlap
+  would be `&`/`&mut` aliasing UB without the copy (regression-tested by
+  `sm4_xts_sectors_key_buf_overlap_ok`). Don't "simplify" by reborrowing the
+  key slice across the `&mut buf`.
 - **`gmssl sm2keygen -out priv.pem`** writes the encrypted PKCS#8 to
   the file **and** prints the SPKI public key to stdout by default.
   Use `-pubout pub.pem` to capture it separately.

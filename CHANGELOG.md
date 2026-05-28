@@ -3,6 +3,55 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.16.0] — 2026-05-29
+
+C FFI for the v0.15 **SM4-XTS multi-sector (disk) helper** — the deferred
+FFI half of v0.15, landed on the established **core-in-vN / FFI-in-vN+1**
+cadence (XTS single-shot core v0.12 → FFI v0.13; the sector helper core v0.15
+→ FFI here). With this, every cipher mode — including the in-place sector run —
+is reachable from C / C++ / Go / Zig / Python. Additive; the default-features
+build of both crates is byte-unchanged.
+
+### Added
+
+- **SM4-XTS multi-sector C FFI** (behind the existing forwarding `sm4-xts`
+  feature on `gmcrypto-c`): two new symbols
+  `gmcrypto_sm4_xts_encrypt_sectors` / `gmcrypto_sm4_xts_decrypt_sectors`
+  exposing `gmcrypto_core::sm4::mode_xts::{encrypt_sectors, decrypt_sectors}`.
+  They transform a contiguous run of equal-size sectors **in place**
+  (`buf: *mut u8` + `buf_len`; `buf_len` must be a whole multiple of
+  `sector_size`), deriving sector `i`'s tweak as little-endian-128
+  (`start_sector + i`). `start_sector` is a `uint64_t` (the block-layer
+  `sector_t` width; the core's `u128` range is a Rust-only nicety no device
+  reaches). Byte-identical to the core helper; single `GMCRYPTO_ERR` on every
+  failure (bad `sector_size`, bad `buf_len` multiple, `Key1 == Key2`, null),
+  with `buf` **untouched** on error; `buf_len == 0` is a vacuous `GMCRYPTO_OK`
+  (but the key is still validated). **Confidentiality only — no authentication.**
+- New doc-only C example
+  [`crates/gmcrypto-c/examples/sm4_xts_multisector.c`](crates/gmcrypto-c/examples/sm4_xts_multisector.c)
+  (in-place 8-sector region round-trip). 10 new `c_smoke` tests (cfg-gated on
+  `sm4-xts`): multi-sector equivalence vs core + round-trip, byte-boundary and
+  high-64-bit-LBA starts, and the full error matrix (each with `buf` untouched).
+
+### Notes
+
+- **In-place divergence from the single-shot XTS FFI.** Unlike every other
+  single-shot symbol (uniformly out-of-place via `(out, out_capacity,
+  out_actual_len)`), the sector functions are **in-place** — mirroring the
+  core's `&mut [u8]` API (chosen so disk callers never double-allocate) and
+  because the transform is length-preserving (so `out_actual_len` carries no
+  information). A W0 codex review confirmed this is the right trade.
+- **No new dependency, no new feature flag, no new `gmcrypto-core` API, no new
+  dudect target.** The FFI is a thin shim over the v0.15 core; the per-sector
+  secret path is already gated by `ct_sm4_xts_decrypt`, and the only new logic
+  (sector-number → LE-128 tweak) is on public addresses. `regen-header` does
+  **not** need to imply `sm4-xts` (two free-fn prototypes emit unconditionally;
+  no new opaque struct types). MSRV stays 1.85.
+- **The default-features build is byte-identical to 0.15.0.** The sector FFI is
+  behind the opt-in `sm4-xts` feature; the three published crates' default
+  builds are unchanged. Scope + decisions in
+  [`docs/v0.16-scope.md`](docs/v0.16-scope.md) (Q16.1–Q16.12).
+
 ## [0.15.0] — 2026-05-28
 
 SM4-XTS gains an **in-place multi-sector (disk) helper**. The v0.14
