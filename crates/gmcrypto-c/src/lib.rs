@@ -1414,6 +1414,112 @@ pub unsafe extern "C" fn gmcrypto_sm4_xts_decrypt(
 }
 
 // ============================================================
+// SM4-XTS — multi-sector (disk) helper (v0.16; GB/T 17964-2021).
+//
+// Wraps gmcrypto_core::sm4::mode_xts::{encrypt_sectors, decrypt_sectors}
+// (cfg-gated on the forwarding `sm4-xts` feature). Encrypt/decrypt a
+// contiguous run of equal-size sectors **in place**, deriving sector i's
+// tweak as the little-endian 128-bit encoding of `start_sector + i` (the
+// standard disk-XTS data-unit convention). Distinct shape from the
+// single-shot XTS FFI above: no out/out_capacity/out_actual_len (the
+// transform is in place and length-preserving), and `start_sector` is a
+// uint64_t (the block-layer sector_t width; the core's u128 range is a
+// Rust-only nicety no addressable device reaches). Whole-block sectors
+// only (no ciphertext stealing). Single GMCRYPTO_ERR on every failure
+// (sector_size ∉ [16, 16 MiB] or not a multiple of 16; buf_len not a whole
+// multiple of sector_size; Key1 == Key2; null). All validation is
+// pre-flighted in core before any mutation, so `buf` is left untouched on
+// GMCRYPTO_ERR. Confidentiality only — NO authentication tag.
+// ============================================================
+
+/// SM4-XTS in-place multi-sector encrypt (GB/T 17964-2021,
+/// `xts_standard=GB`). `key` is exactly [`GMCRYPTO_SM4_XTS_KEY_SIZE`] (32)
+/// bytes (`Key1 ‖ Key2`); `buf` is a contiguous run of `buf_len / sector_size`
+/// equal-size sectors transformed **in place** (`buf_len` must be a whole
+/// multiple of `sector_size`). Sector `i` is encrypted under
+/// tweak = little-endian-128(`start_sector + i`) — the data-unit / LBA
+/// convention; sector numbers must be unique within the XTS-key namespace
+/// (caller's contract). Returns [`GMCRYPTO_OK`] / [`GMCRYPTO_ERR`] (single
+/// failure mode: `sector_size` outside `[16, 16 MiB]` or not a multiple of 16,
+/// `buf_len` not a whole multiple of `sector_size`, `Key1 == Key2`, or null
+/// pointer). **`buf` is untouched on [`GMCRYPTO_ERR`].** `buf_len == 0` is a
+/// vacuous [`GMCRYPTO_OK`] (but the key is still validated, so empty + weak key
+/// → [`GMCRYPTO_ERR`]). **Confidentiality only — SM4-XTS does not
+/// authenticate.**
+#[cfg(feature = "sm4-xts")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_xts_encrypt_sectors(
+    key: *const u8,
+    sector_size: usize,
+    start_sector: u64,
+    buf: *mut u8,
+    buf_len: usize,
+) -> c_int {
+    ffi_guard(|| {
+        let k = match unsafe { try_slice(key, GMCRYPTO_SM4_XTS_KEY_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // Copy the key into an OWNED array so no shared borrow of the key memory
+        // is alive while `buf` is borrowed mutably below. This makes a
+        // (caller-error) `key`/`buf` overlap a benign copy instead of `&`/`&mut`
+        // aliasing UB — the in-place path is the only FFI surface that holds a
+        // `&mut` over caller memory alongside the key. (W0 codex finding.)
+        let key_owned: [u8; GMCRYPTO_SM4_XTS_KEY_SIZE] = match k.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        // SAFETY: buf valid for read+write of buf_len bytes, or buf_len == 0.
+        let b = match unsafe { try_slice_mut(buf, buf_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        match mode_xts::encrypt_sectors(&key_owned, sector_size, u128::from(start_sector), b) {
+            Some(()) => GMCRYPTO_OK,
+            None => GMCRYPTO_ERR,
+        }
+    })
+}
+
+/// SM4-XTS in-place multi-sector decrypt (GB/T 17964-2021, `xts_standard=GB`).
+/// Inverse of [`gmcrypto_sm4_xts_encrypt_sectors`] under the same
+/// `(key, sector_size, start_sector)`; same in-place contract, single failure
+/// mode, and `buf`-untouched-on-error guarantee. XTS is unauthenticated, so
+/// decrypt cannot detect tampering — it only fails on invalid parameters.
+#[cfg(feature = "sm4-xts")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_xts_decrypt_sectors(
+    key: *const u8,
+    sector_size: usize,
+    start_sector: u64,
+    buf: *mut u8,
+    buf_len: usize,
+) -> c_int {
+    ffi_guard(|| {
+        let k = match unsafe { try_slice(key, GMCRYPTO_SM4_XTS_KEY_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // Copy the key into an OWNED array so no shared borrow of the key memory
+        // is alive while `buf` is borrowed mutably below (see the encrypt-side
+        // note — avoids `&`/`&mut` aliasing UB on a caller `key`/`buf` overlap).
+        let key_owned: [u8; GMCRYPTO_SM4_XTS_KEY_SIZE] = match k.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        // SAFETY: buf valid for read+write of buf_len bytes, or buf_len == 0.
+        let b = match unsafe { try_slice_mut(buf, buf_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        match mode_xts::decrypt_sectors(&key_owned, sector_size, u128::from(start_sector), b) {
+            Some(()) => GMCRYPTO_OK,
+            None => GMCRYPTO_ERR,
+        }
+    })
+}
+
+// ============================================================
 // SM4-GCM AEAD — streaming / incremental-input (v0.10 W1+W2).
 //
 // Wraps gmcrypto_core::sm4::{Sm4GcmEncryptor, Sm4GcmDecryptor}.

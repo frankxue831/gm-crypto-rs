@@ -2037,3 +2037,261 @@ fn sm4_xts_small_buffer_returns_err_with_required_len() {
     assert_eq!(r, GMCRYPTO_ERR);
     assert_eq!(actual, pt.len());
 }
+
+// ============================================================
+// v0.16 — SM4-XTS multi-sector (disk) FFI (cfg-gated on `sm4-xts`).
+//
+// In-place over a contiguous run of equal-size sectors; sector i under
+// tweak = LE-128(start_sector + i). Byte-identical to core
+// mode_xts::{encrypt_sectors,decrypt_sectors}. Distinct shape from the
+// single-shot XTS FFI above: no out/out_capacity/out_actual_len (the
+// transform is in place + length-preserving), start_sector is uint64_t.
+// ============================================================
+
+#[cfg(feature = "sm4-xts")]
+use gmcrypto_c::{gmcrypto_sm4_xts_decrypt_sectors, gmcrypto_sm4_xts_encrypt_sectors};
+
+/// Deterministic test pattern of `len` bytes (mirrors the v0.15 core sector
+/// test). The `i as u8` truncation is the intended byte-cycling pattern.
+#[cfg(feature = "sm4-xts")]
+#[allow(clippy::cast_possible_truncation)]
+fn xts_pattern(len: usize) -> Vec<u8> {
+    (0..len)
+        .map(|i| (i as u8).wrapping_mul(31) ^ 0xA5)
+        .collect()
+}
+
+/// Multi-sector (3 × 512 B) in-place encrypt via FFI == core
+/// `encrypt_sectors`; FFI decrypt restores the original in place.
+#[cfg(feature = "sm4-xts")]
+#[test]
+fn sm4_xts_sectors_round_trip_matches_core() {
+    let key = xts_key();
+    let sector_size = 512usize;
+    let start_sector = 42u64;
+    let plain = xts_pattern(sector_size * 3);
+
+    // FFI encrypt in place.
+    let mut buf = plain.clone();
+    let r = unsafe {
+        gmcrypto_sm4_xts_encrypt_sectors(
+            key.as_ptr(),
+            sector_size,
+            start_sector,
+            buf.as_mut_ptr(),
+            buf.len(),
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+
+    // == core encrypt_sectors on an identical clone.
+    let mut core_buf = plain.clone();
+    gmcrypto_core::sm4::mode_xts::encrypt_sectors(
+        &key,
+        sector_size,
+        u128::from(start_sector),
+        &mut core_buf,
+    )
+    .expect("valid params");
+    assert_eq!(buf, core_buf);
+
+    // FFI decrypt restores the plaintext in place.
+    let r = unsafe {
+        gmcrypto_sm4_xts_decrypt_sectors(
+            key.as_ptr(),
+            sector_size,
+            start_sector,
+            buf.as_mut_ptr(),
+            buf.len(),
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert_eq!(buf, plain);
+}
+
+/// Small sectors (3 × 32 B) at `start_sector = 0xfe` so the LE counter crosses
+/// a byte boundary (0xfe → 0xff → 0x100) mid-run; FFI == core.
+#[cfg(feature = "sm4-xts")]
+#[test]
+fn sm4_xts_sectors_byte_boundary_matches_core() {
+    let key = xts_key();
+    let sector_size = 32usize;
+    let start_sector = 0xfeu64;
+    let plain = xts_pattern(sector_size * 3);
+
+    let mut buf = plain.clone();
+    let r = unsafe {
+        gmcrypto_sm4_xts_encrypt_sectors(
+            key.as_ptr(),
+            sector_size,
+            start_sector,
+            buf.as_mut_ptr(),
+            buf.len(),
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+
+    // `plain` is unused after this, so move it into the core buffer.
+    let mut core_buf = plain;
+    gmcrypto_core::sm4::mode_xts::encrypt_sectors(
+        &key,
+        sector_size,
+        u128::from(start_sector),
+        &mut core_buf,
+    )
+    .expect("valid params");
+    assert_eq!(buf, core_buf);
+}
+
+/// A high 64-bit starting LBA (crosses the 2^32 boundary in the LE tweak
+/// counter) round-trips — exercises the `uint64_t → u128` widening with no
+/// overflow (the overflow `None` is unreachable through this FFI).
+#[cfg(feature = "sm4-xts")]
+#[test]
+fn sm4_xts_sectors_high_lba_round_trip() {
+    let key = xts_key();
+    let sector_size = 512usize;
+    let start_sector = 0xFFFF_FFFF_FFFF_0000u64;
+    let plain = xts_pattern(sector_size * 2);
+
+    let mut buf = plain.clone();
+    let r = unsafe {
+        gmcrypto_sm4_xts_encrypt_sectors(
+            key.as_ptr(),
+            sector_size,
+            start_sector,
+            buf.as_mut_ptr(),
+            buf.len(),
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+
+    let mut core_buf = plain.clone();
+    gmcrypto_core::sm4::mode_xts::encrypt_sectors(
+        &key,
+        sector_size,
+        u128::from(start_sector),
+        &mut core_buf,
+    )
+    .expect("valid params");
+    assert_eq!(buf, core_buf);
+
+    let r = unsafe {
+        gmcrypto_sm4_xts_decrypt_sectors(
+            key.as_ptr(),
+            sector_size,
+            start_sector,
+            buf.as_mut_ptr(),
+            buf.len(),
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert_eq!(buf, plain);
+}
+
+/// `sector_size` not a multiple of 16 → `GMCRYPTO_ERR`; `buf` untouched.
+#[cfg(feature = "sm4-xts")]
+#[test]
+fn sm4_xts_sectors_bad_sector_size_buf_untouched() {
+    let key = xts_key();
+    let mut buf = [0xABu8; 40];
+    let before = buf;
+    let r = unsafe {
+        gmcrypto_sm4_xts_encrypt_sectors(key.as_ptr(), 20, 0, buf.as_mut_ptr(), buf.len())
+    };
+    assert_eq!(r, GMCRYPTO_ERR);
+    assert_eq!(buf, before, "buf must be untouched on validation failure");
+}
+
+/// `buf_len` not a whole multiple of `sector_size` → `GMCRYPTO_ERR`; `buf`
+/// untouched.
+#[cfg(feature = "sm4-xts")]
+#[test]
+fn sm4_xts_sectors_non_multiple_buf_untouched() {
+    let key = xts_key();
+    let mut buf = [0xCDu8; 24]; // 24 is not a multiple of the 16-byte sector
+    let before = buf;
+    let r = unsafe {
+        gmcrypto_sm4_xts_encrypt_sectors(key.as_ptr(), 16, 0, buf.as_mut_ptr(), buf.len())
+    };
+    assert_eq!(r, GMCRYPTO_ERR);
+    assert_eq!(buf, before, "buf must be untouched on validation failure");
+}
+
+/// Weak key (`Key1 == Key2`) → `GMCRYPTO_ERR`; `buf` untouched.
+#[cfg(feature = "sm4-xts")]
+#[test]
+fn sm4_xts_sectors_weak_key_buf_untouched() {
+    let key = [0x11u8; GMCRYPTO_SM4_XTS_KEY_SIZE]; // both halves identical
+    let mut buf = [0xEFu8; 32];
+    let before = buf;
+    let r = unsafe {
+        gmcrypto_sm4_xts_encrypt_sectors(key.as_ptr(), 16, 0, buf.as_mut_ptr(), buf.len())
+    };
+    assert_eq!(r, GMCRYPTO_ERR);
+    assert_eq!(buf, before, "buf must be untouched on weak-key reject");
+}
+
+/// Empty `buf` passed as `(NULL, 0)` (the natural C "no data" call) is a vacuous
+/// `GMCRYPTO_OK`; but the key is still validated, so an empty run under a weak
+/// key is still `GMCRYPTO_ERR`.
+#[cfg(feature = "sm4-xts")]
+#[test]
+fn sm4_xts_sectors_empty_buf_ok_weak_err() {
+    let key = xts_key();
+    let r = unsafe { gmcrypto_sm4_xts_encrypt_sectors(key.as_ptr(), 512, 0, ptr::null_mut(), 0) };
+    assert_eq!(r, GMCRYPTO_OK);
+
+    let weak = [0x11u8; GMCRYPTO_SM4_XTS_KEY_SIZE];
+    let r = unsafe { gmcrypto_sm4_xts_encrypt_sectors(weak.as_ptr(), 512, 0, ptr::null_mut(), 0) };
+    assert_eq!(r, GMCRYPTO_ERR);
+}
+
+/// Null `buf` with non-zero `buf_len` → `GMCRYPTO_ERR`.
+#[cfg(feature = "sm4-xts")]
+#[test]
+fn sm4_xts_sectors_null_buf_returns_err() {
+    let key = xts_key();
+    let r = unsafe { gmcrypto_sm4_xts_encrypt_sectors(key.as_ptr(), 16, 0, ptr::null_mut(), 32) };
+    assert_eq!(r, GMCRYPTO_ERR);
+}
+
+/// Null `key` → `GMCRYPTO_ERR`; `buf` untouched (reject before any mutation).
+#[cfg(feature = "sm4-xts")]
+#[test]
+fn sm4_xts_sectors_null_key_buf_untouched() {
+    let mut buf = [0x5Cu8; 32];
+    let before = buf;
+    let r = unsafe { gmcrypto_sm4_xts_encrypt_sectors(ptr::null(), 16, 0, buf.as_mut_ptr(), 32) };
+    assert_eq!(r, GMCRYPTO_ERR);
+    assert_eq!(buf, before, "buf must be untouched on null-key reject");
+}
+
+/// Decrypt-side error path (guards against encrypt/decrypt copy-paste
+/// asymmetry): weak key + bad `sector_size` both → `GMCRYPTO_ERR`, buf
+/// untouched, via `gmcrypto_sm4_xts_decrypt_sectors`.
+#[cfg(feature = "sm4-xts")]
+#[test]
+fn sm4_xts_sectors_decrypt_errors_buf_untouched() {
+    let weak = [0x11u8; GMCRYPTO_SM4_XTS_KEY_SIZE];
+    let mut buf = [0x9Au8; 32];
+    let before = buf;
+    let r = unsafe { gmcrypto_sm4_xts_decrypt_sectors(weak.as_ptr(), 16, 0, buf.as_mut_ptr(), 32) };
+    assert_eq!(r, GMCRYPTO_ERR);
+    assert_eq!(
+        buf, before,
+        "buf must be untouched on weak-key decrypt reject"
+    );
+
+    // Bad sector_size (20, not a multiple of 16) on a correctly-sized 40-byte
+    // buffer → ERR, buf untouched.
+    let key = xts_key();
+    let mut buf2 = [0x9Au8; 40];
+    let before2 = buf2;
+    let r = unsafe { gmcrypto_sm4_xts_decrypt_sectors(key.as_ptr(), 20, 0, buf2.as_mut_ptr(), 40) };
+    assert_eq!(r, GMCRYPTO_ERR);
+    assert_eq!(
+        buf2, before2,
+        "buf must be untouched on bad sector_size decrypt reject"
+    );
+}
