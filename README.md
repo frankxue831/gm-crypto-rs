@@ -15,6 +15,11 @@ detectable-leak regression harness.
 certified by any upstream cryptography project, payment gateway, standards body,
 or vendor.
 
+> ⚠️ **Not independently audited.** This is a solo-maintained, best-effort
+> open-source project with no security audit and no support SLA. Review the
+> code and **use at your own risk.** See [`SECURITY.md`](SECURITY.md) for the
+> threat model and disclosure process.
+
 ## What this is
 
 A small, auditable, pure-Rust SM2 / SM3 / SM4 SDK whose central

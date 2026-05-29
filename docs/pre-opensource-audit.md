@@ -3,14 +3,22 @@
 **Started:** 2026-05-17 · **Repo state:** v0.9.0 on `main` (private) ·
 **History:** 193 commits, 2.9 MB `.git`.
 
-**Publication target: v1.0.** The repo stays **private** until then. This is
-a standing checklist — items that are safe and cost-free now are done
-immediately; items that only matter once the repo is public (or that have a
-real cost while private) are **staged** and applied during the v1.0 pre-flip
-pass. Git history becomes permanently visible on a public repo, so the bar is
-"nothing in the working tree *or* history should embarrass or endanger us
-once it's world-readable, and the CI / community surface should be credible
-for a cryptography library."
+**Publication decision (updated 2026-05-29): go public at v0.17, NOT v1.0.**
+The original plan targeted v1.0; that was superseded. The repo flips
+**private → public** on the 0.x line as the **v0.17 public-flip milestone**
+— a *repository* milestone, **not** a crates.io release (no crate code
+changes; the workspace stays at `0.16.0`, crates.io skips `0.17.0` per the
+v0.14 precedent) — so the project gets public audit/eyes *before* committing
+to the 1.0 SemVer-stability promise. **v1.0 is reserved** for a later
+readiness pass (dudect-gate hardening + API-stability review). See
+`docs/v0.17-scope.md` and the dated execution note at the end of this file.
+This is a standing checklist — items safe and cost-free while private were
+done immediately; items that only matter once the repo is public (or that
+had a real cost while private) were **staged** and are applied during the
+v0.17 pre-flip pass. Git history becomes permanently visible on a public
+repo, so the bar is "nothing in the working tree *or* history should
+embarrass or endanger us once it's world-readable, and the CI / community
+surface should be credible for a cryptography library."
 
 Findings are ranked by risk. Each is marked **[done]** (landed now, in the
 audit PR), **[ok]** (checked, no action), or **[staged — pre-publish]** (a
@@ -29,7 +37,7 @@ pre-flip checklist at the end).
 
 ## 🔴 Critical
 
-### C1 — Self-hosted CI runner must not survive the public flip  **[staged — pre-publish]**
+### C1 — Self-hosted CI runner must not survive the public flip  **[done — v0.17, repo side]**
 
 `ci.yml`'s five jobs run on a self-hosted macOS runner
 (`[self-hosted, macos, arm64, gmcrypto]`) and trigger on
@@ -100,7 +108,7 @@ email is **not** in history. Two display names appear (`Fengxiang Xue`,
 could unify them. No `authors` field in any `Cargo.toml` (deliberate, per
 CLAUDE.md). Nothing to remediate.
 
-### S3 — `CLAUDE.md` self-hosted runbook exposure  **[staged — pre-publish]**
+### S3 — `CLAUDE.md` self-hosted runbook exposure  **[done — v0.17]**
 
 `CLAUDE.md` carries an ~138-line self-hosted-runner runbook (service-account
 name, home paths, runner-registration token flow). Not secret, and **still
@@ -277,3 +285,51 @@ the C1 CI swap, solo-maintainer-friendly config (see the pre-flip checklist).
 Net: item 2 is as complete as it can be while private. The three blocked
 settings + branch protection are the only GitHub-side actions left for the
 flip, all enumerated in the pre-flip checklist above.
+
+---
+
+## 2026-05-29 — v0.17 public-flip execution
+
+The repo flips public at **v0.17** (decision change — see the updated
+framing at the top). Repo-side staged changes were applied on branch
+`chore/v0.17-public-flip` (codex-reviewed plan; this is *not* a crates.io
+release — workspace stays `0.16.0`).
+
+**Applied in this PR (repo side):**
+
+- **C1 — `ci.yml` off self-hosted.** All five jobs `runs-on: macos-14`
+  (GitHub-hosted aarch64); dropped the self-hosted `cache-bin` / `save-if`
+  rust-cache tunings; bumped timeouts (build 15→30, msrv/cabi/wasm32 10→20,
+  deny 5→15); rewrote the self-hosted header comment.
+- **C1 gap — `fuzz-nightly.yml` off self-hosted.** The original C1 covered
+  only `ci.yml`; `fuzz-nightly.yml` *also* ran on the self-hosted runner
+  (it has no `pull_request` trigger, so it was never a fork-PR RCE vector,
+  but it had to move so the runner can be fully retired — and to take the
+  adversarial fuzz workload off the personal Mac). Now `runs-on:
+  ubuntu-latest`, installing nightly + the pinned `cargo-fuzz 0.13.1` per
+  run.
+- **S3 — `CLAUDE.md` runbook removed.** Deleted the `## Self-hosted CI
+  runner setup` section (~140 lines); rewrote the Workflow-notes bullet +
+  the architecture-map `ci.yml` / `fuzz-nightly.yml` lines to GitHub-hosted;
+  removed the `>>> BEFORE PUBLIC FLIP` notes; recorded the v0.17 milestone
+  in the header.
+
+**Remaining GitHub-side actions (apply at the flip, in order):**
+
+- [ ] Smoke the hosted `fuzz-nightly` via `gh workflow run fuzz-nightly.yml
+      --ref main` (PR CI never runs the nightly) — confirm green.
+- [ ] Decommission the self-hosted runner (Settings → Actions → Runners →
+      remove; `./svc.sh stop && ./svc.sh uninstall`; wipe `_work`).
+- [ ] Flip visibility → **Public**.
+- [ ] Enable Secret scanning + Push protection (free once public).
+- [ ] Fork-PR approval = "Require approval for all outside collaborators".
+- [ ] Branch protection on `main`: block force-push + deletion; require the
+      **exact post-swap check context names** (build & test / msrv / cabi /
+      cargo-deny / **each wasm32 matrix leg**); admin bypass on; no review
+      requirement (solo maintainer).
+
+History note: the deleted runbook (service-account `ghrunner`, the
+`/Users/ghrunner` service-account paths) remains in git history. Per the
+"What this audit did NOT change" section, no history rewrite is warranted —
+those are a throwaway service account's paths, not secrets, and `gitleaks`
+over full history is clean.
