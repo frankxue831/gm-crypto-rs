@@ -1,4 +1,4 @@
-# v1.0 open-source readiness checklist
+# Open-source readiness checklist (public flip executed at v0.17)
 
 **Started:** 2026-05-17 · **Repo state:** v0.9.0 on `main` (private) ·
 **History:** 193 commits, 2.9 MB `.git`.
@@ -21,9 +21,9 @@ embarrass or endanger us once it's world-readable, and the CI / community
 surface should be credible for a cryptography library."
 
 Findings are ranked by risk. Each is marked **[done]** (landed now, in the
-audit PR), **[ok]** (checked, no action), or **[staged — pre-publish]** (a
-change prepared but deliberately deferred to the v1.0 flip — see the
-pre-flip checklist at the end).
+audit PR), **[ok]** (checked, no action), **[staged — pre-publish]** (a
+change prepared while private), or **[done — v0.17]** (a staged change
+applied at the v0.17 public flip — see the dated execution note at the end).
 
 > **Why staged, not done:** the self-hosted-runner risk and the CLAUDE.md
 > runbook exposure are *public-repo* problems only. While the repo is
@@ -31,7 +31,8 @@ pre-flip checklist at the end).
 > safe — and GitHub-hosted **macOS** minutes bill at a 10× multiplier
 > against the private-repo quota (the exact cost the self-hosted runner was
 > chosen to avoid). Migrating months early would burn quota for zero
-> security benefit. So the migration is prepared and parked, not applied.
+> security benefit. So the migration was prepared and parked while private,
+> then **applied at the v0.17 flip** (see the dated execution note at the end).
 
 ---
 
@@ -48,9 +49,9 @@ run on the maintainer's Mac (arbitrary code as the `ghrunner` account,
 warm-cache poisoning, potential secret access). GitHub explicitly recommends
 never using self-hosted runners with public repositories.
 
-**Staged, not applied** (see the box at the top for the cost rationale). The
-swap is one mechanical change to `ci.yml`, to be applied during the v1.0
-pre-flip pass:
+**Applied at the v0.17 flip** (it was staged while private — see the box at
+the top for that cost rationale, and the dated execution note at the end).
+The swap was one mechanical change to `ci.yml`:
 
 1. On all five jobs: `runs-on: [self-hosted, macos, arm64, gmcrypto]` →
    `runs-on: macos-14` (GitHub-hosted aarch64).
@@ -113,13 +114,12 @@ CLAUDE.md). Nothing to remediate.
 `CLAUDE.md` carries an ~138-line self-hosted-runner runbook (service-account
 name, home paths, runner-registration token flow). Not secret, and **still
 operationally needed while the self-hosted runner is in use** (re-registering
-the runner if it dies). So it stays until C1's migration happens. At the v1.0
-pre-flip pass, remove the `## Self-hosted CI runner setup` section + trim the
-"Workflow notes" bullet + update the architecture-map `ci.yml` line to
-GitHub-hosted — together with the C1 runner swap (the runbook is dead weight
-the instant the self-hosted runner is retired). This was prototyped during
-the audit and reverted to keep the doc accurate to the current self-hosted
-reality.
+the runner if it dies). It stayed while the self-hosted runner was in use;
+**at the v0.17 flip it was removed** together with the C1 runner swap (the
+runbook is dead weight the instant the self-hosted runner is retired): the
+`## Self-hosted CI runner setup` section is gone, the "Workflow notes" bullet
++ the architecture-map `ci.yml` / `fuzz-nightly.yml` lines now read
+GitHub-hosted, and the `>>> BEFORE PUBLIC FLIP` notes are removed.
 
 ### S4 — `SECURITY.md` dudect inventory was stale  **[fixed]**
 
@@ -180,18 +180,20 @@ test material, never reused as real keys. Safe.
 
 ---
 
-## v1.0 pre-flip checklist (do these when actually making the repo public)
+## Pre-flip checklist (public flip = v0.17)
 
-**In the repo (staged changes to apply — see C1, S3):**
+**In the repo (applied at v0.17 — see C1, S3 + the dated execution note):**
 
-- [ ] Swap `ci.yml`'s five jobs from `[self-hosted, macos, arm64, gmcrypto]`
+- [x] Swap `ci.yml`'s five jobs from `[self-hosted, macos, arm64, gmcrypto]`
       to GitHub-hosted `macos-14`; drop the self-hosted cache tunings; bump
-      timeouts (C1, step list).
-- [ ] Remove the `## Self-hosted CI runner setup` runbook from `CLAUDE.md` +
+      timeouts (C1, step list). **Done v0.17 — plus `fuzz-nightly.yml` →
+      `ubuntu-latest` (the C1 gap).**
+- [x] Remove the `## Self-hosted CI runner setup` runbook from `CLAUDE.md` +
       update the Workflow-notes bullet + the architecture-map `ci.yml` line
-      (S3).
+      (S3). **Done v0.17.**
 - [ ] Decommission the self-hosted runner (remove it in
       Settings → Actions → Runners; wipe `~ghrunner/actions-runner/_work`).
+      **W4 — after the PR merges + hosted CI is green.**
 
 **In the GitHub UI / via API** (see the 2026-05-24 dry-run note below):
 
@@ -231,22 +233,24 @@ test material, never reused as real keys. Safe.
       in `.gitleaks.toml` so `gitleaks git` **and** `gitleaks dir` both
       report *no leaks found*. Strengthens S1 (the at-audit sweep had eyes
       on only 2 of the 4; both new hits are benign KAT hex).
-- [ ] (Optional) Add a `.mailmap` to unify the two author display names (S2).
-- [ ] (Optional) Add a one-line "not independently audited" banner near the
-      top of the README (L1).
-- [ ] Confirm the crates.io README/links render (they point at the GitHub
-      repo, which becomes reachable on flip).
-- [ ] Re-read `CLAUDE.md` once more with fresh eyes for any internal detail
-      not wanted in public (it's retained deliberately as the agent guide).
+- [x] Add a `.mailmap` to unify the two author display names (S2). **Done
+      v0.17** (`git shortlog -sne` now collapses to one author).
+- [x] Add a one-line "not independently audited" banner near the top of the
+      README (L1). **Done v0.17.**
+- [x] Re-read `CLAUDE.md` with fresh eyes for any internal detail not wanted
+      in public. **Done v0.17** (the self-hosted runbook was the only such
+      detail — removed per S3; `CLAUDE.md` is retained as the agent guide).
+- [ ] **W4 (post-flip verify):** confirm the crates.io README/links resolve
+      (they point at the GitHub repo, reachable once public).
 
 ## What this audit did NOT change
 
 - No git-history rewrite (none warranted — history is clean).
 - No code/algorithm changes (out of scope for an open-sourcing audit).
-- The self-hosted runner stays live until v1.0 (publication is deferred);
-  the migration is staged, not applied — see C1.
-- `CLAUDE.md` retained as the internal/agent guide; only the self-hosted
-  runbook is slated for removal at the flip (S3).
+- The self-hosted runner is retired at the v0.17 flip; the CI migration was
+  applied — see C1 and the dated execution note.
+- `CLAUDE.md` retained as the internal/agent guide; the self-hosted runbook
+  was removed at the v0.17 flip (S3).
 
 ---
 
