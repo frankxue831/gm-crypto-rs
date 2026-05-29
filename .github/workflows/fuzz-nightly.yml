@@ -6,25 +6,22 @@ name: fuzz nightly (cargo-fuzz)
 # invariant on adversarial bytes: no panic / no OOM / no hang — every
 # malformed input collapses to the single safe None / Failed return.
 #
-# Runner: the SAME self-hosted macOS aarch64 runner as ci.yml
-# (`[self-hosted, macos, arm64, gmcrypto]`). Safe while the repo is
-# PRIVATE — only trusted users can trigger it.
-#
-# >>> BEFORE MAKING THIS REPO PUBLIC (planned at v1.0): a self-hosted
-# >>> runner on a public repo is remote code execution, and fuzzing
-# >>> *runs adversarial native code by design* — even more reason to
-# >>> isolate. Migrate to a GitHub-hosted runner (or a sandboxed/
-# >>> ephemeral self-hosted one) before the flip. See
-# >>> docs/pre-opensource-audit.md and docs/v0.14-scope.md Q14.8.
+# Runner: GitHub-hosted `ubuntu-latest`. libFuzzer is native on Linux
+# and the 16 targets fuzz platform-agnostic decode/decrypt logic (the
+# fuzz crate enables sm4-aead + sm4-xts but not SIMD), so host arch is
+# irrelevant. Moved off the self-hosted macOS runner at the v0.17 public
+# flip — a self-hosted runner on a PUBLIC repo is remote code execution,
+# and fuzzing runs adversarial native code by design, so it must not run
+# on a personal machine. See docs/pre-opensource-audit.md (C1) and
+# docs/v0.14-scope.md Q14.8.
 #
 # This is NOT a PR gate — fuzzing does not block PRs (ci.yml / the
 # dudect workflows do). A real crash here is a failure-mode-invariant
 # violation → fix in core + commit the minimized input as a regression
 # seed (docs/v0.14-scope.md Q14.10).
 #
-# Prereqs on the runner (one-time, see CLAUDE.md runner setup):
-#   rustup toolchain install nightly
-#   cargo install cargo-fuzz --version 0.13.1 --locked
+# nightly + cargo-fuzz are installed per-run below (hosted runners start
+# clean); cargo-fuzz is pinned for reproducibility.
 
 on:
   schedule:
@@ -51,22 +48,21 @@ env:
 jobs:
   fuzz:
     name: cargo-fuzz nightly sweep
-    runs-on: [self-hosted, macos, arm64, gmcrypto]
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
-      # nightly is pre-installed on the runner (CLAUDE.md runner setup).
-      # We deliberately do NOT use dtolnay/rust-toolchain@master here —
-      # it was observed prompting for sudo on this self-hosted macOS
-      # runner (see ci.yml header). Just confirm nightly is present.
-      - name: Confirm nightly toolchain
-        run: rustc +nightly --version
+      # Hosted runners start clean — install nightly explicitly (libFuzzer
+      # requires the nightly compiler's sanitizer support).
+      - name: Install Rust nightly
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustc +nightly --version
 
-      # Idempotent: install the pinned cargo-fuzz only if missing /
-      # version-mismatched. Pre-installed at runner setup; this guards
-      # against a wiped CARGO_HOME.
-      - name: Ensure pinned cargo-fuzz
+      # Pinned for reproducibility (same posture as the cbindgen 0.29 pin
+      # in gmcrypto-c). The guard makes a warm cache a no-op.
+      - name: Install pinned cargo-fuzz
         run: |
           if ! cargo fuzz --version 2>/dev/null | grep -q "$CARGO_FUZZ_VERSION"; then
             cargo install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked

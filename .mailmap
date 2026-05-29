@@ -1,0 +1,4 @@
+# Unify the two commit display names that share one GitHub noreply email,
+# so `git shortlog -sne` / GitHub contributor views show a single author.
+Fengxiang Xue <47923440+frankxue831@users.noreply.github.com> <47923440+frankxue831@users.noreply.github.com>
+Fengxiang Xue <47923440+frankxue831@users.noreply.github.com> Frank_Xue <47923440+frankxue831@users.noreply.github.com>

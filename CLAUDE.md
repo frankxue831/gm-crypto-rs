@@ -1,6 +1,15 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3/SM4 SDK. **v0.16.0 published to crates.io 2026-05-29**
+Pure-Rust SM2/SM3/SM4 SDK. **v0.17 — public-flip milestone (on `main`)**
+— open-sourcing the repository. CI migrated **off the self-hosted macOS
+runner** to GitHub-hosted (`ci.yml` → `macos-14`, `fuzz-nightly.yml` →
+`ubuntu-latest`) so the personal-Mac runner can be retired before the repo
+flips **private → public**. **Repository milestone, NOT a crates.io
+release** — no crate code changes, workspace stays **0.16.0**, crates.io
+skips `0.17.0` (the v0.14 precedent); **v1.0 reserved** for a later
+readiness pass (dudect-gate hardening + API-stability review). Per
+`docs/v0.17-scope.md` + `docs/pre-opensource-audit.md` (codex-reviewed plan).
+**Earlier — v0.16.0 published to crates.io 2026-05-29**
 — **C FFI for the SM4-XTS multi-sector (disk) helper**: expose the v0.15
 `sm4::mode_xts::{encrypt_sectors, decrypt_sectors}` through the `gmcrypto-c`
 C ABI behind the existing forwarding **`sm4-xts`** feature
@@ -67,8 +76,8 @@ over the full untrusted-input decode/decrypt surface of `gmcrypto-core`
 raw ciphertext, SM2 decrypt + verify, SM4-CBC/GCM/CCM/XTS decrypt), each
 proving the failure-mode invariant on adversarial bytes — **no panic / no
 OOM / no hang**. Capped nightly job `.github/workflows/fuzz-nightly.yml`
-(cron + `workflow_dispatch`, self-hosted, pinned `cargo-fuzz 0.13.1`, NOT
-a PR gate). Codex-reviewed W0+W1+W2+W3. Workspace `version` stays
+(cron + `workflow_dispatch`, GitHub-hosted `ubuntu-latest` since v0.17,
+pinned `cargo-fuzz 0.13.1`, NOT a PR gate). Codex-reviewed W0+W1+W2+W3. Workspace `version` stays
 **0.13.0** (no bump). The 3 published crates' default builds are
 byte-identical; `cargo {build,test,clippy} --workspace`, `cargo deny`,
 MSRV-1.85, and `cargo publish` are all unaffected by `fuzz/`.
@@ -193,7 +202,8 @@ v0.13.0 = C FFI for SM4-XTS (`gmcrypto_sm4_xts_encrypt`/`_decrypt` + `GMCRYPTO_S
 v0.14 = parser fuzzing (`cargo-fuzz`/libFuzzer over the full untrusted-input decode/decrypt surface; 16 targets; failure-mode-invariant assurance — no panic/OOM/hang; per `docs/v0.14-scope.md` Q14.1–Q14.12). **Assurance/infra only — NOT a crates.io release** (initial sweep found zero crashes → published crates byte-unchanged → no version bump, no publish, per Q14.11). New workspace-excluded `fuzz/` crate + nightly CI; codex-reviewed W0–W3.
 v0.15.0 = SM4-XTS multi-sector (disk) helper (`sm4::mode_xts::{encrypt_sectors, decrypt_sectors}`: in-place `&mut [u8] -> Option<()>` over a run of equal-size sectors, tweak_i = LE-128(start_sector + i); byte-identical to looping the v0.12 single-shot per sector; whole-block / no CTS; ciphers built once + reused scratch; single None with buf untouched; confidentiality-only; per `docs/v0.15-scope.md` Q15.1–Q15.12, codex-reviewed W0+W1). **Pure-core: no new dep/feature/SIMD/dudect target** (`ct_sm4_xts_decrypt` covers the per-sector path). C FFI deferred to v0.16. crates.io skips 0.14.0; workspace version 0.13.0 → 0.15.0; default build byte-identical.
 v0.16.0 = C FFI for the SM4-XTS multi-sector helper (`gmcrypto_sm4_xts_encrypt_sectors`/`_decrypt_sectors` in `gmcrypto-c` behind the existing forwarding `sm4-xts` feature; **in-place** `buf: *mut u8 + buf_len` mirroring the core `&mut [u8]` — a deliberate divergence from the uniformly out-of-place single-shot XTS FFI, so disk callers never double-allocate; `start_sector: uint64_t`, tweak = LE-128(start_sector+i); byte-identical to core `mode_xts::{encrypt,decrypt}_sectors`; single `GMCRYPTO_ERR` with buf untouched; W0 codex key-copy fix for caller key/buf overlap; confidentiality-only; per `docs/v0.16-scope.md` Q16.1–Q16.12, codex-reviewed W0+W1). The deferred v0.15 FFI half on the core-in-vN/FFI-in-vN+1 cadence — every cipher mode now FFI-complete. No new `gmcrypto-core` API, no new dudect target, no new dep; additive; default build byte-unchanged. Workspace version 0.15.0 → 0.16.0.
-v0.17+ = (candidate) round-trip/differential parser fuzzing + streaming-decryptor fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + pinned dudect runner + `cargo fuzz coverage` in CI + AVX-512 sbox_x64 + CCM buffered input + a v1.0 readiness pass (per `docs/v0.16-scope.md` §5/§6 Q17.x).
+v0.17 = public open-source release (flipped the GitHub repo private → public on the 0.x line; CI moved off the self-hosted macOS runner to GitHub-hosted `macos-14` + fuzz-nightly to `ubuntu-latest`; **repository milestone, NOT a crates.io release** — no crate code change, workspace stays 0.16.0, crates.io skips 0.17.0 per the v0.14 precedent; v1.0 reserved for a later readiness pass; per `docs/v0.17-scope.md` + `docs/pre-opensource-audit.md`, codex-reviewed).
+v0.18+ = (candidate) dudect-gate hardening (pinned dudect-job toolchain + self-calibrating relative gate + multi-run median/percentile robustness — the noise is run-to-run variance, not a leak) + round-trip/differential parser fuzzing + streaming-decryptor fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + `cargo fuzz coverage` in CI + AVX-512 sbox_x64 + CCM buffered input + a v1.0 readiness pass (per `docs/v0.16-scope.md` §5/§6, formerly the v0.17 candidate menu).
 
 Read `README.md`, `SECURITY.md`, `CONTRIBUTING.md` for the user-facing posture.
 This file lists the constraints a coding agent will violate by default.
@@ -504,10 +514,10 @@ fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN 
   README.md                 # build/run/repro runbook + seed-regen recipe
 
 .github/workflows/
-  ci.yml                    # 5 jobs on self-hosted macOS aarch64: build/test (stable, full) + msrv (1.85, build-only) + cabi + cargo-deny + wasm32 matrix. Per-feature clippy passes (digest-traits, cipher-traits, sm4-bitsliced, sm4-bitsliced-simd, crypto-bigint-scalar). concurrency: cancel-in-progress. UNAFFECTED by fuzz/ (excluded).
+  ci.yml                    # 5 jobs on GitHub-hosted macos-14 (aarch64, v0.17+): build/test (stable, full) + msrv (1.85, build-only) + cabi + cargo-deny + wasm32 matrix. Per-feature clippy passes (digest-traits, cipher-traits, sm4-bitsliced, sm4-bitsliced-simd, crypto-bigint-scalar). concurrency: cancel-in-progress. UNAFFECTED by fuzz/ (excluded).
   dudect-pr.yml             # 10K samples on ubuntu-latest, |tau| gate, matrix on features=[default, sm4-bitsliced, sm4-bitsliced-simd], path-allowlisted, concurrency: cancel-in-progress
   dudect-nightly.yml        # 100K samples on ubuntu-latest, same gate + matrix, 30-day artifact retention; concurrency: cancel-in-progress=false (a partial 100K run is wasted compute). PR #38 drops the push:main trigger in favour of cron-only (regression watch) + workflow_dispatch (manual reruns).
-  fuzz-nightly.yml          # v0.14 — capped cargo-fuzz sweep over all 16 targets on the self-hosted runner (cron 06:00 UTC + workflow_dispatch w/ max_total_time input; pinned cargo-fuzz 0.13.1; -max_total_time/-rss_limit_mb/-timeout caps; crash-artifact upload 30d; concurrency cancel-in-progress=false). NOT a PR gate. >>> BEFORE PUBLIC FLIP: fuzzing runs adversarial native code — isolate/move off the self-hosted personal Mac.
+  fuzz-nightly.yml          # v0.14 — capped cargo-fuzz sweep over all 16 targets on GitHub-hosted ubuntu-latest (v0.17+; cron 06:00 UTC + workflow_dispatch w/ max_total_time input; installs nightly + pinned cargo-fuzz 0.13.1 per run; -max_total_time/-rss_limit_mb/-timeout caps; crash-artifact upload 30d; concurrency cancel-in-progress=false). NOT a PR gate.
 
 docs/
   v0.1.0-release-review.md      # pre-publish reviewer checklist (template)
@@ -535,14 +545,16 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
 
 ## Workflow notes
 
-- **Self-hosted CI runner (v0.5+).** Private-repo Pro-plan minute caps
-  drove a split: `ci.yml`'s five jobs (build / msrv / cabi / deny /
-  wasm32) run on a **self-hosted macOS aarch64 runner labelled
-  `gmcrypto`**; the two dudect workflows stay on `ubuntu-latest`
-  because their `|tau|` gates were empirically calibrated against
-  GitHub's `ubuntu-24.04` runner-image noise floor (v0.4 release-prep
-  PR #22). Moving dudect would invalidate the calibration. See the
-  `## Self-hosted CI runner setup` section below for the runbook.
+- **GitHub-hosted CI (v0.17+).** `ci.yml`'s five jobs (build / msrv / cabi
+  / deny / wasm32) run on GitHub-hosted **`macos-14`** (aarch64);
+  `fuzz-nightly.yml` runs on **`ubuntu-latest`**. The two dudect workflows
+  also stay on `ubuntu-latest` — their `|tau|` gates were empirically
+  calibrated against GitHub's `ubuntu-24.04` runner-image noise floor (v0.4
+  release-prep PR #22); **don't move dudect** or you invalidate the
+  calibration. Through v0.16 the build jobs ran on a self-hosted macOS
+  runner (to dodge private-repo minute caps); it was **retired at the v0.17
+  public flip** — a self-hosted runner on a public repo is remote code
+  execution (any fork PR would run on the host).
 - Branch model: branch + PR for all changes. Direct commits to `main` reserved
   for trivial-and-time-sensitive fixes only. CI fires on the PR (+ on the
   merge commit to `main`); dudect-pr.yml smoke is path-allowlisted so doc-only
@@ -556,149 +568,6 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
   as the template before publishing v0.5. **Two crates ship**:
   `gmcrypto-core` first, then `gmcrypto-c` (path dep on core via
   `version = "0.5"` — core must be on crates.io before c can publish).
-
-## Self-hosted CI runner setup
-
-`ci.yml` runs on a self-hosted macOS aarch64 runner. One-time setup
-per host machine:
-
-```bash
-# 1. Dedicated user — runner CANNOT read your daily-driver home dir.
-#    `sysadminctl` is the modern macOS path (auto-assigns a free UID)
-#    and avoids hand-rolled `dscl` boilerplate that can collide with
-#    an existing UID 600. We intentionally do NOT set a login
-#    password for ghrunner — it's a service account, no SSH/login
-#    exposure, and `sudo -iu ghrunner` from the maintainer user
-#    authenticates the maintainer, not ghrunner. Passwordless
-#    service accounts are slightly more secure here.
-sudo sysadminctl -addUser ghrunner -shell /bin/zsh \
-  -home /Users/ghrunner -admin no
-# Expect a "No clear text password ... will not allow user to use
-# FDE" warning — benign for a service account. Note the assigned
-# UID/GID in the output (typically 5xx / 20=staff).
-
-# sysadminctl ASSIGNS but does NOT CREATE the home directory.
-# Create it now or `sudo -iu ghrunner` will fail with
-# "chdir to /Users/ghrunner: No such file or directory".
-sudo mkdir /Users/ghrunner
-sudo chown ghrunner:staff /Users/ghrunner
-sudo chmod 700 /Users/ghrunner   # only ghrunner can read its own home
-
-# Smoke-test before continuing:
-sudo -iu ghrunner whoami   # should print: ghrunner
-sudo -iu ghrunner pwd      # should print: /Users/ghrunner
-
-# 2. Switch users + install rustup with the toolchains CI needs
-sudo -iu ghrunner
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-    --default-toolchain stable
-source $HOME/.cargo/env
-rustup toolchain install 1.85
-rustup target add wasm32-unknown-unknown --toolchain stable
-rustup target add wasm32-unknown-unknown --toolchain 1.85
-rustup component add clippy rustfmt --toolchain stable
-# v0.14 — parser fuzzing (.github/workflows/fuzz-nightly.yml). cargo-fuzz
-# needs nightly + libFuzzer (Apple clang on macOS provides it). Pin
-# cargo-fuzz for reproducibility (same posture as the cbindgen 0.29 pin).
-rustup toolchain install nightly
-cargo install cargo-fuzz --version 0.13.1 --locked
-
-# 2b. Pre-empt git's macOS keychain credential helper. The system
-#     gitconfig that ships with Xcode CLT configures `credential.helper =
-#     osxkeychain` globally. When git runs as a fresh user (ghrunner),
-#     the first credential lookup triggers macOS Keychain Services
-#     prompting "<user> wants to use the login keychain" — and ghrunner
-#     has no login keychain, so the prompt is unsatisfiable and hangs
-#     the runner. Override with an empty helper in ghrunner's user-
-#     scoped gitconfig (written directly to sidestep `git config`'s
-#     newer "no action specified" gotcha with empty-string values).
-cat > ~/.gitconfig <<'INNER'
-[credential]
-	helper =
-[safe]
-	directory = *
-INNER
-
-# 3. Register the runner.
-#
-# 3a. Look up the latest runner version as your MAINTAINER user
-#     (NOT as ghrunner — ghrunner has no `gh` auth). The
-#     unauthenticated GitHub API has a 60-req/hour-per-IP cap; `gh
-#     api` auto-uses your stored auth token and has a 5000/hour
-#     limit. The first version of this runbook used raw `curl
-#     https://api.github.com/...` and hit the rate limit on a fresh
-#     setup attempt.
-#
-LATEST=$(gh api /repos/actions/runner/releases/latest \
-  --jq '.tag_name | ltrimstr("v")')
-echo "Use this version when prompted: ${LATEST}"
-#
-# 3b. Get TOKEN from
-#     https://github.com/frankxue831/gm-crypto-rs/settings/actions/runners/new
-#     (one-time-use, ~1 hour TTL).
-#
-# 3c. Switch to ghrunner and download + register. Substitute the
-#     literal LATEST value from 3a above (ghrunner's shell does not
-#     inherit it from sudo -iu).
-sudo -iu ghrunner
-mkdir -p ~/actions-runner && cd ~/actions-runner
-LATEST=2.319.1   # <-- paste the literal version from 3a
-curl -fsSL -o runner.tar.gz \
-  "https://github.com/actions/runner/releases/download/v${LATEST}/actions-runner-osx-arm64-${LATEST}.tar.gz"
-tar xzf runner.tar.gz
-./config.sh --url https://github.com/frankxue831/gm-crypto-rs \
-  --token <TOKEN> \
-  --labels self-hosted,macos,arm64,gmcrypto \
-  --work _work \
-  --unattended
-
-# 4. Test interactively first:
-./run.sh   # Ctrl-C to stop
-
-# 5. Once green, install as a launchd service. On macOS the runner's
-#    `svc.sh` does NOT take a username argument (Linux semantics) and
-#    must be invoked WITHOUT `sudo` — it installs under the current
-#    user (which is `ghrunner` here per the `sudo -iu` in step 2).
-./svc.sh install
-./svc.sh start
-./svc.sh status   # verify "active" / "Started"
-```
-
-Operational notes:
-
-- The runner-side `_work/` directory holds checked-out repo + build
-  artifacts. Persists between jobs (good for warm Cargo cache). Wipe
-  with `rm -rf /Users/ghrunner/actions-runner/_work/*` (as
-  `ghrunner`, no sudo) if state ever gets corrupted.
-- The labels `[self-hosted, macos, arm64, gmcrypto]` are AND-ed in
-  `ci.yml` (case-insensitive). Only runners matching ALL four labels
-  pick up the job. The `gmcrypto` label is specific to this repo —
-  important when you one day host multiple project runners on the
-  same Mac.
-- **Offline-runner behaviour: queued jobs sit pending until they hit
-  GitHub's 24-hour timeout and then fail.** Not "indefinite". If you
-  see a job stuck in `Queued`, check the runner is still healthy at
-  https://github.com/frankxue831/gm-crypto-rs/settings/actions/runners
-  (status should say `Idle`). Escape hatch: revert the self-hosted
-  PR's `runs-on:` to `ubuntu-latest` and `git push`. Monitoring tip:
-  GitHub emails the repo owner if a job fails for `no_self_hosted_
-  runner_available` after the 24-hour timeout.
-- The runner's CARGO_HOME (`/Users/ghrunner/.cargo/`) is pre-populated
-  in step 2 with rustup + stable + 1.85 + clippy + rustfmt +
-  wasm32-unknown-unknown targets. `Swatinem/rust-cache@v2` calls in
-  `ci.yml` are configured with `cache-bin: "false"` so the action's
-  restore step won't evict those pre-installed binaries (the
-  default `cache-bin: "true"` has a known issue on long-lived
-  self-hosted runners where the restore overwrites `~/.cargo/bin/`
-  with whatever was in the cached snapshot).
-- `Swatinem/rust-cache@v2`'s registry / target caches live under
-  `/Users/ghrunner/actions-runner/_work/_cache/`. Native macOS
-  filesystem makes incremental warm-cache builds significantly
-  faster than the equivalent on `ubuntu-latest` (no Docker
-  bind-mount).
-- The dudect workflows STAY on `ubuntu-latest`. Don't move them —
-  the `|tau|` gates were calibrated against GitHub's `ubuntu-24.04`
-  image.
 
 ## Don't
 
