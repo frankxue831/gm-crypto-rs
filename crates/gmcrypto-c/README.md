@@ -33,7 +33,7 @@ build flags are needed by C consumers beyond rebuilding the library):
 | Feature | Adds | Example |
 |---|---|---|
 | `sm4-aead` | SM4-GCM / SM4-CCM single-shot + streaming SM4-GCM AEAD (`gmcrypto_sm4_gcm_*` / `gmcrypto_sm4_ccm_*`) | [`examples/sm4_gcm_streaming.c`](examples/sm4_gcm_streaming.c) |
-| `sm4-xts` | SM4-XTS single-shot tweakable disk/sector mode (`gmcrypto_sm4_xts_encrypt` / `_decrypt`; GB/T 17964-2021) | [`examples/sm4_xts_sector.c`](examples/sm4_xts_sector.c) |
+| `sm4-xts` | SM4-XTS tweakable disk/sector mode (GB/T 17964-2021): single-shot (`gmcrypto_sm4_xts_encrypt` / `_decrypt`) + in-place multi-sector run (`gmcrypto_sm4_xts_encrypt_sectors` / `_decrypt_sectors`) | [`examples/sm4_xts_sector.c`](examples/sm4_xts_sector.c), [`examples/sm4_xts_multisector.c`](examples/sm4_xts_multisector.c) |
 
 ```bash
 cargo build -p gmcrypto-c --release --features sm4-aead,sm4-xts
@@ -45,6 +45,17 @@ caller-unique per key). It is length-preserving and **confidentiality
 only — it does not authenticate**; use an AEAD mode if you need
 integrity. Sizes are exported as `GMCRYPTO_SM4_XTS_KEY_SIZE` (32) and
 `GMCRYPTO_SM4_BLOCK_SIZE` (16).
+
+The **`*_sectors`** variants encrypt/decrypt a contiguous run of equal-size
+sectors **in place** (`buf` is both input and output; `buf_len` must be a
+whole multiple of `sector_size`), deriving sector `i`'s tweak as
+little-endian-128(`start_sector + i`) — the standard disk-XTS LBA convention.
+`start_sector` is a `uint64_t`. **Sector numbers must be unique within an
+XTS-key namespace** — do not encrypt multiple devices / partitions / snapshots
+under one key all starting at sector 0 (use absolute LBAs or a per-device
+key); reuse leaks block-equality structure. On `GMCRYPTO_ERR` (bad
+`sector_size`, bad `buf_len` multiple, weak key, null) `buf` is untouched; a
+zero-length run is a vacuous success (but the key is still validated).
 
 ## Header
 

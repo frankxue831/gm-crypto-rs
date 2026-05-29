@@ -38,7 +38,7 @@ pub fn write_length(out: &mut Vec<u8>, len: usize) {
         out.push((len >> 8) as u8);
         out.push(len as u8);
     } else {
-        panic!("DER length overflow: {} >= {} bytes", len, MAX_DER_LEN);
+        panic!("DER length overflow: {len} >= {MAX_DER_LEN} bytes");
     }
 }
 

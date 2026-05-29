@@ -549,6 +549,45 @@ int gmcrypto_sm4_xts_decrypt(const uint8_t *key,
 ;
 
 /*
+ SM4-XTS in-place multi-sector encrypt (GB/T 17964-2021,
+ `xts_standard=GB`). `key` is exactly [`GMCRYPTO_SM4_XTS_KEY_SIZE`] (32)
+ bytes (`Key1 ‖ Key2`); `buf` is a contiguous run of `buf_len / sector_size`
+ equal-size sectors transformed **in place** (`buf_len` must be a whole
+ multiple of `sector_size`). Sector `i` is encrypted under
+ tweak = little-endian-128(`start_sector + i`) — the data-unit / LBA
+ convention; sector numbers must be unique within the XTS-key namespace
+ (caller's contract). Returns [`GMCRYPTO_OK`] / [`GMCRYPTO_ERR`] (single
+ failure mode: `sector_size` outside `[16, 16 MiB]` or not a multiple of 16,
+ `buf_len` not a whole multiple of `sector_size`, `Key1 == Key2`, or null
+ pointer). **`buf` is untouched on [`GMCRYPTO_ERR`].** `buf_len == 0` is a
+ vacuous [`GMCRYPTO_OK`] (but the key is still validated, so empty + weak key
+ → [`GMCRYPTO_ERR`]). **Confidentiality only — SM4-XTS does not
+ authenticate.**
+ */
+
+int gmcrypto_sm4_xts_encrypt_sectors(const uint8_t *key,
+                                     uintptr_t sector_size,
+                                     uint64_t start_sector,
+                                     uint8_t *buf,
+                                     uintptr_t buf_len)
+;
+
+/*
+ SM4-XTS in-place multi-sector decrypt (GB/T 17964-2021, `xts_standard=GB`).
+ Inverse of [`gmcrypto_sm4_xts_encrypt_sectors`] under the same
+ `(key, sector_size, start_sector)`; same in-place contract, single failure
+ mode, and `buf`-untouched-on-error guarantee. XTS is unauthenticated, so
+ decrypt cannot detect tampering — it only fails on invalid parameters.
+ */
+
+int gmcrypto_sm4_xts_decrypt_sectors(const uint8_t *key,
+                                     uintptr_t sector_size,
+                                     uint64_t start_sector,
+                                     uint8_t *buf,
+                                     uintptr_t buf_len)
+;
+
+/*
  Construct a streaming SM4-GCM encryptor. `key` is exactly 16 bytes;
  `nonce` is `nonce_len` bytes (12 = canonical; other lengths invoke
  the extra GHASH J0-derivation per NIST SP 800-38D §8.2.2); `aad` is
