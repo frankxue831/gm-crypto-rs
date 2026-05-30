@@ -101,12 +101,30 @@ cadence — every cipher mode is now FFI-complete. **No new dependency, no new
 feature flag, no new `gmcrypto-core` API, no new dudect target.** Design
 rationale: [`docs/v0.16-scope.md`](docs/v0.16-scope.md) (Q16.1–Q16.12).
 
-**Deferred to v0.18+** (per [`docs/v0.16-scope.md`](docs/v0.16-scope.md) §5/§6;
-v0.17 is the public-flip milestone, so the hardening menu moves to v0.18):
-round-trip / streaming-decryptor parser fuzzing; dudect-gate hardening
-(pinned toolchain + self-calibrating gate); RustCrypto `aead` trait fit
-(still `0.6.0-rc.10`); `cargo fuzz coverage`; AVX-512 `sbox_x64`; CCM buffered
-input; a v1.0 readiness pass.
+## v0.18 scope (shipped — infra-assurance, not a crates.io release)
+
+**dudect-gate hardening.** v0.18 pins the dudect CI workflows' drift axes
+(`ubuntu-24.04` OS-label + exact `dtolnay/rust-toolchain@1.95.0`) and gates on a
+**CI-level multi-run median** `|tau|` (PR 3 runs / nightly 5 runs; the
+`required_low` gates + the nightly gross-regression sentinel use the **median**,
+`negative_control` uses the **min**, and any required target not measured on
+every run fails). The bench harness `timing_leaks.rs` is **byte-unchanged** — the
+loop and median live entirely in CI. A 100K×5 calibration measured the
+`ct_fn_invert`/`ct_fp_invert` diagnostics back near their ~0.006 baseline, but
+they were **kept on the telemetry / sentinel posture (not re-promoted)**: the
+noise that demoted them is runner-image-sensitive and would re-flake a tight gate
+if it returns — robustness over a tighter gate. A **repository / infra-assurance**
+milestone — no crate code change (workspace stays `0.16.0`; crates.io skips
+`0.18.0` per the v0.14 / v0.17 precedent). Design rationale:
+[`docs/v0.18-scope.md`](docs/v0.18-scope.md) (Q18.1–Q18.7) +
+[`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md) (v0.18
+resolution).
+
+**Deferred to v0.19+** (per [`docs/v0.18-scope.md`](docs/v0.18-scope.md) §5/§6):
+a self-calibrating relative dudect gate (the change that could safely re-promote
+the invert diagnostics); round-trip / differential + streaming-decryptor parser
+fuzzing; RustCrypto `aead` trait fit (still `0.6.0-rc.10`); `cargo fuzz coverage`;
+AVX-512 `sbox_x64`; CCM buffered input; a v1.0 readiness pass.
 
 ## v0.15 scope (shipped)
 
@@ -457,8 +475,9 @@ Everything v0.2 shipped is unchanged:
 | v0.15.0 (shipped) | **SM4-XTS multi-sector (disk) helper.** Per `docs/v0.15-scope.md` Q15.1–Q15.12. New: `sm4::mode_xts::{encrypt_sectors, decrypt_sectors}` (opt-in `sm4-xts`) — encrypt/decrypt a contiguous run of equal-size disk sectors **in place** (`&mut [u8] -> Option<()>`), sector `i` under tweak = little-endian-128(`start_sector + i`) (the standard disk-XTS data-unit convention; owns the encoding the single-shot v0.12 API left to the caller). Byte-identical to looping the single-shot per sector (transitively OpenSSL `xts_standard=GB`-pinned); whole-block sectors (no ciphertext stealing); ciphers built once + reused scratch (no per-sector allocation); single `None` for all validation with `buf` untouched; confidentiality-only. **Pure-core: no new dependency, no new feature flag, no new SIMD, no new dudect target** (the existing `ct_sm4_xts_decrypt` covers it). C FFI deferred to v0.16. crates.io skips `0.14.0` (the unpublished fuzzing cycle). **Additive — no public API breakage.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.15.0]`. |
 | v0.16.0 (shipped) | **C ABI for the SM4-XTS multi-sector helper.** Per `docs/v0.16-scope.md` Q16.1–Q16.12. New: `gmcrypto_sm4_xts_encrypt_sectors` / `_decrypt_sectors` in `gmcrypto-c`, behind the existing forwarding `sm4-xts` feature — **in-place** over a contiguous run of equal-size sectors (`buf: *mut u8` + `buf_len`; no `out`/`out_capacity`/`out_actual_len`, mirroring the core's `&mut [u8]` so disk callers never double-allocate), `start_sector: uint64_t`, tweak = LE-128(`start_sector + i`). Byte-identical to `gmcrypto_core::sm4::mode_xts::{encrypt,decrypt}_sectors`; single `GMCRYPTO_ERR` with `buf` untouched on error; confidentiality-only. The deferred FFI half of v0.15 — every cipher mode is now FFI-complete. 11 new `c_smoke` tests + doc-only C example `examples/sm4_xts_multisector.c`; regenerated header (no `regen-header` change — free fns, no new opaque structs). No new `gmcrypto-core` API, no new dudect target, **no new dependency**. **Additive — no public API breakage.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.16.0]`. |
 | v0.17 (public release; not a crates.io release) | **Open-sourced the repository.** Flipped the GitHub repo private → public on the 0.x line; CI migrated off the self-hosted macOS runner to GitHub-hosted (`ci.yml` → `macos-14`, `fuzz-nightly.yml` → `ubuntu-latest`). A *repository* milestone — no crate code changes (workspace stays `0.16.0`; crates.io skips `0.17.0` per the v0.14 precedent); v1.0 reserved. Per [`docs/v0.17-scope.md`](docs/v0.17-scope.md). |
-| v0.18+ | Per `docs/v0.16-scope.md` §5/§6 (the former v0.17 candidate menu): dudect-gate hardening (pinned toolchain + self-calibrating relative gate + multi-run robustness); round-trip / differential parser fuzzing; streaming-decryptor fuzzing; RustCrypto `aead` trait fit (upstream still on `0.6.0-rc.10`); `cargo fuzz coverage` reporting; AVX-512 16-way `sbox_x64`; CCM buffered input; Argon2-with-SM3 (research-only); `wasm-bindgen-test` KAT runner. Each lands behind its own scope-doc cycle. |
-| v1.0 | API stabilization (readiness pass: API-stability review + the v0.18 hardening). |
+| v0.18 (infra-assurance; not a crates.io release) | **dudect-gate hardening.** Per `docs/v0.18-scope.md` Q18.1–Q18.7. Pinned the dudect CI workflows' drift axes (`ubuntu-24.04` OS-label + exact `dtolnay/rust-toolchain@1.95.0`) and gate on a CI-level multi-run median `\|tau\|` (PR 3 runs / nightly 5 runs; `required_low` + the nightly sentinel on the median, `negative_control` on the min, completeness gate on `< N` runs). `timing_leaks.rs` byte-unchanged — the loop + median live in CI. A 100K×5 calibration showed `ct_fn_invert`/`ct_fp_invert` back near baseline (medians 0.006–0.028) but **kept on telemetry / sentinel — not re-promoted** (the noise is runner-image-sensitive; a tight gate would re-flake if it returns). Also a comma-free `rust-cache` `shared-key`. A *repository / infra-assurance* milestone — no crate code change (workspace stays `0.16.0`; crates.io skips `0.18.0` per the v0.14 / v0.17 precedent). See [`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md) (v0.18 resolution). |
+| v0.19+ | Per `docs/v0.18-scope.md` §5/§6: a self-calibrating relative dudect gate (the change that could safely re-promote the invert diagnostics); round-trip / differential parser fuzzing; streaming-decryptor fuzzing; RustCrypto `aead` trait fit (upstream still on `0.6.0-rc.10`); `cargo fuzz coverage` reporting; AVX-512 16-way `sbox_x64`; CCM buffered input; Argon2-with-SM3 (research-only); `wasm-bindgen-test` KAT runner. Each lands behind its own scope-doc cycle. |
+| v1.0 | API stabilization (readiness pass: API-stability review + the v0.18/v0.19 hardening). |
 
 ## Quick-start
 

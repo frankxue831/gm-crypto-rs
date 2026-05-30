@@ -1,6 +1,29 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3/SM4 SDK. **v0.17 — public-flip milestone (on `main`)**
+Pure-Rust SM2/SM3/SM4 SDK. **v0.18 — dudect-gate hardening (on `main`)**
+— pin the dudect CI workflows' drift axes (`ubuntu-24.04` **OS-label** pin +
+exact `dtolnay/rust-toolchain@1.95.0`, the load-bearing axis) and gate on a
+**CI-level multi-run median** `|tau|` (PR N=3 / nightly N=5; `required_low` +
+the nightly sentinel on the **median**, `negative_control` on the **min**, plus
+a completeness gate that FAILs any required target measured < N runs). The bench
+harness `timing_leaks.rs` is **byte-unchanged** — the loop + median live
+entirely in the workflow YAML + the inline Python gate. **Repository /
+infra-assurance milestone, NOT a crates.io release** — no crate code change,
+workspace stays **0.16.0**, crates.io skips `0.18.0` (the v0.14 / v0.17
+precedent). The v0.5 recalibration doc's "authoritative fix" (a noise-isolated
+self-hosted runner) is **off the table** post-v0.17 (self-hosted on a public
+repo is RCE), so robustness is now pure software on GitHub-hosted `ubuntu-24.04`.
+100K×5 calibration showed `ct_fn_invert`/`ct_fp_invert` back near the ~0.006
+baseline (medians 0.006–0.028), but they were **kept on the telemetry (PR) /
+median-gated gross-regression sentinel @0.55 (nightly) posture — NOT
+re-promoted** to a `|tau| < 0.20` gate: the noise is image-sensitive and
+intermittent, so a tight gate (even a 5-run median) would re-flake if it
+returns; robustness-first per `docs/v0.18-scope.md` Q18.7 +
+`docs/v0.5-dudect-recalibration.md` (v0.18 resolution). A self-calibrating
+relative gate is the v0.19 candidate. The dudect `rust-cache` `shared-key` was
+also made comma-free (keyed on `strategy.job-index`) so the multi-feature leg
+caches. **Two PRs**: #75 (pin + median + completeness) + #76 (cache key).
+**Earlier — v0.17 — public-flip milestone (on `main`)**
 — open-sourcing the repository. CI migrated **off the self-hosted macOS
 runner** to GitHub-hosted (`ci.yml` → `macos-14`, `fuzz-nightly.yml` →
 `ubuntu-latest`) so the personal-Mac runner can be retired before the repo
@@ -203,7 +226,8 @@ v0.14 = parser fuzzing (`cargo-fuzz`/libFuzzer over the full untrusted-input dec
 v0.15.0 = SM4-XTS multi-sector (disk) helper (`sm4::mode_xts::{encrypt_sectors, decrypt_sectors}`: in-place `&mut [u8] -> Option<()>` over a run of equal-size sectors, tweak_i = LE-128(start_sector + i); byte-identical to looping the v0.12 single-shot per sector; whole-block / no CTS; ciphers built once + reused scratch; single None with buf untouched; confidentiality-only; per `docs/v0.15-scope.md` Q15.1–Q15.12, codex-reviewed W0+W1). **Pure-core: no new dep/feature/SIMD/dudect target** (`ct_sm4_xts_decrypt` covers the per-sector path). C FFI deferred to v0.16. crates.io skips 0.14.0; workspace version 0.13.0 → 0.15.0; default build byte-identical.
 v0.16.0 = C FFI for the SM4-XTS multi-sector helper (`gmcrypto_sm4_xts_encrypt_sectors`/`_decrypt_sectors` in `gmcrypto-c` behind the existing forwarding `sm4-xts` feature; **in-place** `buf: *mut u8 + buf_len` mirroring the core `&mut [u8]` — a deliberate divergence from the uniformly out-of-place single-shot XTS FFI, so disk callers never double-allocate; `start_sector: uint64_t`, tweak = LE-128(start_sector+i); byte-identical to core `mode_xts::{encrypt,decrypt}_sectors`; single `GMCRYPTO_ERR` with buf untouched; W0 codex key-copy fix for caller key/buf overlap; confidentiality-only; per `docs/v0.16-scope.md` Q16.1–Q16.12, codex-reviewed W0+W1). The deferred v0.15 FFI half on the core-in-vN/FFI-in-vN+1 cadence — every cipher mode now FFI-complete. No new `gmcrypto-core` API, no new dudect target, no new dep; additive; default build byte-unchanged. Workspace version 0.15.0 → 0.16.0.
 v0.17 = public open-source release (flipped the GitHub repo private → public on the 0.x line; CI moved off the self-hosted macOS runner to GitHub-hosted `macos-14` + fuzz-nightly to `ubuntu-latest`; **repository milestone, NOT a crates.io release** — no crate code change, workspace stays 0.16.0, crates.io skips 0.17.0 per the v0.14 precedent; v1.0 reserved for a later readiness pass; per `docs/v0.17-scope.md` + `docs/pre-opensource-audit.md`, codex-reviewed).
-v0.18+ = (candidate) dudect-gate hardening (pinned dudect-job toolchain + self-calibrating relative gate + multi-run median/percentile robustness — the noise is run-to-run variance, not a leak) + round-trip/differential parser fuzzing + streaming-decryptor fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + `cargo fuzz coverage` in CI + AVX-512 sbox_x64 + CCM buffered input + a v1.0 readiness pass (per `docs/v0.16-scope.md` §5/§6, formerly the v0.17 candidate menu).
+v0.18 = dudect-gate hardening (pin the dudect CI workflows' drift axes — `ubuntu-24.04` OS-label + exact `dtolnay/rust-toolchain@1.95.0` — and gate on a CI-level multi-run median `|tau|`: PR N=3 / nightly N=5, `required_low` + the nightly sentinel on the **median**, `negative_control` on the **min**, plus a completeness gate that FAILs any required target measured < N runs; `timing_leaks.rs` byte-unchanged, the loop + median live in CI. 100K×5 calibration showed `ct_fn_invert`/`ct_fp_invert` back near the ~0.006 baseline [medians 0.006–0.028] but **KEPT them on telemetry [PR] / median-gated sentinel @0.55 [nightly] — NOT re-promoted** to a `|tau|<0.20` gate, because the noise is image-sensitive + intermittent and would re-flake even a 5-run median gate if it returns [Q18.7 robustness-first]. The v0.5 recalibration doc's self-hosted-runner "authoritative fix" is off the table post-v0.17 [RCE on a public repo]. Also a comma-free `rust-cache` `shared-key` [job-index] so the multi-feature leg caches. **Infra-assurance milestone, NOT a crates.io release** — no crate code change, workspace stays 0.16.0, crates.io skips 0.18.0 [the v0.14/v0.17 precedent]; PRs #75 [pin+median+completeness] + #76 [cache key]; per `docs/v0.18-scope.md` Q18.1–Q18.7 + `docs/v0.5-dudect-recalibration.md` v0.18 resolution, codex-reviewed W0+W1).
+v0.19+ = (candidate) self-calibrating relative dudect gate (a noise-floor-relative threshold — the change that could safely re-promote `ct_fn_invert`/`ct_fp_invert` since it adapts to the runner floor) + round-trip/differential parser fuzzing + streaming-decryptor fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + `cargo fuzz coverage` in CI + AVX-512 sbox_x64 + CCM buffered input + a v1.0 readiness pass (per `docs/v0.18-scope.md` §5/§6, formerly the v0.18+ candidate menu).
 
 Read `README.md`, `SECURITY.md`, `CONTRIBUTING.md` for the user-facing posture.
 This file lists the constraints a coding agent will violate by default.
@@ -348,6 +372,18 @@ cfg-gated on `sm4-xts` per Q12.9 of `docs/v0.12-scope.md`).
 to the dudect bench step, so the parse step's feature-conditional gates
 (`sm4-bitsliced-simd` / `sm4-aead` / `sm4-xts`) never fired — now
 re-declared on the parse step in both workflows.
+**v0.18 hardened the gate** (PRs #75/#76, `docs/v0.18-scope.md`): the dudect
+workflows are pinned to `ubuntu-24.04` (OS-label) + `dtolnay/rust-toolchain@1.95.0`,
+and the bench is looped **N times** per job (PR N=3 / nightly N=5) into numbered
+logs (`dudect-$i.log` / `dudect-nightly-$i.log`) — the inline Python gates the
+per-target **median** `|tau|` (`required_low` + the nightly sentinel) and the
+**min** (`negative_control`, must fire every run), and FAILs any required target
+measured `< N` runs (completeness). `timing_leaks.rs` stays **byte-unchanged**;
+the loop + median live entirely in the workflow. A 100K×5 calibration showed
+`ct_fn_invert`/`ct_fp_invert` back near the ~0.006 baseline (medians 0.006–0.028)
+but they were **kept on the sentinel (NOT re-promoted)** — the noise is
+image-sensitive and a tight gate would re-flake if it returns (see the table
+notes below + the v0.18 resolution in `docs/v0.5-dudect-recalibration.md`).
 The PR-smoke and nightly workflows run the harness under a matrix
 over
 `features=[default, sm4-bitsliced, sm4-bitsliced-simd,
@@ -357,13 +393,13 @@ under every cipher dispatch path:
 
 | Target | Gate | Meaning |
 |---|---|---|
-| `negative_control` | `\|tau\| > 1.0` | MUST fire — proves harness wiring. |
+| `negative_control` | `\|tau\| > 1.0` (v0.18: gated on the **min** across the N runs) | MUST fire on EVERY run — proves harness wiring (a liveness check, so the floor-across-runs is the correct gate). |
 | `ct_mul_g` | `\|tau\| < 0.20` | Fixed-base scalar mult. v0.3 W6 replaced the body with a comb-table walk; constant-time-designed lookup preserved. 10K-sample smoke after W6: `\|tau\| ≈ 0.04`. |
 | `ct_mul_var` | `\|tau\| < 0.20` | Variable-base scalar mult. |
 | `ct_sign` | `\|tau\| < 0.20` | `sign_raw_with_id`, class-split by private key `d` (NOT `sign_with_id` — DER is variable-time on public output). |
 | `ct_sign_k_class` | nightly only: `\|tau\| < 0.25` | `sign_raw_with_id`, class-split by nonce `k` magnitude with `d` held fixed (W0; both retry nonces class-tied). v0.4 release-prep: **dropped from the PR-smoke (10K) allowlist** — observed values span [0.21–0.37] across seven runs on the GH Actions ubuntu-24.04 runner, with no structure tied to code changes. The 100K nightly gate at 0.25 is retained (signal-to-noise is meaningful there). The direct invert diagnostics (`ct_fn_invert` / `ct_fp_invert`) are the actual invert-leak regression guards at the PR budget; `ct_sign_k_class` is a composite that dilutes invert signal by ~50× per the v0.2 W0 analysis. The bench still runs (data lands in the artifact log) but doesn't gate at 10K. |
-| `ct_fn_invert` | PR-smoke: **telemetry only**. Nightly: gross-regression sentinel at `\|tau\| ≥ 0.55`. | Direct `Fn::invert((1+d) mod n)` diagnostic (W0). Recalibrated 2026-05-13 — see `docs/v0.5-dudect-recalibration.md`. |
-| `ct_fp_invert` | PR-smoke: **telemetry only**. Nightly: gross-regression sentinel at `\|tau\| ≥ 0.55`. | Direct `Fp::invert(Z)` diagnostic (W0). The 2026-05-12 GH Actions `ubuntu-24.04` runner-image update (image `20260413.86.1` → `20260512.134.1`, kernel `6.17.0-1010-azure` → `6.17.0-1013-azure`, Rust toolchain `1.94.1` → `1.95.0`) shifted the 100K noise floor on this target from ~0.006 (v0.2 baseline) to intermittent values in [0.29–0.40]. The 0.20 gate is no longer authoritative on the current shared runner; the gross-regression sentinel at 0.55 retains protection against a real cryptographic leak (the v0.1 `ConstMontyForm::invert` regression at `\|tau\| ≈ 0.70` would still fire). Authoritative fix (pinned / noise-isolated dudect runner) deferred to a future scope doc — see `docs/v0.5-dudect-recalibration.md`. |
+| `ct_fn_invert` | PR-smoke: **telemetry only**. Nightly: gross-regression sentinel at `\|tau\| ≥ 0.55` (v0.18: **median-gated**). | Direct `Fn::invert((1+d) mod n)` diagnostic (W0). Recalibrated 2026-05-13. **v0.18 100K×5 calibration on the pinned runner: median 0.006–0.011** (back near baseline) — but kept on the sentinel, NOT re-promoted (image-noise robustness; Q18.7). See `docs/v0.5-dudect-recalibration.md`. |
+| `ct_fp_invert` | PR-smoke: **telemetry only**. Nightly: gross-regression sentinel at `\|tau\| ≥ 0.55` (v0.18: **median-gated**). | Direct `Fp::invert(Z)` diagnostic (W0). The 2026-05-12 GH Actions `ubuntu-24.04` runner-image update (image `20260413.86.1` → `20260512.134.1`, kernel `6.17.0-1010-azure` → `6.17.0-1013-azure`, Rust toolchain `1.94.1` → `1.95.0`) shifted the 100K noise floor on this target from ~0.006 (v0.2 baseline) to intermittent values in [0.29–0.40]. The 0.20 gate is no longer authoritative on the current shared runner; the gross-regression sentinel at 0.55 retains protection against a real cryptographic leak (the v0.1 `ConstMontyForm::invert` regression at `\|tau\| ≈ 0.70` would still fire). The v0.5 doc's authoritative fix (a noise-isolated self-hosted runner) is **off the table** post-v0.17 (RCE on a public repo); **v0.18** instead pinned the toolchain + image and added the multi-run median. v0.18 100K×5 calibration: **median 0.014–0.028** (back near baseline) — but kept on the sentinel, NOT re-promoted (the noise is image-sensitive; a tight median gate would re-flake if it returns; Q18.7). A self-calibrating relative gate (v0.19) is the change that could safely re-promote. See `docs/v0.5-dudect-recalibration.md` (v0.18 resolution). |
 | `ct_sm4_key_schedule` | `\|tau\| < 0.20` | SM4 key schedule, class-split by master key bytes (v0.2 W1). v0.4 CI also gates this under `features=sm4-bitsliced`. |
 | `ct_sm4_encrypt_block` | `\|tau\| < 0.20` | SM4 "construct cipher + encrypt one block" timed under one window, class-split by master key bytes (v0.2 W1). v0.4 CI also gates this under `features=sm4-bitsliced`; 10K-sample smoke on the bitsliced path: `\|tau\| ≈ 0.025`. |
 | `ct_sm4_ctr_encrypt` | `\|tau\| < 0.20` | v0.7 W3 — SM4-CTR encrypt timed over a fixed 256-byte plaintext (16 blocks), class-split by master key bytes. Dispatches through `Sm4Cipher::encrypt_blocks` (v0.7 W1), so this gates the constant-time discipline on every cipher path — linear-scan under default, gate-only under `sm4-bitsliced`, SIMD-packed batches under `sm4-bitsliced-simd` (two AVX2 batches on x86_64, four NEON batches on aarch64). **Not** cfg-gated on `sm4-bitsliced-simd` — runs under all three matrix entries. 5K-sample local smoke: `\|tau\| ≈ 0.064`. Per Q7.2 of `docs/v0.6-scope.md`. |
@@ -410,7 +446,13 @@ code, with same-commit pass/fail across consecutive nightly runs. The
 PR-smoke gates and 100K nightly gates for these two targets were
 relaxed; see `docs/v0.5-dudect-recalibration.md` for the data + the
 new sentinel posture. The CODE is unchanged from v0.2 baseline; the
-CI noise floor is the moving piece.
+CI noise floor is the moving piece. **v0.18 update (2026-05-30):** pinned
+the OS label (`ubuntu-24.04`, not an exact-image freeze) + toolchain
+(`@1.95.0`) and added a CI-level
+multi-run median; a 100K×5 calibration measured these two back near the
+~0.006 baseline (medians 0.006–0.028), but they were KEPT on the
+telemetry/median-sentinel posture (NOT re-promoted) for image-noise
+robustness — see the v0.18 resolution in `docs/v0.5-dudect-recalibration.md`.
 
 The three secret-touching `invert` sites:
 
@@ -719,6 +761,28 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
   "Parse and gate" step (`env` is step-scoped). Without it the
   feature-conditional `|tau|` gates silently never fire (the v0.12 W3
   latent-bug fix).
+- Don't bump the dudect `dtolnay/rust-toolchain@1.95.0` pin or the
+  `runs-on: ubuntu-24.04` casually (v0.18). A deliberate toolchain/image
+  bump is a **reviewed re-baseline**: bump → dispatch the nightly several
+  times (`gh workflow run dudect-nightly.yml --ref <branch>`) → confirm the
+  per-target medians are stable → record the new floor (with the run's
+  `ImageVersion` + kernel) in `docs/v0.5-dudect-recalibration.md`. The pin is
+  the load-bearing drift fix; the median is the residual-noise absorber.
+- Don't move the dudect multi-run median into `timing_leaks.rs` (v0.18). The
+  harness has no multi-run logic and stays **byte-unchanged**; the bench loop
+  (`DUDECT_RUNS`) + the per-target median/min live entirely in the workflow
+  YAML + the inline Python. `required_low` + the nightly sentinel gate the
+  **median**; `negative_control` gates the **min**; any required target
+  measured `< N` runs FAILs (completeness).
+- Don't re-promote `ct_fn_invert`/`ct_fp_invert` to a `|tau|<0.20` gate just
+  because a calibration shows them quiet (v0.18 kept them on telemetry/sentinel
+  despite medians ~0.01). The noise is image-sensitive + intermittent; a tight
+  gate — even a 5-run median — re-flakes if it returns. The self-calibrating
+  relative gate (v0.19) is the change that can safely re-promote.
+- The dudect `rust-cache` `shared-key` is keyed on `strategy.job-index`, NOT
+  `${{ matrix.features }}` (v0.18 / PR #76): the multi-feature leg's comma
+  breaks `Swatinem/rust-cache` (`Key ... cannot contain commas`). Keep it
+  comma-free.
 
 ## Agent gotchas
 
