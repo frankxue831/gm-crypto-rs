@@ -84,7 +84,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.95.0
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: gmcrypto-stable-${{ matrix.features }}
+          # Keyed on the matrix job-index (0-3), NOT ${{ matrix.features }}:
+          # the 4th leg's feature string contains commas
+          # (sm4-bitsliced-simd,sm4-aead,sm4-xts) and Swatinem/rust-cache
+          # rejects commas in `shared-key`
+          # (ValidationError: Key ... cannot contain commas), so that leg's
+          # build cache was never restored. job-index keeps each leg's cache
+          # distinct; the job NAME still carries the human-readable features=.
+          shared-key: gmcrypto-stable-${{ strategy.job-index }}
 
       # v0.5 W4 phase 2 prep — capture runner environment so future
       # calibration drifts can be correlated with `|tau|` shifts.
