@@ -308,6 +308,16 @@ jobs:
           telemetry_only = ["ct_fn_invert", "ct_fp_invert", "ct_sign_k_class"]
 
           fail = False
+          # Completeness: every REQUIRED target must be measured in EVERY run.
+          # A target missing from one numbered log (e.g. a malformed line the
+          # regex skipped) must FAIL — never silently gate the median/min over
+          # a reduced (< n_runs) sample set. WARN above stays for the
+          # non-required telemetry targets.
+          for name in list(required_high) + list(required_low):
+              got = len(findings.get(name, []))
+              if got != n_runs:
+                  print(f"FAIL: {name} measured {got}/{n_runs} runs (incomplete) — expected all {n_runs}")
+                  fail = True
           # required_high: gate on MIN (must fire every run).
           for name, lower_bound in required_high.items():
               v = mn(name)
