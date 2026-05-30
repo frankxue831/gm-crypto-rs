@@ -26,8 +26,14 @@ env:
 
 jobs:
   smoke:
-    name: timing-leak smoke (10K samples, |tau|<0.20, features=${{ matrix.features }})
-    runs-on: ubuntu-latest
+    name: timing-leak smoke (10K×3 median, |tau|<0.20, features=${{ matrix.features }})
+    # v0.18 W1 — pinned `ubuntu-24.04` (OS-label pin, was `ubuntu-latest`):
+    # freezes the OS-major axis against the future `ubuntu-latest`→26.04 roll.
+    # The load-bearing drift fix is the exact toolchain pin below; the
+    # multi-run median absorbs the residual 24.04 image-refresh noise. The
+    # gate stays on the 24.04 noise floor it was calibrated against. See
+    # docs/v0.18-scope.md Q18.3 + docs/v0.5-dudect-recalibration.md.
+    runs-on: ubuntu-24.04
     # Skip-CI gate. GitHub's native `[skip ci]` handles push events but
     # not pull_request — this is exclusively a pull_request workflow, so
     # the explicit gate is what actually skips the run. Checks both PR
@@ -71,7 +77,16 @@ jobs:
           - "sm4-bitsliced-simd,sm4-aead,sm4-xts"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # v0.18 W1 — PINNED (was @stable). The toolchain is the load-bearing
+      # drift axis: the 2026-05-12 ubuntu-24.04 image refresh rolled Rust
+      # 1.94.1 → 1.95.0 and shifted the ct_fn_invert / ct_fp_invert noise
+      # floor (docs/v0.5-dudect-recalibration.md). Pin captured empirically
+      # from the "Capture runner environment" rustc -Vv; MUST be >= MSRV 1.85.
+      # A DELIBERATE bump is a reviewed re-baseline: bump here, dispatch the
+      # nightly several times, confirm medians stable, record the new floor
+      # (with ImageVersion + kernel) in docs/v0.5-dudect-recalibration.md.
+      # See docs/v0.18-scope.md Q18.4.
+      - uses: dtolnay/rust-toolchain@1.95.0
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: gmcrypto-stable-${{ matrix.features }}
@@ -105,20 +120,32 @@ jobs:
           rustc -Vv
           cargo -V
 
-      - name: Run dudect harness (smoke budget)
+      - name: Run dudect harness (smoke budget, 3 runs for median)
         env:
           DUDECT_SAMPLES: "10000"
+          DUDECT_RUNS: "3"
           MATRIX_FEATURES: ${{ matrix.features }}
         run: |
           set -euxo pipefail
+          # v0.18 W1 — multi-run median robustness. The harness emits one
+          # `max tau` per target per process; it has NO multi-run logic
+          # (timing_leaks.rs is byte-unchanged). We loop the bench DUDECT_RUNS
+          # times into numbered logs; the parse step takes the per-target
+          # MEDIAN |tau| (robust to the run-to-run variance the 2026-05-12
+          # ubuntu-24.04 image update introduced; see
+          # docs/v0.5-dudect-recalibration.md). 3×~7.5s at 10K fits the timeout.
           # v0.5 W5 — the bench `Sm2PrivateKey::from_scalar(U256)` callsites
           # require `crypto-bigint-scalar`; combine it with the matrix's
           # SM4 feature when needed.
           if [ "$MATRIX_FEATURES" = "default" ]; then
-            cargo bench --bench timing_leaks --features crypto-bigint-scalar 2>&1 | tee dudect.log
+            FEATURES="crypto-bigint-scalar"
           else
-            cargo bench --bench timing_leaks --features "$MATRIX_FEATURES,crypto-bigint-scalar" 2>&1 | tee dudect.log
+            FEATURES="$MATRIX_FEATURES,crypto-bigint-scalar"
           fi
+          for i in $(seq 1 "$DUDECT_RUNS"); do
+            echo "=== dudect run $i/$DUDECT_RUNS (features=$FEATURES) ==="
+            cargo bench --bench timing_leaks --features "$FEATURES" 2>&1 | tee "dudect-$i.log"
+          done
 
       - name: Parse and gate
         env:
@@ -128,22 +155,46 @@ jobs:
           MATRIX_FEATURES: ${{ matrix.features }}
         run: |
           python3 - <<'PY'
+          # v0.18 W1 — multi-run median gate. Reads dudect-1.log..dudect-N.log
+          # (one process per file, one `max tau` per target each), accumulates
+          # findings[name]=[|tau|,...], gates the per-target MEDIAN for
+          # required_low (robust to the 2026-05-12 ubuntu-24.04 variance) and
+          # the MIN for negative_control (must fire EVERY run). We gate on |tau|
+          # (scale-free), not |t| (grows with sqrt(N)).
+          #
           # Output format from dudect-bencher, one line per bench:
-          #   bench <name>           : n == +X.XXXM, max t = +X.XXXXX, max tau = +X.XXXXX, ...
-          # We gate on |tau| (scale-free) rather than |t| (grows with sqrt(N)).
-          import re, sys, pathlib
+          #   bench <name>  ... : n == +X.XXXM, max t = +X.XXXXX, max tau = +X.XXXXX, ...
+          import re, sys, glob, statistics, os
 
-          log = pathlib.Path("dudect.log").read_text()
           pat = re.compile(
               r"^bench\s+(\S+)\s*\.+\s*:.*?max tau\s*=\s*([+\-]?\d+\.\d+)",
               re.M,
           )
-          findings = {m.group(1): abs(float(m.group(2))) for m in pat.finditer(log)}
+          logs = sorted(glob.glob("dudect-*.log"))
+          assert logs, "no dudect-*.log files found — bench loop did not run"
 
-          assert findings, f"no tau values parsed; harness output:\n{log[-1000:]}"
+          findings = {}
+          for path in logs:
+              text = open(path).read()
+              matches = list(pat.finditer(text))
+              assert matches, f"no tau values parsed from {path}; tail:\n{text[-1000:]}"
+              for m in matches:
+                  findings.setdefault(m.group(1), []).append(abs(float(m.group(2))))
 
-          # negative_control MUST flag (large |tau|) — confirms harness wiring.
-          # Real targets MUST stay below the noise threshold.
+          n_runs = len(logs)
+          for name, taus in findings.items():
+              if len(taus) != n_runs:
+                  print(f"WARN: {name} measured {len(taus)}/{n_runs} runs: {taus}")
+
+          def med(name): return statistics.median(findings[name]) if name in findings else None
+          def mn(name):  return min(findings[name]) if name in findings else None
+          def telem(name):
+              taus = findings.get(name)
+              if not taus: return "not measured"
+              return (f"runs={['%.4f' % t for t in taus]} median={statistics.median(taus):.4f} "
+                      f"min={min(taus):.4f} max={max(taus):.4f}")
+
+          # negative_control MUST flag (large |tau|) on EVERY run — gate on MIN.
           required_high = {"negative_control": 1.0}
           # 0.20 chosen empirically: 8 sample runs on macOS desktop (noisier
           # than typical Linux CI) showed worst-case |tau| of 0.152 for
@@ -226,7 +277,6 @@ jobs:
           # `sm4-bitsliced-simd`. Phase 1 measures the same byte
           # sequence as `ct_sm4_encrypt_block` (transparent delegate);
           # the gate stays at 0.20 across the three-phase rollout.
-          import os
           matrix_features = os.environ.get("MATRIX_FEATURES", "")
           if "sm4-bitsliced-simd" in matrix_features:
               required_low["ct_sm4_encrypt_block_bitsliced_simd"] = 0.20
@@ -258,33 +308,23 @@ jobs:
           telemetry_only = ["ct_fn_invert", "ct_fp_invert", "ct_sign_k_class"]
 
           fail = False
+          # required_high: gate on MIN (must fire every run).
           for name, lower_bound in required_high.items():
-              tau = findings.get(name)
-              if tau is None:
-                  print(f"FAIL: {name} not measured"); fail = True
-              elif tau <= lower_bound:
-                  print(f"FAIL: {name} |tau|={tau:.4f} <= {lower_bound} — harness broken")
-                  fail = True
-              else:
-                  print(f"OK:   {name} |tau|={tau:.4f} (must be > {lower_bound})")
+              v = mn(name)
+              if v is None: print(f"FAIL: {name} not measured"); fail = True
+              elif v <= lower_bound:
+                  print(f"FAIL: {name} min|tau|={v:.4f} <= {lower_bound} — harness broken ({telem(name)})"); fail = True
+              else: print(f"OK:   {name} min|tau|={v:.4f} (> {lower_bound}) ({telem(name)})")
+          # required_low: gate on MEDIAN (robust to single-run noise).
           for name, upper_bound in required_low.items():
-              tau = findings.get(name)
-              if tau is None:
-                  print(f"FAIL: {name} not measured"); fail = True
-              elif tau > upper_bound:
-                  print(f"FAIL: {name} |tau|={tau:.4f} > {upper_bound} — timing leak")
-                  fail = True
-              else:
-                  print(f"OK:   {name} |tau|={tau:.4f} (must be < {upper_bound})")
-          # Telemetry-only: print measured |tau| with no pass/fail gate.
-          # Prefix with `TELEMETRY:` so log readers can grep it out
-          # from the gating lines above.
+              v = med(name)
+              if v is None: print(f"FAIL: {name} not measured"); fail = True
+              elif v > upper_bound:
+                  print(f"FAIL: {name} median|tau|={v:.4f} > {upper_bound} — timing leak ({telem(name)})"); fail = True
+              else: print(f"OK:   {name} median|tau|={v:.4f} (< {upper_bound}) ({telem(name)})")
+          # Telemetry-only: print median + all runs, no pass/fail gate.
           for name in telemetry_only:
-              tau = findings.get(name)
-              if tau is None:
-                  print(f"TELEMETRY: {name} not measured")
-              else:
-                  print(f"TELEMETRY: {name} |tau|={tau:.4f} (non-blocking)")
+              print(f"TELEMETRY: {name} {telem(name)} (non-blocking)")
           sys.exit(1 if fail else 0)
           PY
 
@@ -293,5 +333,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dudect-pr-log-${{ matrix.features }}
-          path: dudect.log
+          path: dudect-*.log
           retention-days: 7
