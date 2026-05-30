@@ -1,6 +1,33 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3/SM4 SDK. **v0.18 — dudect-gate hardening (on `main`)**
+Pure-Rust SM2/SM3/SM4 SDK. **v0.19 — self-calibrating relative dudect gate:
+TESTED and FALSIFIED → honest fallback (on `main`)** — added two **fix-vs-fix
+noise-floor probes** (`noise_floor_fn_invert` / `noise_floor_fp_invert`) to the
+dudect harness (each runs the same `Fn`/`Fp` `invert` as its `ct_f{n,p}_invert`
+suspect but feeds **both dudect classes one identical input**, so its `|tau|` is
+pure measurement noise) plus a CI **relative gate**
+`median(target) ≤ max(0.20, K=4·median(probe))` meant to re-promote
+`ct_fn_invert`/`ct_fp_invert` off the v0.18 telemetry/sentinel posture by adapting
+to the runner's own noise floor. **The 100K calibration FALSIFIED the matched-
+sensitivity premise**: the probes stay uniformly quiet (~0.005) while the real
+class-split targets spike intermittently to [0.26–0.32] (`ct_fp_invert` **median
+0.2606** on the `sm4-bitsliced-simd` leg, ratio **50**) — the runner noise lives
+in the **two-input class-split difference** (`z_small` vs `z_large`), **NOT** the
+operation duration a same-input probe can see, so the probe cannot track it and
+the relative threshold stays pinned at the `ABS_FLOOR` 0.20 the noise already
+breaks. **Honest fallback (Q19.5)**: the relative gate is demoted to non-blocking
+`REL-TELEMETRY`; `ct_fn_invert`/`ct_fp_invert` revert to the v0.18 posture
+(telemetry PR / gross-regression **sentinel @0.55** nightly — the sole
+authoritative gate again); the two probes are **KEPT as telemetry** (they are the
+*evidence* that the noise is class-split-specific — the input to a v0.20
+**class-split-aware "noise-twin"** reference). **Repository / infra-assurance
+milestone, NOT a crates.io release** — the only `crates/` change is the dev-only
+bench harness `timing_leaks.rs` (published library byte-unchanged), workspace
+stays **0.16.0**, crates.io skips `0.19.0` (the v0.14 / v0.17 / v0.18 precedent).
+**PR #78** (probes + relative gate, merged) **+ the resolution follow-up**
+(relative gate → telemetry + fallback docs). Per `docs/v0.19-scope.md` Q19.1–Q19.7
++ `docs/v0.5-dudect-recalibration.md` (v0.19 resolution), codex-reviewed.
+**Earlier — v0.18 — dudect-gate hardening (on `main`)**
 — pin the dudect CI workflows' drift axes (`ubuntu-24.04` **OS-label** pin +
 exact `dtolnay/rust-toolchain@1.95.0`, the load-bearing axis) and gate on a
 **CI-level multi-run median** `|tau|` (PR N=3 / nightly N=5; `required_low` +
@@ -227,7 +254,8 @@ v0.15.0 = SM4-XTS multi-sector (disk) helper (`sm4::mode_xts::{encrypt_sectors, 
 v0.16.0 = C FFI for the SM4-XTS multi-sector helper (`gmcrypto_sm4_xts_encrypt_sectors`/`_decrypt_sectors` in `gmcrypto-c` behind the existing forwarding `sm4-xts` feature; **in-place** `buf: *mut u8 + buf_len` mirroring the core `&mut [u8]` — a deliberate divergence from the uniformly out-of-place single-shot XTS FFI, so disk callers never double-allocate; `start_sector: uint64_t`, tweak = LE-128(start_sector+i); byte-identical to core `mode_xts::{encrypt,decrypt}_sectors`; single `GMCRYPTO_ERR` with buf untouched; W0 codex key-copy fix for caller key/buf overlap; confidentiality-only; per `docs/v0.16-scope.md` Q16.1–Q16.12, codex-reviewed W0+W1). The deferred v0.15 FFI half on the core-in-vN/FFI-in-vN+1 cadence — every cipher mode now FFI-complete. No new `gmcrypto-core` API, no new dudect target, no new dep; additive; default build byte-unchanged. Workspace version 0.15.0 → 0.16.0.
 v0.17 = public open-source release (flipped the GitHub repo private → public on the 0.x line; CI moved off the self-hosted macOS runner to GitHub-hosted `macos-14` + fuzz-nightly to `ubuntu-latest`; **repository milestone, NOT a crates.io release** — no crate code change, workspace stays 0.16.0, crates.io skips 0.17.0 per the v0.14 precedent; v1.0 reserved for a later readiness pass; per `docs/v0.17-scope.md` + `docs/pre-opensource-audit.md`, codex-reviewed).
 v0.18 = dudect-gate hardening (pin the dudect CI workflows' drift axes — `ubuntu-24.04` OS-label + exact `dtolnay/rust-toolchain@1.95.0` — and gate on a CI-level multi-run median `|tau|`: PR N=3 / nightly N=5, `required_low` + the nightly sentinel on the **median**, `negative_control` on the **min**, plus a completeness gate that FAILs any required target measured < N runs; `timing_leaks.rs` byte-unchanged, the loop + median live in CI. 100K×5 calibration showed `ct_fn_invert`/`ct_fp_invert` back near the ~0.006 baseline [medians 0.006–0.028] but **KEPT them on telemetry [PR] / median-gated sentinel @0.55 [nightly] — NOT re-promoted** to a `|tau|<0.20` gate, because the noise is image-sensitive + intermittent and would re-flake even a 5-run median gate if it returns [Q18.7 robustness-first]. The v0.5 recalibration doc's self-hosted-runner "authoritative fix" is off the table post-v0.17 [RCE on a public repo]. Also a comma-free `rust-cache` `shared-key` [job-index] so the multi-feature leg caches. **Infra-assurance milestone, NOT a crates.io release** — no crate code change, workspace stays 0.16.0, crates.io skips 0.18.0 [the v0.14/v0.17 precedent]; PRs #75 [pin+median+completeness] + #76 [cache key]; per `docs/v0.18-scope.md` Q18.1–Q18.7 + `docs/v0.5-dudect-recalibration.md` v0.18 resolution, codex-reviewed W0+W1).
-v0.19+ = (candidate) self-calibrating relative dudect gate (a noise-floor-relative threshold — the change that could safely re-promote `ct_fn_invert`/`ct_fp_invert` since it adapts to the runner floor) + round-trip/differential parser fuzzing + streaming-decryptor fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + `cargo fuzz coverage` in CI + AVX-512 sbox_x64 + CCM buffered input + a v1.0 readiness pass (per `docs/v0.18-scope.md` §5/§6, formerly the v0.18+ candidate menu).
+v0.19 = self-calibrating relative dudect gate — **TESTED and FALSIFIED → honest fallback** (per `docs/v0.19-scope.md` Q19.1–Q19.7 + `docs/v0.5-dudect-recalibration.md` v0.19 resolution). Added two fix-vs-fix noise-floor probes (`noise_floor_fn_invert`/`noise_floor_fp_invert`: same `Fn`/`Fp` `invert` as the suspect, but both dudect classes get one identical input → pure measurement noise, cannot leak) + a CI relative gate `median(target) ≤ max(0.20, 4·median(probe))` intended to re-promote `ct_fn_invert`/`ct_fp_invert`. The 100K calibration falsified the matched-sensitivity premise: the probes stayed uniformly quiet (~0.005) while the class-split targets spiked to [0.26–0.32] (`ct_fp_invert` median 0.2606 on the simd leg, ratio 50) — the runner noise is in the **two-input class-split difference**, not the operation duration a same-input probe sees, so the probe can't track it and the relative threshold pins at the 0.20 the noise already breaks. Fallback (Q19.5): relative gate → non-blocking `REL-TELEMETRY`; `ct_fn_invert`/`ct_fp_invert` revert to telemetry (PR) / sentinel @0.55 (nightly, sole gate again); probes KEPT as telemetry (evidence the noise is class-split-specific → input to v0.20). **Infra-assurance milestone, NOT a crates.io release** — only the dev-only bench harness changed, workspace stays 0.16.0, crates.io skips 0.19.0 (the v0.14/v0.17/v0.18 precedent); PR #78 (probes + relative gate) + resolution follow-up (relative gate → telemetry + docs), codex-reviewed.
+v0.20+ = (candidate) **class-split-aware "noise-twin" dudect reference** — the v0.19 successor: a two-different-input split through a known-constant-time op that measures the runner's *two-input comparison* noise floor (which the v0.19 fix-vs-fix probe could not), the only design that could now safely re-promote `ct_fn_invert`/`ct_fp_invert` — plus round-trip/differential parser fuzzing + streaming-decryptor fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + `cargo fuzz coverage` in CI + AVX-512 sbox_x64 + CCM buffered input + a v1.0 readiness pass (per `docs/v0.19-scope.md` §5/§6).
 
 Read `README.md`, `SECURITY.md`, `CONTRIBUTING.md` for the user-facing posture.
 This file lists the constraints a coding agent will violate by default.
@@ -354,10 +382,10 @@ cargo +nightly fuzz run fuzz_pem fuzz/corpus/fuzz_pem fuzz/seeds/fuzz_pem -- \
 
 ## Dudect harness gate
 
-Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. **Thirteen
-targets at the default / `sm4-bitsliced` budget; fifteen under
-`sm4-bitsliced-simd`; eighteen under `sm4-bitsliced-simd,sm4-aead`;
-nineteen under `sm4-bitsliced-simd,sm4-aead,sm4-xts`** (v0.3 added
+Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. **Fifteen
+targets at the default / `sm4-bitsliced` budget; seventeen under
+`sm4-bitsliced-simd`; twenty under `sm4-bitsliced-simd,sm4-aead`;
+twenty-one under `sm4-bitsliced-simd,sm4-aead,sm4-xts`** (v0.3 added
 `ct_pkcs8_decrypt`; v0.5 W4 phase 1 added
 `ct_sm4_encrypt_block_bitsliced_simd` cfg-gated on `sm4-bitsliced-simd`;
 v0.6 W6 added `ct_sm4_cbc_decrypt_fanout` cfg-gated on the same feature
@@ -367,7 +395,9 @@ Q7.2; v0.8 W4 added `ct_sm4_gcm_decrypt` and `ct_sm4_ccm_decrypt`
 cfg-gated on `sm4-aead` per Q8.7 of `docs/v0.7-aead-scope.md`;
 v0.9 W3 added `ct_sm4_gcm_decrypt_buffered` cfg-gated on `sm4-aead`
 per Q9.5 of `docs/v0.9-scope.md`; v0.12 W3 added `ct_sm4_xts_decrypt`
-cfg-gated on `sm4-xts` per Q12.9 of `docs/v0.12-scope.md`).
+cfg-gated on `sm4-xts` per Q12.9 of `docs/v0.12-scope.md`; v0.19 added the
+two base `noise_floor_f{n,p}_invert` fix-vs-fix telemetry probes — non-cfg-gated,
+so the base count is now 15, NOT gating per Q19.5).
 **v0.12 W3 also fixed a latent bug**: `MATRIX_FEATURES` was `env`-scoped
 to the dudect bench step, so the parse step's feature-conditional gates
 (`sm4-bitsliced-simd` / `sm4-aead` / `sm4-xts`) never fired — now
@@ -384,6 +414,16 @@ the loop + median live entirely in the workflow. A 100K×5 calibration showed
 but they were **kept on the sentinel (NOT re-promoted)** — the noise is
 image-sensitive and a tight gate would re-flake if it returns (see the table
 notes below + the v0.18 resolution in `docs/v0.5-dudect-recalibration.md`).
+**v0.19 tried to re-promote them via a self-calibrating relative gate
+(`median(target) ≤ max(0.20, 4·median(noise_floor_probe))`) and FALSIFIED it**:
+the 100K calibration showed the fix-vs-fix probes uniformly quiet (~0.005) while
+the class-split targets spiked to [0.26–0.32] (`ct_fp_invert` median 0.2606 on the
+simd leg, ratio 50) — the noise is in the **two-input class split**, not the
+operation a same-input probe sees, so the probe can't track it. The relative gate
+is now **non-blocking `REL-TELEMETRY`**; the two targets stay on telemetry (PR) /
+sentinel @0.55 (nightly); the probes are kept as telemetry. A class-split-aware
+"noise-twin" is the v0.20 candidate (Q19.5; `docs/v0.5-dudect-recalibration.md`
+v0.19 resolution).
 The PR-smoke and nightly workflows run the harness under a matrix
 over
 `features=[default, sm4-bitsliced, sm4-bitsliced-simd,
@@ -398,8 +438,10 @@ under every cipher dispatch path:
 | `ct_mul_var` | `\|tau\| < 0.20` | Variable-base scalar mult. |
 | `ct_sign` | `\|tau\| < 0.20` | `sign_raw_with_id`, class-split by private key `d` (NOT `sign_with_id` — DER is variable-time on public output). |
 | `ct_sign_k_class` | nightly only: `\|tau\| < 0.25` | `sign_raw_with_id`, class-split by nonce `k` magnitude with `d` held fixed (W0; both retry nonces class-tied). v0.4 release-prep: **dropped from the PR-smoke (10K) allowlist** — observed values span [0.21–0.37] across seven runs on the GH Actions ubuntu-24.04 runner, with no structure tied to code changes. The 100K nightly gate at 0.25 is retained (signal-to-noise is meaningful there). The direct invert diagnostics (`ct_fn_invert` / `ct_fp_invert`) are the actual invert-leak regression guards at the PR budget; `ct_sign_k_class` is a composite that dilutes invert signal by ~50× per the v0.2 W0 analysis. The bench still runs (data lands in the artifact log) but doesn't gate at 10K. |
-| `ct_fn_invert` | PR-smoke: **telemetry only**. Nightly: gross-regression sentinel at `\|tau\| ≥ 0.55` (v0.18: **median-gated**). | Direct `Fn::invert((1+d) mod n)` diagnostic (W0). Recalibrated 2026-05-13. **v0.18 100K×5 calibration on the pinned runner: median 0.006–0.011** (back near baseline) — but kept on the sentinel, NOT re-promoted (image-noise robustness; Q18.7). See `docs/v0.5-dudect-recalibration.md`. |
-| `ct_fp_invert` | PR-smoke: **telemetry only**. Nightly: gross-regression sentinel at `\|tau\| ≥ 0.55` (v0.18: **median-gated**). | Direct `Fp::invert(Z)` diagnostic (W0). The 2026-05-12 GH Actions `ubuntu-24.04` runner-image update (image `20260413.86.1` → `20260512.134.1`, kernel `6.17.0-1010-azure` → `6.17.0-1013-azure`, Rust toolchain `1.94.1` → `1.95.0`) shifted the 100K noise floor on this target from ~0.006 (v0.2 baseline) to intermittent values in [0.29–0.40]. The 0.20 gate is no longer authoritative on the current shared runner; the gross-regression sentinel at 0.55 retains protection against a real cryptographic leak (the v0.1 `ConstMontyForm::invert` regression at `\|tau\| ≈ 0.70` would still fire). The v0.5 doc's authoritative fix (a noise-isolated self-hosted runner) is **off the table** post-v0.17 (RCE on a public repo); **v0.18** instead pinned the toolchain + image and added the multi-run median. v0.18 100K×5 calibration: **median 0.014–0.028** (back near baseline) — but kept on the sentinel, NOT re-promoted (the noise is image-sensitive; a tight median gate would re-flake if it returns; Q18.7). A self-calibrating relative gate (v0.19) is the change that could safely re-promote. See `docs/v0.5-dudect-recalibration.md` (v0.18 resolution). |
+| `ct_fn_invert` | PR-smoke: **telemetry only**. Nightly: gross-regression sentinel at `\|tau\| ≥ 0.55` (v0.18: **median-gated**). | Direct `Fn::invert((1+d) mod n)` diagnostic (W0). Recalibrated 2026-05-13. **v0.18 100K×5 calibration on the pinned runner: median 0.006–0.011** (back near baseline) — but kept on the sentinel, NOT re-promoted (image-noise robustness; Q18.7). **v0.19**: the relative gate vs a fix-vs-fix probe (`noise_floor_fn_invert`) was implemented and falsified — the probe stays quiet (~0.005) while this target's noise is in its class split — so it stays on telemetry/sentinel. See `docs/v0.5-dudect-recalibration.md` (v0.19 resolution). |
+| `ct_fp_invert` | PR-smoke: **telemetry only**. Nightly: gross-regression sentinel at `\|tau\| ≥ 0.55` (v0.18: **median-gated**). | Direct `Fp::invert(Z)` diagnostic (W0). The 2026-05-12 GH Actions `ubuntu-24.04` runner-image update (image `20260413.86.1` → `20260512.134.1`, kernel `6.17.0-1010-azure` → `6.17.0-1013-azure`, Rust toolchain `1.94.1` → `1.95.0`) shifted the 100K noise floor on this target from ~0.006 (v0.2 baseline) to intermittent values in [0.29–0.40]. The 0.20 gate is no longer authoritative on the current shared runner; the gross-regression sentinel at 0.55 retains protection against a real cryptographic leak (the v0.1 `ConstMontyForm::invert` regression at `\|tau\| ≈ 0.70` would still fire). The v0.5 doc's authoritative fix (a noise-isolated self-hosted runner) is **off the table** post-v0.17 (RCE on a public repo); **v0.18** instead pinned the toolchain + image and added the multi-run median. v0.18 100K×5 calibration: **median 0.014–0.028** (back near baseline) — but kept on the sentinel, NOT re-promoted (the noise is image-sensitive; a tight median gate would re-flake if it returns; Q18.7). A self-calibrating relative gate (v0.19) is the change that could safely re-promote. **v0.19 IMPLEMENTED and FALSIFIED it**: the 100K calibration showed the fix-vs-fix probe `noise_floor_fp_invert` quiet (~0.005) while this target's median hit **0.2606** on the `sm4-bitsliced-simd` leg (ratio 50) — the noise is in the **two-input class split** (`z_small` vs `z_large`), not the operation a same-input probe sees, so the probe can't track it. Reverted to telemetry/sentinel; a class-split-aware "noise-twin" is the v0.20 candidate. See `docs/v0.5-dudect-recalibration.md` (v0.19 resolution). |
+| `noise_floor_fn_invert` | **telemetry only** (non-blocking `REL-TELEMETRY`) | v0.19 — fix-vs-fix `Fn::invert` noise-floor probe: both dudect classes get one identical input, so `|tau|` is pure measurement noise (cannot leak by construction). Built as the matched reference for the (falsified) relative gate; KEPT as a longitudinal noise-floor diagnostic. Measures ~0.005 (uniformly quiet — the evidence the `ct_fn_invert` noise is class-split-specific). |
+| `noise_floor_fp_invert` | **telemetry only** (non-blocking `REL-TELEMETRY`) | v0.19 — fix-vs-fix `Fp::invert` noise-floor probe; same construction over `Fp`. Measures ~0.005 even when `ct_fp_invert` spikes to 0.26 — the proof that the runner noise is in the two-input class split, not the operation. Input to a v0.20 class-split-aware reference. |
 | `ct_sm4_key_schedule` | `\|tau\| < 0.20` | SM4 key schedule, class-split by master key bytes (v0.2 W1). v0.4 CI also gates this under `features=sm4-bitsliced`. |
 | `ct_sm4_encrypt_block` | `\|tau\| < 0.20` | SM4 "construct cipher + encrypt one block" timed under one window, class-split by master key bytes (v0.2 W1). v0.4 CI also gates this under `features=sm4-bitsliced`; 10K-sample smoke on the bitsliced path: `\|tau\| ≈ 0.025`. |
 | `ct_sm4_ctr_encrypt` | `\|tau\| < 0.20` | v0.7 W3 — SM4-CTR encrypt timed over a fixed 256-byte plaintext (16 blocks), class-split by master key bytes. Dispatches through `Sm4Cipher::encrypt_blocks` (v0.7 W1), so this gates the constant-time discipline on every cipher path — linear-scan under default, gate-only under `sm4-bitsliced`, SIMD-packed batches under `sm4-bitsliced-simd` (two AVX2 batches on x86_64, four NEON batches on aarch64). **Not** cfg-gated on `sm4-bitsliced-simd` — runs under all three matrix entries. 5K-sample local smoke: `\|tau\| ≈ 0.064`. Per Q7.2 of `docs/v0.6-scope.md`. |
@@ -777,8 +819,21 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
 - Don't re-promote `ct_fn_invert`/`ct_fp_invert` to a `|tau|<0.20` gate just
   because a calibration shows them quiet (v0.18 kept them on telemetry/sentinel
   despite medians ~0.01). The noise is image-sensitive + intermittent; a tight
-  gate — even a 5-run median — re-flakes if it returns. The self-calibrating
-  relative gate (v0.19) is the change that can safely re-promote.
+  gate — even a 5-run median — re-flakes if it returns. They stay on telemetry
+  (PR) / gross-regression sentinel @0.55 (nightly).
+- **The v0.19 fix-vs-fix relative gate was FALSIFIED — don't re-add it.** v0.19
+  tried gating these two against a same-input probe
+  (`noise_floor_f{n,p}_invert`) on the theory that image noise would lift probe
+  and target together. The 100K calibration disproved it: the probes stay
+  uniformly quiet (~0.005) while the targets spike to [0.26–0.32] (`ct_fp_invert`
+  median 0.2606, ratio 50). **The runner noise is in the two-input class-split
+  difference (`z_small` vs `z_large` timed against each other), not the operation
+  duration a fix-vs-fix probe can see**, so the probe cannot track it. The probes
+  are kept as telemetry (evidence), the relative gate is non-blocking
+  `REL-TELEMETRY`, and a future self-calibrating reference must be a
+  **class-split-aware "noise-twin"** (two *different* inputs through a
+  known-CT op), not a same-input probe — the v0.20 candidate. See
+  `docs/v0.5-dudect-recalibration.md` (v0.19 resolution).
 - The dudect `rust-cache` `shared-key` is keyed on `strategy.job-index`, NOT
   `${{ matrix.features }}` (v0.18 / PR #76): the multi-feature leg's comma
   breaks `Swatinem/rust-cache` (`Key ... cannot contain commas`). Keep it

@@ -101,6 +101,43 @@ cadence — every cipher mode is now FFI-complete. **No new dependency, no new
 feature flag, no new `gmcrypto-core` API, no new dudect target.** Design
 rationale: [`docs/v0.16-scope.md`](docs/v0.16-scope.md) (Q16.1–Q16.12).
 
+## v0.19 scope (infra-assurance, not a crates.io release) — relative gate tested and falsified
+
+**Self-calibrating relative dudect gate — TESTED and FALSIFIED → honest fallback.**
+v0.19 set out to re-promote the two direct-invert diagnostics
+(`ct_fn_invert` / `ct_fp_invert`) off the v0.18 telemetry/sentinel posture by
+adding two **fix-vs-fix noise-floor probes** (`noise_floor_fn_invert` /
+`noise_floor_fp_invert` — each runs the same `Fn`/`Fp` inversion as its suspect
+but feeds both dudect classes one identical input, so its `|tau|` is pure
+measurement noise) and gating each target *relatively*:
+`median(target) ≤ max(0.20, 4·median(probe))` — a threshold that adapts to the
+runner's own noise floor.
+
+The 100K calibration on `main` **falsified the matched-sensitivity premise**: the
+probes stay uniformly quiet (~0.005) while the real class-split targets spike
+intermittently into [0.26–0.32] (`ct_fp_invert` reached a **median of 0.2606** on
+the `sm4-bitsliced-simd` leg, ratio 50). The runner noise lives in the **two-input
+class-split difference** (`z_small` vs `z_large`), *not* the operation duration a
+same-input probe can observe — so the probe cannot track it and the relative
+threshold just pins at the `0.20` the noise already breaks. Per the pre-committed
+honest-fallback path, the relative gate is demoted to non-blocking telemetry, the
+two targets revert to telemetry (PR) / gross-regression **sentinel @0.55**
+(nightly), and the probes are **kept as telemetry** — they are the evidence that
+the noise is class-split-specific, the input to a v0.20 **class-split-aware
+"noise-twin"** reference. A **repository / infra-assurance** milestone — the only
+crate change is the dev-only bench harness (published library byte-unchanged;
+workspace stays `0.16.0`; crates.io skips `0.19.0` per the v0.14 / v0.17 / v0.18
+precedent). Design + result:
+[`docs/v0.19-scope.md`](docs/v0.19-scope.md) (Q19.1–Q19.7) +
+[`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md) (v0.19
+resolution).
+
+**Deferred to v0.20+**: a class-split-aware "noise-twin" dudect reference (the
+v0.19 successor that could finally re-promote the invert diagnostics);
+round-trip / differential + streaming-decryptor parser fuzzing; RustCrypto `aead`
+trait fit (still `0.6.0-rc.10`); `cargo fuzz coverage`; AVX-512 `sbox_x64`; CCM
+buffered input; a v1.0 readiness pass.
+
 ## v0.18 scope (shipped — infra-assurance, not a crates.io release)
 
 **dudect-gate hardening.** v0.18 pins the dudect CI workflows' drift axes
@@ -476,7 +513,8 @@ Everything v0.2 shipped is unchanged:
 | v0.16.0 (shipped) | **C ABI for the SM4-XTS multi-sector helper.** Per `docs/v0.16-scope.md` Q16.1–Q16.12. New: `gmcrypto_sm4_xts_encrypt_sectors` / `_decrypt_sectors` in `gmcrypto-c`, behind the existing forwarding `sm4-xts` feature — **in-place** over a contiguous run of equal-size sectors (`buf: *mut u8` + `buf_len`; no `out`/`out_capacity`/`out_actual_len`, mirroring the core's `&mut [u8]` so disk callers never double-allocate), `start_sector: uint64_t`, tweak = LE-128(`start_sector + i`). Byte-identical to `gmcrypto_core::sm4::mode_xts::{encrypt,decrypt}_sectors`; single `GMCRYPTO_ERR` with `buf` untouched on error; confidentiality-only. The deferred FFI half of v0.15 — every cipher mode is now FFI-complete. 11 new `c_smoke` tests + doc-only C example `examples/sm4_xts_multisector.c`; regenerated header (no `regen-header` change — free fns, no new opaque structs). No new `gmcrypto-core` API, no new dudect target, **no new dependency**. **Additive — no public API breakage.** See [`CHANGELOG.md`](CHANGELOG.md) `[0.16.0]`. |
 | v0.17 (public release; not a crates.io release) | **Open-sourced the repository.** Flipped the GitHub repo private → public on the 0.x line; CI migrated off the self-hosted macOS runner to GitHub-hosted (`ci.yml` → `macos-14`, `fuzz-nightly.yml` → `ubuntu-latest`). A *repository* milestone — no crate code changes (workspace stays `0.16.0`; crates.io skips `0.17.0` per the v0.14 precedent); v1.0 reserved. Per [`docs/v0.17-scope.md`](docs/v0.17-scope.md). |
 | v0.18 (infra-assurance; not a crates.io release) | **dudect-gate hardening.** Per `docs/v0.18-scope.md` Q18.1–Q18.7. Pinned the dudect CI workflows' drift axes (`ubuntu-24.04` OS-label + exact `dtolnay/rust-toolchain@1.95.0`) and gate on a CI-level multi-run median `\|tau\|` (PR 3 runs / nightly 5 runs; `required_low` + the nightly sentinel on the median, `negative_control` on the min, completeness gate on `< N` runs). `timing_leaks.rs` byte-unchanged — the loop + median live in CI. A 100K×5 calibration showed `ct_fn_invert`/`ct_fp_invert` back near baseline (medians 0.006–0.028) but **kept on telemetry / sentinel — not re-promoted** (the noise is runner-image-sensitive; a tight gate would re-flake if it returns). Also a comma-free `rust-cache` `shared-key`. A *repository / infra-assurance* milestone — no crate code change (workspace stays `0.16.0`; crates.io skips `0.18.0` per the v0.14 / v0.17 precedent). See [`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md) (v0.18 resolution). |
-| v0.19+ | Per `docs/v0.18-scope.md` §5/§6: a self-calibrating relative dudect gate (the change that could safely re-promote the invert diagnostics); round-trip / differential parser fuzzing; streaming-decryptor fuzzing; RustCrypto `aead` trait fit (upstream still on `0.6.0-rc.10`); `cargo fuzz coverage` reporting; AVX-512 16-way `sbox_x64`; CCM buffered input; Argon2-with-SM3 (research-only); `wasm-bindgen-test` KAT runner. Each lands behind its own scope-doc cycle. |
+| v0.19 (infra-assurance; not a crates.io release) | **Self-calibrating relative dudect gate — TESTED and FALSIFIED → honest fallback.** Per `docs/v0.19-scope.md` Q19.1–Q19.7. Added two fix-vs-fix noise-floor probes (`noise_floor_f{n,p}_invert`) + a relative gate `median(target) ≤ max(0.20, 4·median(probe))` to re-promote `ct_fn_invert`/`ct_fp_invert`. The 100K calibration disproved the matched-sensitivity premise: the probes stay quiet (~0.005) while the targets spike to [0.26–0.32] (`ct_fp_invert` median 0.2606, ratio 50) — the noise is in the two-input class split, not the operation, so a same-input probe can't track it. Reverted to telemetry / sentinel @0.55; probes kept as telemetry (evidence for a v0.20 class-split-aware "noise-twin"). Only the dev-only bench harness changed (workspace stays `0.16.0`; crates.io skips `0.19.0`). See [`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md) (v0.19 resolution). |
+| v0.20+ | A **class-split-aware "noise-twin"** dudect reference (the v0.19 successor — a two-different-input split through a known-CT op, the only design that could now re-promote the invert diagnostics); round-trip / differential parser fuzzing; streaming-decryptor fuzzing; RustCrypto `aead` trait fit (upstream still on `0.6.0-rc.10`); `cargo fuzz coverage` reporting; AVX-512 16-way `sbox_x64`; CCM buffered input; a v1.0 readiness pass. Each lands behind its own scope-doc cycle. |
 | v1.0 | API stabilization (readiness pass: API-stability review + the v0.18/v0.19 hardening). |
 
 ## Quick-start

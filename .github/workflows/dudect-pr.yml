@@ -343,15 +343,17 @@ jobs:
           for name in telemetry_only:
               print(f"TELEMETRY: {name} {telem(name)} (non-blocking)")
 
-          # v0.19 (Q19.6) — the self-calibrating RELATIVE gate runs at PR as
-          # TELEMETRY ONLY (10K is noisier than 100K — "the effect is even
-          # stronger at 10K"; the gate is proven authoritative at the cleaner
-          # 100K nightly first, see dudect-nightly.yml). ct_fn_invert /
-          # ct_fp_invert stay in `telemetry_only` above. We DO gate the PRESENCE
-          # of the two noise-floor probes though: they are base targets that
-          # must appear every run, so a missing one means the harness or the
-          # parse regex drifted — catch that fast at PR even though their VALUE
-          # is non-blocking here. See docs/v0.19-scope.md Q19.3/Q19.6.
+          # v0.19 — relative-gate TELEMETRY (non-blocking). The matched fix-vs-fix
+          # probe approach was FALSIFIED at the 100K nightly (W3, 2026-05-30): the
+          # probes stay quiet (~0.005) while the class-split targets spike, so the
+          # probe cannot track the noise (it lives in the two-input difference, not
+          # the operation). The relative gate is therefore non-authoritative
+          # everywhere; ct_fn_invert / ct_fp_invert remain in `telemetry_only`
+          # above (PR) and on the @0.55 sentinel (nightly). The probes + ratio are
+          # printed as a longitudinal diagnostic that documents the class-split
+          # noise for a future v0.20 class-split-aware reference. The probes are
+          # non-gating (a missing one is reported, not failed). See
+          # docs/v0.5-dudect-recalibration.md (v0.19 resolution).
           REL_K = 4.0
           REL_ABS_FLOOR = 0.20
           relative_gate = {"ct_fn_invert": "noise_floor_fn_invert",
@@ -359,8 +361,7 @@ jobs:
           for probe in sorted(set(relative_gate.values())):
               got = len(findings.get(probe, []))
               if got != n_runs:
-                  print(f"FAIL: {probe} measured {got}/{n_runs} runs (incomplete; noise-floor probe missing)")
-                  fail = True
+                  print(f"REL-TELEMETRY: {probe} measured {got}/{n_runs} runs (noise-floor probe; non-blocking)")
           for target, probe in relative_gate.items():
               t, p = med(target), med(probe)
               if t is None or p is None:
