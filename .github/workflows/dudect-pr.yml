@@ -342,6 +342,34 @@ jobs:
           # Telemetry-only: print median + all runs, no pass/fail gate.
           for name in telemetry_only:
               print(f"TELEMETRY: {name} {telem(name)} (non-blocking)")
+
+          # v0.19 (Q19.6) — the self-calibrating RELATIVE gate runs at PR as
+          # TELEMETRY ONLY (10K is noisier than 100K — "the effect is even
+          # stronger at 10K"; the gate is proven authoritative at the cleaner
+          # 100K nightly first, see dudect-nightly.yml). ct_fn_invert /
+          # ct_fp_invert stay in `telemetry_only` above. We DO gate the PRESENCE
+          # of the two noise-floor probes though: they are base targets that
+          # must appear every run, so a missing one means the harness or the
+          # parse regex drifted — catch that fast at PR even though their VALUE
+          # is non-blocking here. See docs/v0.19-scope.md Q19.3/Q19.6.
+          REL_K = 4.0
+          REL_ABS_FLOOR = 0.20
+          relative_gate = {"ct_fn_invert": "noise_floor_fn_invert",
+                           "ct_fp_invert": "noise_floor_fp_invert"}
+          for probe in sorted(set(relative_gate.values())):
+              got = len(findings.get(probe, []))
+              if got != n_runs:
+                  print(f"FAIL: {probe} measured {got}/{n_runs} runs (incomplete; noise-floor probe missing)")
+                  fail = True
+          for target, probe in relative_gate.items():
+              t, p = med(target), med(probe)
+              if t is None or p is None:
+                  print(f"REL-TELEMETRY: {target} vs {probe} — not measured (non-blocking)"); continue
+              threshold = max(REL_ABS_FLOOR, REL_K * p)
+              ratio = (t / p) if p > 0 else float("inf")
+              verdict = "would-PASS" if t <= threshold else "would-FAIL"
+              print(f"REL-TELEMETRY: {target} median={t:.4f} vs threshold={threshold:.4f} "
+                    f"(= max({REL_ABS_FLOOR}, {REL_K}*probe={p:.4f}), ratio={ratio:.2f}) → {verdict} (non-blocking)")
           sys.exit(1 if fail else 0)
           PY
 

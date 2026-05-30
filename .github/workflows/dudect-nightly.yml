@@ -296,6 +296,10 @@ jobs:
           # well below a real leak (the v0.1 ConstMontyForm::invert
           # measured `|tau| ≈ 0.70` in isolation). See
           # `docs/v0.5-dudect-recalibration.md` for the data.
+          # v0.19 — these two targets are now PRIMARILY gated by the relative
+          # gate (below); the sentinel is RETAINED as defense-in-depth (it
+          # fires on a gross regression even if the probe mis-measures high and
+          # the relative threshold loosens too far). Keep it. Q19.5.
           gross_regression_sentinel = {
               "ct_fn_invert": 0.55,
               "ct_fp_invert": 0.55,
@@ -326,6 +330,49 @@ jobs:
               elif v > upper_bound:
                   print(f"FAIL: {name} median|tau|={v:.4f} > {upper_bound} — timing leak ({telem(name)})"); fail = True
               else: print(f"OK:   {name} median|tau|={v:.4f} (< {upper_bound}) ({telem(name)})")
+
+          # v0.19 (Q19.1) — self-calibrating RELATIVE gate for the two direct-
+          # invert diagnostics. Each suspect target T is gated against its
+          # MATCHED-SENSITIVITY fix-vs-fix probe P (same operation, identical
+          # class inputs -> P measures pure measurement noise and CANNOT carry
+          # an input-dependent class signal). threshold = max(ABS_FLOOR, K*median(P)):
+          # degenerates to the historical 0.20 absolute gate in the quiet regime
+          # (K*floor < 0.20 iff floor < 0.05) and only loosens when the probe
+          # proves the operation-class is noisy -- the anti-flake property that
+          # lets these two be re-promoted without re-flaking on 2026-05-12-style
+          # image noise, while NEVER being stricter than the old 0.20 gate.
+          # K / ABS_FLOOR are CALIBRATED in W3 (docs/v0.5-dudect-recalibration.md);
+          # these are the starting values. See docs/v0.19-scope.md Q19.3/Q19.5.
+          REL_K = 4.0
+          REL_ABS_FLOOR = 0.20
+          relative_gate = {
+              "ct_fn_invert": "noise_floor_fn_invert",
+              "ct_fp_invert": "noise_floor_fp_invert",
+          }
+          # Completeness for the relative-gate inputs: BOTH target and probe must
+          # be measured in EVERY run, else the threshold would be computed over a
+          # reduced sample set (the silent degradation completeness exists to stop).
+          for target, probe in relative_gate.items():
+              for name in (target, probe):
+                  got = len(findings.get(name, []))
+                  if got != n_runs:
+                      print(f"FAIL: {name} measured {got}/{n_runs} runs (incomplete; relative-gate input)")
+                      fail = True
+          for target, probe in relative_gate.items():
+              t, p = med(target), med(probe)
+              if t is None or p is None:
+                  print(f"FAIL: relative gate {target} vs {probe} — input not measured"); fail = True; continue
+              threshold = max(REL_ABS_FLOOR, REL_K * p)
+              ratio = (t / p) if p > 0 else float("inf")
+              if t > threshold:
+                  print(f"FAIL: {target} median|tau|={t:.4f} > threshold={threshold:.4f} "
+                        f"(= max({REL_ABS_FLOOR}, {REL_K}*probe={p:.4f})); ratio={ratio:.2f} "
+                        f"— diverged from its noise floor, investigate (T {telem(target)} | P {telem(probe)})")
+                  fail = True
+              else:
+                  print(f"OK:   {target} median|tau|={t:.4f} <= threshold={threshold:.4f} "
+                        f"(probe median={p:.4f}, ratio={ratio:.2f}) (T {telem(target)} | P {telem(probe)})")
+
           # Gross-regression sentinel (MEDIAN-gated): gates only on egregious
           # values that would indicate a real cryptographic leak rather than
           # runner-image noise. Prefix `SENTINEL:` so log readers can
