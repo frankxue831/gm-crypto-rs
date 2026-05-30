@@ -1,10 +1,17 @@
 //! `dudect-bencher` detectable-leak regression harness.
 //!
-//! Twelve targets, listed in the order the harness sorts them
-//! (alphabetical):
+//! Fifteen base targets (plus the feature-gated SM4 targets registered
+//! later), grouped here by role rather than the harness's alphabetical
+//! output order:
 //!
 //! - `ct_fn_invert`         — direct `Fn::invert((1+d) mod n)` diagnostic (W0).
 //! - `ct_fp_invert`         — direct `Fp::invert(Z)` diagnostic (W0).
+//! - `noise_floor_fn_invert` — fix-vs-fix `Fn::invert` noise-floor probe
+//!   (v0.19 W1): both classes get one fixed input, so any `|tau|` is pure
+//!   measurement noise — the matched-sensitivity reference the CI relative
+//!   gate uses to calibrate `ct_fn_invert`. Cannot leak by construction.
+//! - `noise_floor_fp_invert` — fix-vs-fix `Fp::invert` noise-floor probe
+//!   (v0.19 W1); same construction over `Fp`, calibrates `ct_fp_invert`.
 //! - `ct_hmac_sm3`          — HMAC-SM3, class-split by key (W3).
 //! - `ct_mul_g`             — fixed-base scalar multiplication `k·G`.
 //! - `ct_mul_var`           — variable-base scalar multiplication `k·P`.
@@ -19,6 +26,9 @@
 //!   the MAC check via identical control flow; v0.2 Phase 3).
 //! - `ct_sm4_encrypt_block` — SM4 "construct cipher + encrypt one block",
 //!   class-split by master key bytes (W1).
+//! - `ct_sm4_ctr_encrypt`   — SM4-CTR encrypt over a fixed 256-byte plaintext,
+//!   class-split by master key bytes (v0.7 W3); rides `encrypt_blocks` so it
+//!   gates the CT discipline on every cipher dispatch path.
 //! - `ct_sm4_key_schedule`  — SM4 key schedule, class-split by master key (W1).
 //! - `negative_control`     — deliberately-leaky function. The harness MUST flag
 //!   this — if it doesn't, the harness wiring is broken.
@@ -390,6 +400,61 @@ fn ct_fp_invert(runner: &mut CtRunner, rng: &mut BenchRng) {
             (Class::Right, &z_large)
         };
         runner.run_one(class, || x.invert());
+    }
+}
+
+/// Fix-vs-fix noise-floor probe for `Fn::invert` (v0.19, Q19.1).
+///
+/// **Both classes receive the one same precomputed value** (`one_plus_d`),
+/// so the probe cannot carry an *input-dependent* class signal by
+/// construction: any measured `|tau|` is purely statistical measurement
+/// noise of `Fn::invert` at the current image / sample budget (sampling
+/// false positives, temporal drift, random class-count imbalance) — never a
+/// cryptographic leak. This is the matched-sensitivity reference the relative
+/// gate uses to calibrate `ct_fn_invert`: a real `Fn::invert` leak lifts
+/// `ct_fn_invert` (which DOES split small-`d` vs large-`d`) but cannot lift
+/// this probe, so the ratio diverges exactly when a real leak appears. The
+/// 2026-05-12 runner noise was sensitivity-specific (short single-inversions
+/// were hit), so the probe wraps the SAME operation at the SAME duration as
+/// `ct_fn_invert` — never two equal-but-distinct objects (a single value, so
+/// there is no address- or layout-dependent difference either). See
+/// `docs/v0.19-scope.md` + `docs/v0.5-dudect-recalibration.md`.
+fn noise_floor_fn_invert(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let one = Scalar::new(&U256::ONE);
+    let d_small = Scalar::new(&U256::from_be_hex(
+        "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8",
+    ));
+    // ONE fixed input, fed to BOTH classes (mirrors ct_fn_invert's
+    // `one_plus_d_small`; the `_large` value is deliberately absent — no class
+    // split, so no input-dependent signal is possible).
+    let one_plus_d = one + d_small;
+    for _ in 0..sample_count() {
+        let class = if rng.random::<bool>() {
+            Class::Left
+        } else {
+            Class::Right
+        };
+        runner.run_one(class, || one_plus_d.invert());
+    }
+}
+
+/// Fix-vs-fix noise-floor probe for `Fp::invert` (v0.19, Q19.1).
+///
+/// Same construction as [`noise_floor_fn_invert`] but over `Fp` — the
+/// matched-sensitivity reference for `ct_fp_invert`. Both classes receive the
+/// one same `Fp` value (mirrors `ct_fp_invert`'s `z_small`); with no class
+/// split the probe cannot encode an input-dependent leak, so any `|tau|` is
+/// pure measurement noise of `Fp::invert` at the current image / budget.
+fn noise_floor_fp_invert(runner: &mut CtRunner, rng: &mut BenchRng) {
+    // ONE fixed input, fed to BOTH classes (mirrors ct_fp_invert's `z_small`).
+    let z = Fp::new(&U256::from_u64(0x1234));
+    for _ in 0..sample_count() {
+        let class = if rng.random::<bool>() {
+            Class::Left
+        } else {
+            Class::Right
+        };
+        runner.run_one(class, || z.invert());
     }
 }
 
@@ -952,6 +1017,20 @@ fn main() {
             name: BenchName("ct_fp_invert"),
             seed: None,
             benchfn: ct_fp_invert,
+        },
+        // v0.19 W1 — matched-sensitivity fix-vs-fix noise-floor probes (Q19.1).
+        // Base (non-cfg-gated) so they appear in every matrix leg, exactly like
+        // the ct_fn_invert / ct_fp_invert targets they calibrate. Both classes
+        // get one fixed input → pure measurement-noise floor, cannot leak.
+        BenchMetadata {
+            name: BenchName("noise_floor_fn_invert"),
+            seed: None,
+            benchfn: noise_floor_fn_invert,
+        },
+        BenchMetadata {
+            name: BenchName("noise_floor_fp_invert"),
+            seed: None,
+            benchfn: noise_floor_fp_invert,
         },
         BenchMetadata {
             name: BenchName("ct_sm4_key_schedule"),
