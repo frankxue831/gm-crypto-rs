@@ -6,6 +6,11 @@ failure-mode invariant on adversarial bytes: **every malformed input collapses
 to the single safe `None` / `Error::Failed` (or `false`) return — no panic, no
 unbounded allocation, no hang.** See `docs/v0.14-scope.md` for the full design.
 
+v0.20 adds two **differential** targets (`fuzz_sm4_{cbc,gcm}_streaming_decrypt`)
+with a stronger invariant: the *streaming* decryptor fed in **arbitrary chunk
+boundaries** must be **byte-identical** to the *single-shot* oracle fed
+all-at-once. See `docs/v0.20-scope.md`.
+
 This crate is its **own** Cargo workspace (note the empty `[workspace]` table in
 `Cargo.toml`) and is **excluded** from the published 3-crate workspace. Its
 `libfuzzer-sys` / `arbitrary` deps never enter the published dependency graph.
@@ -53,6 +58,26 @@ cargo +nightly fuzz run fuzz_pem fuzz/corpus/fuzz_pem fuzz/seeds/fuzz_pem -- \
 cargo +nightly fuzz build
 ```
 
+## Coverage report (v0.20)
+
+The nightly workflow renders per-target `llvm-cov` region/line coverage over the
+**committed seed corpus** and uploads a `SUMMARY.txt` artifact. It is
+**non-gating** — the report is the deliverable, not a coverage-% threshold. To
+render locally:
+
+```bash
+rustup component add llvm-tools-preview --toolchain nightly
+T=fuzz_sm4_gcm_streaming_decrypt
+cargo +nightly fuzz coverage "$T" "fuzz/corpus/$T" "fuzz/seeds/$T"
+LLVM_COV="$(find "$(rustc +nightly --print sysroot)" -name llvm-cov -type f | head -1)"
+BIN="$(find fuzz/target "$HOME/.cargo" -type f -name "$T" | grep -E '/(coverage|release)/' | head -1)"
+"$LLVM_COV" report "$BIN" -instr-profile="fuzz/coverage/$T/coverage.profdata"
+```
+
+Coverage % is reported over the **whole linked `gmcrypto-core` crate**, so a
+single decrypt target shows a small fraction (it exercises only its own path);
+the signal is the per-target trend, not an absolute number.
+
 ## Targets
 
 | Target | Entry point under test |
@@ -70,8 +95,13 @@ cargo +nightly fuzz build
 | `fuzz_sm2_decrypt` | `sm2::decrypt` (fixed key; parse + KDF + MAC) |
 | `fuzz_sm2_verify` | `verify_with_id` (fixed key; sig DER parse) |
 
-(W3 adds the SM4 decrypts: `fuzz_sm4_cbc_decrypt` / `_gcm_decrypt` /
-`_ccm_decrypt` / `_xts_decrypt`. See `docs/v0.14-scope.md` Q14.3.)
+(v0.14 W3 added the SM4 single-shot decrypts: `fuzz_sm4_cbc_decrypt` /
+`_gcm_decrypt` / `_ccm_decrypt` / `_xts_decrypt` — negative-input, see
+`docs/v0.14-scope.md` Q14.3. **v0.20** added two **differential**
+streaming-decryptor targets, `fuzz_sm4_cbc_streaming_decrypt` /
+`fuzz_sm4_gcm_streaming_decrypt`, which assert the streaming decryptor fed in
+arbitrary chunks is byte-identical to the single-shot oracle — not merely
+crash-free; see `docs/v0.20-scope.md`. **18 targets total.**)
 
 ### Regenerating seeds
 
@@ -85,4 +115,15 @@ coverage off real structure. To regenerate, see `docs/v0.14-scope.md` Q14.6.
 **front-consuming** reads, so the committed `fuzz_sm4_*` seeds are plain
 field concatenations that depend on `arbitrary 1.4.2`'s consumption order
 (pinned in `fuzz/Cargo.lock`). If you ever bump `arbitrary`, re-verify the
-front-vs-tail consumption order and regenerate those four seeds.
+front-vs-tail consumption order and regenerate those seeds. The v0.20
+streaming targets' layouts are:
+
+- `fuzz_sm4_cbc_streaming_decrypt`: `[key:16][iv:16][chunk_len:1][ct:rest]`
+- `fuzz_sm4_gcm_streaming_decrypt`:
+  `[key:16][tag:16][nonce_len:1][nonce][aad_len:1][aad][chunk_len:1][ct:rest]`
+  where the source reads `nonce_len` as `u8 % 17` (0..=16) and `aad_len` as
+  `u8 % 33` (0..=32), so both valid and malformed nonce/aad lengths are explored;
+  the GCM `tag` is a fixed 16 bytes (the `mode_gcm::decrypt` path).
+
+where `chunk_len` (a `u8`, fed as `max(1, chunk_len)` so `0` ⇒ 1-byte chunks) sets the streaming chunk size the
+ciphertext is fed in. Their seeds are valid encrypts generated under a fixed key.

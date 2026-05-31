@@ -185,6 +185,42 @@ nonce becomes a noise source distributing uniformly across both classes).
 `d`-class harness could not see. Well under threshold; not a leak. Worth
 noting the elevated signal exists.
 
+### v1.0 constant-time baseline (settled — v0.18 / v0.19 / v0.20)
+
+This is the **settled constant-time gate posture for v1.0**, with narrow,
+explicitly-named revisit criteria (not "permanent/final", not "still an open
+hardening gap"):
+
+- **Composite dudect targets remain release-gated at `|tau| < 0.20`.** These are
+  the full-operation targets (sign, scalar-mult, SM4 key-schedule / encrypt /
+  CTR / CBC-fanout / GCM / CCM / XTS decrypt, HMAC, SM2 decrypt, PKCS#8 decrypt);
+  they measure quietly and gate authoritatively.
+- **The two single-field-inversion micro-diagnostics (`ct_fn_invert`,
+  `ct_fp_invert`) are retained as telemetry (PR) + a nightly gross-regression
+  sentinel at `|tau| ≥ 0.55`** — *not* the 0.20 gate. Shared GitHub-runner
+  measurements show an empirically unstable **two-input class-split** floor for
+  these short targets after the 2026-05-12 image refresh (intermittent
+  [0.26–0.40]), while every composite target stays < 0.01.
+- **Why not a tighter gate.** v0.18 pinned the toolchain/image + added a CI-level
+  multi-run median; v0.19 then built two **fix-vs-fix noise probes**
+  (`noise_floor_f{n,p}_invert`) and a self-calibrating relative gate to re-promote
+  these two — and **falsified it**: the same-input probes stay quiet (~0.005)
+  while the class-split targets spike (median 0.26, ratio ~50), i.e. the noise
+  lives in the *two-input class-split difference*, which a same-input probe is
+  structurally blind to. The probes are kept as permanent telemetry — they are
+  the *evidence* for this baseline. (Full data: `docs/v0.5-dudect-recalibration.md`,
+  v0.18 + v0.19 resolutions.)
+- **Revisit criteria (narrow).** Re-promotion will be reconsidered **only** if a
+  *materially different measurement design* exists: a **class-split-twin**
+  diagnostic that reproduces the dudect two-input split geometry *without* the
+  inversion operation (so it measures the runner's two-input noise floor a
+  fix-vs-fix probe cannot), **or** an **offline / dedicated / manual-hardware**
+  measurement. It will **not** be revisited by re-tuning shared-CI thresholds, and
+  **not** via PR-executing public self-hosted CI (remote-code-execution risk,
+  rejected at v0.17). This baseline does not block v1.0 — the constant-time
+  *design* is unchanged and complete; only the *measurability* of two short
+  diagnostics on noisy shared CI is bounded.
+
 ### SM4 (W1) — S-box and CBC contract
 
 **S-box.** SM4's 32-round Feistel-like structure runs four S-box lookups
@@ -306,6 +342,22 @@ a schedule; a crash uploads a minimized reproducer, which becomes a committed
 regression seed under `fuzz/seeds/`. The **initial v0.14 sweep found zero
 crashes** across all 16 targets. Reproduce locally per
 [`fuzz/README.md`](fuzz/README.md).
+
+**v0.20 — streaming-decryptor differential fuzzing + coverage.** Two targets are
+added (**18 total**): `fuzz_sm4_cbc_streaming_decrypt` and
+`fuzz_sm4_gcm_streaming_decrypt`. These are **differential** harnesses, a stronger
+property than negative-input: each feeds the ciphertext to the *streaming*
+decryptor (`Sm4CbcDecryptor` / `Sm4GcmDecryptor`) in **arbitrary chunk
+boundaries** and asserts the result is **byte-identical** to the *single-shot*
+`mode_{cbc,gcm}::decrypt` oracle fed all-at-once (`Some==Some` plaintext, or
+`None==None`) — so any chunking-dependent divergence (e.g. the CBC
+buffer-back-by-one PKCS#7 boundary, or the GCM commit-on-verify GHASH
+accumulator) is caught, on top of the no-panic/OOM/hang invariant. The initial
+v0.20 sweep found **zero crashes and zero divergences**. The nightly workflow
+also gained a non-gating **`cargo fuzz coverage`** job that renders per-target
+`llvm-cov` region/line totals over the committed seed corpus and uploads them as
+an artifact (the report is the deliverable, not a coverage-% gate). v0.20 is an
+infra-assurance cycle — no published-crate change; workspace stays `0.16.0`.
 
 ## Compliance posture
 
