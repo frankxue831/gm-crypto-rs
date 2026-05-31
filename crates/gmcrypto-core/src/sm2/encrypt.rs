@@ -164,8 +164,10 @@ fn try_encrypt_once(public: &Sm2PublicKey, plaintext: &[u8], k: &Fn) -> Option<S
     z.zeroize();
 
     Some(Sm2Ciphertext {
-        x: x1.retrieve(),
-        y: y1.retrieve(),
+        // v0.22: `Sm2Ciphertext.{x,y}` are 32-byte big-endian (was `U256`);
+        // `retrieve()` reduces mod p, `u256_to_be32` is the canonical encoding.
+        x: crate::u256_to_be32(&x1.retrieve()),
+        y: crate::u256_to_be32(&y1.retrieve()),
         hash: c3,
         ciphertext: c2,
     })

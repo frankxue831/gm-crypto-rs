@@ -11,27 +11,36 @@
 //! signature scalars `r`, `s` lie in `[1, n-1]` — zero is malformed.
 
 use alloc::vec::Vec;
-use crypto_bigint::U256;
 
 use super::{reader, writer};
 
 /// Encode `(r, s)` as a DER `SEQUENCE { r INTEGER, s INTEGER }`.
+///
+/// `r` and `s` are 32-byte big-endian scalars. v0.22 reshaped this from
+/// `&crypto_bigint::U256` to `&[u8; 32]` so the public API names no
+/// `crypto-bigint` type (`docs/v0.22-scope.md` §3 Q22.4); the emitted DER
+/// is byte-identical (`write_integer` canonicalizes the same bytes).
 #[must_use]
-pub fn encode_sig(r: &U256, s: &U256) -> Vec<u8> {
-    let r_be = r.to_be_bytes();
-    let s_be = s.to_be_bytes();
+pub fn encode_sig(r: &[u8; 32], s: &[u8; 32]) -> Vec<u8> {
     let mut body = Vec::with_capacity(72);
-    writer::write_integer(&mut body, &r_be);
-    writer::write_integer(&mut body, &s_be);
+    writer::write_integer(&mut body, r);
+    writer::write_integer(&mut body, s);
     let mut out = Vec::with_capacity(body.len() + 4);
     writer::write_sequence(&mut out, &body);
     out
 }
 
-/// Decode a DER `SEQUENCE { r, s }` into two `U256`s. Returns `None`
-/// for any malformed input. **No distinguishing failure modes**.
+/// Decode a DER `SEQUENCE { r, s }` into two 32-byte big-endian scalars.
+/// Returns `None` for any malformed input. **No distinguishing failure
+/// modes**.
+///
+/// v0.22 reshaped the return from `(U256, U256)` to `([u8; 32], [u8; 32])`
+/// (Q22.4); the accept/reject behaviour is unchanged — all the
+/// strict-canonical + zero/length rejects stay in [`read_scalar_in_range`].
+/// Callers that need the numeric value (e.g. `verify_with_id`'s
+/// `r < n` / `Fn::new` checks) reconstruct `U256::from_be_slice` themselves.
 #[must_use]
-pub fn decode_sig(input: &[u8]) -> Option<(U256, U256)> {
+pub fn decode_sig(input: &[u8]) -> Option<([u8; 32], [u8; 32])> {
     let (body, rest) = reader::read_sequence(input)?;
     if !rest.is_empty() {
         return None;
@@ -49,7 +58,7 @@ pub fn decode_sig(input: &[u8]) -> Option<(U256, U256)> {
 /// - any encoding that fails the strict-canonical reader rules;
 /// - the canonical zero `02 01 00` (since SM2 `r`, `s ∈ [1, n-1]`);
 /// - content longer than 32 bytes (since SM2 scalars are 256-bit).
-fn read_scalar_in_range(input: &[u8]) -> Option<(U256, &[u8])> {
+fn read_scalar_in_range(input: &[u8]) -> Option<([u8; 32], &[u8])> {
     let (bytes, rest) = reader::read_integer(input)?;
     // SM2 r/s ∈ [1, n-1] → zero is invalid. The reader returns
     // `[0x00]` for canonical zero; reject that here.
@@ -61,17 +70,18 @@ fn read_scalar_in_range(input: &[u8]) -> Option<(U256, &[u8])> {
     }
     let mut padded = [0u8; 32];
     padded[32 - bytes.len()..].copy_from_slice(bytes);
-    Some((U256::from_be_slice(&padded), rest))
+    Some((padded, rest))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crypto_bigint::U256;
 
     #[test]
     fn round_trip_small() {
-        let r = U256::from_u64(0x1234);
-        let s = U256::from_u64(0x5678);
+        let r = crate::u256_to_be32(&U256::from_u64(0x1234));
+        let s = crate::u256_to_be32(&U256::from_u64(0x5678));
         let der = encode_sig(&r, &s);
         let (r2, s2) = decode_sig(&der).expect("round-trip");
         assert_eq!(r2, r);
@@ -81,10 +91,12 @@ mod tests {
     #[test]
     fn round_trip_large_with_high_bit() {
         // A value with the high bit set requires a 0x00 pad in DER INTEGER.
-        let r =
-            U256::from_be_hex("FF00000000000000000000000000000000000000000000000000000000000001");
-        let s =
-            U256::from_be_hex("8000000000000000000000000000000000000000000000000000000000000002");
+        let r = crate::u256_to_be32(&U256::from_be_hex(
+            "FF00000000000000000000000000000000000000000000000000000000000001",
+        ));
+        let s = crate::u256_to_be32(&U256::from_be_hex(
+            "8000000000000000000000000000000000000000000000000000000000000002",
+        ));
         let der = encode_sig(&r, &s);
         let (r2, s2) = decode_sig(&der).expect("round-trip");
         assert_eq!(r2, r);

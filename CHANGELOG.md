@@ -5,6 +5,43 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] — v1.0 prep (not published)
 
+**v0.22 — API-tightening: decouple `crypto-bigint 0.7` from the 1.0 contract
+(non-publishing).** Resolves the v0.21 §3.A finding via Option 2 (tighten the
+surface). The **always-on (default-features) public API now names zero
+`crypto-bigint` types**; the workspace stays **0.16.0** and crates.io skips
+`0.22.0` (the breaking API-*shape* change ships with the deliberate `1.0.0`
+publish). **Runtime output is byte-identical** — SM2 signature + ciphertext wire
+bytes unchanged (full KAT + gmssl 3.1.1 interop 11/11). Per `docs/v0.22-scope.md`
+(Q22.1–Q22.8), codex-reviewed W0–W3.
+
+### Changed — BREAKING (Rust API shape; wire output unchanged)
+- `asn1::sig::{encode_sig, decode_sig}` (+ the `asn1::{encode_sig, decode_sig}`
+  re-exports) now take / return `[u8; 32]` big-endian scalars instead of
+  `crypto_bigint::U256` (`(&[u8;32], &[u8;32]) -> Vec<u8>` /
+  `&[u8] -> Option<([u8;32], [u8;32])>`). The DER wire format and all
+  strict-canonical / zero / length rejects are unchanged.
+- `asn1::ciphertext::Sm2Ciphertext::{x, y}` are now `[u8; 32]` (were `U256`). The
+  decode-side `< p` malleability bound and the `decrypt` on-curve check are
+  preserved at their existing boundaries.
+
+### Changed — `#[doc(hidden)]` (no longer SemVer-covered; kept `pub` for in-repo dev)
+- The low-level SM2 curve arithmetic is now `#[doc(hidden)]`: the whole
+  `sm2::curve` module (`Fn`, `Fp`, `NMod`, `PMod`, `b`, `b3`), the whole
+  `sm2::scalar_mul` module (`mul_g`, `mul_var`), the `sm2::{Fn, Fp, mul_g, mul_var}`
+  re-exports, and `ProjectivePoint::to_affine`. These carry a "not public API / not
+  covered by SemVer" contract and stay `pub` only so the in-repo dudect bench /
+  integration tests / fuzz reach them. `ProjectivePoint` itself stays public +
+  unchanged (it names no `crypto-bigint` type once `to_affine` is hidden).
+
+### Unchanged / residual
+- `Sm2PrivateKey::from_scalar(crypto_bigint::U256)` stays as the **opt-in**
+  `crypto-bigint-scalar` escape hatch — enabling that feature is an explicit opt-in
+  to the `crypto-bigint 0.7` type contract (documented). It is the only place a
+  `crypto-bigint` type appears in the public API, and it is off by default.
+- The committed `cargo-public-api` baseline (`docs/api-baseline/gmcrypto-core.txt`,
+  regenerated) records exactly that residual; the C ABI (`gmcrypto.h`) is unchanged
+  (the FFI never named these types).
+
 **v0.21 — v1.0 readiness audit (non-publishing assurance cycle).** No published
 crate changed: this entry covers docs + CI + dev-only changes; the workspace stays
 **0.16.0** and crates.io skips `0.21.0` (the v0.14/v0.17/v0.18/v0.19/v0.20

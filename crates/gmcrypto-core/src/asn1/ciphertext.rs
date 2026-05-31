@@ -49,10 +49,16 @@ const HASH_LEN: usize = 32;
 /// KDF-XOR'd plaintext.
 #[derive(Clone, Debug)]
 pub struct Sm2Ciphertext {
-    /// `C1.x`.
-    pub x: U256,
-    /// `C1.y`.
-    pub y: U256,
+    /// `C1.x` — 32-byte big-endian field element.
+    ///
+    /// v0.22 reshaped this from `crypto_bigint::U256` to `[u8; 32]` so the
+    /// public API names no `crypto-bigint` type (`docs/v0.22-scope.md` §3
+    /// Q22.4). The bytes are the canonical big-endian encoding of the
+    /// coordinate; [`decode`] guarantees `x < p`, but a value built directly
+    /// is **not** validated until [`crate::sm2::decrypt()`]'s on-curve check.
+    pub x: [u8; 32],
+    /// `C1.y` — 32-byte big-endian field element (see [`Sm2Ciphertext::x`]).
+    pub y: [u8; 32],
     /// `C3 = SM3(x2 || M || y2)`. Always 32 bytes.
     pub hash: [u8; HASH_LEN],
     /// `C2 = M XOR KDF(x2 || y2, |M|)`. Length matches plaintext length.
@@ -62,11 +68,9 @@ pub struct Sm2Ciphertext {
 /// Encode an [`Sm2Ciphertext`] as a GM/T 0009 SEQUENCE.
 #[must_use]
 pub fn encode(ct: &Sm2Ciphertext) -> Vec<u8> {
-    let x_be = ct.x.to_be_bytes();
-    let y_be = ct.y.to_be_bytes();
     let mut body = Vec::with_capacity(ct.ciphertext.len() + 80);
-    writer::write_integer(&mut body, &x_be);
-    writer::write_integer(&mut body, &y_be);
+    writer::write_integer(&mut body, &ct.x);
+    writer::write_integer(&mut body, &ct.y);
     writer::write_octet_string(&mut body, &ct.hash);
     writer::write_octet_string(&mut body, &ct.ciphertext);
     let mut out = Vec::with_capacity(body.len() + 4);
@@ -107,22 +111,24 @@ pub fn decode(input: &[u8]) -> Option<Sm2Ciphertext> {
 /// big-endian field element of `Fp`. Accepts zero (the canonical
 /// `02 01 00`); rejects coordinates `≥ p` so that `Fp::new` cannot
 /// silently reduce modulo `p` (which would create malleability).
-fn read_field_element(input: &[u8]) -> Option<(U256, &[u8])> {
+fn read_field_element(input: &[u8]) -> Option<([u8; 32], &[u8])> {
     let (bytes, rest) = reader::read_integer(input)?;
     if bytes.len() > 32 {
         return None;
     }
     let mut padded = [0u8; 32];
     padded[32 - bytes.len()..].copy_from_slice(bytes);
-    let value = U256::from_be_slice(&padded);
     // Reject coordinates ≥ p. C1 coordinates are public; using
     // `ConstantTimeLess` matches the rest of the crate's idiom even
-    // though no secret material flows here.
+    // though no secret material flows here. v0.22 returns the canonical
+    // `[u8; 32]` (was `U256`) but keeps this `< p` malleability bound at
+    // the decode boundary unchanged.
+    let value = U256::from_be_slice(&padded);
     let in_field: bool = value.ct_lt(Fp::MODULUS.as_ref()).into();
     if !in_field {
         return None;
     }
-    Some((value, rest))
+    Some((padded, rest))
 }
 
 #[cfg(test)]
@@ -131,12 +137,12 @@ mod tests {
 
     fn make_ct(ciphertext: Vec<u8>) -> Sm2Ciphertext {
         Sm2Ciphertext {
-            x: U256::from_be_hex(
+            x: crate::u256_to_be32(&U256::from_be_hex(
                 "1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF",
-            ),
-            y: U256::from_be_hex(
+            )),
+            y: crate::u256_to_be32(&U256::from_be_hex(
                 "FEDCBA0987654321FEDCBA0987654321FEDCBA0987654321FEDCBA0987654321",
-            ),
+            )),
             hash: [0xa5u8; 32],
             ciphertext,
         }
@@ -168,8 +174,9 @@ mod tests {
     #[test]
     fn round_trip_x_high_bit_set() {
         let mut ct = make_ct(b"x".to_vec());
-        ct.x =
-            U256::from_be_hex("FFEDCBA9876543210FEDCBA9876543210FEDCBA9876543210FEDCBA987654321");
+        ct.x = crate::u256_to_be32(&U256::from_be_hex(
+            "FFEDCBA9876543210FEDCBA9876543210FEDCBA9876543210FEDCBA987654321",
+        ));
         let der = encode(&ct);
         let decoded = decode(&der).expect("decode high-bit round-trip");
         assert_eq!(decoded.x, ct.x);
@@ -280,10 +287,10 @@ mod tests {
     #[test]
     fn round_trip_x_zero() {
         let mut ct = make_ct(b"z".to_vec());
-        ct.x = U256::ZERO;
+        ct.x = [0u8; 32];
         let der = encode(&ct);
         let decoded = decode(&der).expect("decode round-trip with x = 0");
-        assert_eq!(decoded.x, U256::ZERO);
+        assert_eq!(decoded.x, [0u8; 32]);
         assert_eq!(decoded.y, ct.y);
     }
 
@@ -325,10 +332,10 @@ mod tests {
     fn round_trip_x_p_minus_one() {
         let p_minus_one = Fp::MODULUS.as_ref().wrapping_sub(&U256::ONE);
         let mut ct = make_ct(b"q".to_vec());
-        ct.x = p_minus_one;
+        ct.x = crate::u256_to_be32(&p_minus_one);
         let der = encode(&ct);
         let decoded = decode(&der).expect("decode round-trip with x = p - 1");
-        assert_eq!(decoded.x, p_minus_one);
+        assert_eq!(decoded.x, crate::u256_to_be32(&p_minus_one));
     }
 
     /// The 0x83 length encoding boundary: a ciphertext payload exactly

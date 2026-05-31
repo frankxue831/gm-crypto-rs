@@ -67,6 +67,7 @@ use crate::sm2::private_key::Sm2PrivateKey;
 use crate::sm2::scalar_mul::mul_var;
 use crate::sm3::Sm3;
 use alloc::vec::Vec;
+use crypto_bigint::U256;
 use subtle::{Choice, ConstantTimeEq};
 use zeroize::Zeroize;
 
@@ -85,8 +86,13 @@ pub fn decrypt(private: &Sm2PrivateKey, ciphertext_der: &[u8]) -> Result<Vec<u8>
     let parsed = decode(ciphertext_der).ok_or(crate::Error::Failed)?;
 
     // 2. Construct C1 from (x1, y1). Reject off-curve.
-    let x1 = Fp::new(&parsed.x);
-    let y1 = Fp::new(&parsed.y);
+    //    v0.22: `parsed.{x,y}` are 32-byte big-endian (was `U256`); reconstruct
+    //    the field elements. `Fp::new` reduces mod p as before, and the
+    //    on-curve check below is the unchanged invalid-curve-attack defense
+    //    (the `[u8; 32]` fields are NOT inherently canonical — a caller can
+    //    build an arbitrary `Sm2Ciphertext`, so this guard stays here).
+    let x1 = Fp::new(&U256::from_be_slice(&parsed.x));
+    let y1 = Fp::new(&U256::from_be_slice(&parsed.y));
     if !point_on_curve(&x1, &y1) {
         return Err(crate::Error::Failed);
     }
@@ -240,8 +246,8 @@ mod tests {
             U256::from_be_hex("1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0");
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid d");
         let off_curve = Sm2Ciphertext {
-            x: U256::from_u64(1),
-            y: U256::from_u64(1), // (1, 1) is not on SM2
+            x: crate::u256_to_be32(&U256::from_u64(1)),
+            y: crate::u256_to_be32(&U256::from_u64(1)), // (1, 1) is not on SM2
             hash: [0u8; 32],
             ciphertext: alloc::vec![0u8; 16],
         };
