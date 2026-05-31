@@ -89,15 +89,23 @@ the design intent in isolation.
 
 ## Stability & SemVer
 
-The crate line is **pre-1.0 (0.x)**: minor releases may contain breaking changes,
-and crates.io versions can be skipped for non-publishing assurance cycles (v0.14,
-v0.17–v0.23 are infra/assurance milestones; crates.io is at **0.16.0**). The public
-API has been stable in practice since v0.5; the **v1.0 readiness audit** (v0.21)
-froze and tooling-guarded it ahead of a `1.0` commitment, the **v0.22
-API-tightening cycle** decoupled it from `crypto-bigint 0.7`, and the **v0.23
-pre-1.0 re-audit remediation cycle** applied the API/ABI-finality + hardening
-fixes from a multi-model adversarial re-audit ([`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md))
-— see [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md).
+The line graduates to **1.0 (stable)** with this release. crates.io history goes
+**0.16.0 → 1.0.0**, skipping 0.17.0–0.23.0 (those were non-publishing assurance +
+API-finalization milestones; their changes all ship together in the first stable
+`1.0.0`). The only migration is 0.16 → 1.0, a single major bump — no published 0.x
+consumer ever saw an intermediate break. The public API had been stable in
+practice since v0.5; the **v1.0 readiness audit** (v0.21) froze and tooling-guarded
+it, the **v0.22 API-tightening cycle** decoupled it from `crypto-bigint 0.7`, and
+the **v0.23 pre-1.0 re-audit remediation cycle** applied the API/ABI-finality +
+hardening fixes from a multi-model adversarial re-audit
+([`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md)) —
+see [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md).
+
+**From 1.0, SemVer is enforced**: breaking changes to the covered surface require a
+major bump, and `cargo-semver-checks` runs as the forward breaking-change gate in
+CI (the three crates always release together at one lockstep version, with
+intra-workspace deps pinned exactly — `=1.0.0`). The runtime wire output (SM2
+signatures / ciphertexts, SM4 mode bytes) is byte-identical to 0.16.0.
 
 - **What's covered by SemVer:** the public Rust API of `gmcrypto-core` (the
   surface snapshotted in [`docs/api-baseline/gmcrypto-core.txt`](docs/api-baseline/gmcrypto-core.txt),

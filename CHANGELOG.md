@@ -3,7 +3,48 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — v1.0 prep (not published)
+## [Unreleased]
+
+## [1.0.0] - 2026-06-01
+
+First **stable** release — the deliberate 1.0 publish to crates.io of all three
+crates (`gmcrypto-simd`, `gmcrypto-core`, `gmcrypto-c`) at one lockstep version,
+with the intra-workspace path-deps pinned exactly (`=1.0.0`).
+
+This graduates the v0.21 → v0.23 readiness arc: the public API is frozen and
+tooling-guarded (`cargo-public-api` baselines + enforced drift-check), the
+`crypto-bigint 0.7` types are decoupled from the always-on contract (v0.22), and a
+multi-model adversarial pre-publish re-audit (v0.23) remediated 2 API/ABI BLOCKERs
+plus a set of crypto/zeroize/doc should-fixes. From 1.0, `cargo-semver-checks`
+becomes the enforced forward breaking-change gate.
+
+The crates.io history **skips 0.17.0–0.23.0** (the non-publishing assurance +
+API-finalization cycles, detailed in the `### v0.17`–`### v0.23` subsections
+below); their changes all ship together in this first published `1.0.0`. The
+**only migration is 0.16 → 1.0** — no published 0.x consumer ever saw an
+intermediate break. The runtime wire output (SM2 signatures / ciphertexts, SM4
+mode bytes) is **byte-identical to 0.16.0** (KAT + gmssl 3.1.1 interop 11/11); the
+breaking changes are API *shape* only.
+
+**Breaking (vs the unpublished 0.16.x line):**
+- `Sm2PrivateKey::public_key()` returns `Sm2PublicKey` (was `ProjectivePoint`); the
+  raw EC point surface (`ProjectivePoint`, `sm2::point`, the bare curve arithmetic)
+  and the low-level `asn1::{reader,writer,oid}` + in-crate `traits` modules are
+  `#[doc(hidden)]` (kept `pub` for in-repo dev; not SemVer-covered). `spki` / `sec1`
+  speak `Sm2PublicKey`.
+- `asn1::{encode,decode}_sig` and `Sm2Ciphertext::{x,y}` are `[u8; 32]` (were
+  `U256`); the always-on public API names zero `crypto-bigint` types (the opt-in
+  `crypto-bigint-scalar` `from_scalar(U256)` is the one documented escape hatch).
+- SM2 `sign_with_id` / `sign_raw_with_id` / `encrypt` take the fallible
+  `rand_core::TryCryptoRng` bound; single-shot `mode_gcm::{encrypt,
+  encrypt_with_tag_len}` are now fallible (`-> Option<…>`, rejecting plaintext
+  `> 2^36−32` bytes).
+- C ABI: the SM4-GCM/CCM/XTS FFI symbols are always-on (the forwarding `sm4-aead`
+  / `sm4-xts` cargo features on `gmcrypto-c` were removed); the committed
+  `gmcrypto.h` matches a default `cargo build -p gmcrypto-c`.
+
+See `docs/v1.0-readiness.md` for the full GO checklist + publish runbook, and the
+per-cycle subsections below for the detail.
 
 **v0.23 — pre-1.0 re-audit remediation (non-publishing).** A multi-model
 adversarial pre-publish re-audit (Codex `gpt-5.5` + Grok, each finding
