@@ -35,8 +35,8 @@ env:
   # PINNED so the committed public-api baseline is reproducible: cargo-public-api
   # output is tied to the rustdoc-JSON format (= the nightly toolchain) and to the
   # tool version. Bumping either is a REVIEWED re-baseline — update both pins and
-  # regenerate docs/api-baseline/*.txt with the recipe below (also in fuzz/README
-  # / docs/v1.0-readiness.md), then confirm this workflow stays green.
+  # regenerate docs/api-baseline/*.txt with the exact command in the `public-api`
+  # job below (see also docs/v1.0-readiness.md §2), then confirm this stays green.
   PUBLIC_API_NIGHTLY: nightly-2026-05-23
   CARGO_PUBLIC_API_VERSION: 0.52.0
 

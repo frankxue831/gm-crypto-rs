@@ -13,6 +13,19 @@ We aim to acknowledge within 5 business days. There is no bug bounty.
 Only the latest released minor version receives security fixes. There is no
 LTS branch.
 
+## API stability & SemVer
+
+The crate line is pre-1.0 (0.x); the **v1.0 readiness audit** (v0.21) froze and
+CI-guarded the public surface ahead of a `1.0` commitment. The SemVer contract
+covers the public Rust API of `gmcrypto-core` (snapshotted in
+`docs/api-baseline/gmcrypto-core.txt`, drift-checked in CI) and the `gmcrypto-c`
+**C ABI** (the committed `crates/gmcrypto-c/include/gmcrypto.h`, drift-checked in
+CI). It does **not** cover any `#[doc(hidden)]` item (`sm2::sign_raw_with_id`; the
+`Sm4Cbc{Encryptor,Decryptor}::take_output` FFI-shim drains) or the **`gmcrypto-simd`**
+crate (an internal acceleration backend with no stable Rust API). See
+[`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) for the full posture, the guard
+tooling, and the load-bearing pre-1.0 decision (the `crypto-bigint`-type exposure).
+
 ## Threat model
 
 Server-side use, dedicated host, operator-trusted. Network MITM is in scope;
