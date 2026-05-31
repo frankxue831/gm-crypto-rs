@@ -168,6 +168,14 @@ impl ProjectivePoint {
     /// Fermat-invert workstream is dropped; `pow_bounded_exp` remains a
     /// fallback if a future `crypto-bigint` release regresses.
     /// See `SECURITY.md` for the full posture.
+    ///
+    /// **Not part of the public API / not covered by SemVer.** This is the one
+    /// `ProjectivePoint` method that names the internal `crypto-bigint`-typed
+    /// `Fp` (see [`crate::sm2::curve`]); v0.22 marks it `#[doc(hidden)]` so the
+    /// stable 1.0 public API names no `crypto-bigint` types. It may change or be
+    /// removed in any release. Kept `pub` for in-crate + in-repo dev use; the
+    /// high-level byte-shaped key/point output is `Sm2PublicKey::to_sec1_uncompressed`.
+    #[doc(hidden)]
     #[must_use]
     pub fn to_affine(&self) -> Option<(Fp, Fp)> {
         let z_inv: subtle::CtOption<Fp> = self.z.invert().into();
