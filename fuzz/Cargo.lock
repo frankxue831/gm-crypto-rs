@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "gmcrypto-core"
-version = "0.13.0"
+version = "0.16.0"
 dependencies = [
  "crypto-bigint",
  "gmcrypto-simd",
@@ -132,7 +132,7 @@ dependencies = [
 
 [[package]]
 name = "gmcrypto-simd"
-version = "0.13.0"
+version = "0.16.0"
 dependencies = [
  "cpufeatures",
 ]

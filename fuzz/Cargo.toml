@@ -144,5 +144,21 @@ test = false
 doc = false
 bench = false
 
+# v0.20 — streaming-decryptor DIFFERENTIAL targets: streaming (fed in arbitrary
+# chunks) must byte-equal the single-shot oracle for every input.
+[[bin]]
+name = "fuzz_sm4_cbc_streaming_decrypt"
+path = "fuzz_targets/fuzz_sm4_cbc_streaming_decrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm4_gcm_streaming_decrypt"
+path = "fuzz_targets/fuzz_sm4_gcm_streaming_decrypt.rs"
+test = false
+doc = false
+bench = false
+
 # v0.14 — its own workspace so it is excluded from the parent.
 [workspace]
