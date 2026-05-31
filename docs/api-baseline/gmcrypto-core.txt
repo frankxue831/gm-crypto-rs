@@ -4,8 +4,8 @@ pub mod gmcrypto_core::asn1::ciphertext
 pub struct gmcrypto_core::asn1::ciphertext::Sm2Ciphertext
 pub gmcrypto_core::asn1::ciphertext::Sm2Ciphertext::ciphertext: alloc::vec::Vec<u8>
 pub gmcrypto_core::asn1::ciphertext::Sm2Ciphertext::hash: [u8; 32]
-pub gmcrypto_core::asn1::ciphertext::Sm2Ciphertext::x: crypto_bigint::uint::U256
-pub gmcrypto_core::asn1::ciphertext::Sm2Ciphertext::y: crypto_bigint::uint::U256
+pub gmcrypto_core::asn1::ciphertext::Sm2Ciphertext::x: [u8; 32]
+pub gmcrypto_core::asn1::ciphertext::Sm2Ciphertext::y: [u8; 32]
 pub fn gmcrypto_core::asn1::ciphertext::decode(&[u8]) -> core::option::Option<gmcrypto_core::asn1::ciphertext::Sm2Ciphertext>
 pub fn gmcrypto_core::asn1::ciphertext::encode(&gmcrypto_core::asn1::ciphertext::Sm2Ciphertext) -> alloc::vec::Vec<u8>
 pub mod gmcrypto_core::asn1::oid
@@ -40,8 +40,8 @@ pub fn gmcrypto_core::asn1::reader::read_sequence(&[u8]) -> core::option::Option
 pub fn gmcrypto_core::asn1::reader::read_tag(&[u8], u8) -> core::option::Option<&[u8]>
 pub fn gmcrypto_core::asn1::reader::read_tlv(&[u8], u8) -> core::option::Option<(&[u8], &[u8])>
 pub mod gmcrypto_core::asn1::sig
-pub fn gmcrypto_core::asn1::sig::decode_sig(&[u8]) -> core::option::Option<(crypto_bigint::uint::U256, crypto_bigint::uint::U256)>
-pub fn gmcrypto_core::asn1::sig::encode_sig(&crypto_bigint::uint::U256, &crypto_bigint::uint::U256) -> alloc::vec::Vec<u8>
+pub fn gmcrypto_core::asn1::sig::decode_sig(&[u8]) -> core::option::Option<([u8; 32], [u8; 32])>
+pub fn gmcrypto_core::asn1::sig::encode_sig(&[u8; 32], &[u8; 32]) -> alloc::vec::Vec<u8>
 pub mod gmcrypto_core::asn1::writer
 pub fn gmcrypto_core::asn1::writer::write_bit_string(&mut alloc::vec::Vec<u8>, u8, &[u8])
 pub fn gmcrypto_core::asn1::writer::write_context_tagged_explicit(&mut alloc::vec::Vec<u8>, u8, &[u8])
@@ -52,8 +52,8 @@ pub fn gmcrypto_core::asn1::writer::write_null(&mut alloc::vec::Vec<u8>)
 pub fn gmcrypto_core::asn1::writer::write_octet_string(&mut alloc::vec::Vec<u8>, &[u8])
 pub fn gmcrypto_core::asn1::writer::write_oid(&mut alloc::vec::Vec<u8>, &[u8])
 pub fn gmcrypto_core::asn1::writer::write_sequence(&mut alloc::vec::Vec<u8>, &[u8])
-pub fn gmcrypto_core::asn1::decode_sig(&[u8]) -> core::option::Option<(crypto_bigint::uint::U256, crypto_bigint::uint::U256)>
-pub fn gmcrypto_core::asn1::encode_sig(&crypto_bigint::uint::U256, &crypto_bigint::uint::U256) -> alloc::vec::Vec<u8>
+pub fn gmcrypto_core::asn1::decode_sig(&[u8]) -> core::option::Option<([u8; 32], [u8; 32])>
+pub fn gmcrypto_core::asn1::encode_sig(&[u8; 32], &[u8; 32]) -> alloc::vec::Vec<u8>
 pub mod gmcrypto_core::hmac
 pub struct gmcrypto_core::hmac::HmacSm3
 impl gmcrypto_core::hmac::HmacSm3
@@ -104,19 +104,6 @@ pub fn gmcrypto_core::sec1::EcPrivateKey::drop(&mut self)
 pub fn gmcrypto_core::sec1::decode(&[u8]) -> core::option::Option<gmcrypto_core::sec1::EcPrivateKey>
 pub fn gmcrypto_core::sec1::encode(&[u8; 32], core::option::Option<&[u8; 65]>) -> alloc::vec::Vec<u8>
 pub mod gmcrypto_core::sm2
-pub mod gmcrypto_core::sm2::curve
-pub struct gmcrypto_core::sm2::curve::NMod
-impl crypto_bigint::modular::const_monty_form::ConstMontyParams<{ <$uint_type>::LIMBS }> for gmcrypto_core::sm2::curve::NMod
-pub const gmcrypto_core::sm2::curve::NMod::LIMBS: usize
-pub const gmcrypto_core::sm2::curve::NMod::PARAMS: crypto_bigint::modular::monty_params::FixedMontyParams<{ U256::LIMBS }>
-pub struct gmcrypto_core::sm2::curve::PMod
-impl crypto_bigint::modular::const_monty_form::ConstMontyParams<{ <$uint_type>::LIMBS }> for gmcrypto_core::sm2::curve::PMod
-pub const gmcrypto_core::sm2::curve::PMod::LIMBS: usize
-pub const gmcrypto_core::sm2::curve::PMod::PARAMS: crypto_bigint::modular::monty_params::FixedMontyParams<{ U256::LIMBS }>
-pub const fn gmcrypto_core::sm2::curve::b() -> gmcrypto_core::sm2::curve::Fp
-pub fn gmcrypto_core::sm2::curve::b3() -> gmcrypto_core::sm2::curve::Fp
-pub type gmcrypto_core::sm2::curve::Fn = crypto_bigint::modular::const_monty_form::ConstMontyForm<gmcrypto_core::sm2::curve::NMod, { U256::LIMBS }>
-pub type gmcrypto_core::sm2::curve::Fp = crypto_bigint::modular::const_monty_form::ConstMontyForm<gmcrypto_core::sm2::curve::PMod, { U256::LIMBS }>
 pub mod gmcrypto_core::sm2::decrypt
 pub fn gmcrypto_core::sm2::decrypt::decrypt(&gmcrypto_core::sm2::private_key::Sm2PrivateKey, &[u8]) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
 pub mod gmcrypto_core::sm2::encrypt
@@ -130,7 +117,6 @@ pub const fn gmcrypto_core::sm2::point::ProjectivePoint::generator() -> Self
 pub const fn gmcrypto_core::sm2::point::ProjectivePoint::identity() -> Self
 pub fn gmcrypto_core::sm2::point::ProjectivePoint::is_identity(&self) -> subtle::Choice
 pub fn gmcrypto_core::sm2::point::ProjectivePoint::neg(&self) -> Self
-pub fn gmcrypto_core::sm2::point::ProjectivePoint::to_affine(&self) -> core::option::Option<(gmcrypto_core::sm2::curve::Fp, gmcrypto_core::sm2::curve::Fp)>
 impl core::convert::From<gmcrypto_core::sm2::point::ProjectivePoint> for gmcrypto_core::sm2::public_key::Sm2PublicKey
 pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::from(gmcrypto_core::sm2::point::ProjectivePoint) -> Self
 impl subtle::ConditionallySelectable for gmcrypto_core::sm2::point::ProjectivePoint
@@ -165,9 +151,6 @@ pub const gmcrypto_core::sm2::raw_ciphertext::C3_LEN: usize
 pub fn gmcrypto_core::sm2::raw_ciphertext::decode_c1c2c3_legacy(&[u8]) -> core::option::Option<gmcrypto_core::asn1::ciphertext::Sm2Ciphertext>
 pub fn gmcrypto_core::sm2::raw_ciphertext::decode_c1c3c2(&[u8]) -> core::option::Option<gmcrypto_core::asn1::ciphertext::Sm2Ciphertext>
 pub fn gmcrypto_core::sm2::raw_ciphertext::encode_c1c3c2(&gmcrypto_core::asn1::ciphertext::Sm2Ciphertext) -> alloc::vec::Vec<u8>
-pub mod gmcrypto_core::sm2::scalar_mul
-pub fn gmcrypto_core::sm2::scalar_mul::mul_g(&gmcrypto_core::sm2::curve::Fn) -> gmcrypto_core::sm2::point::ProjectivePoint
-pub fn gmcrypto_core::sm2::scalar_mul::mul_var(&gmcrypto_core::sm2::curve::Fn, &gmcrypto_core::sm2::point::ProjectivePoint) -> gmcrypto_core::sm2::point::ProjectivePoint
 pub mod gmcrypto_core::sm2::sign
 pub const gmcrypto_core::sm2::sign::DEFAULT_SIGNER_ID: &[u8; 16]
 pub const gmcrypto_core::sm2::sign::MAX_ID_LEN: usize
@@ -183,7 +166,6 @@ pub const fn gmcrypto_core::sm2::point::ProjectivePoint::generator() -> Self
 pub const fn gmcrypto_core::sm2::point::ProjectivePoint::identity() -> Self
 pub fn gmcrypto_core::sm2::point::ProjectivePoint::is_identity(&self) -> subtle::Choice
 pub fn gmcrypto_core::sm2::point::ProjectivePoint::neg(&self) -> Self
-pub fn gmcrypto_core::sm2::point::ProjectivePoint::to_affine(&self) -> core::option::Option<(gmcrypto_core::sm2::curve::Fp, gmcrypto_core::sm2::curve::Fp)>
 impl core::convert::From<gmcrypto_core::sm2::point::ProjectivePoint> for gmcrypto_core::sm2::public_key::Sm2PublicKey
 pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::from(gmcrypto_core::sm2::point::ProjectivePoint) -> Self
 impl subtle::ConditionallySelectable for gmcrypto_core::sm2::point::ProjectivePoint
@@ -214,13 +196,9 @@ pub const gmcrypto_core::sm2::DEFAULT_SIGNER_ID: &[u8; 16]
 pub fn gmcrypto_core::sm2::compute_z(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8]) -> [u8; 32]
 pub fn gmcrypto_core::sm2::decrypt(&gmcrypto_core::sm2::private_key::Sm2PrivateKey, &[u8]) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
 pub fn gmcrypto_core::sm2::encrypt<R: rand_core::CryptoRng + rand_core::Rng>(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8], &mut R) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
-pub fn gmcrypto_core::sm2::mul_g(&gmcrypto_core::sm2::curve::Fn) -> gmcrypto_core::sm2::point::ProjectivePoint
-pub fn gmcrypto_core::sm2::mul_var(&gmcrypto_core::sm2::curve::Fn, &gmcrypto_core::sm2::point::ProjectivePoint) -> gmcrypto_core::sm2::point::ProjectivePoint
 pub fn gmcrypto_core::sm2::sign_with_id<R: rand_core::CryptoRng + rand_core::Rng>(&gmcrypto_core::sm2::private_key::Sm2PrivateKey, &[u8], &[u8], &mut R) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
 pub fn gmcrypto_core::sm2::verify_with_id(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8], &[u8], &[u8]) -> bool
 pub type gmcrypto_core::sm2::Error = gmcrypto_core::Error
-pub type gmcrypto_core::sm2::Fn = crypto_bigint::modular::const_monty_form::ConstMontyForm<gmcrypto_core::sm2::curve::NMod, { U256::LIMBS }>
-pub type gmcrypto_core::sm2::Fp = crypto_bigint::modular::const_monty_form::ConstMontyForm<gmcrypto_core::sm2::curve::PMod, { U256::LIMBS }>
 pub mod gmcrypto_core::sm3
 pub struct gmcrypto_core::sm3::Sm3
 impl gmcrypto_core::sm3::Sm3

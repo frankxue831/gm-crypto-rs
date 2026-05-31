@@ -1,6 +1,49 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3/SM4 SDK. **v0.21 — v1.0 readiness audit (non-publishing) — API/SemVer
+Pure-Rust SM2/SM3/SM4 SDK. **v0.22 — API-tightening: decouple `crypto-bigint 0.7`
+from the 1.0 public API (non-publishing, on `main`)** — resolved the v0.21 audit's
+headline §3.A finding (the always-on public API named `crypto-bigint 0.7` types) via
+**Option 2 (tighten the surface)**. After v0.22 the **always-on (default-features)
+public API names ZERO `crypto-bigint` types**. Three groups: **Group A** — the
+low-level SM2 curve arithmetic is now `#[doc(hidden)]` (kept `pub`): the whole
+`sm2::curve` module (`Fn`/`Fp`/`NMod`/`PMod`/`b`/`b3` — module-level hiding also covers
+the macro-generated `NMod`/`PMod`), the whole `sm2::scalar_mul` (`mul_g`/`mul_var`), the
+`sm2::{Fn,Fp,mul_g,mul_var}` re-exports, and `ProjectivePoint::to_affine`, each with a
+"not public API / not SemVer; may change in any release" contract — kept `pub` only so
+the in-repo dudect bench / integration tests / fuzz reach them cross-crate (the v0.21
+`gmcrypto-simd` precedent). **Group B** — the always-on byte-adjacent public types
+reshaped from `U256` to `[u8;32]` **byte-output-identically**: `asn1::sig::{encode,
+decode}_sig` (+ `asn1::` re-exports) and `asn1::ciphertext::Sm2Ciphertext::{x,y}`; the
+DER/raw wire format + all strict-canonical / zero / `< p` / on-curve rejects are
+unchanged (`decode_sig` keeps its rejects, `verify` reconstructs `U256` for the
+`r!=0`/`r<n`/`Fn::new`/`t!=0` checks; `decrypt` keeps the on-curve guard since the
+public `[u8;32]` fields are caller-constructible / not inherently canonical). A new
+`pub(crate)` `lib.rs` helper `u256_to_be32` pins the `U256 -> [u8;32]` conversion
+(crypto-bigint's `to_be_bytes` returns `EncodedUint`, not `[u8;32]`). **Group C** —
+`ProjectivePoint` stays **public + unchanged** (it names no `crypto-bigint` type once
+`to_affine` is hidden, so the high-level key path `public_key`/`from_point`/`spki`/`sec1`
+is untouched; decouple-only, NOT point-type removal). **The one residual:** the
+**opt-in** `crypto-bigint-scalar` feature's `Sm2PrivateKey::from_scalar(U256)` stays as a
+**documented escape hatch** (enabling the feature is an explicit opt-in to the
+`crypto-bigint 0.7` type contract; off by default). The committed (`--all-features`)
+`cargo-public-api` baseline (`docs/api-baseline/gmcrypto-core.txt`, regenerated with the
+pinned `cargo-public-api 0.52.0` + `nightly-2026-05-23`) records **exactly** that
+residual and nothing else `crypto-bigint`-typed; an ad-hoc **default-features** run greps
+**zero**. The C ABI is unchanged (the FFI never named these types — `gmcrypto.h`
+drift-check stays green; 65 `c_smoke` pass). **Verified byte-identical:** full KAT +
+gmssl 3.1.1 interop **11/11** + 248 core / full-workspace tests; per-feature clippy +
+fmt + `cargo doc` + 18 fuzz targets + MSRV-1.85 + wasm32 + `--no-default-features`.
+**Repository / infra-assurance milestone, NOT a crates.io release** — the breaking
+API-*shape* change ships with the deliberate `1.0.0` publish; it never reaches a
+published 0.x crate, so no 0.x consumer sees the break (the only migration is
+0.16 → 1.0, a major bump anyway). Workspace stays **0.16.0**; crates.io skips `0.22.0`
+(the v0.14/v0.17/v0.18/v0.19/v0.20/v0.21 precedent). `docs/v1.0-readiness.md` §3.A now
+flips to **GO** — nothing pre-1.0 remains outstanding. Forks settled before planning:
+depth = decouple-only (keep `ProjectivePoint` public); escape hatch = keep `from_scalar`
+documented opt-in; posture = non-publishing — all three **Codex-confirmed**
+(`codex exec --sandbox read-only`, gpt-5.5). Per `docs/v0.22-scope.md` Q22.1–Q22.8,
+codex-reviewed W0–W3.
+**Earlier — v0.21 — v1.0 readiness audit (non-publishing) — API/SemVer
 freeze + CI guards + docs freeze (on `main`)** — locked + tooling-guarded the public API
 ahead of a `1.0` commitment, **without** the irreversible publish. New
 `.github/workflows/api-stability.yml` (4 legs): a committed **`cargo-public-api`
@@ -313,8 +356,9 @@ v0.18 = dudect-gate hardening (pin the dudect CI workflows' drift axes — `ubun
 v0.19 = self-calibrating relative dudect gate — **TESTED and FALSIFIED → honest fallback** (per `docs/v0.19-scope.md` Q19.1–Q19.7 + `docs/v0.5-dudect-recalibration.md` v0.19 resolution). Added two fix-vs-fix noise-floor probes (`noise_floor_fn_invert`/`noise_floor_fp_invert`: same `Fn`/`Fp` `invert` as the suspect, but both dudect classes get one identical input → pure measurement noise, cannot leak) + a CI relative gate `median(target) ≤ max(0.20, 4·median(probe))` intended to re-promote `ct_fn_invert`/`ct_fp_invert`. The 100K calibration falsified the matched-sensitivity premise: the probes stayed uniformly quiet (~0.005) while the class-split targets spiked to [0.26–0.32] (`ct_fp_invert` median 0.2606 on the simd leg, ratio 50) — the runner noise is in the **two-input class-split difference**, not the operation duration a same-input probe sees, so the probe can't track it and the relative threshold pins at the 0.20 the noise already breaks. Fallback (Q19.5): relative gate → non-blocking `REL-TELEMETRY`; `ct_fn_invert`/`ct_fp_invert` revert to telemetry (PR) / sentinel @0.55 (nightly, sole gate again); probes KEPT as telemetry (evidence the noise is class-split-specific → input to v0.20). **Infra-assurance milestone, NOT a crates.io release** — only the dev-only bench harness changed, workspace stays 0.16.0, crates.io skips 0.19.0 (the v0.14/v0.17/v0.18 precedent); PR #78 (probes + relative gate) + resolution follow-up (relative gate → telemetry + docs), codex-reviewed.
 v0.20 = streaming-decryptor differential fuzzing + `cargo fuzz coverage` + codified v1.0 CT baseline (per `docs/v0.20-scope.md` Q20.1–Q20.5; theme chosen after a Codex+Grok strategy discussion — one more assurance cycle over a 3rd dudect cycle / over new features). Two new libFuzzer targets (`fuzz_sm4_cbc_streaming_decrypt`/`fuzz_sm4_gcm_streaming_decrypt`) assert the streaming decryptors (`Sm4CbcDecryptor`/`Sm4GcmDecryptor`), fed in arbitrary chunk boundaries, are byte-identical to the single-shot `mode_{cbc,gcm}::decrypt` oracle — a **differential** invariant stronger than v0.14's no-panic (catches the CBC buffer-back-by-one PKCS#7 boundary + the GCM commit-on-verify GHASH accumulator); fuzz sweep → **18 targets**; initial sweep zero crashes + zero divergences. New **non-gating `cargo fuzz coverage`** nightly job (per-target llvm-cov TOTALS artifact; report-as-deliverable, no %-gate). Codified the settled v1.0 constant-time baseline in `SECURITY.md` (Option 2: composite dudect targets gated `|tau|<0.20`; the two single-inversion diagnostics stay telemetry/sentinel @0.55 — the v0.19 falsification is the evidence — with a **narrow revisit door**: a class-split-twin without the inversion op, or offline/dedicated HW, never public self-hosted CI). **Infra-assurance milestone, NOT a crates.io release** — only the workspace-excluded `fuzz/` crate + `fuzz-nightly.yml` + docs changed; published library byte-unchanged, workspace stays 0.16.0, crates.io skips 0.20.0 (the v0.14/v0.17/v0.18/v0.19 precedent); codex-reviewed W0–W2.
 v0.21 = v1.0 readiness audit (non-publishing) — froze + CI-guarded the public API ahead of a 1.0 commitment. New `.github/workflows/api-stability.yml` (4 legs): committed `cargo-public-api` baselines (`docs/api-baseline/*.txt`) + an **enforced drift-check** (pinned `cargo-public-api 0.52.0` + `nightly-2026-05-23`; the cbindgen-header pattern), `cargo-semver-checks` (**informational** pre-1.0; enforced forward gate from 1.0), `cargo doc -D warnings -A rustdoc::private_intra_doc_links`, and a `--no-default-features`/`--all-features` matrix. Finalized the `#[doc(hidden)]` surface (**Option A**: doc-attributes + tests only, **no behavior change**): "not public / not SemVer" notes on the 3 core hidden items (`sm2::sign_raw_with_id`; the two `Sm4Cbc{Encryptor,Decryptor}::take_output`) + `#[doc(hidden)]` on the whole `gmcrypto-simd` surface (kept `pub` for cross-crate use; "no stable Rust API, internal backend") so the baseline records the intended-1.0 surface; existence tests (`tests/api_surface.rs`, `tests/internal_surface.rs`). Froze docs (README **Stability & SemVer**, SECURITY cross-ref, CHANGELOG `[Unreleased]`, **`docs/v1.0-readiness.md`** GO/NO-GO + publish runbook). **Headline finding:** the always-on public API names `crypto-bigint 0.7` types (`asn1::{en,de}code_sig`, `Sm2Ciphertext`, the `curve`/`point`/`scalar_mul` surface) — a load-bearing decision to resolve before 1.0 (`docs/v1.0-readiness.md` §3.A; likely a focused pre-1.0 API-tightening cycle). Forks: publish posture = non-publishing (maintainer); finalization depth = Option A (Codex). Non-publishing (workspace stays 0.16.0; crates.io skips 0.21.0 — the v0.14/v0.17/v0.18/v0.19/v0.20 precedent); per `docs/v0.21-scope.md` Q21.1–Q21.9, codex-reviewed W0–W3.
-v1.0 = the deliberate crates.io publish AFTER the §3.A decision (resolve crypto-bigint exposure; bump 0.16.0→1.0.0 with exact `=1.0.0` sibling pins; publish `gmcrypto-simd → core → c`; flip `cargo-semver-checks` to enforced) — runbook in `docs/v1.0-readiness.md` §4.
-post-1.0 / deferred = class-split-aware "noise-twin" dudect reference (the only design that could re-promote `ct_fn_invert`/`ct_fp_invert`) + round-trip/differential parser fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + AVX-512 sbox_x64 + CCM buffered input + the recurring `dudect-nightly` default+full leg-cancellation CI-health fix. (NB: the §3.A crypto-bigint-exposure decision + any surface-tightening is **pre-1.0**, not post-1.0 — see the `v1.0 =` line above.)
+v0.22 = API-tightening — decouple `crypto-bigint 0.7` from the 1.0 public API (resolves the v0.21 §3.A finding via Option 2). The **always-on (default-features) public API names ZERO `crypto-bigint` types**. **Group A** — `#[doc(hidden)]` (kept `pub`) the low-level SM2 curve arithmetic: the whole `sm2::curve` module (`Fn`/`Fp`/`NMod`/`PMod`/`b`/`b3`; module-level hiding covers the macro-generated `NMod`/`PMod`), the whole `sm2::scalar_mul` (`mul_g`/`mul_var`), the `sm2::{Fn,Fp,mul_g,mul_var}` re-exports, and `ProjectivePoint::to_affine` — each with a "not public API / not SemVer" contract, kept `pub` only so in-repo dev crates (dudect bench / tests / fuzz) reach them (the v0.21 `gmcrypto-simd` precedent); pinned by `tests/api_surface.rs` `const _` existence assertions. **Group B** — reshape `asn1::sig::{encode,decode}_sig` (+ `asn1::` re-exports) and `asn1::ciphertext::Sm2Ciphertext::{x,y}` from `U256` to `[u8;32]`, **byte-output-identical** (DER/raw wire + all strict-canonical/zero/`<p`/on-curve rejects unchanged; `verify` reconstructs `U256` for its numeric checks; `decrypt` keeps the on-curve guard since the public `[u8;32]` fields are caller-constructible). New `pub(crate)` `lib.rs` helper `u256_to_be32` pins the conversion (crypto-bigint `to_be_bytes` → `EncodedUint`, not `[u8;32]`). **Group C** — `ProjectivePoint` stays public + unchanged (decouple-only, NOT point-type removal). **Residual:** the opt-in `crypto-bigint-scalar` `Sm2PrivateKey::from_scalar(U256)` (documented escape hatch; off by default) — the committed `--all-features` baseline records exactly that, an ad-hoc default-features run greps zero. C ABI unchanged (FFI never named these types; 65 c_smoke pass). **Infra-assurance milestone, NOT a crates.io release** — the breaking API-*shape* change ships with the 1.0 publish (never a published 0.x crate); workspace stays 0.16.0, crates.io skips 0.22.0 (the v0.14/v0.17–v0.21 precedent). Verified byte-identical (KAT + gmssl 11/11 + full workspace + clippy/fmt/doc + 18 fuzz + MSRV + wasm32). Forks (all Codex-confirmed): depth=decouple-only, escape-hatch=keep-documented, posture=non-publishing. Per `docs/v0.22-scope.md` Q22.1–Q22.8, codex-reviewed W0–W3.
+v1.0 = the deliberate crates.io publish AFTER the §3.A decision (**resolved in v0.22** — crypto-bigint decoupled; bump 0.16.0→1.0.0 with exact `=1.0.0` sibling pins; publish `gmcrypto-simd → core → c`; flip `cargo-semver-checks` to enforced) — runbook in `docs/v1.0-readiness.md` §4.
+post-1.0 / deferred = class-split-aware "noise-twin" dudect reference (the only design that could re-promote `ct_fn_invert`/`ct_fp_invert`) + round-trip/differential parser fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + AVX-512 sbox_x64 + CCM buffered input + the recurring `dudect-nightly` default+full leg-cancellation CI-health fix. (NB: the §3.A crypto-bigint-exposure decision was **pre-1.0** and is now **resolved in v0.22** — see the `v0.22 =`/`v1.0 =` lines above; nothing pre-1.0 remains outstanding.)
 
 Read `README.md`, `SECURITY.md`, `CONTRIBUTING.md` for the user-facing posture.
 This file lists the constraints a coding agent will violate by default.
@@ -675,8 +719,9 @@ docs/
   v0.8-ccm-kat-sourcing.md      # v0.8 W0 — sourcing decision for SM4-CCM KAT vectors (OpenSSL 3.x EVP `SM4-CCM`; gmssl 3.1.1 lacks `-ccm`); embedded C harness + parametric coverage matrix
   v0.14-scope.md                # v0.14 W0 — parser-fuzzing scope (Q14.1–Q14.12, codex-reviewed); 16 cargo-fuzz targets over the untrusted-input decode/decrypt surface; assurance-only (clean run ⇒ no crates.io release per Q14.11); §6 v0.15 candidate Q-list
   v0.21-scope.md                # v0.21 W0 — v1.0-readiness-audit scope (Q21.1–Q21.9, codex-reviewed); non-publishing; Option A finalization; the public-api/semver-checks/cargo-doc guard set
-  v1.0-readiness.md             # v0.21 W3 — the GO/NO-GO readiness report + the 1.0.0 publish runbook; §3.A = the headline crypto-bigint-exposure decision to resolve before 1.0
-  api-baseline/                 # v0.21 — committed cargo-public-api baselines (gmcrypto-core.txt = full surface; gmcrypto-simd.txt = `pub mod gmcrypto_simd` only); the drift-check contract regenerated by api-stability.yml
+  v0.22-scope.md                # v0.22 W0 — API-tightening scope (Q22.1–Q22.8, codex-reviewed); resolves §3.A via Option 2 (decouple crypto-bigint); three-group map (A doc-hidden / B reshaped to [u8;32] / C kept-public ProjectivePoint); non-publishing
+  v1.0-readiness.md             # v0.21 W3 (updated v0.22) — the GO/NO-GO readiness report + the 1.0.0 publish runbook; §3.A = the crypto-bigint-exposure decision, now RESOLVED in v0.22 (status flipped to GO)
+  api-baseline/                 # v0.21 — committed cargo-public-api baselines (gmcrypto-core.txt = full surface; gmcrypto-simd.txt = `pub mod gmcrypto_simd` only); the drift-check contract regenerated by api-stability.yml. v0.22 regenerated gmcrypto-core.txt: Group-A curve/scalar items removed, Group-B sig/ciphertext reshaped to [u8;32], only the gated from_scalar(U256) residual remains crypto-bigint-typed
   (scope docs for v0.9–v0.13 + v0.15–v0.20 live alongside; not all relisted here)
 ```
 

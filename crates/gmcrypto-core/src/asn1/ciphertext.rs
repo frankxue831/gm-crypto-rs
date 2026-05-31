@@ -55,7 +55,7 @@ pub struct Sm2Ciphertext {
     /// public API names no `crypto-bigint` type (`docs/v0.22-scope.md` §3
     /// Q22.4). The bytes are the canonical big-endian encoding of the
     /// coordinate; [`decode`] guarantees `x < p`, but a value built directly
-    /// is **not** validated until [`crate::sm2::decrypt`]'s on-curve check.
+    /// is **not** validated until [`crate::sm2::decrypt()`]'s on-curve check.
     pub x: [u8; 32],
     /// `C1.y` — 32-byte big-endian field element (see [`Sm2Ciphertext::x`]).
     pub y: [u8; 32],
