@@ -35,11 +35,13 @@
 //! # Failure-mode invariant
 //!
 //! [`encrypt`] returns `Result<Vec<u8>, crate::Error>` with a single
-//! `Failed` variant — collapses every retry-budget-exhausted, identity-
-//! point, or KDF-zero outcome to one uninformative shape. With a
-//! [`CryptoRng`], the cumulative-failure probability is `≤ 2^-512` per
-//! call across all plaintext lengths (1-byte through arbitrary), per
-//! the [`ENCRYPT_RETRY_BUDGET`] table — i.e. never observed in
+//! `Failed` variant — collapses every nonce-sampler-exhausted, KDF-zero-
+//! retry-exhausted, identity-point, or RNG-failure outcome to one
+//! uninformative shape. With a [`rand_core::TryCryptoRng`] the dominant
+//! spurious-failure term is the fixed-budget nonce sampler exhausting all
+//! `NONCE_SAMPLE_BUDGET` draws (≈ `2^-128`; v0.23 fails closed here rather
+//! than encrypting under a dummy nonce); the KDF-zero retry adds a far
+//! smaller term (`≤ 2^-512` for plaintext ≥ 4 bytes). Never observed in
 //! practice.
 //!
 //! # Constant-time stance
@@ -61,7 +63,7 @@ use crate::sm2::sign::sample_nonzero_scalar;
 use crate::sm3::{DIGEST_SIZE, Sm3};
 use alloc::vec::Vec;
 use crypto_bigint::U256;
-use rand_core::{CryptoRng, Rng};
+use rand_core::TryCryptoRng;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
@@ -90,17 +92,27 @@ const ENCRYPT_RETRY_BUDGET: usize = 64;
 /// Encrypt `plaintext` to recipient `public`, returning a GM/T 0009
 /// DER-encoded ciphertext.
 ///
-/// `rng` must be a [`CryptoRng`]. With a CSPRNG, encrypt failure
-/// probability is `≤ 2^-512` for any plaintext length — see the
+/// `rng` must be a [`rand_core::TryCryptoRng`] (the fallible
+/// cryptographic-RNG trait). With a CSPRNG, encrypt failure probability
+/// is `≤ 2^-512` for any plaintext length — see the
 /// [`ENCRYPT_RETRY_BUDGET`] table for the per-length math.
+///
+/// # RNG bound
+///
+/// `R: TryCryptoRng` is the **fallible** `rand_core` cryptographic-RNG
+/// trait. This is a deliberate ecosystem coupling: `rand_core` is the
+/// interop point for RNGs, and the fallible bound gives a defined,
+/// no-panic path when the RNG fails (the error collapses to `Failed`).
 ///
 /// # Errors
 ///
 /// Returns [`crate::Error::Failed`] if the recipient public key is the
 /// identity point (a malicious caller could construct one via
-/// [`Sm2PublicKey::from_point`]) or if every retry produced an
-/// all-zeros KDF output.
-pub fn encrypt<R: CryptoRng + Rng>(
+/// [`Sm2PublicKey::from_point`]), if the supplied RNG fails (collapsed
+/// to `Failed`, never a panic), if `plaintext.len()` exceeds the SM2
+/// KDF counter ceiling ([`KDF_MAX_OUTPUT`]), or if every retry produced
+/// an all-zeros KDF output.
+pub fn encrypt<R: TryCryptoRng>(
     public: &Sm2PublicKey,
     plaintext: &[u8],
     rng: &mut R,
@@ -108,8 +120,26 @@ pub fn encrypt<R: CryptoRng + Rng>(
     if bool::from(public.point().is_identity()) {
         return Err(crate::Error::Failed);
     }
+    // B-5 (v0.23): SM2's KDF uses a `u32` block counter. Past
+    // `32·(2^32−1)` output bytes the counter wraps and the KDF stream
+    // repeats. Unreachable at sane sizes (≈137 GB); guard anyway since
+    // `encrypt` is already fallible.
+    if plaintext.len() as u64 > KDF_MAX_OUTPUT {
+        return Err(crate::Error::Failed);
+    }
     for _ in 0..ENCRYPT_RETRY_BUDGET {
-        let k = sample_nonzero_scalar(rng);
+        // `None` is an RNG failure (public) → `Failed`. `sample_ok == 0`
+        // is the (≈2^-128) budget-exhaustion case: `k` is then a dummy
+        // and MUST NOT be used to encrypt, so we fail closed. Unlike the
+        // signing path (dudect-gated, fully masked), the SM2 encrypt path
+        // is not constant-time-gated and this exhaustion check is a benign
+        // fail-closed reject (see `docs/v1.0-reaudit.md` B-9/B-10).
+        let Some((k, sample_ok)) = sample_nonzero_scalar(rng) else {
+            return Err(crate::Error::Failed);
+        };
+        if !bool::from(sample_ok) {
+            return Err(crate::Error::Failed);
+        }
         if let Some(ct) = try_encrypt_once(public, plaintext, &k) {
             return Ok(encode(&ct));
         }
@@ -173,6 +203,14 @@ fn try_encrypt_once(public: &Sm2PublicKey, plaintext: &[u8], k: &Fn) -> Option<S
     })
 }
 
+/// Maximum SM2 KDF output length in bytes before the `u32` block
+/// counter wraps (B-5, v0.23). The KDF emits 32-byte SM3 blocks indexed
+/// by a `u32` counter `1..=2^32−1`, so the largest non-wrapping output
+/// is `32·(2^32−1)` bytes (≈ 137 GB). Callers guard `plaintext` /
+/// `ciphertext` lengths against this before invoking [`kdf`]; the bound
+/// is unreachable at any realistic SM2 payload size.
+pub(super) const KDF_MAX_OUTPUT: u64 = 32 * ((1u64 << 32) - 1);
+
 /// SM3 counter-mode KDF per GB/T 32918.4 §5.4.3.
 ///
 /// Writes `output.len()` bytes of derived material into `output` from
@@ -193,7 +231,12 @@ pub(super) fn kdf(z: &[u8], output: &mut [u8]) {
         let copy_len = block_remaining.min(DIGEST_SIZE);
         output[written..written + copy_len].copy_from_slice(&digest[..copy_len]);
         written += copy_len;
-        counter += 1;
+        // `wrapping_add` so the post-increment after the final block (which
+        // is never read — the loop exits on `written == output.len()`)
+        // cannot debug-overflow at the `KDF_MAX_OUTPUT` boundary. Callers
+        // already reject `output.len() > KDF_MAX_OUTPUT`, so no in-spec
+        // output ever consumes a wrapped counter.
+        counter = counter.wrapping_add(1);
     }
 }
 
@@ -358,7 +401,7 @@ mod tests {
     #[test]
     fn encrypt_rejects_identity_pubkey() {
         let pk = Sm2PublicKey::from_point(ProjectivePoint::identity());
-        let mut rng = rand_core::UnwrapErr(getrandom::SysRng);
+        let mut rng = getrandom::SysRng;
         assert_eq!(
             encrypt(&pk, b"any plaintext", &mut rng),
             Err(crate::Error::Failed)
@@ -373,14 +416,14 @@ mod tests {
         let d =
             U256::from_be_hex("1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0");
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid d");
-        let pk = Sm2PublicKey::from_point(key.public_key());
+        let pk = key.public_key();
         let k_bytes =
             U256::from_be_hex("4C62EEFD6ECFC2B95B92FD6C3D9575148AFA17425546D49018E5388D49DD7B4F")
                 .to_be_bytes();
         let mut bytes = [0u8; 32];
         bytes.copy_from_slice(&k_bytes);
-        let mut rng_a = rand_core::UnwrapErr(FixedScalarRng::new(bytes));
-        let mut rng_b = rand_core::UnwrapErr(FixedScalarRng::new(bytes));
+        let mut rng_a = FixedScalarRng::new(bytes);
+        let mut rng_b = FixedScalarRng::new(bytes);
         let der_a = encrypt(&pk, b"encryption standard", &mut rng_a).expect("encrypt a");
         let der_b = encrypt(&pk, b"encryption standard", &mut rng_b).expect("encrypt b");
         assert_eq!(der_a, der_b, "fixed-k encrypt must be deterministic");

@@ -111,8 +111,11 @@ jobs:
         run: cargo doc --no-deps -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar
       - name: doc gmcrypto-simd
         run: cargo doc --no-deps -p gmcrypto-simd
-      - name: doc gmcrypto-c (sm4-aead,sm4-xts; NOT regen-header)
-        run: cargo doc --no-deps -p gmcrypto-c --features sm4-aead,sm4-xts
+      # v0.23 W3 — the AEAD/XTS FFI surface is now always-on in gmcrypto-c
+      # (the forwarding sm4-aead/sm4-xts cargo features were dropped), so the
+      # default build documents the full ABI. NOT regen-header (would run cbindgen).
+      - name: doc gmcrypto-c (full ABI always-on; NOT regen-header)
+        run: cargo doc --no-deps -p gmcrypto-c
 
   feature-matrix:
     name: feature matrix (no-default-features / all-features)

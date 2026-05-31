@@ -129,11 +129,18 @@ pub fn hmac_sm3(key: &[u8], message: &[u8]) -> [u8; DIGEST_SIZE] {
 ///
 /// # Zeroization
 ///
-/// The pre-computed `outer` keyed-state (`SM3` after absorbing
-/// `K' XOR opad`) holds key-derived material. [`HmacSm3::finalize`]
-/// and [`HmacSm3::verify`] consume `self` and zeroize it before
-/// returning. If the caller drops the `HmacSm3` without calling
-/// either method, the [`Drop`] impl wipes the state.
+/// The keyed `inner` / `outer` [`Sm3`] states (the SM3 compression
+/// state after absorbing `K' XOR ipad` / `K' XOR opad`) hold
+/// key-derived material. They are wiped at the **field layer** by
+/// [`Sm3`]'s own [`Drop`] impl (v0.23): whenever an `HmacSm3` — or the
+/// `Sm3` values moved out of it by [`HmacSm3::finalize`] — is dropped,
+/// the compression state + input buffer are scrubbed. There is no
+/// `impl Drop for HmacSm3` (and there must not be: `finalize(self)`
+/// moves the `inner`/`outer` fields out of `self`, which a `Drop` impl
+/// would forbid). Construction-time intermediates (`K'`, `K' XOR ipad`,
+/// `K' XOR opad`) are zeroized inside [`HmacSm3::new`] after they are
+/// folded into the keyed states. The 32-byte tag returned by
+/// [`HmacSm3::finalize`] is the public output and is not wiped.
 pub struct HmacSm3 {
     /// Inner-hash state, currently absorbing `K' XOR ipad || message-so-far`.
     inner: Sm3,
@@ -194,14 +201,11 @@ impl HmacSm3 {
 
     /// Consume the instance and produce the 32-byte MAC tag.
     ///
-    /// The `outer` keyed-state and the `inner` final state are both
-    /// dropped after consuming `self`; `Sm3`'s `Drop` impl is the
-    /// one we rely on here. To be defensive against a future change
-    /// where `Sm3` is no longer `ZeroizeOnDrop`, both fields are
-    /// explicitly wiped via `clone-then-drop` would be safer — but
-    /// `Sm3` does not currently implement `Zeroize` directly. The
-    /// state is consumed by `outer.finalize()` which produces the
-    /// public output and discards the rest.
+    /// `self.inner` is finalized (by value) into the inner digest and
+    /// `self.outer` is moved out, fed the inner digest, and finalized.
+    /// Both keyed `Sm3` values are scrubbed by [`Sm3`]'s [`Drop`] impl
+    /// (v0.23) when they go out of scope here; the returned tag is the
+    /// public output.
     #[must_use]
     pub fn finalize(self) -> [u8; DIGEST_SIZE] {
         let inner_digest = self.inner.finalize();

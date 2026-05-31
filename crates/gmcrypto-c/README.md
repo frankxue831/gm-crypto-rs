@@ -23,20 +23,23 @@ Output artifacts land in `target/release/`:
 - `libgmcrypto_c.a` (Linux/macOS) / `gmcrypto_c.lib` (Windows) —
   static library.
 
-## Optional features
+## Cipher-mode coverage (complete, always-on)
 
-The default build exposes SM2 / SM3 / SM4-ECB+CBC / HMAC-SM3 /
-PBKDF2-HMAC-SM3. Two opt-in features add the symmetric-cipher modes
-(each forwards to the corresponding `gmcrypto-core` feature; no extra
-build flags are needed by C consumers beyond rebuilding the library):
+The C ABI is **complete and always-on**: a default `cargo build -p gmcrypto-c`
+exports the full surface — SM2 / SM3 / SM4-ECB+CBC / HMAC-SM3 / PBKDF2-HMAC-SM3
+**plus** the symmetric-cipher modes below. As of **v0.23** the AEAD/XTS symbols
+are no longer behind opt-in cargo features (the former `sm4-aead` / `sm4-xts`
+forwarding features were removed), so the committed
+[`include/gmcrypto.h`](include/gmcrypto.h) matches the default build exactly —
+no feature flags are needed.
 
-| Feature | Adds | Example |
+| Mode | Symbols | Example |
 |---|---|---|
-| `sm4-aead` | SM4-GCM / SM4-CCM single-shot + streaming SM4-GCM AEAD (`gmcrypto_sm4_gcm_*` / `gmcrypto_sm4_ccm_*`) | [`examples/sm4_gcm_streaming.c`](examples/sm4_gcm_streaming.c) |
-| `sm4-xts` | SM4-XTS tweakable disk/sector mode (GB/T 17964-2021): single-shot (`gmcrypto_sm4_xts_encrypt` / `_decrypt`) + in-place multi-sector run (`gmcrypto_sm4_xts_encrypt_sectors` / `_decrypt_sectors`) | [`examples/sm4_xts_sector.c`](examples/sm4_xts_sector.c), [`examples/sm4_xts_multisector.c`](examples/sm4_xts_multisector.c) |
+| SM4-GCM / SM4-CCM AEAD (single-shot + streaming SM4-GCM) | `gmcrypto_sm4_gcm_*` / `gmcrypto_sm4_ccm_*` | [`examples/sm4_gcm_streaming.c`](examples/sm4_gcm_streaming.c) |
+| SM4-XTS tweakable disk/sector mode (GB/T 17964-2021): single-shot + in-place multi-sector | `gmcrypto_sm4_xts_{encrypt,decrypt}` / `gmcrypto_sm4_xts_{encrypt,decrypt}_sectors` | [`examples/sm4_xts_sector.c`](examples/sm4_xts_sector.c), [`examples/sm4_xts_multisector.c`](examples/sm4_xts_multisector.c) |
 
 ```bash
-cargo build -p gmcrypto-c --release --features sm4-aead,sm4-xts
+cargo build -p gmcrypto-c --release   # the complete ABI — no feature flags
 ```
 
 **SM4-XTS** takes a 32-byte key (`Key1 ‖ Key2`; `Key1 == Key2` is

@@ -106,6 +106,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use subtle::ConstantTimeEq;
+use zeroize::Zeroize;
 
 use super::cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
 
@@ -216,10 +217,12 @@ pub fn decrypt(
 
     // Step 1: CTR-decrypt the ciphertext into a tentative plaintext.
     // We need the plaintext to recompute the MAC, so unlike GCM we
-    // can't verify-before-decrypt purely. However, we still don't
-    // *return* the plaintext until the tag verifies — and the local
-    // buffer is dropped on the failure path (Rust's drop discipline
-    // handles it; no explicit zeroize needed for a stack-Vec).
+    // can't verify-before-decrypt purely. CCM is decrypt-before-verify
+    // by construction, so the tentative plaintext materializes before
+    // the tag check; on a tag mismatch it is wiped via `zeroize()`
+    // before `return None` (B-3, v0.23 — a `Vec` drop frees but does
+    // not scrub, and SM2-decrypt / the GCM-decrypt comment both hold
+    // this same posture).
     let mut a0 = [0u8; BLOCK_SIZE];
     a0[0] = (q - 1) as u8;
     a0[1..=nonce.len()].copy_from_slice(nonce);
@@ -250,6 +253,8 @@ pub fn decrypt(
 
     // Step 4: constant-time compare against wire tag.
     if expected_tag[..tag_len].ct_eq(wire_tag).unwrap_u8() != 1 {
+        // B-3 (v0.23): wipe the unverified plaintext before dropping it.
+        tentative_pt.zeroize();
         return None;
     }
 

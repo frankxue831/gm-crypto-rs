@@ -1,6 +1,6 @@
 [package]
 name = "gmcrypto-core"
-description = "Constant-time-designed pure-Rust SM2/SM3 primitives (no_std + alloc) with an in-CI dudect timing-leak regression harness"
+description = "Constant-time-designed pure-Rust SM2/SM3/SM4 primitives (no_std + alloc) with an in-CI dudect timing-leak regression harness"
 keywords = ["sm2", "sm3", "gm-crypto", "no-std", "constant-time"]
 categories = ["cryptography", "no-std"]
 readme = "../../README.md"

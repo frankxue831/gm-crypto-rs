@@ -28,24 +28,23 @@
 use crate::asn1::oid::{ID_EC_PUBLIC_KEY, SM2P256V1};
 use crate::asn1::{reader, writer};
 use crate::sec1::{SEC1_UNCOMPRESSED_LEN, decode_uncompressed_point, encode_uncompressed_point};
-use crate::sm2::point::ProjectivePoint;
 use alloc::vec::Vec;
 
-/// Encode an SM2 public point as a DER `SubjectPublicKeyInfo` blob.
+/// Encode an SM2 public key as a DER `SubjectPublicKeyInfo` blob.
 ///
-/// Caller pre-validates that `point` is on-curve and not at
+/// Caller pre-validates that the key's point is on-curve and not at
 /// infinity. (The standard accessor
 /// [`crate::sm2::Sm2PublicKey::to_sec1_uncompressed`] feeds this
 /// helper after extracting the affine `(x, y)`.)
 ///
 /// # Panics
 ///
-/// Panics if `point` is at infinity (callers must reject the
+/// Panics if the underlying point is at infinity (callers must reject the
 /// identity point at the boundary).
 #[must_use]
 #[allow(clippy::missing_panics_doc)]
-pub fn encode(point: &ProjectivePoint) -> Vec<u8> {
-    let (x, y) = point.to_affine().expect("SPKI: point at infinity");
+pub fn encode(key: &crate::sm2::Sm2PublicKey) -> Vec<u8> {
+    let (x, y) = key.point().to_affine().expect("SPKI: point at infinity");
     let pk = encode_uncompressed_point(&x, &y);
     encode_uncompressed(&pk)
 }
@@ -77,7 +76,7 @@ pub fn encode_uncompressed(uncompressed: &[u8; SEC1_UNCOMPRESSED_LEN]) -> Vec<u8
 }
 
 /// Decode a DER `SubjectPublicKeyInfo` blob into a validated
-/// [`ProjectivePoint`].
+/// [`crate::sm2::Sm2PublicKey`].
 ///
 /// Validates:
 ///
@@ -90,7 +89,7 @@ pub fn encode_uncompressed(uncompressed: &[u8; SEC1_UNCOMPRESSED_LEN]) -> Vec<u8
 ///
 /// Returns `None` for any malformed input.
 #[must_use]
-pub fn decode(input: &[u8]) -> Option<ProjectivePoint> {
+pub fn decode(input: &[u8]) -> Option<crate::sm2::Sm2PublicKey> {
     let (body, rest) = reader::read_sequence(input)?;
     if !rest.is_empty() {
         return None;
@@ -113,21 +112,24 @@ pub fn decode(input: &[u8]) -> Option<ProjectivePoint> {
     if unused != 0 || !body.is_empty() {
         return None;
     }
-    decode_uncompressed_point(pk_bytes)
+    Some(crate::sm2::Sm2PublicKey::from_point(
+        decode_uncompressed_point(pk_bytes)?,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sm2::point::ProjectivePoint;
 
     /// SPKI round-trip for the SM2 generator.
     #[test]
     fn round_trip_generator() {
         let g = ProjectivePoint::generator();
-        let der = encode(&g);
+        let der = encode(&crate::sm2::Sm2PublicKey::from_point(g));
         let recovered = decode(&der).expect("decode");
         let (gx, gy) = g.to_affine().expect("G finite");
-        let (rx, ry) = recovered.to_affine().expect("recovered finite");
+        let (rx, ry) = recovered.point().to_affine().expect("recovered finite");
         assert_eq!(rx.retrieve(), gx.retrieve());
         assert_eq!(ry.retrieve(), gy.retrieve());
     }
@@ -137,7 +139,7 @@ mod tests {
     #[test]
     fn encoded_form_shape() {
         let g = ProjectivePoint::generator();
-        let der = encode(&g);
+        let der = encode(&crate::sm2::Sm2PublicKey::from_point(g));
         assert_eq!(der[0], 0x30, "outer tag must be SEQUENCE");
         // SubjectPublicKeyInfo for SM2 is always 91 bytes: 2-byte SEQUENCE
         // header + 18-byte AlgorithmIdentifier + 71-byte BIT STRING wrapping 65-byte key
@@ -212,7 +214,7 @@ mod tests {
     #[test]
     fn rejects_trailing_bytes() {
         let g = ProjectivePoint::generator();
-        let mut der = encode(&g);
+        let mut der = encode(&crate::sm2::Sm2PublicKey::from_point(g));
         der.push(0x00);
         assert!(decode(&der).is_none());
     }

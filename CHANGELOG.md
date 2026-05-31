@@ -5,6 +5,81 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] — v1.0 prep (not published)
 
+**v0.23 — pre-1.0 re-audit remediation (non-publishing).** A multi-model
+adversarial pre-publish re-audit (Codex `gpt-5.5` + Grok, each finding
+source-verified — see [`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md)) returned
+**NO-GO as-is**: the core primitives are sound, but it surfaced **2 API/ABI
+BLOCKERs** plus a set of API-finality, zeroize-on-failure, spec-ceiling, and
+doc should-fixes that become irreversible or harder to fix after 1.0. This cycle
+remediates them. The workspace stays **0.16.0** and crates.io skips `0.23.0`
+(the v0.14/v0.17–v0.22 precedent); the **breaking API/ABI changes ship with the
+deliberate `1.0.0` publish**, never reaching a published 0.x crate. **Runtime
+output is byte-identical** for everything except the *deliberately* changed
+signatures — full KAT + gmssl 3.1.1 interop **11/11** stay green; the SM2 DER
+signature + ciphertext wire bytes, SM4 mode outputs, and PKCS#8/SPKI fixtures
+are unchanged, and the zeroization changes are not observable in output. Per
+`docs/v0.23-scope.md` (Q23.1–Q23.9), codex+grok-reviewed W0–W4.
+
+### Changed — BREAKING (ships with 1.0; never a published 0.x crate)
+- **`Sm2PrivateKey::public_key()` now returns `Sm2PublicKey`** (was
+  `ProjectivePoint`). The raw EC point type no longer appears in the high-level
+  key path; `Sm2PublicKey::from_sec1_bytes` (already on-curve-checked) is the
+  public point constructor (A-2).
+- **Single-shot `sm4::mode_gcm::{encrypt, encrypt_with_tag_len}` are now
+  fallible** (`-> Option<…>`), rejecting plaintext longer than `2^36 − 32` bytes
+  (the GCM 32-bit counter ceiling; past it the keystream would repeat), matching
+  the streaming-encryptor poison and the `decrypt` guards. This is a *length-range*
+  reject, not a failure-mode distinction (B-1).
+- **`sm2::{sign_with_id, sign_raw_with_id, encrypt}` now take the fallible
+  `rand_core::TryCryptoRng` bound** (was the infallible `CryptoRng + Rng`). An RNG
+  failure collapses to the single `Failed` — a defined, no-panic RNG-failure path —
+  and the `UnwrapErr` adapter is dropped. `rand_core` is the deliberate, documented
+  ecosystem RNG-interop point (unlike the v0.22 `crypto-bigint` decoupling) (A-3).
+- **C ABI: the SM4-GCM / CCM / XTS FFI symbols are now always-on in `gmcrypto-c`**
+  — the forwarding `sm4-aead` / `sm4-xts` *cargo* features on the C shim are dropped,
+  so the committed `gmcrypto.h` == a default `cargo build -p gmcrypto-c` (one
+  complete, permanent ABI; resolves the header ⟷ build-contract mismatch). The C
+  shim's default build now transitively pulls `gmcrypto-simd`; `gmcrypto-core` keeps
+  its own feature gates (Rust callers still opt in) (A-1).
+
+### Changed — `#[doc(hidden)]` (no longer SemVer-covered; kept `pub` for in-repo dev)
+- The raw EC point surface is now internal: `sm2::point::ProjectivePoint` (the type,
+  the `sm2::point` module, and the `sm2::ProjectivePoint` re-export), the bare
+  `add`/`double`/`neg` / generator / identity arithmetic, and
+  `Sm2PublicKey::{from_point, point}` + `From<ProjectivePoint> for Sm2PublicKey`.
+  Kept `pub` only so in-repo dev crates (dudect bench / tests / fuzz) reach them —
+  the v0.22 Group-A pattern (A-2).
+- The low-level `asn1::{reader, writer, oid}` modules and the in-crate
+  `traits::{Hash, Mac, BlockCipher}` module are now `#[doc(hidden)]` (module-level
+  hiding). The wire types `asn1::{encode_sig, decode_sig}` + `Sm2Ciphertext` stay
+  public (the intended v0.22 surface) (A-4/A-5).
+- `sec1::EcPrivateKey.public` and the `spki::{encode, decode}` point-typed
+  signatures now speak `Sm2PublicKey`, not `ProjectivePoint` (A-2/A-6).
+
+### Security — hardening (defense-in-depth; no output change)
+- **Constant-time SM2 nonce sampler.** `sample_nonzero_scalar` is now a
+  fixed-budget (4-draw) **masked** sampler — no secret-dependent branch or loop,
+  collapsing exhaustion to `Failed` (the K=2 sign-retry pattern). Removes the
+  literal `if bool::from(..)` on a `k`-derived `Choice` (B-7).
+- **Zeroization.** The SM2 sign nonce `k` + scalar intermediates (incl. `1 + d`)
+  are wiped on the way out; SM4-CCM `decrypt` zeroizes the tentative plaintext on
+  the tag-fail arm (it must decrypt-before-verify); and `Sm3` now wipes its keyed
+  compression state on `Drop` — at the field layer, which also makes the
+  `HmacSm3` zeroization claim true (the prior doc overclaimed a `Drop`/`finalize`
+  zeroize that did not exist) (B-2/B-3/B-4). Best-effort, per the existing stack
+  caveat.
+- **SM2 KDF counter-wrap guard.** A `u32` counter-overflow guard on the SM2 KDF
+  (`encrypt` is already fallible) (B-5).
+
+### Notes
+- Documentation refreshes (C-1 / D-1 + B-6/8/9/10): sharpened README audit-status
+  banner (internal-assurance basis made explicit); SECURITY notes for the
+  CT-until-the-validity-bit posture (B-10), the streaming-CBC unverified-incremental-
+  output contract (B-6), and short-plaintext SM2-encrypt retry timing (B-9). See
+  [`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md) §4/§5.
+- The `cargo-public-api` baseline was regenerated to record the reshaped surface;
+  the C header drift-check is green under the new always-on contract.
+
 **v0.22 — API-tightening: decouple `crypto-bigint 0.7` from the 1.0 contract
 (non-publishing).** Resolves the v0.21 §3.A finding via Option 2 (tighten the
 surface). The **always-on (default-features) public API now names zero

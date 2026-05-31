@@ -14,6 +14,10 @@ pub(crate) mod comb_table;
 pub mod curve;
 pub mod decrypt;
 pub mod encrypt;
+// `point` (`ProjectivePoint`) is the internal low-level curve point. Same
+// posture as `curve`/`scalar_mul` above: `#[doc(hidden)]`, not public API /
+// not SemVer-covered, kept `pub` only for in-repo dev crates + cross-module use.
+#[doc(hidden)]
 pub mod point;
 pub mod private_key;
 pub mod public_key;
@@ -32,6 +36,9 @@ pub mod verify;
 pub use curve::{Fn, Fp};
 pub use decrypt::decrypt;
 pub use encrypt::encrypt;
+// Re-export of the internal low-level curve point; `#[doc(hidden)]` (see
+// `mod point`) — not public API / not SemVer; internal low-level curve point.
+#[doc(hidden)]
 pub use point::ProjectivePoint;
 pub use private_key::Sm2PrivateKey;
 pub use public_key::Sm2PublicKey;

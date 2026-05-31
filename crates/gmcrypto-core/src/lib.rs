@@ -72,6 +72,8 @@ pub mod sm2;
 pub mod sm3;
 pub mod sm4;
 pub mod spki;
+// Not public API / not SemVer — low-level in-crate trait surface kept pub for internal cross-module + dev-crate use; the public trait fit is the opt-in RustCrypto digest/cipher impls.
+#[doc(hidden)]
 pub mod traits;
 
 /// Internal helper: canonical 32-byte big-endian encoding of a `U256`.

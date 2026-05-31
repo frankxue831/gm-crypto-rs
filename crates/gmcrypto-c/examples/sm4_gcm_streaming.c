@@ -4,7 +4,7 @@
  * differently-sized chunks and verify the tag.
  *
  * Requires the library built with the `sm4-aead` feature:
- *   cargo build -p gmcrypto-c --release --features sm4-aead
+ *   cargo build -p gmcrypto-c --release   /* AEAD+XTS are always-on (v0.23) */
  *
  * Build (Linux/macOS, dynamic):
  *   cc -I ../include -L ../../../target/release -lgmcrypto_c \

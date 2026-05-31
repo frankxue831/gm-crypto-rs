@@ -143,9 +143,6 @@ jobs:
         run: cargo test -p gmcrypto-core --features sm4-aead
       - name: cargo test --features sm4-aead,sm4-bitsliced-simd
         run: cargo test -p gmcrypto-core --features sm4-aead,sm4-bitsliced-simd
-      # v0.9 W4 — gmcrypto-c single-shot AEAD FFI (forwarding sm4-aead feature).
-      - name: cargo test -p gmcrypto-c --features sm4-aead
-        run: cargo test -p gmcrypto-c --features sm4-aead
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
       - name: cargo clippy
@@ -158,8 +155,6 @@ jobs:
         run: cargo clippy -p gmcrypto-core --features sm4-bitsliced-simd --all-targets -- -D warnings
       - name: cargo clippy --features sm4-aead (full matrix)
         run: cargo clippy -p gmcrypto-core --features sm4-aead,sm4-bitsliced-simd,digest-traits,cipher-traits,crypto-bigint-scalar --all-targets -- -D warnings
-      - name: cargo clippy -p gmcrypto-c --features sm4-aead
-        run: cargo clippy -p gmcrypto-c --features sm4-aead --all-targets -- -D warnings
       - name: cargo clippy --features crypto-bigint-scalar
         run: cargo clippy -p gmcrypto-core --features crypto-bigint-scalar --all-targets -- -D warnings
 
@@ -233,13 +228,11 @@ jobs:
       # The c_smoke integration test exercises every FFI entry point
       # via Rust's own extern "C" interop. This is the v0.4 W4
       # cryptographic-correctness gate (Rust-equivalence on every
-      # entry point).
+      # entry point). As of v0.23 W3 (A-1) the AEAD (SM4-GCM/CCM) +
+      # SM4-XTS FFI is always compiled into the C ABI, so the default
+      # build runs all 65 c_smoke tests (no per-feature invocation).
       - name: cargo test -p gmcrypto-c
         run: cargo test -p gmcrypto-c
-      # v0.9 W4 — the single-shot AEAD FFI surface (gmcrypto_sm4_gcm_* /
-      # gmcrypto_sm4_ccm_*) behind the forwarding sm4-aead feature.
-      - name: cargo test -p gmcrypto-c --features sm4-aead
-        run: cargo test -p gmcrypto-c --features sm4-aead
 
   deny:
     name: cargo-deny (no forbidden runtime deps)

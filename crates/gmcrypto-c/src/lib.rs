@@ -89,15 +89,15 @@ use gmcrypto_core::sm3::{Sm3 as InnerSm3, hash as sm3_hash};
 use gmcrypto_core::sm4::{
     Sm4CbcDecryptor as InnerSm4CbcDec, Sm4CbcEncryptor as InnerSm4CbcEnc, Sm4Cipher, mode_cbc,
 };
-// v0.9 W4 — single-shot AEAD (SM4-GCM / SM4-CCM) FFI, gated on the
-// forwarding `sm4-aead` feature.
-#[cfg(feature = "sm4-aead")]
+// v0.9 W4 — single-shot AEAD (SM4-GCM / SM4-CCM) FFI. v0.23 W3 (A-1):
+// always compiled into the C ABI (the forwarding `sm4-aead` feature was
+// removed; `gmcrypto-core` is pulled with `sm4-aead` always enabled).
 use gmcrypto_core::sm4::{
     GcmTagLen, Sm4GcmDecryptor as InnerSm4GcmDec, Sm4GcmEncryptor as InnerSm4GcmEnc, mode_ccm,
     mode_gcm,
 };
-// v0.13 — single-shot SM4-XTS FFI, gated on the forwarding `sm4-xts` feature.
-#[cfg(feature = "sm4-xts")]
+// v0.13 — single-shot SM4-XTS FFI. v0.23 W3 (A-1): always compiled into
+// the C ABI (the forwarding `sm4-xts` feature was removed).
 use gmcrypto_core::sm4::mode_xts;
 use gmcrypto_core::{pem, pkcs8};
 use rand_core::TryRng;
@@ -177,7 +177,6 @@ pub struct gmcrypto_sm4_cbc_decryptor_t {
 /// Construct with [`gmcrypto_sm4_gcm_encryptor_new`]; pair with exactly
 /// one finalize (which frees the handle) **or** one
 /// [`gmcrypto_sm4_gcm_encryptor_free`].
-#[cfg(feature = "sm4-aead")]
 pub struct gmcrypto_sm4_gcm_encryptor_t {
     inner: InnerSm4GcmEnc,
 }
@@ -188,7 +187,6 @@ pub struct gmcrypto_sm4_gcm_encryptor_t {
 /// **nothing**; [`gmcrypto_sm4_gcm_decryptor_finalize_verify`] releases
 /// the full plaintext only after a constant-time tag check. Memory is
 /// `O(message)`. Construct with [`gmcrypto_sm4_gcm_decryptor_new`].
-#[cfg(feature = "sm4-aead")]
 pub struct gmcrypto_sm4_gcm_decryptor_t {
     inner: InnerSm4GcmDec,
 }
@@ -975,7 +973,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_cbc_decryptor_free(dec: *mut gmcrypto_sm4_
 /// SM4-GCM single-shot encrypt. `ct_out` receives `pt_len` bytes (via
 /// the capacity/actual-len convention); `tag_out` receives exactly 16
 /// bytes. Returns [`GMCRYPTO_OK`] / [`GMCRYPTO_ERR`].
-#[cfg(feature = "sm4-aead")]
 #[allow(clippy::too_many_arguments)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_gcm_encrypt(
@@ -1017,7 +1014,13 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_encrypt(
             Some(s) => s,
             None => return GMCRYPTO_ERR,
         };
-        let (ciphertext, tag) = mode_gcm::encrypt(k_arr, n, a, p);
+        // `None` only when `pt_len > 2^36 − 32` (the GCM keystream
+        // ceiling). Collapses to the single error code like every other
+        // failure path.
+        let (ciphertext, tag) = match mode_gcm::encrypt(k_arr, n, a, p) {
+            Some(out) => out,
+            None => return GMCRYPTO_ERR,
+        };
         // SAFETY: ct_out valid for ct_capacity bytes; ct_actual_len valid.
         let rc = unsafe { write_output(&ciphertext, ct_out, ct_capacity, ct_actual_len) };
         if rc != GMCRYPTO_OK {
@@ -1031,7 +1034,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_encrypt(
 /// SM4-GCM single-shot decrypt with a 16-byte tag. `pt_out` receives
 /// `ct_len` bytes. Returns [`GMCRYPTO_OK`] only if the tag verifies;
 /// [`GMCRYPTO_ERR`] on any failure (single failure mode).
-#[cfg(feature = "sm4-aead")]
 #[allow(clippy::too_many_arguments)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_gcm_decrypt(
@@ -1089,7 +1091,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_decrypt(
 /// SM4-GCM encrypt with a truncated tag. `tag_len` must be in
 /// `{4, 8, 12, 13, 14, 15, 16}`; `tag_out` receives `tag_len` bytes.
 /// Invalid `tag_len` → [`GMCRYPTO_ERR`].
-#[cfg(feature = "sm4-aead")]
 #[allow(clippy::too_many_arguments)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_gcm_encrypt_with_tag_len(
@@ -1136,7 +1137,12 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_encrypt_with_tag_len(
             Some(s) => s,
             None => return GMCRYPTO_ERR,
         };
-        let (ciphertext, tag) = mode_gcm::encrypt_with_tag_len(k_arr, n, a, p, tl);
+        // `None` only when `pt_len > 2^36 − 32` (the GCM keystream
+        // ceiling). Collapses to the single error code.
+        let (ciphertext, tag) = match mode_gcm::encrypt_with_tag_len(k_arr, n, a, p, tl) {
+            Some(out) => out,
+            None => return GMCRYPTO_ERR,
+        };
         // SAFETY: ct_out valid for ct_capacity bytes; ct_actual_len valid.
         let rc = unsafe { write_output(&ciphertext, ct_out, ct_capacity, ct_actual_len) };
         if rc != GMCRYPTO_OK {
@@ -1150,7 +1156,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_encrypt_with_tag_len(
 /// SM4-GCM decrypt with a truncated tag. `tag` is `tag_len` bytes;
 /// `tag_len` must be in `{4, 8, 12, 13, 14, 15, 16}`. `pt_out`
 /// receives `ct_len` bytes. [`GMCRYPTO_ERR`] on any failure.
-#[cfg(feature = "sm4-aead")]
 #[allow(clippy::too_many_arguments)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_gcm_decrypt_with_tag_len(
@@ -1207,7 +1212,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_decrypt_with_tag_len(
 /// `{4, 6, 8, 10, 12, 14, 16}`; `nonce_len` in `[7, 13]`. `out`
 /// receives `pt_len + tag_len` bytes (`ciphertext ‖ tag`). Invalid
 /// parameters → [`GMCRYPTO_ERR`].
-#[cfg(feature = "sm4-aead")]
 #[allow(clippy::too_many_arguments)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_ccm_encrypt(
@@ -1258,7 +1262,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_ccm_encrypt(
 /// (`ciphertext ‖ tag`); `tag_len` must match the value used at
 /// encrypt time. `pt_out` receives `ct_len - tag_len` bytes.
 /// [`GMCRYPTO_ERR`] on any failure (single failure mode).
-#[cfg(feature = "sm4-aead")]
 #[allow(clippy::too_many_arguments)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_ccm_decrypt(
@@ -1308,8 +1311,8 @@ pub unsafe extern "C" fn gmcrypto_sm4_ccm_decrypt(
 // ============================================================
 // SM4-XTS — single-shot tweakable mode (v0.13; GB/T 17964-2021).
 //
-// Wraps gmcrypto_core::sm4::mode_xts (cfg-gated on the forwarding
-// `sm4-xts` feature). Stateless per call: key = 32 bytes (Key1‖Key2),
+// Wraps gmcrypto_core::sm4::mode_xts (always compiled into the C ABI as
+// of v0.23 W3 / A-1). Stateless per call: key = 32 bytes (Key1‖Key2),
 // tweak = 16 raw bytes, output length == data_len (length-preserving).
 // Confidentiality only — NO authentication tag. Single GMCRYPTO_ERR on
 // every failure (data_len ∉ [16, 16 MiB], Key1==Key2, null, or buffer
@@ -1327,7 +1330,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_ccm_decrypt(
 /// `[16, 16 MiB]`, `Key1 == Key2`, null pointer, or buffer too small —
 /// in which case `*out_actual_len` is set to the required length).
 /// **Confidentiality only — SM4-XTS does not authenticate.**
-#[cfg(feature = "sm4-xts")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_xts_encrypt(
     key: *const u8,
@@ -1373,7 +1375,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_xts_encrypt(
 /// [`GMCRYPTO_ERR`] (same single failure mode). XTS is unauthenticated,
 /// so decrypt cannot detect tampering — it only fails on invalid
 /// parameters (length / weak key / buffer).
-#[cfg(feature = "sm4-xts")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_xts_decrypt(
     key: *const u8,
@@ -1417,7 +1418,7 @@ pub unsafe extern "C" fn gmcrypto_sm4_xts_decrypt(
 // SM4-XTS — multi-sector (disk) helper (v0.16; GB/T 17964-2021).
 //
 // Wraps gmcrypto_core::sm4::mode_xts::{encrypt_sectors, decrypt_sectors}
-// (cfg-gated on the forwarding `sm4-xts` feature). Encrypt/decrypt a
+// (always compiled into the C ABI as of v0.23 W3 / A-1). Encrypt/decrypt a
 // contiguous run of equal-size sectors **in place**, deriving sector i's
 // tweak as the little-endian 128-bit encoding of `start_sector + i` (the
 // standard disk-XTS data-unit convention). Distinct shape from the
@@ -1446,7 +1447,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_xts_decrypt(
 /// vacuous [`GMCRYPTO_OK`] (but the key is still validated, so empty + weak key
 /// → [`GMCRYPTO_ERR`]). **Confidentiality only — SM4-XTS does not
 /// authenticate.**
-#[cfg(feature = "sm4-xts")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_xts_encrypt_sectors(
     key: *const u8,
@@ -1486,7 +1486,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_xts_encrypt_sectors(
 /// `(key, sector_size, start_sector)`; same in-place contract, single failure
 /// mode, and `buf`-untouched-on-error guarantee. XTS is unauthenticated, so
 /// decrypt cannot detect tampering — it only fails on invalid parameters.
-#[cfg(feature = "sm4-xts")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_xts_decrypt_sectors(
     key: *const u8,
@@ -1541,7 +1540,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_xts_decrypt_sectors(
 /// Returns NULL on invalid pointer/length input. **Nonce uniqueness is
 /// the caller's responsibility** — reusing `(key, nonce)` is
 /// catastrophic for GCM.
-#[cfg(feature = "sm4-aead")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_new(
     key: *const u8,
@@ -1574,7 +1572,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_new(
 /// Returns [`GMCRYPTO_ERR`] once the cumulative plaintext would exceed
 /// the GCM ceiling (`2^36 − 32` bytes); the encryptor is poisoned and
 /// all later calls also return [`GMCRYPTO_ERR`].
-#[cfg(feature = "sm4-aead")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_update(
     enc: *mut gmcrypto_sm4_gcm_encryptor_t,
@@ -1607,7 +1604,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_update(
 /// the handle is freed by this call** (even on error); do NOT call
 /// [`gmcrypto_sm4_gcm_encryptor_free`] on it afterwards. `tag_out`
 /// must be valid for exactly 16 bytes.
-#[cfg(feature = "sm4-aead")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_finalize(
     enc: *mut gmcrypto_sm4_gcm_encryptor_t,
@@ -1636,7 +1632,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_finalize(
 /// 16}` (else [`GMCRYPTO_ERR`]). **Consumes the encryptor — the handle
 /// is freed by this call** (even on error); do NOT call
 /// [`gmcrypto_sm4_gcm_encryptor_free`] afterwards.
-#[cfg(feature = "sm4-aead")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_finalize_with_tag_len(
     enc: *mut gmcrypto_sm4_gcm_encryptor_t,
@@ -1665,7 +1660,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_finalize_with_tag_len(
 /// Free a streaming SM4-GCM encryptor without finalizing (abort path).
 /// Passing NULL is a no-op. Do NOT call after any `_finalize*` — those
 /// already consumed the handle.
-#[cfg(feature = "sm4-aead")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_free(enc: *mut gmcrypto_sm4_gcm_encryptor_t) {
     if enc.is_null() {
@@ -1677,7 +1671,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_free(enc: *mut gmcrypto_sm4_
 
 /// Construct a streaming SM4-GCM decryptor. Same parameter contract as
 /// [`gmcrypto_sm4_gcm_encryptor_new`]. Returns NULL on invalid input.
-#[cfg(feature = "sm4-aead")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_gcm_decryptor_new(
     key: *const u8,
@@ -1707,7 +1700,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_decryptor_new(
 /// invalid input pointer; a length-ceiling overflow is latched and
 /// surfaces as [`GMCRYPTO_ERR`] at
 /// [`gmcrypto_sm4_gcm_decryptor_finalize_verify`].
-#[cfg(feature = "sm4-aead")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_gcm_decryptor_update(
     dec: *mut gmcrypto_sm4_gcm_decryptor_t,
@@ -1745,7 +1737,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_decryptor_update(
 ///   the required plaintext length and no plaintext is written. The
 ///   handle is consumed, so you cannot retry — size `out` to the total
 ///   ciphertext length up-front (GCM plaintext is the same length).
-#[cfg(feature = "sm4-aead")]
 #[allow(clippy::too_many_arguments)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_gcm_decryptor_finalize_verify(
@@ -1787,7 +1778,6 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_decryptor_finalize_verify(
 /// Free a streaming SM4-GCM decryptor without verifying (abort path).
 /// NULL is a no-op. Do NOT call after
 /// [`gmcrypto_sm4_gcm_decryptor_finalize_verify`].
-#[cfg(feature = "sm4-aead")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_gcm_decryptor_free(dec: *mut gmcrypto_sm4_gcm_decryptor_t) {
     if dec.is_null() {
@@ -2035,7 +2025,7 @@ pub unsafe extern "C" fn gmcrypto_sm2_sign(
             None => return GMCRYPTO_ERR,
         };
         let k = unsafe { &*key };
-        let mut rng = rand_core::UnwrapErr(getrandom::SysRng);
+        let mut rng = getrandom::SysRng;
         let sig = match sign_with_id(&k.inner, id, m, &mut rng) {
             Ok(s) => s,
             Err(_) => return GMCRYPTO_ERR,
@@ -2106,7 +2096,7 @@ pub unsafe extern "C" fn gmcrypto_sm2_encrypt(
             None => return GMCRYPTO_ERR,
         };
         let k = unsafe { &*key };
-        let mut rng = rand_core::UnwrapErr(getrandom::SysRng);
+        let mut rng = getrandom::SysRng;
         let ct = match sm2_encrypt(&k.inner, p, &mut rng) {
             Ok(c) => c,
             Err(_) => return GMCRYPTO_ERR,
@@ -2161,10 +2151,13 @@ impl core::fmt::Display for CallbackRngError {
 impl core::error::Error for CallbackRngError {}
 
 /// Bridge from the C ABI function pointer + opaque context to
-/// `rand_core::TryRng + TryCryptoRng`. Wrapping in
-/// `rand_core::UnwrapErr` gives an infallible `Rng + CryptoRng` that
-/// panics on callback failure; the panic is caught by `ffi_guard` and
-/// converted to `GMCRYPTO_FAILED`.
+/// `rand_core::TryRng + TryCryptoRng`. Passed **directly** (no
+/// `UnwrapErr`) to the core `sign_with_id` / `encrypt`, whose public
+/// bound is now the fallible `TryCryptoRng` (v0.23): a callback failure
+/// surfaces as `Err(CallbackRngError)`, the core collapses it to
+/// `Error::Failed`, and the FFI maps that to `GMCRYPTO_FAILED` — a
+/// defined, no-panic RNG-failure path (the previous design panicked via
+/// `UnwrapErr` and relied on `ffi_guard` to catch it).
 struct CallbackRng {
     callback: unsafe extern "C" fn(context: *mut c_void, buf: *mut u8, buf_len: usize) -> c_int,
     context: *mut c_void,
@@ -2291,7 +2284,7 @@ pub unsafe extern "C" fn gmcrypto_sm2_encrypt_c1c3c2(
         };
         // SAFETY: key non-null per check above.
         let k = unsafe { &*key };
-        let mut rng = rand_core::UnwrapErr(getrandom::SysRng);
+        let mut rng = getrandom::SysRng;
         let der_bytes = match sm2_encrypt(&k.inner, p, &mut rng) {
             Ok(b) => b,
             Err(_) => return GMCRYPTO_ERR,
@@ -2455,10 +2448,10 @@ pub unsafe extern "C" fn gmcrypto_sm2_sign_with_rng(
         };
         // SAFETY: key non-null per check above.
         let k = unsafe { &*key };
-        let mut rng = rand_core::UnwrapErr(CallbackRng {
+        let mut rng = CallbackRng {
             callback,
             context: rng_context,
-        });
+        };
         let sig = match sign_with_id(&k.inner, id, m, &mut rng) {
             Ok(s) => s,
             Err(_) => return GMCRYPTO_ERR,
@@ -2505,10 +2498,10 @@ pub unsafe extern "C" fn gmcrypto_sm2_encrypt_with_rng(
         };
         // SAFETY: key non-null per check above.
         let k = unsafe { &*key };
-        let mut rng = rand_core::UnwrapErr(CallbackRng {
+        let mut rng = CallbackRng {
             callback,
             context: rng_context,
-        });
+        };
         let ct = match sm2_encrypt(&k.inner, p, &mut rng) {
             Ok(c) => c,
             Err(_) => return GMCRYPTO_ERR,

@@ -61,7 +61,8 @@
 //! let aad: &[u8] = b"additional authenticated data";
 //! let plaintext = b"hello world";
 //!
-//! let (ciphertext, tag) = mode_gcm::encrypt(&key, &nonce, aad, plaintext);
+//! let (ciphertext, tag) =
+//!     mode_gcm::encrypt(&key, &nonce, aad, plaintext).expect("plaintext under the GCM ceiling");
 //! assert_eq!(ciphertext.len(), plaintext.len());
 //!
 //! let recovered = mode_gcm::decrypt(&key, &nonce, aad, &ciphertext, &tag);
@@ -86,6 +87,16 @@ use super::cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
 /// truncated length for [`encrypt_with_tag_len`] /
 /// [`decrypt_with_tag_len`].
 pub const TAG_SIZE: usize = 16;
+
+/// NIST SP 800-38D §5.2.1.1 plaintext ceiling, in bytes:
+/// `2^39 − 256` bits = `2^36 − 32` bytes. Past this limit the 32-bit
+/// GCTR counter wraps and keystream is reused — catastrophic. The
+/// single-shot [`encrypt`] / [`encrypt_with_tag_len`] reject inputs
+/// above this (mirroring the streaming poison in
+/// [`super::gcm_streaming`]); [`decrypt`] / [`decrypt_with_tag_len`]
+/// reject over-ceiling ciphertexts symmetrically. Mirrors
+/// `gcm_streaming.rs`'s `GCM_MAX_PT_BYTES`.
+pub(crate) const GCM_MAX_PT_BYTES: u64 = (1u64 << 36) - 32;
 
 /// A validated GCM authentication-tag length, in bytes.
 ///
@@ -121,8 +132,15 @@ impl GcmTagLen {
 }
 
 /// Encrypt `plaintext` under `(key, nonce)` with `aad` authenticated
-/// but not encrypted. Returns `(ciphertext, tag)` where
+/// but not encrypted. Returns `Some((ciphertext, tag))` where
 /// `ciphertext.len() == plaintext.len()` and `tag.len() == 16`.
+///
+/// Returns `None` when `plaintext.len() > 2^36 − 32` bytes
+/// ([`GCM_MAX_PT_BYTES`]): past that limit the 32-bit GCTR counter
+/// wraps and keystream is reused (NIST SP 800-38D §5.2.1.1). This is a
+/// length-range reject, not a failure-mode distinction; it mirrors the
+/// streaming-encryptor poison. The bound is unreachable at sane sizes
+/// (a single ~68 GB in-memory buffer).
 ///
 /// See the module-level docstring for the nonce-uniqueness contract.
 #[must_use]
@@ -131,7 +149,10 @@ pub fn encrypt(
     nonce: &[u8],
     aad: &[u8],
     plaintext: &[u8],
-) -> (Vec<u8>, [u8; TAG_SIZE]) {
+) -> Option<(Vec<u8>, [u8; TAG_SIZE])> {
+    if plaintext.len() as u64 > GCM_MAX_PT_BYTES {
+        return None;
+    }
     let cipher = Sm4Cipher::new(key);
 
     // §6.3: H = SM4_E(key, 0^128). The GCM hash subkey.
@@ -152,7 +173,7 @@ pub fn encrypt(
     let mut tag = [0u8; TAG_SIZE];
     gctr(&cipher, &j0, &s, &mut tag);
 
-    (ciphertext, tag)
+    Some((ciphertext, tag))
 }
 
 /// Decrypt `ciphertext` under `(key, nonce)` with `aad` authenticated.
@@ -169,6 +190,9 @@ pub fn decrypt(
     ciphertext: &[u8],
     tag: &[u8; TAG_SIZE],
 ) -> Option<Vec<u8>> {
+    if ciphertext.len() as u64 > GCM_MAX_PT_BYTES {
+        return None;
+    }
     let cipher = Sm4Cipher::new(key);
 
     let mut h_block = [0u8; BLOCK_SIZE];
@@ -204,6 +228,9 @@ pub fn decrypt(
 /// 800-38D §5.2.1.2 truncation: `T = MSB_t(full_tag)`). The
 /// ciphertext is byte-identical to [`encrypt`]'s — only the tag
 /// length changes.
+///
+/// Returns `None` for the same `> 2^36 − 32`-byte plaintext ceiling as
+/// [`encrypt`] ([`GCM_MAX_PT_BYTES`]).
 #[must_use]
 pub fn encrypt_with_tag_len(
     key: &[u8; KEY_SIZE],
@@ -211,10 +238,13 @@ pub fn encrypt_with_tag_len(
     aad: &[u8],
     plaintext: &[u8],
     tag_len: GcmTagLen,
-) -> (Vec<u8>, Vec<u8>) {
-    let (ciphertext, full_tag) = encrypt(key, nonce, aad, plaintext);
+) -> Option<(Vec<u8>, Vec<u8>)> {
+    if plaintext.len() as u64 > GCM_MAX_PT_BYTES {
+        return None;
+    }
+    let (ciphertext, full_tag) = encrypt(key, nonce, aad, plaintext)?;
     let tag = full_tag[..tag_len.as_usize()].to_vec();
-    (ciphertext, tag)
+    Some((ciphertext, tag))
 }
 
 /// Decrypt where the authentication tag may be shorter than 128 bits.
@@ -234,6 +264,9 @@ pub fn decrypt_with_tag_len(
     ciphertext: &[u8],
     tag: &[u8],
 ) -> Option<Vec<u8>> {
+    if ciphertext.len() as u64 > GCM_MAX_PT_BYTES {
+        return None;
+    }
     let tag_len = GcmTagLen::new(tag.len())?;
     let t = tag_len.as_usize();
 
@@ -424,7 +457,7 @@ mod tests {
     fn round_trip_canonical_nonce() {
         let aad = b"associated data";
         let plaintext = b"v0.8 W2 SM4-GCM round-trip smoke test";
-        let (ct, tag) = encrypt(&KEY, &NONCE_12, aad, plaintext);
+        let (ct, tag) = encrypt(&KEY, &NONCE_12, aad, plaintext).expect("under ceiling");
         let recovered = decrypt(&KEY, &NONCE_12, aad, &ct, &tag).expect("tag verifies");
         assert_eq!(recovered, plaintext);
     }
@@ -432,7 +465,7 @@ mod tests {
     #[test]
     fn round_trip_empty_plaintext() {
         let aad = b"aad-only message";
-        let (ct, tag) = encrypt(&KEY, &NONCE_12, aad, &[]);
+        let (ct, tag) = encrypt(&KEY, &NONCE_12, aad, &[]).expect("under ceiling");
         assert!(ct.is_empty());
         let recovered = decrypt(&KEY, &NONCE_12, aad, &ct, &tag).expect("tag verifies");
         assert_eq!(recovered, &[] as &[u8]);
@@ -441,7 +474,7 @@ mod tests {
     #[test]
     fn round_trip_empty_aad() {
         let plaintext = b"hello GCM, no AAD";
-        let (ct, tag) = encrypt(&KEY, &NONCE_12, &[], plaintext);
+        let (ct, tag) = encrypt(&KEY, &NONCE_12, &[], plaintext).expect("under ceiling");
         let recovered = decrypt(&KEY, &NONCE_12, &[], &ct, &tag).expect("tag verifies");
         assert_eq!(recovered, plaintext);
     }
@@ -451,7 +484,7 @@ mod tests {
         let nonce: [u8; 7] = [0x42u8; 7];
         let aad = b"aad";
         let plaintext = b"short-nonce SM4-GCM";
-        let (ct, tag) = encrypt(&KEY, &nonce, aad, plaintext);
+        let (ct, tag) = encrypt(&KEY, &nonce, aad, plaintext).expect("under ceiling");
         let recovered = decrypt(&KEY, &nonce, aad, &ct, &tag).expect("tag verifies");
         assert_eq!(recovered, plaintext);
     }
@@ -460,7 +493,7 @@ mod tests {
     fn tampered_tag_fails() {
         let aad = b"x";
         let plaintext = b"original";
-        let (ct, mut tag) = encrypt(&KEY, &NONCE_12, aad, plaintext);
+        let (ct, mut tag) = encrypt(&KEY, &NONCE_12, aad, plaintext).expect("under ceiling");
         tag[0] ^= 0x01;
         assert!(decrypt(&KEY, &NONCE_12, aad, &ct, &tag).is_none());
     }
@@ -469,7 +502,7 @@ mod tests {
     fn tampered_ciphertext_fails() {
         let aad = b"x";
         let plaintext = b"original";
-        let (mut ct, tag) = encrypt(&KEY, &NONCE_12, aad, plaintext);
+        let (mut ct, tag) = encrypt(&KEY, &NONCE_12, aad, plaintext).expect("under ceiling");
         if !ct.is_empty() {
             ct[0] ^= 0x01;
         }
@@ -480,7 +513,7 @@ mod tests {
     fn tampered_aad_fails() {
         let aad = b"correct-aad";
         let plaintext = b"original";
-        let (ct, tag) = encrypt(&KEY, &NONCE_12, aad, plaintext);
+        let (ct, tag) = encrypt(&KEY, &NONCE_12, aad, plaintext).expect("under ceiling");
         assert!(decrypt(&KEY, &NONCE_12, b"wrong-aad", &ct, &tag).is_none());
     }
 
@@ -504,10 +537,11 @@ mod tests {
     fn tag_len_truncation_matches_full_tag_prefix() {
         let aad = b"hdr";
         let pt = b"truncate me to a short tag";
-        let (ct_full, tag_full) = encrypt(&KEY, &NONCE_12, aad, pt);
+        let (ct_full, tag_full) = encrypt(&KEY, &NONCE_12, aad, pt).expect("under ceiling");
         for &n in &[4usize, 8, 12, 13, 14, 15, 16] {
             let tl = GcmTagLen::new(n).unwrap();
-            let (ct_t, tag_t) = encrypt_with_tag_len(&KEY, &NONCE_12, aad, pt, tl);
+            let (ct_t, tag_t) =
+                encrypt_with_tag_len(&KEY, &NONCE_12, aad, pt, tl).expect("under ceiling");
             assert_eq!(ct_t, ct_full, "ciphertext invariant under tag_len {n}");
             assert_eq!(tag_t.as_slice(), &tag_full[..n], "tag = MSB_n(full) at {n}");
         }
@@ -519,7 +553,8 @@ mod tests {
         let pt = b"round trip under every tag length";
         for &n in &[4usize, 8, 12, 13, 14, 15, 16] {
             let tl = GcmTagLen::new(n).unwrap();
-            let (ct, tag) = encrypt_with_tag_len(&KEY, &NONCE_12, aad, pt, tl);
+            let (ct, tag) =
+                encrypt_with_tag_len(&KEY, &NONCE_12, aad, pt, tl).expect("under ceiling");
             let got = decrypt_with_tag_len(&KEY, &NONCE_12, aad, &ct, &tag);
             assert_eq!(
                 got.as_deref(),
@@ -534,11 +569,21 @@ mod tests {
         let aad = b"hdr";
         let pt = b"reject me";
         let tl = GcmTagLen::new(12).unwrap();
-        let (ct, mut tag) = encrypt_with_tag_len(&KEY, &NONCE_12, aad, pt, tl);
+        let (ct, mut tag) =
+            encrypt_with_tag_len(&KEY, &NONCE_12, aad, pt, tl).expect("under ceiling");
         tag[0] ^= 0x01;
         assert!(decrypt_with_tag_len(&KEY, &NONCE_12, aad, &ct, &tag).is_none());
         // Wrong-length tag (not in the valid set) → None.
         assert!(decrypt_with_tag_len(&KEY, &NONCE_12, aad, &ct, &tag[..5]).is_none());
+    }
+
+    #[test]
+    fn gcm_max_pt_bytes_matches_spec() {
+        // NIST SP 800-38D §5.2.1.1: 2^39 − 256 bits = 2^36 − 32 bytes.
+        // Pinned identical to the streaming-encryptor ceiling so the
+        // single-shot and streaming poison agree.
+        assert_eq!(GCM_MAX_PT_BYTES, (1u64 << 36) - 32);
+        assert_eq!(GCM_MAX_PT_BYTES, 68_719_476_704);
     }
 
     #[test]
@@ -548,7 +593,7 @@ mod tests {
         let aad = b"hdr";
         let pt = b"cross-API consistency";
         let tl = GcmTagLen::new(16).unwrap();
-        let (ct, tag) = encrypt_with_tag_len(&KEY, &NONCE_12, aad, pt, tl);
+        let (ct, tag) = encrypt_with_tag_len(&KEY, &NONCE_12, aad, pt, tl).expect("under ceiling");
         let tag16: [u8; TAG_SIZE] = tag.as_slice().try_into().unwrap();
         assert_eq!(
             decrypt(&KEY, &NONCE_12, aad, &ct, &tag16).as_deref(),

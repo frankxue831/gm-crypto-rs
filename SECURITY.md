@@ -239,6 +239,49 @@ hardening gap"):
   *design* is unchanged and complete; only the *measurability* of two short
   diagnostics on noisy shared CI is bounded.
 
+### Constant-time posture clarification (B-10)
+
+The implementation is constant-time **up to the single unavoidable public
+validity bit** that must affect observable behavior — e.g. signature-valid /
+tag-valid / decode-ok deciding `Some` vs `None`, `Ok` vs `Err`, or `true` vs
+`false`. **No secret-dependent work or timing precedes that decision:** the full
+operation runs to completion (fixed-window scalar multiplication, constant-time
+S-box, masked padding strip, `subtle::ConstantTimeEq` tag/MAC compare), and only
+the final `Choice → bool` conversion branches — to choose the return shape and to
+zeroize on the failure arm. The "one bit" is inherent (a verify/decrypt API must
+report success or failure); it is not a leak of any secret beyond that bit. This
+is the project-wide posture; the per-mode notes below are its instances (CBC's
+single `None`, the AEAD constant-time tag compare, SM2 decrypt's zeroize-on-fail).
+
+### v0.23 re-audit hardening
+
+The v0.23 pre-1.0 re-audit remediation cycle (see
+[`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md) §3) tightened several
+defense-in-depth properties. None changes runtime output.
+
+- **Fixed-budget constant-time SM2 nonce sampler.** `sample_nonzero_scalar` is now
+  a fixed number of draws with a masked-select of the first valid candidate,
+  collapsing exhaustion to `Failed` — no data-dependent loop count and no `if` /
+  `bool` on a `k`-derived `Choice` (the prior code had a literal `if bool::from(..)`
+  whose rejection probability was ≈ `2^-32`; this restores the documented "no `bool`
+  on secrets" invariant at the sampling site).
+- **Zeroization.** The SM2 sign nonce `k` and its scalar intermediates (including
+  `1 + d`) are wiped on the way out; SM4-CCM `decrypt` zeroizes its tentative
+  plaintext on the tag-fail arm (CCM must decrypt-before-verify); and `Sm3` now
+  wipes its keyed compression state on `Drop` — at the field layer, which makes the
+  `HmacSm3` zeroization claim true (the prior doc overclaimed a `Drop` / `finalize`
+  zeroize that did not exist). This is **best-effort stack zeroization**: the wipes
+  cover the named owned values, but `subtle::CtOption` `Copy` duplicates produced
+  during masked selection are not separately zeroable, and the compiler is free to
+  leave transient copies in registers / spilled stack slots.
+- **No-panic RNG-failure path.** `sm2::{sign_with_id, sign_raw_with_id, encrypt}`
+  take the **fallible** `rand_core::TryCryptoRng` bound; an RNG failure collapses to
+  the single `Failed` rather than panicking through an unwrap adapter.
+- **GCM length ceiling.** Single-shot `sm4::mode_gcm::{encrypt, encrypt_with_tag_len}`
+  now reject plaintext past the `2^36 − 32`-byte GCM 32-bit-counter ceiling (a `None`
+  return), matching the streaming-encryptor poison and the `decrypt` guards — past
+  that limit the counter would wrap and the keystream repeat.
+
 ### SM4 (W1) — S-box and CBC contract
 
 **S-box.** SM4's 32-round Feistel-like structure runs four S-box lookups
@@ -274,6 +317,18 @@ in encrypt-then-MAC: serialize `(IV || ciphertext)`, compute the MAC
 over that, send `IV || ciphertext || tag`, verify the MAC before
 invoking `decrypt`.
 
+**Streaming CBC — incremental output is unverified until `finalize` (B-6).**
+`Sm4CbcDecryptor` emits decrypted blocks incrementally (buffering one block back
+so the final PKCS#7 strip can run on `finalize`). That incremental plaintext is
+**unauthenticated and unverified** until `finalize` returns — inherent to
+streaming **unauthenticated** CBC (it provides confidentiality, not integrity).
+A caller that acts on bytes emitted before `finalize` is acting on data that may
+yet be rejected. `finalize` still returns a single `None` on any failure
+(length, padding, or otherwise — no padding-oracle distinction). Callers needing
+integrity use SM4-GCM / SM4-CCM, or wrap CBC in encrypt-then-MAC as above. (The
+v0.20 differential fuzzer proves the streaming decryptor is byte-identical to the
+single-shot `mode_cbc::decrypt` across arbitrary chunk boundaries.)
+
 ### SM2 envelope encryption (Phase 3)
 
 **Invalid-curve attack defense.** `sm2::decrypt` validates the
@@ -288,6 +343,15 @@ single `Failed` variant collapsing every failure mode (malformed
 DER, off-curve `C1`, identity `C1`, all-zero KDF, MAC mismatch). MAC compare uses
 `subtle::ConstantTimeEq` on the 32-byte digest; on failure the
 already-XOR'd plaintext buffer is zeroized before return.
+
+**Short-plaintext encrypt KDF-zero retry timing (B-9).** SM2 encryption is
+spec-mandated to re-draw the ephemeral nonce if the KDF output is all-zero. For
+very short plaintext this retry is observable in timing: it leaks a negligible
+predicate on the ephemeral nonce `k` — roughly `2^-8` for a 1-byte plaintext,
+`≤ 2^-32` for plaintext of 4 bytes or more. This is negligible for realistic
+message lengths and reveals nothing about the recipient's private key. SM2
+**encrypt** is not a `dudect`-gated path (the gated SM2 paths are sign and
+decrypt); the retry behavior is documented here rather than gated.
 
 **Wire format.** GM/T 0009-2012 §6 DER is the primary wire format and
 the only emit format until v0.3. v0.3 W4 added raw-byte concatenation

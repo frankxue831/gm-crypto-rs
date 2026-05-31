@@ -86,17 +86,16 @@ mod tests {
     use crate::sm2::private_key::Sm2PrivateKey;
     use crate::sm2::sign::sign_with_id;
     use getrandom::SysRng;
-    use rand_core::UnwrapErr;
 
     #[test]
     fn round_trip_random_message() {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid");
-        let pk = Sm2PublicKey::from_point(key.public_key());
+        let pk = key.public_key();
         let id = b"ALICE123@YAHOO.COM";
         let msg = b"hello world";
-        let mut rng = UnwrapErr(SysRng);
+        let mut rng = SysRng;
         let sig = sign_with_id(&key, id, msg, &mut rng).expect("sign");
         assert!(verify_with_id(&pk, id, msg, &sig));
     }
@@ -106,9 +105,9 @@ mod tests {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid");
-        let pk = Sm2PublicKey::from_point(key.public_key());
+        let pk = key.public_key();
         let id = b"ALICE123@YAHOO.COM";
-        let mut rng = UnwrapErr(SysRng);
+        let mut rng = SysRng;
         let sig = sign_with_id(&key, id, b"original", &mut rng).expect("sign");
         assert!(!verify_with_id(&pk, id, b"tampered", &sig));
     }
@@ -121,10 +120,10 @@ mod tests {
             U256::from_be_hex("0000000000000000000000000000000000000000000000000000000000000007");
         let key_a = Sm2PrivateKey::from_scalar_inner(d_a).expect("valid");
         let key_b = Sm2PrivateKey::from_scalar_inner(d_b).expect("valid");
-        let pk_b = Sm2PublicKey::from_point(key_b.public_key());
+        let pk_b = key_b.public_key();
         let id = b"ALICE123@YAHOO.COM";
         let msg = b"hello world";
-        let mut rng = UnwrapErr(SysRng);
+        let mut rng = SysRng;
         let sig = sign_with_id(&key_a, id, msg, &mut rng).expect("sign");
         // sig is under key_a; verifying under key_b's public must fail.
         assert!(!verify_with_id(&pk_b, id, msg, &sig));
@@ -135,7 +134,7 @@ mod tests {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid");
-        let pk = Sm2PublicKey::from_point(key.public_key());
+        let pk = key.public_key();
         // Garbage signature bytes.
         assert!(!verify_with_id(&pk, b"id", b"msg", &[0u8; 8]));
         assert!(!verify_with_id(&pk, b"id", b"msg", &[]));
@@ -165,7 +164,7 @@ mod tests {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid");
-        let pk = Sm2PublicKey::from_point(key.public_key());
+        let pk = key.public_key();
         let too_long = alloc::vec![0u8; crate::sm2::sign::MAX_ID_LEN + 1];
         // Doesn't matter what the signature is — must be rejected before
         // ever touching it.

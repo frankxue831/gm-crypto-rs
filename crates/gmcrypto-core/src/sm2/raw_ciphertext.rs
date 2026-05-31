@@ -188,9 +188,8 @@ fn read_field_element(bytes: &[u8]) -> Option<FieldBytes> {
 mod tests {
     use super::*;
     use crate::sm2::ProjectivePoint;
-    use crate::sm2::{Sm2PrivateKey, Sm2PublicKey, decrypt, encrypt};
+    use crate::sm2::{Sm2PrivateKey, decrypt, encrypt};
     use crypto_bigint::U256;
-    use rand_core::UnwrapErr;
 
     // Helper: build a canonical Sm2Ciphertext using the SM2 generator's
     // affine coordinates as (x, y) — they pass on-curve and field-bound
@@ -321,8 +320,8 @@ mod tests {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid d");
-        let pk = Sm2PublicKey::from_point(key.public_key());
-        let mut rng = UnwrapErr(getrandom::SysRng);
+        let pk = key.public_key();
+        let mut rng = getrandom::SysRng;
         let plaintext = b"raw-ciphertext modern roundtrip";
         let der = encrypt(&pk, plaintext, &mut rng).expect("encrypt");
         // DER → struct

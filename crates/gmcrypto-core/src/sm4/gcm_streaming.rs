@@ -409,7 +409,8 @@ mod tests {
     fn encryptor_chunked_matches_single_shot() {
         let aad = b"associated header";
         let pt = make_payload(200);
-        let (ref_ct, ref_tag) = mode_gcm::encrypt(&KEY, &NONCE_12, aad, &pt);
+        let (ref_ct, ref_tag) =
+            mode_gcm::encrypt(&KEY, &NONCE_12, aad, &pt).expect("under ceiling");
 
         for chunk in [1usize, 7, 15, 16, 17, 31, 32, 33, 100, pt.len().max(1)] {
             let mut enc = Sm4GcmEncryptor::new(&KEY, &NONCE_12, aad);
@@ -430,7 +431,7 @@ mod tests {
     fn encryptor_tag_len_matches_single_shot_truncation() {
         let aad = b"h";
         let pt = b"tag-len finalize path";
-        let (_, full) = mode_gcm::encrypt(&KEY, &NONCE_12, aad, pt);
+        let (_, full) = mode_gcm::encrypt(&KEY, &NONCE_12, aad, pt).expect("under ceiling");
         let mut enc = Sm4GcmEncryptor::new(&KEY, &NONCE_12, aad);
         let _ = enc.update(pt).unwrap();
         let tag = enc.finalize_with_tag_len(GcmTagLen::new(12).unwrap());
@@ -449,7 +450,7 @@ mod tests {
     fn decryptor_chunked_matches_single_shot() {
         let aad = b"associated header";
         let pt = make_payload(200);
-        let (ct, tag) = mode_gcm::encrypt(&KEY, &NONCE_12, aad, &pt);
+        let (ct, tag) = mode_gcm::encrypt(&KEY, &NONCE_12, aad, &pt).expect("under ceiling");
 
         for chunk in [1usize, 7, 15, 16, 17, 31, 32, 33, 100, ct.len().max(1)] {
             let mut dec = Sm4GcmDecryptor::new(&KEY, &NONCE_12, aad);
@@ -472,7 +473,7 @@ mod tests {
     fn decryptor_rejects_tampered_tag() {
         let aad = b"h";
         let pt = b"tamper target";
-        let (ct, mut tag) = mode_gcm::encrypt(&KEY, &NONCE_12, aad, pt);
+        let (ct, mut tag) = mode_gcm::encrypt(&KEY, &NONCE_12, aad, pt).expect("under ceiling");
         tag[0] ^= 0x01;
         let mut dec = Sm4GcmDecryptor::new(&KEY, &NONCE_12, aad);
         dec.update(&ct);
@@ -483,7 +484,7 @@ mod tests {
     fn decryptor_rejects_invalid_tag_length() {
         let aad = b"h";
         let pt = b"bad tag length";
-        let (ct, tag) = mode_gcm::encrypt(&KEY, &NONCE_12, aad, pt);
+        let (ct, tag) = mode_gcm::encrypt(&KEY, &NONCE_12, aad, pt).expect("under ceiling");
         let mut dec = Sm4GcmDecryptor::new(&KEY, &NONCE_12, aad);
         dec.update(&ct);
         // 5 is not in {4,8,12,13,14,15,16}.
@@ -504,7 +505,7 @@ mod tests {
 
     #[test]
     fn decryptor_empty_then_verify() {
-        let (ct, tag) = mode_gcm::encrypt(&KEY, &NONCE_12, b"a", &[]);
+        let (ct, tag) = mode_gcm::encrypt(&KEY, &NONCE_12, b"a", &[]).expect("under ceiling");
         let mut dec = Sm4GcmDecryptor::new(&KEY, &NONCE_12, b"a");
         dec.update(&[]);
         dec.update(&ct);
@@ -534,7 +535,7 @@ mod tests {
         let nonce: [u8; 7] = [0x42; 7];
         let aad = b"short nonce";
         let pt = make_payload(80);
-        let (ref_ct, ref_tag) = mode_gcm::encrypt(&KEY, &nonce, aad, &pt);
+        let (ref_ct, ref_tag) = mode_gcm::encrypt(&KEY, &nonce, aad, &pt).expect("under ceiling");
 
         let mut enc = Sm4GcmEncryptor::new(&KEY, &nonce, aad);
         let mut ct = Vec::new();

@@ -4,7 +4,7 @@
  * using the sector number as the 16-byte tweak (GB/T 17964-2021).
  *
  * Requires the library built with the `sm4-xts` feature:
- *   cargo build -p gmcrypto-c --release --features sm4-xts
+ *   cargo build -p gmcrypto-c --release   /* AEAD+XTS are always-on (v0.23) */
  *
  * Build (Linux/macOS, dynamic):
  *   cc -I ../include -L ../../../target/release -lgmcrypto_c \

@@ -11,16 +11,22 @@ pub struct Sm2PublicKey {
 }
 
 impl Sm2PublicKey {
+    /// Not part of the public API / not covered by SemVer; may change or be removed in any release. Internal/low-level — Rust users construct via [`Sm2PublicKey::from_sec1_bytes`] or [`crate::sm2::Sm2PrivateKey::public_key`].
+    ///
     /// Wrap a curve point as a public key. Caller is responsible for
     /// having checked the point is on-curve and not at infinity. API entry
     /// points that need stronger failure guarantees perform their own
     /// boundary checks.
+    #[doc(hidden)]
     #[must_use]
     pub const fn from_point(point: ProjectivePoint) -> Self {
         Self { point }
     }
 
+    /// Not part of the public API / not covered by SemVer; may change or be removed in any release. Internal/low-level — Rust users construct via [`Sm2PublicKey::from_sec1_bytes`] or [`crate::sm2::Sm2PrivateKey::public_key`].
+    ///
     /// Underlying point.
+    #[doc(hidden)]
     #[must_use]
     pub const fn point(&self) -> ProjectivePoint {
         self.point
@@ -61,6 +67,8 @@ impl Sm2PublicKey {
     }
 }
 
+/// Not part of the public API / not covered by SemVer; may change or be removed in any release. Internal/low-level — Rust users construct via [`Sm2PublicKey::from_sec1_bytes`] or [`crate::sm2::Sm2PrivateKey::public_key`].
+#[doc(hidden)]
 impl From<ProjectivePoint> for Sm2PublicKey {
     fn from(p: ProjectivePoint) -> Self {
         Self::from_point(p)
@@ -94,7 +102,7 @@ mod tests {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
         let priv_key = Sm2PrivateKey::from_scalar_inner(d).expect("valid d");
-        let pub_key = Sm2PublicKey::from_point(priv_key.public_key());
+        let pub_key = priv_key.public_key();
         let bytes = pub_key.to_sec1_uncompressed();
         assert_eq!(bytes[0], 0x04);
         let recovered = Sm2PublicKey::from_sec1_bytes(&bytes).expect("decode");
