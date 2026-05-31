@@ -44,6 +44,16 @@ env:
   # Pinned for reproducibility (W0 codex finding; same posture as the
   # cbindgen 0.29 pin in gmcrypto-c).
   CARGO_FUZZ_VERSION: '0.13.1'
+  # v0.20 — single source of truth for the target list, shared by the fuzz
+  # sweep and the coverage job (`>-` folds the newlines into one space-
+  # separated string). 18 targets: 16 from v0.14 + the 2 v0.20 streaming-
+  # decryptor differential targets.
+  FUZZ_TARGETS: >-
+    fuzz_pem fuzz_pkcs8_decode fuzz_pkcs8_decrypt fuzz_spki fuzz_sec1 fuzz_sig
+    fuzz_asn1_reader fuzz_sm2_ciphertext_der fuzz_sm2_raw_ciphertext
+    fuzz_sm2_pubkey_sec1 fuzz_sm2_decrypt fuzz_sm2_verify fuzz_sm4_cbc_decrypt
+    fuzz_sm4_gcm_decrypt fuzz_sm4_ccm_decrypt fuzz_sm4_xts_decrypt
+    fuzz_sm4_cbc_streaming_decrypt fuzz_sm4_gcm_streaming_decrypt
 
 jobs:
   fuzz:
@@ -75,17 +85,8 @@ jobs:
       - name: Fuzz each target (capped)
         run: |
           BUDGET="${{ github.event.inputs.max_total_time || '120' }}"
-          TARGETS="
-            fuzz_pem
-            fuzz_pkcs8_decode fuzz_pkcs8_decrypt
-            fuzz_spki fuzz_sec1 fuzz_sig fuzz_asn1_reader
-            fuzz_sm2_ciphertext_der fuzz_sm2_raw_ciphertext
-            fuzz_sm2_pubkey_sec1 fuzz_sm2_decrypt fuzz_sm2_verify
-            fuzz_sm4_cbc_decrypt fuzz_sm4_gcm_decrypt
-            fuzz_sm4_ccm_decrypt fuzz_sm4_xts_decrypt
-          "
           failed=""
-          for t in $TARGETS; do
+          for t in $FUZZ_TARGETS; do
             echo "::group::$t"
             mkdir -p "fuzz/corpus/$t"
             if cargo +nightly fuzz run "$t" "fuzz/corpus/$t" "fuzz/seeds/$t" -- \
@@ -112,3 +113,69 @@ jobs:
           path: fuzz/artifacts/
           retention-days: 30
           if-no-files-found: ignore
+
+  # v0.20 (Q20.3) — coverage report. A SEPARATE job (parallel to `fuzz`) so a
+  # coverage-tooling hiccup can never mask a real fuzz crash, and vice versa.
+  # This is NOT a gate on coverage numbers: the deliverable is the report
+  # artifact; the job passes iff it completes + uploads (both models: report,
+  # not a vanity %-gate). Coverage replays the COMMITTED `seeds/` (the
+  # gitignored `corpus/` is empty on a clean checkout) — i.e. seed-corpus
+  # coverage; growing-corpus coverage is a later refinement.
+  coverage:
+    name: cargo-fuzz coverage report
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly + llvm-tools
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add llvm-tools-preview --toolchain nightly
+          rustc +nightly --version
+
+      - name: Install pinned cargo-fuzz
+        run: |
+          if ! cargo fuzz --version 2>/dev/null | grep -q "$CARGO_FUZZ_VERSION"; then
+            cargo install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
+          fi
+          cargo fuzz --version
+
+      - name: Generate per-target coverage + summary
+        run: |
+          LLVM_COV="$(find "$(rustc +nightly --print sysroot)" -name llvm-cov -type f | head -1)"
+          echo "llvm-cov: ${LLVM_COV:-<not found>}"
+          mkdir -p fuzz/coverage
+          SUMMARY=fuzz/coverage/SUMMARY.txt
+          : > "$SUMMARY"
+          for t in $FUZZ_TARGETS; do
+            echo "::group::coverage $t"
+            mkdir -p "fuzz/corpus/$t"
+            # Replay corpus+seeds through an instrumented build → coverage.profdata.
+            if cargo +nightly fuzz coverage "$t" "fuzz/corpus/$t" "fuzz/seeds/$t"; then
+              prof="fuzz/coverage/$t/coverage.profdata"
+              bin="$(find fuzz/target -type f -path '*coverage*release*' -name "$t" | head -1)"
+              if [ -n "$LLVM_COV" ] && [ -f "$prof" ] && [ -n "$bin" ]; then
+                line="$("$LLVM_COV" report "$bin" -instr-profile="$prof" 2>/dev/null | tail -1)"
+                printf '%-34s %s\n' "$t" "$line" | tee -a "$SUMMARY"
+              else
+                printf '%-34s %s\n' "$t" "report-skipped (prof=$prof bin=$bin)" | tee -a "$SUMMARY"
+              fi
+            else
+              printf '%-34s %s\n' "$t" "coverage-build-failed" | tee -a "$SUMMARY"
+            fi
+            echo "::endgroup::"
+          done
+          echo "===== coverage summary (seed-corpus) ====="
+          cat "$SUMMARY"
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-coverage
+          path: |
+            fuzz/coverage/SUMMARY.txt
+            fuzz/coverage/**/coverage.profdata
+          retention-days: 30
+          if-no-files-found: warn
