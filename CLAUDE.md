@@ -1,6 +1,31 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3/SM4 SDK. **v0.19 — self-calibrating relative dudect gate:
+Pure-Rust SM2/SM3/SM4 SDK. **v0.20 — streaming-decryptor differential fuzzing +
+`cargo fuzz coverage` + codified v1.0 CT baseline (on `main`)** — two new
+libFuzzer targets (`fuzz_sm4_cbc_streaming_decrypt` /
+`fuzz_sm4_gcm_streaming_decrypt`) assert the **streaming** decryptors
+(`Sm4CbcDecryptor` / `Sm4GcmDecryptor`, fed in **arbitrary chunk boundaries**) are
+**byte-identical** to the single-shot `mode_{cbc,gcm}::decrypt` oracle — a
+*differential* invariant stronger than v0.14's no-panic (catches the CBC
+buffer-back-by-one PKCS#7 boundary + the GCM commit-on-verify GHASH accumulator).
+Plus a **non-gating `cargo fuzz coverage`** nightly job (per-target `llvm-cov`
+TOTALS artifact; report-as-deliverable, no %-gate) and the fuzz sweep grown to
+**18 targets**. Initial sweep: **zero crashes, zero divergences**. Also
+**codifies the settled v1.0 constant-time baseline** in `SECURITY.md`
+(Codex+Grok-advised): composite dudect targets stay gated `|tau|<0.20`; the two
+single-inversion diagnostics stay telemetry/sentinel @0.55 (the v0.19
+falsification is the evidence), with a *narrow* revisit door (a class-split-twin
+reproducing the dudect two-input geometry **without** the inversion op, or
+offline/dedicated hardware — never public self-hosted CI). **Repository /
+infra-assurance milestone, NOT a crates.io release** — only the workspace-excluded
+`fuzz/` crate + `fuzz-nightly.yml` + docs change; the published library is
+byte-unchanged, workspace stays **0.16.0**, crates.io skips `0.20.0` (the
+v0.14/v0.17/v0.18/v0.19 precedent). Theme chosen after a **Codex+Grok strategy
+discussion** (one more assurance cycle over a 3rd dudect cycle and over new
+features); **v0.21 = the v1.0 readiness audit** (API/SemVer + docs freeze), with
+v0.20's harnesses + coverage as input evidence. Per `docs/v0.20-scope.md`
+Q20.1–Q20.5, codex-reviewed W0–W2.
+**Earlier — v0.19 — self-calibrating relative dudect gate:
 TESTED and FALSIFIED → honest fallback (on `main`)** — added two **fix-vs-fix
 noise-floor probes** (`noise_floor_fn_invert` / `noise_floor_fp_invert`) to the
 dudect harness (each runs the same `Fn`/`Fp` `invert` as its `ct_f{n,p}_invert`
@@ -255,7 +280,8 @@ v0.16.0 = C FFI for the SM4-XTS multi-sector helper (`gmcrypto_sm4_xts_encrypt_s
 v0.17 = public open-source release (flipped the GitHub repo private → public on the 0.x line; CI moved off the self-hosted macOS runner to GitHub-hosted `macos-14` + fuzz-nightly to `ubuntu-latest`; **repository milestone, NOT a crates.io release** — no crate code change, workspace stays 0.16.0, crates.io skips 0.17.0 per the v0.14 precedent; v1.0 reserved for a later readiness pass; per `docs/v0.17-scope.md` + `docs/pre-opensource-audit.md`, codex-reviewed).
 v0.18 = dudect-gate hardening (pin the dudect CI workflows' drift axes — `ubuntu-24.04` OS-label + exact `dtolnay/rust-toolchain@1.95.0` — and gate on a CI-level multi-run median `|tau|`: PR N=3 / nightly N=5, `required_low` + the nightly sentinel on the **median**, `negative_control` on the **min**, plus a completeness gate that FAILs any required target measured < N runs; `timing_leaks.rs` byte-unchanged, the loop + median live in CI. 100K×5 calibration showed `ct_fn_invert`/`ct_fp_invert` back near the ~0.006 baseline [medians 0.006–0.028] but **KEPT them on telemetry [PR] / median-gated sentinel @0.55 [nightly] — NOT re-promoted** to a `|tau|<0.20` gate, because the noise is image-sensitive + intermittent and would re-flake even a 5-run median gate if it returns [Q18.7 robustness-first]. The v0.5 recalibration doc's self-hosted-runner "authoritative fix" is off the table post-v0.17 [RCE on a public repo]. Also a comma-free `rust-cache` `shared-key` [job-index] so the multi-feature leg caches. **Infra-assurance milestone, NOT a crates.io release** — no crate code change, workspace stays 0.16.0, crates.io skips 0.18.0 [the v0.14/v0.17 precedent]; PRs #75 [pin+median+completeness] + #76 [cache key]; per `docs/v0.18-scope.md` Q18.1–Q18.7 + `docs/v0.5-dudect-recalibration.md` v0.18 resolution, codex-reviewed W0+W1).
 v0.19 = self-calibrating relative dudect gate — **TESTED and FALSIFIED → honest fallback** (per `docs/v0.19-scope.md` Q19.1–Q19.7 + `docs/v0.5-dudect-recalibration.md` v0.19 resolution). Added two fix-vs-fix noise-floor probes (`noise_floor_fn_invert`/`noise_floor_fp_invert`: same `Fn`/`Fp` `invert` as the suspect, but both dudect classes get one identical input → pure measurement noise, cannot leak) + a CI relative gate `median(target) ≤ max(0.20, 4·median(probe))` intended to re-promote `ct_fn_invert`/`ct_fp_invert`. The 100K calibration falsified the matched-sensitivity premise: the probes stayed uniformly quiet (~0.005) while the class-split targets spiked to [0.26–0.32] (`ct_fp_invert` median 0.2606 on the simd leg, ratio 50) — the runner noise is in the **two-input class-split difference**, not the operation duration a same-input probe sees, so the probe can't track it and the relative threshold pins at the 0.20 the noise already breaks. Fallback (Q19.5): relative gate → non-blocking `REL-TELEMETRY`; `ct_fn_invert`/`ct_fp_invert` revert to telemetry (PR) / sentinel @0.55 (nightly, sole gate again); probes KEPT as telemetry (evidence the noise is class-split-specific → input to v0.20). **Infra-assurance milestone, NOT a crates.io release** — only the dev-only bench harness changed, workspace stays 0.16.0, crates.io skips 0.19.0 (the v0.14/v0.17/v0.18 precedent); PR #78 (probes + relative gate) + resolution follow-up (relative gate → telemetry + docs), codex-reviewed.
-v0.20+ = (candidate) **class-split-aware "noise-twin" dudect reference** — the v0.19 successor: a two-different-input split through a known-constant-time op that measures the runner's *two-input comparison* noise floor (which the v0.19 fix-vs-fix probe could not), the only design that could now safely re-promote `ct_fn_invert`/`ct_fp_invert` — plus round-trip/differential parser fuzzing + streaming-decryptor fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + `cargo fuzz coverage` in CI + AVX-512 sbox_x64 + CCM buffered input + a v1.0 readiness pass (per `docs/v0.19-scope.md` §5/§6).
+v0.20 = streaming-decryptor differential fuzzing + `cargo fuzz coverage` + codified v1.0 CT baseline (per `docs/v0.20-scope.md` Q20.1–Q20.5; theme chosen after a Codex+Grok strategy discussion — one more assurance cycle over a 3rd dudect cycle / over new features). Two new libFuzzer targets (`fuzz_sm4_cbc_streaming_decrypt`/`fuzz_sm4_gcm_streaming_decrypt`) assert the streaming decryptors (`Sm4CbcDecryptor`/`Sm4GcmDecryptor`), fed in arbitrary chunk boundaries, are byte-identical to the single-shot `mode_{cbc,gcm}::decrypt` oracle — a **differential** invariant stronger than v0.14's no-panic (catches the CBC buffer-back-by-one PKCS#7 boundary + the GCM commit-on-verify GHASH accumulator); fuzz sweep → **18 targets**; initial sweep zero crashes + zero divergences. New **non-gating `cargo fuzz coverage`** nightly job (per-target llvm-cov TOTALS artifact; report-as-deliverable, no %-gate). Codified the settled v1.0 constant-time baseline in `SECURITY.md` (Option 2: composite dudect targets gated `|tau|<0.20`; the two single-inversion diagnostics stay telemetry/sentinel @0.55 — the v0.19 falsification is the evidence — with a **narrow revisit door**: a class-split-twin without the inversion op, or offline/dedicated HW, never public self-hosted CI). **Infra-assurance milestone, NOT a crates.io release** — only the workspace-excluded `fuzz/` crate + `fuzz-nightly.yml` + docs changed; published library byte-unchanged, workspace stays 0.16.0, crates.io skips 0.20.0 (the v0.14/v0.17/v0.18/v0.19 precedent); codex-reviewed W0–W2.
+v0.21+ = (candidate) **v1.0 readiness audit** (the confirmed v0.21 primary: API-stability/SemVer review across core+FFI+SIMD, feature-flag & no_std promises, docs/CHANGELOG freeze; v0.20's fuzz harnesses + coverage report are input evidence) + (deferred) a **class-split-aware "noise-twin" dudect reference** (the only design that could re-promote `ct_fn_invert`/`ct_fp_invert` — measures the runner's two-input noise floor the v0.19 fix-vs-fix probe could not) + round-trip/differential parser fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + AVX-512 sbox_x64 + CCM buffered input + the recurring `dudect-nightly` default+full leg-cancellation CI-health fix (per `docs/v0.20-scope.md` §5/§6).
 
 Read `README.md`, `SECURITY.md`, `CONTRIBUTING.md` for the user-facing posture.
 This file lists the constraints a coding agent will violate by default.
@@ -371,7 +397,7 @@ GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
 # Run from the REPO ROOT (the dir containing fuzz/). The fuzz crate is its
 # OWN workspace + parent exclude=["fuzz"], so it does NOT affect any
 # `cargo ... --workspace` / `cargo deny` / publish of the 3 crates.
-cargo +nightly fuzz build                          # build all 16 targets
+cargo +nightly fuzz build                          # build all 18 targets
 cargo +nightly fuzz run fuzz_pem fuzz/corpus/fuzz_pem fuzz/seeds/fuzz_pem -- \
     -max_len=16384 -rss_limit_mb=2048 -timeout=25 -max_total_time=60
 # Dir order: corpus FIRST (gitignored, libFuzzer writes new units here),
@@ -591,9 +617,9 @@ crates/gmcrypto-simd/       # v0.5 W4 phase 2 / v0.6 W6 / v0.8 W1 — SIMD backe
   tests/ghash_kat.rs        # v0.8 W1 — NIST-derived GHASH triple (H, X, Y) regression KAT across all three dispatch paths
   tests/ghash_lane_equivalence.rs # v0.8 W1 — software vs CLMUL vs PMULL byte-equivalence sweep over 75 inputs (random + structural edges)
 
-fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN WORKSPACE (empty [workspace] table) + parent exclude=["fuzz"] → nightly-only libfuzzer-sys/arbitrary deps never enter the published 3-crate graph; unpublished, NOT MSRV-bound, NOT in cargo deny. fuzz/Cargo.lock IS committed (.gitignore anchors /Cargo.lock to root so it isn't swallowed). 16 targets prove the failure-mode invariant (no panic/OOM/hang) on adversarial bytes; initial sweep zero crashes.
-  Cargo.toml                # gmcrypto-core path dep w/ features=["sm4-aead","sm4-xts"] always on (no per-target feature juggling); 16 [[bin]] entries; empty [workspace]
-  fuzz_targets/             # fuzz_pem, fuzz_pkcs8_{decode,decrypt}, fuzz_spki, fuzz_sec1, fuzz_sig, fuzz_asn1_reader, fuzz_sm2_{ciphertext_der,raw_ciphertext,pubkey_sec1,decrypt,verify}, fuzz_sm4_{cbc,gcm,ccm,xts}_decrypt. SM4 targets carve key/iv/nonce/aad/tag via FRONT-consuming arbitrary::Unstructured (so seeds are plain concatenations; pinned to arbitrary 1.4.2 order). sm2_decrypt/verify use a fixed test key via OnceLock.
+fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN WORKSPACE (empty [workspace] table) + parent exclude=["fuzz"] → nightly-only libfuzzer-sys/arbitrary deps never enter the published 3-crate graph; unpublished, NOT MSRV-bound, NOT in cargo deny. fuzz/Cargo.lock IS committed (.gitignore anchors /Cargo.lock to root so it isn't swallowed). 18 targets (v0.14's 16 + v0.20's 2 streaming-decryptor differential); v0.14's prove the failure-mode invariant (no panic/OOM/hang), v0.20's prove streaming==single-shot; initial sweeps zero crashes (+ zero divergences for v0.20).
+  Cargo.toml                # gmcrypto-core path dep w/ features=["sm4-aead","sm4-xts"] always on (no per-target feature juggling); 18 [[bin]] entries; empty [workspace]
+  fuzz_targets/             # fuzz_pem, fuzz_pkcs8_{decode,decrypt}, fuzz_spki, fuzz_sec1, fuzz_sig, fuzz_asn1_reader, fuzz_sm2_{ciphertext_der,raw_ciphertext,pubkey_sec1,decrypt,verify}, fuzz_sm4_{cbc,gcm,ccm,xts}_decrypt + v0.20 fuzz_sm4_{cbc,gcm}_streaming_decrypt (DIFFERENTIAL: streaming Sm4{Cbc,Gcm}Decryptor fed in arbitrary chunks == single-shot mode_{cbc,gcm}::decrypt; layouts add a chunk_len byte). SM4 targets carve key/iv/nonce/aad/tag via FRONT-consuming arbitrary::Unstructured (so seeds are plain concatenations; pinned to arbitrary 1.4.2 order). sm2_decrypt/verify use a fixed test key via OnceLock.
   seeds/<target>/           # committed curated valid seeds (from a one-time generator using gmcrypto-core's encode/sign/encrypt). corpus/, target/, artifacts/ are gitignored.
   README.md                 # build/run/repro runbook + seed-regen recipe
 
@@ -601,7 +627,7 @@ fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN 
   ci.yml                    # 5 jobs on GitHub-hosted macos-14 (aarch64, v0.17+): build/test (stable, full) + msrv (1.85, build-only) + cabi + cargo-deny + wasm32 matrix. Per-feature clippy passes (digest-traits, cipher-traits, sm4-bitsliced, sm4-bitsliced-simd, crypto-bigint-scalar). concurrency: cancel-in-progress. UNAFFECTED by fuzz/ (excluded).
   dudect-pr.yml             # 10K samples on ubuntu-latest, |tau| gate, matrix on features=[default, sm4-bitsliced, sm4-bitsliced-simd], path-allowlisted, concurrency: cancel-in-progress
   dudect-nightly.yml        # 100K samples on ubuntu-latest, same gate + matrix, 30-day artifact retention; concurrency: cancel-in-progress=false (a partial 100K run is wasted compute). PR #38 drops the push:main trigger in favour of cron-only (regression watch) + workflow_dispatch (manual reruns).
-  fuzz-nightly.yml          # v0.14 — capped cargo-fuzz sweep over all 16 targets on GitHub-hosted ubuntu-latest (v0.17+; cron 06:00 UTC + workflow_dispatch w/ max_total_time input; installs nightly + pinned cargo-fuzz 0.13.1 per run; -max_total_time/-rss_limit_mb/-timeout caps; crash-artifact upload 30d; concurrency cancel-in-progress=false). NOT a PR gate.
+  fuzz-nightly.yml          # v0.14 — capped cargo-fuzz sweep over all 18 targets (v0.20: FUZZ_TARGETS env is the single source of truth) on GitHub-hosted ubuntu-latest (v0.17+; cron 06:00 UTC + workflow_dispatch w/ max_total_time input; installs nightly + pinned cargo-fuzz 0.13.1 per run; -max_total_time/-rss_limit_mb/-timeout caps; crash-artifact upload 30d; concurrency cancel-in-progress=false). NOT a PR gate. v0.20 adds a SEPARATE non-gating `coverage` job: cargo +nightly fuzz coverage per target over committed seeds → llvm-cov TOTALS SUMMARY.txt artifact (report-as-deliverable, no %-gate).
 
 docs/
   v0.1.0-release-review.md      # pre-publish reviewer checklist (template)

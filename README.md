@@ -101,6 +101,33 @@ cadence — every cipher mode is now FFI-complete. **No new dependency, no new
 feature flag, no new `gmcrypto-core` API, no new dudect target.** Design
 rationale: [`docs/v0.16-scope.md`](docs/v0.16-scope.md) (Q16.1–Q16.12).
 
+## v0.20 scope (infra-assurance, not a crates.io release) — streaming-decryptor differential fuzzing + coverage
+
+**Two new differential fuzz targets + `cargo fuzz coverage` + a codified v1.0
+constant-time baseline.** `fuzz_sm4_cbc_streaming_decrypt` and
+`fuzz_sm4_gcm_streaming_decrypt` feed the ciphertext to the **streaming**
+decryptors (`Sm4CbcDecryptor` / `Sm4GcmDecryptor`) in **arbitrary chunk
+boundaries** and assert the result is **byte-identical** to the single-shot
+`mode_{cbc,gcm}::decrypt` oracle — a *differential* invariant (catches the CBC
+buffer-back-by-one PKCS#7 boundary and the GCM commit-on-verify GHASH
+accumulator), stronger than v0.14's no-panic property. The nightly fuzz sweep
+grows to **18 targets** (initial sweep: zero crashes, zero divergences) and gains
+a **non-gating `cargo fuzz coverage`** job that renders per-target `llvm-cov`
+TOTALS over the committed seed corpus and uploads them (the report is the
+deliverable, not a coverage-% gate). v0.20 also **codifies the settled v1.0
+constant-time baseline** in [`SECURITY.md`](SECURITY.md): composite dudect
+targets stay gated `|tau| < 0.20`; the two single-inversion micro-diagnostics
+remain telemetry + a `|tau| ≥ 0.55` sentinel (the v0.19 falsification is the
+evidence), with a *narrow* revisit door (a class-split-twin without the inversion
+op, or offline/dedicated hardware — never PR-executing public self-hosted CI).
+The theme was chosen after a Codex + Grok strategy discussion (one more assurance
+cycle that feeds v1.0 readiness, over a third dudect cycle or new features). A
+*repository / infra-assurance* milestone — only the workspace-excluded `fuzz/`
+crate + `fuzz-nightly.yml` + docs change (workspace stays `0.16.0`; crates.io
+skips `0.20.0` per the v0.14/v0.17/v0.18/v0.19 precedent). Design + result:
+[`docs/v0.20-scope.md`](docs/v0.20-scope.md) (Q20.1–Q20.5). **Next: v0.21 = the
+v1.0 readiness audit**, with v0.20's harnesses + coverage as input evidence.
+
 ## v0.19 scope (infra-assurance, not a crates.io release) — relative gate tested and falsified
 
 **Self-calibrating relative dudect gate — TESTED and FALSIFIED → honest fallback.**
@@ -514,7 +541,8 @@ Everything v0.2 shipped is unchanged:
 | v0.17 (public release; not a crates.io release) | **Open-sourced the repository.** Flipped the GitHub repo private → public on the 0.x line; CI migrated off the self-hosted macOS runner to GitHub-hosted (`ci.yml` → `macos-14`, `fuzz-nightly.yml` → `ubuntu-latest`). A *repository* milestone — no crate code changes (workspace stays `0.16.0`; crates.io skips `0.17.0` per the v0.14 precedent); v1.0 reserved. Per [`docs/v0.17-scope.md`](docs/v0.17-scope.md). |
 | v0.18 (infra-assurance; not a crates.io release) | **dudect-gate hardening.** Per `docs/v0.18-scope.md` Q18.1–Q18.7. Pinned the dudect CI workflows' drift axes (`ubuntu-24.04` OS-label + exact `dtolnay/rust-toolchain@1.95.0`) and gate on a CI-level multi-run median `\|tau\|` (PR 3 runs / nightly 5 runs; `required_low` + the nightly sentinel on the median, `negative_control` on the min, completeness gate on `< N` runs). `timing_leaks.rs` byte-unchanged — the loop + median live in CI. A 100K×5 calibration showed `ct_fn_invert`/`ct_fp_invert` back near baseline (medians 0.006–0.028) but **kept on telemetry / sentinel — not re-promoted** (the noise is runner-image-sensitive; a tight gate would re-flake if it returns). Also a comma-free `rust-cache` `shared-key`. A *repository / infra-assurance* milestone — no crate code change (workspace stays `0.16.0`; crates.io skips `0.18.0` per the v0.14 / v0.17 precedent). See [`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md) (v0.18 resolution). |
 | v0.19 (infra-assurance; not a crates.io release) | **Self-calibrating relative dudect gate — TESTED and FALSIFIED → honest fallback.** Per `docs/v0.19-scope.md` Q19.1–Q19.7. Added two fix-vs-fix noise-floor probes (`noise_floor_f{n,p}_invert`) + a relative gate `median(target) ≤ max(0.20, 4·median(probe))` to re-promote `ct_fn_invert`/`ct_fp_invert`. The 100K calibration disproved the matched-sensitivity premise: the probes stay quiet (~0.005) while the targets spike to [0.26–0.32] (`ct_fp_invert` median 0.2606, ratio 50) — the noise is in the two-input class split, not the operation, so a same-input probe can't track it. Reverted to telemetry / sentinel @0.55; probes kept as telemetry (evidence for a v0.20 class-split-aware "noise-twin"). Only the dev-only bench harness changed (workspace stays `0.16.0`; crates.io skips `0.19.0`). See [`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md) (v0.19 resolution). |
-| v0.20+ | A **class-split-aware "noise-twin"** dudect reference (the v0.19 successor — a two-different-input split through a known-CT op, the only design that could now re-promote the invert diagnostics); round-trip / differential parser fuzzing; streaming-decryptor fuzzing; RustCrypto `aead` trait fit (upstream still on `0.6.0-rc.10`); `cargo fuzz coverage` reporting; AVX-512 16-way `sbox_x64`; CCM buffered input; a v1.0 readiness pass. Each lands behind its own scope-doc cycle. |
+| v0.20 (infra-assurance; not a crates.io release) | **Streaming-decryptor differential fuzzing + `cargo fuzz coverage` + codified v1.0 CT baseline.** Per `docs/v0.20-scope.md` Q20.1–Q20.5. Two new differential targets (`fuzz_sm4_{cbc,gcm}_streaming_decrypt`) assert the streaming decryptors fed in arbitrary chunks equal the single-shot oracle; fuzz sweep → 18 targets (zero crashes, zero divergences); a non-gating `cargo fuzz coverage` nightly job (llvm-cov TOTALS artifact). Codified the settled v1.0 CT baseline in `SECURITY.md` (composite targets gated <0.20; the two single-inversion diagnostics on telemetry/sentinel @0.55, narrow revisit door). Theme chosen after a Codex+Grok discussion. Only `fuzz/` + `fuzz-nightly.yml` + docs changed (workspace stays `0.16.0`; crates.io skips `0.20.0`). |
+| v0.21+ | **v1.0 readiness audit** (the confirmed next theme: API-stability/SemVer review across core+FFI+SIMD, feature-flag & `no_std` promises, docs/CHANGELOG freeze — v0.20's fuzz harnesses + coverage are input evidence); plus, deferred: a **class-split-aware "noise-twin"** dudect reference (the only design that could re-promote the invert diagnostics); round-trip / differential parser fuzzing; RustCrypto `aead` trait fit (upstream still on `0.6.0-rc.10`); AVX-512 16-way `sbox_x64`; CCM buffered input; the recurring `dudect-nightly` leg-cancellation CI-health fix. Each lands behind its own scope-doc cycle. |
 | v1.0 | API stabilization (readiness pass: API-stability review + the v0.18/v0.19 hardening). |
 
 ## Quick-start
