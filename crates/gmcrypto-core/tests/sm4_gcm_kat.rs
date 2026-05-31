@@ -102,7 +102,8 @@ const VECTORS: &[GcmVector] = &[
 #[test]
 fn encrypt_matches_gmssl_vectors() {
     for v in VECTORS {
-        let (ct, tag) = mode_gcm::encrypt(&v.key, v.nonce, v.aad, v.plaintext);
+        let (ct, tag) =
+            mode_gcm::encrypt(&v.key, v.nonce, v.aad, v.plaintext).expect("under ceiling");
         assert_eq!(
             ct, v.ciphertext,
             "ciphertext divergence for scenario {:?}",
@@ -173,7 +174,8 @@ fn encrypt_with_tag_len_matches_truncated_gmssl_tag() {
     for v in VECTORS {
         for &t in &[4usize, 8, 12, 13, 14, 15, 16] {
             let tl = GcmTagLen::new(t).unwrap();
-            let (ct, tag) = mode_gcm::encrypt_with_tag_len(&v.key, v.nonce, v.aad, v.plaintext, tl);
+            let (ct, tag) = mode_gcm::encrypt_with_tag_len(&v.key, v.nonce, v.aad, v.plaintext, tl)
+                .expect("under ceiling");
             assert_eq!(
                 ct, v.ciphertext,
                 "ciphertext divergence for {:?} at tag_len {t}",

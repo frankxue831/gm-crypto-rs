@@ -331,7 +331,7 @@ fn gmssl_sm2_sign_us_verify_them() {
     fs::write(&msg_path, message).expect("write message");
 
     let priv_key = load_w3_private();
-    let mut rng = rand_core::UnwrapErr(getrandom::SysRng);
+    let mut rng = getrandom::SysRng;
     let sig =
         sm2::sign_with_id(&priv_key, sm2::DEFAULT_SIGNER_ID, message, &mut rng).expect("sign");
     fs::write(&sig_path, &sig).expect("write sig");
@@ -418,7 +418,7 @@ fn gmssl_sm2_encrypt_us_decrypt_them() {
 
     let priv_key = load_w3_private();
     let pub_key = priv_key.public_key();
-    let mut rng = rand_core::UnwrapErr(getrandom::SysRng);
+    let mut rng = getrandom::SysRng;
     let ct = sm2::encrypt(&pub_key, plaintext, &mut rng).expect("encrypt");
     fs::write(&ct_path, &ct).expect("write ct");
 
@@ -724,7 +724,7 @@ fn gmssl_sm4_gcm_encrypt_us_decrypt_them() {
     let aad = b"v0.8 W2 GCM encrypt-us cross-validation";
     let plaintext: &[u8] = b"v0.8 W2 SM4-GCM encrypt-us cross-validation against gmssl 3.1.1";
 
-    let (ct, tag) = mode_gcm::encrypt(&key, &nonce, aad, plaintext);
+    let (ct, tag) = mode_gcm::encrypt(&key, &nonce, aad, plaintext).expect("under ceiling");
     let mut combined = Vec::with_capacity(ct.len() + tag.len());
     combined.extend_from_slice(&ct);
     combined.extend_from_slice(&tag);

@@ -17,14 +17,13 @@
 use getrandom::SysRng;
 use gmcrypto_core::sm2::{DEFAULT_SIGNER_ID, Sm2PrivateKey, sign_raw_with_id};
 use gmcrypto_core::sm4::{Sm4CbcDecryptor, Sm4CbcEncryptor};
-use rand_core::UnwrapErr;
 
 #[test]
 fn sign_raw_with_id_exists() {
     let key = Sm2PrivateKey::from_bytes_be(&[0x11; 32])
         .into_option()
         .expect("0x11..11 is a valid SM2 scalar");
-    let mut rng = UnwrapErr(SysRng);
+    let mut rng = SysRng;
     // The #[doc(hidden)] raw signer the dudect harness targets must stay
     // callable and return the un-DER-encoded (r, s) pair.
     let pair = sign_raw_with_id(&key, DEFAULT_SIGNER_ID, b"v0.21 existence probe", &mut rng);

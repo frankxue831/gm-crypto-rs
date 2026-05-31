@@ -128,7 +128,7 @@ use gmcrypto_core::sm2::{
     mul_var, sign_raw_with_id,
 };
 use gmcrypto_core::sm4::Sm4Cipher;
-use rand_core::{TryCryptoRng, TryRng, UnwrapErr};
+use rand_core::{TryCryptoRng, TryRng};
 
 /// Default per-bench sample count (smoke). Overridable via `DUDECT_SAMPLES`.
 const DEFAULT_SAMPLES: usize = 100_000;
@@ -246,7 +246,7 @@ fn ct_sign(runner: &mut CtRunner, rng: &mut BenchRng) {
         // `run_one` takes `Fn` (immutable closure), so construct the
         // zero-sized system RNG wrapper inside the closure.
         runner.run_one(class, || {
-            let mut rng = UnwrapErr(SysRng);
+            let mut rng = SysRng;
             sign_raw_with_id(key, DEFAULT_SIGNER_ID, b"timing target", &mut rng)
         });
     }
@@ -344,9 +344,9 @@ fn ct_sign_k_class(runner: &mut CtRunner, rng: &mut BenchRng) {
         let is_left = matches!(class, Class::Left);
         runner.run_one(class, || {
             let mut k_rng = if is_left {
-                UnwrapErr(ClassKRng::new_left())
+                ClassKRng::new_left()
             } else {
-                UnwrapErr(ClassKRng::new_right())
+                ClassKRng::new_right()
             };
             sign_raw_with_id(&key, DEFAULT_SIGNER_ID, b"timing target", &mut k_rng)
         });
@@ -685,8 +685,10 @@ fn ct_sm4_gcm_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
     let aad: [u8; 16] = [0xAA; 16];
     let plaintext: [u8; 256] = [0u8; 256];
 
-    let (ct_left, tag_left) = mode_gcm::encrypt(&key_left, &nonce, &aad, &plaintext);
-    let (ct_right, tag_right) = mode_gcm::encrypt(&key_right, &nonce, &aad, &plaintext);
+    let (ct_left, tag_left) =
+        mode_gcm::encrypt(&key_left, &nonce, &aad, &plaintext).expect("under ceiling");
+    let (ct_right, tag_right) =
+        mode_gcm::encrypt(&key_right, &nonce, &aad, &plaintext).expect("under ceiling");
 
     for _ in 0..sample_count() {
         let (class, key, ct, tag) = if rng.random::<bool>() {
@@ -771,8 +773,10 @@ fn ct_sm4_gcm_decrypt_buffered(runner: &mut CtRunner, rng: &mut BenchRng) {
     let aad: [u8; 16] = [0xAA; 16];
     let plaintext: [u8; 256] = [0u8; 256];
 
-    let (ct_left, tag_left) = mode_gcm::encrypt(&key_left, &nonce, &aad, &plaintext);
-    let (ct_right, tag_right) = mode_gcm::encrypt(&key_right, &nonce, &aad, &plaintext);
+    let (ct_left, tag_left) =
+        mode_gcm::encrypt(&key_left, &nonce, &aad, &plaintext).expect("under ceiling");
+    let (ct_right, tag_right) =
+        mode_gcm::encrypt(&key_right, &nonce, &aad, &plaintext).expect("under ceiling");
 
     for _ in 0..sample_count() {
         let (class, key, ct, tag) = if rng.random::<bool>() {
@@ -878,7 +882,7 @@ fn ct_sm2_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
     ))
     .expect("valid d for recipient");
     let recipient_pk = recipient_priv.public_key();
-    let mut sys_rng = UnwrapErr(SysRng);
+    let mut sys_rng = SysRng;
     let ciphertext =
         encrypt(&recipient_pk, b"timing target", &mut sys_rng).expect("encrypt to recipient");
 

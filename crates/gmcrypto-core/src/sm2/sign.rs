@@ -8,8 +8,9 @@ use crate::sm2::scalar_mul::mul_g;
 use crate::sm3::{DIGEST_SIZE, Sm3};
 use alloc::vec::Vec;
 use crypto_bigint::U256;
-use rand_core::{CryptoRng, Rng};
+use rand_core::TryCryptoRng;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, ConstantTimeLess, CtOption};
+use zeroize::Zeroize;
 
 /// Default signer ID per GM/T 0009: 16 ASCII bytes "1234567812345678".
 pub const DEFAULT_SIGNER_ID: &[u8; 16] = b"1234567812345678";
@@ -87,11 +88,21 @@ pub(crate) const SIGN_RETRY_BUDGET: usize = 2;
 /// # Errors
 ///
 /// Returns [`crate::Error::Failed`] if `id.len() > MAX_ID_LEN` (the
-/// `ENTL_A` field is 16-bit) or if every retry in the budget produced
-/// an invalid candidate (`r == 0`, `r + k == n`, or `s == 0`). Failure
-/// modes are deliberately collapsed to one variant per the
-/// failure-mode-invariant policy; see `SECURITY.md`.
-pub fn sign_with_id<R: CryptoRng + Rng>(
+/// `ENTL_A` field is 16-bit), if the supplied RNG fails (its
+/// `try_fill_bytes` errored — the failure is collapsed to `Failed`,
+/// never propagated as a panic), or if every retry in the budget
+/// produced an invalid candidate (`r == 0`,
+/// `r + k == n`, or `s == 0`). Failure modes are deliberately collapsed
+/// to one variant per the failure-mode-invariant policy; see
+/// `SECURITY.md`.
+///
+/// # RNG bound
+///
+/// `R: TryCryptoRng` is the **fallible** `rand_core` cryptographic-RNG
+/// trait. This is a deliberate ecosystem coupling: `rand_core` is the
+/// interop point for RNGs, and the fallible bound gives a defined,
+/// no-panic path when the RNG fails (the error collapses to `Failed`).
+pub fn sign_with_id<R: TryCryptoRng>(
     key: &Sm2PrivateKey,
     id: &[u8],
     message: &[u8],
@@ -123,11 +134,11 @@ pub fn sign_with_id<R: CryptoRng + Rng>(
 ///
 /// # Errors
 ///
-/// Same as [`sign_with_id`]: returns [`crate::Error::Failed`] only if
-/// every retry produced an invalid candidate (`r == 0`, `r + k == n`,
-/// or `s == 0`).
+/// Same as [`sign_with_id`]: returns [`crate::Error::Failed`] if the
+/// RNG fails or if every retry produced an invalid candidate (`r == 0`,
+/// `r + k == n`, or `s == 0`).
 #[doc(hidden)]
-pub fn sign_raw_with_id<R: CryptoRng + Rng>(
+pub fn sign_raw_with_id<R: TryCryptoRng>(
     key: &Sm2PrivateKey,
     id: &[u8],
     message: &[u8],
@@ -174,8 +185,13 @@ impl ConditionallySelectable for RsPair {
 }
 
 #[allow(clippy::similar_names, clippy::many_single_char_names)]
-fn try_sign_once<R: CryptoRng + Rng>(key: &Sm2PrivateKey, e: &Fn, rng: &mut R) -> CtOption<RsPair> {
-    let k = sample_nonzero_scalar(rng);
+fn try_sign_once<R: TryCryptoRng>(key: &Sm2PrivateKey, e: &Fn, rng: &mut R) -> CtOption<RsPair> {
+    // RNG failure / budget exhaustion in the sampler is NOT secret-
+    // derived, so collapsing it to an invalid `CtOption` here is a
+    // public-path early return (it becomes `Error::Failed` upstream).
+    let Some(mut k) = sample_nonzero_scalar(rng) else {
+        return CtOption::new(RsPair::default(), Choice::from(0u8));
+    };
     let kg = mul_g(&k);
     let (x1, _y1) = kg.to_affine().expect("k·G is finite for k != 0");
 
@@ -192,31 +208,68 @@ fn try_sign_once<R: CryptoRng + Rng>(key: &Sm2PrivateKey, e: &Fn, rng: &mut R) -
     let one = Fn::new(&U256::ONE);
     let one_plus_d = one + *d;
     let one_plus_d_inv = one_plus_d.invert();
-    let rd = r * *d;
-    let k_minus_rd = k - rd;
+    let mut rd = r * *d;
+    let mut k_minus_rd = k - rd;
 
-    let inv_unwrapped: Fn = one_plus_d_inv.unwrap_or(Fn::new(&U256::ONE));
+    let mut inv_unwrapped: Fn = one_plus_d_inv.unwrap_or(Fn::new(&U256::ONE));
     let inv_ok: Choice = one_plus_d_inv.is_some().into();
 
-    let s = inv_unwrapped * k_minus_rd;
+    let mut s = inv_unwrapped * k_minus_rd;
     let s_u = s.retrieve();
     let s_zero: Choice = s_u.ct_eq(&U256::ZERO);
 
     let valid = !bad_r & !s_zero & inv_ok;
-    CtOption::new(RsPair { r: r_u, s: s_u }, valid)
+    let out = CtOption::new(RsPair { r: r_u, s: s_u }, valid);
+
+    // B-4 (v0.23): wipe the secret-derived scalar intermediates. `Fn`
+    // (`ConstMontyForm`) implements `zeroize::DefaultIsZeroes` under
+    // crypto-bigint's `zeroize` feature (enabled in the workspace
+    // `Cargo.toml`), giving a real `.zeroize()` on the Montgomery
+    // representation. The nonce `k`, the inverse `(1+d)^-1`, `r·d`,
+    // `k − r·d`, and `s` are all functions of the secret `k`/`d`; a
+    // nonce leak alone permits private-key recovery from `(r, s)`. The
+    // public outputs `r_u`/`s_u` (already in `out`) are deliberately
+    // NOT wiped.
+    k.zeroize();
+    inv_unwrapped.zeroize();
+    rd.zeroize();
+    k_minus_rd.zeroize();
+    s.zeroize();
+
+    out
 }
 
-pub(crate) fn sample_nonzero_scalar<R: CryptoRng + Rng>(rng: &mut R) -> Fn {
+/// Fixed-budget constant-time nonzero-scalar sampler. Per-draw reject
+/// probability ≈ 2^-32 (n ≈ 2^256 − 2^224), so a 4-draw budget fails
+/// (all invalid) with probability ≈ 2^-128. Returns `None` on RNG error
+/// or budget exhaustion (collapsed to `Failed` upstream). No `if`/`bool`
+/// branch on secret-derived bytes — the first valid candidate is kept by
+/// masked select; the loop always runs `NONCE_SAMPLE_BUDGET` iterations.
+pub(crate) const NONCE_SAMPLE_BUDGET: usize = 4;
+
+pub(crate) fn sample_nonzero_scalar<R: TryCryptoRng>(rng: &mut R) -> Option<Fn> {
     let n = *Fn::MODULUS.as_ref();
-    loop {
+    let mut chosen = U256::ONE;
+    let mut found = Choice::from(0u8);
+    for _ in 0..NONCE_SAMPLE_BUDGET {
         let mut buf = [0u8; 32];
-        rng.fill_bytes(&mut buf);
+        // RNG failure is NOT secret-derived: collapsing it to None here is
+        // a public-path early return (becomes Error::Failed upstream).
+        if rng.try_fill_bytes(&mut buf).is_err() {
+            buf.zeroize();
+            return None;
+        }
         let candidate = U256::from_be_slice(&buf);
         let valid = !candidate.ct_eq(&U256::ZERO) & candidate.ct_lt(&n);
-        if bool::from(valid) {
-            return Fn::new(&candidate);
-        }
+        let take = valid & !found; // keep the FIRST valid draw
+        chosen = U256::conditional_select(&chosen, &candidate, take);
+        found |= valid;
+        buf.zeroize();
     }
+    let out: Option<Fn> = CtOption::new(Fn::new(&chosen), found).into();
+    // best-effort wipe of the chosen representative if it wasn't used
+    chosen.zeroize();
+    out
 }
 
 fn ct_or_else<T: ConditionallySelectable + Default>(a: CtOption<T>, b: CtOption<T>) -> CtOption<T> {
@@ -235,10 +288,10 @@ mod tests {
     use crate::sm2::private_key::Sm2PrivateKey;
     use core::convert::Infallible;
     use getrandom::SysRng;
-    use rand_core::{TryCryptoRng, TryRng, UnwrapErr};
+    use rand_core::{TryCryptoRng, TryRng};
 
     struct SequenceRng {
-        values: [U256; 2],
+        values: [U256; NONCE_SAMPLE_BUDGET],
         index: usize,
     }
 
@@ -293,23 +346,77 @@ mod tests {
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid scalar");
         let too_long = alloc::vec![0u8; MAX_ID_LEN + 1];
-        let mut rng = UnwrapErr(SysRng);
+        let mut rng = SysRng;
         let result = sign_with_id(&key, &too_long, b"msg", &mut rng);
         assert_eq!(result, Err(crate::Error::Failed));
     }
 
+    /// The fixed-budget masked sampler keeps the FIRST valid draw and
+    /// rejects an out-of-range (`>= n`) first candidate via masked
+    /// select. v0.23 (B-7): the sampler runs the full
+    /// `NONCE_SAMPLE_BUDGET` regardless of which draw was valid (no
+    /// data-dependent loop count), so the RNG is consumed exactly
+    /// `NONCE_SAMPLE_BUDGET` times.
     #[test]
     fn sample_nonzero_scalar_rejects_candidates_above_order() {
         let n_plus_one = Fn::MODULUS.as_ref().wrapping_add(&U256::ONE);
+        // First draw is out-of-range (rejected); second is the valid
+        // value 2 (kept); the remaining draws are also valid but must
+        // NOT displace the first-valid representative.
         let mut rng = SequenceRng {
-            values: [n_plus_one, U256::from_u64(2)],
+            values: [
+                n_plus_one,
+                U256::from_u64(2),
+                U256::from_u64(7),
+                U256::from_u64(9),
+            ],
             index: 0,
         };
 
-        let sampled = sample_nonzero_scalar(&mut rng).retrieve();
+        let sampled = sample_nonzero_scalar(&mut rng)
+            .expect("a valid draw")
+            .retrieve();
 
-        assert_eq!(sampled, U256::from_u64(2));
-        assert_eq!(rng.index, 2);
+        assert_eq!(sampled, U256::from_u64(2), "first valid draw is kept");
+        assert_eq!(
+            rng.index, NONCE_SAMPLE_BUDGET,
+            "fixed-budget sampler consumes exactly NONCE_SAMPLE_BUDGET draws"
+        );
+    }
+
+    /// All-invalid draws exhaust the budget → `None` (collapsed to
+    /// `Failed` upstream). Uses `n` itself (rejected by `< n`) for
+    /// every draw.
+    #[test]
+    fn sample_nonzero_scalar_exhausts_budget_to_none() {
+        let n = *Fn::MODULUS.as_ref();
+        let mut rng = SequenceRng {
+            values: [n; NONCE_SAMPLE_BUDGET],
+            index: 0,
+        };
+        assert!(sample_nonzero_scalar(&mut rng).is_none());
+        assert_eq!(rng.index, NONCE_SAMPLE_BUDGET);
+    }
+
+    /// An erroring RNG collapses to `None` (the no-panic RNG-failure
+    /// path).
+    #[test]
+    fn sample_nonzero_scalar_rng_error_is_none() {
+        struct ErrRng;
+        impl TryRng for ErrRng {
+            type Error = core::fmt::Error;
+            fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+                Err(core::fmt::Error)
+            }
+            fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+                Err(core::fmt::Error)
+            }
+            fn try_fill_bytes(&mut self, _dst: &mut [u8]) -> Result<(), Self::Error> {
+                Err(core::fmt::Error)
+            }
+        }
+        impl TryCryptoRng for ErrRng {}
+        assert!(sample_nonzero_scalar(&mut ErrRng).is_none());
     }
 }
 

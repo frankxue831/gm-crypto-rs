@@ -86,7 +86,6 @@ mod tests {
     use crate::sm2::private_key::Sm2PrivateKey;
     use crate::sm2::sign::sign_with_id;
     use getrandom::SysRng;
-    use rand_core::UnwrapErr;
 
     #[test]
     fn round_trip_random_message() {
@@ -96,7 +95,7 @@ mod tests {
         let pk = key.public_key();
         let id = b"ALICE123@YAHOO.COM";
         let msg = b"hello world";
-        let mut rng = UnwrapErr(SysRng);
+        let mut rng = SysRng;
         let sig = sign_with_id(&key, id, msg, &mut rng).expect("sign");
         assert!(verify_with_id(&pk, id, msg, &sig));
     }
@@ -108,7 +107,7 @@ mod tests {
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid");
         let pk = key.public_key();
         let id = b"ALICE123@YAHOO.COM";
-        let mut rng = UnwrapErr(SysRng);
+        let mut rng = SysRng;
         let sig = sign_with_id(&key, id, b"original", &mut rng).expect("sign");
         assert!(!verify_with_id(&pk, id, b"tampered", &sig));
     }
@@ -124,7 +123,7 @@ mod tests {
         let pk_b = key_b.public_key();
         let id = b"ALICE123@YAHOO.COM";
         let msg = b"hello world";
-        let mut rng = UnwrapErr(SysRng);
+        let mut rng = SysRng;
         let sig = sign_with_id(&key_a, id, msg, &mut rng).expect("sign");
         // sig is under key_a; verifying under key_b's public must fail.
         assert!(!verify_with_id(&pk_b, id, msg, &sig));

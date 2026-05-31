@@ -732,7 +732,7 @@ fn sm2_decrypt_c1c2c3_legacy_via_ffi() {
     let pub_key = key.public_key();
 
     let pt = b"legacy ordering";
-    let mut rng = rand_core::UnwrapErr(getrandom::SysRng);
+    let mut rng = getrandom::SysRng;
     let der_ct = core_encrypt(&pub_key, pt, &mut rng).expect("encrypt ok");
     let parsed = der_decode(&der_ct).expect("DER decode ok");
 
@@ -1210,7 +1210,8 @@ fn sm4_gcm_round_trip_matches_core() {
     assert_eq!(ct_actual, pt.len());
 
     // Byte-equivalence with the core API.
-    let (core_ct, core_tag) = gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, pt);
+    let (core_ct, core_tag) =
+        gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, pt).expect("under ceiling");
     assert_eq!(ct, core_ct);
     assert_eq!(tag, core_tag);
 
@@ -1244,7 +1245,8 @@ fn sm4_gcm_tampered_tag_returns_err() {
     let nonce = [0x01u8; 12];
     let aad = b"h";
     let pt = b"tamper target";
-    let (ct, mut tag) = gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, pt);
+    let (ct, mut tag) =
+        gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, pt).expect("under ceiling");
     tag[0] ^= 0x01;
     let mut pt_back = vec![0u8; ct.len()];
     let mut pt_actual = 0usize;
@@ -1298,7 +1300,8 @@ fn sm4_gcm_tag_len_12_round_trip_matches_core() {
 
     let tl = gmcrypto_core::sm4::GcmTagLen::new(tag_len).unwrap();
     let (core_ct, core_tag) =
-        gmcrypto_core::sm4::mode_gcm::encrypt_with_tag_len(&key, &nonce, aad, pt, tl);
+        gmcrypto_core::sm4::mode_gcm::encrypt_with_tag_len(&key, &nonce, aad, pt, tl)
+            .expect("under ceiling");
     assert_eq!(ct, core_ct);
     assert_eq!(tag, core_tag);
 
@@ -1508,7 +1511,8 @@ fn sm4_gcm_encryptor_chunked_matches_core() {
     // but we are not exercising the tag in this test.
     unsafe { gmcrypto_sm4_gcm_encryptor_free(enc) };
 
-    let (core_ct, _core_tag) = gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, &pt);
+    let (core_ct, _core_tag) =
+        gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, &pt).expect("under ceiling");
     assert_eq!(ct, core_ct);
 }
 
@@ -1550,7 +1554,8 @@ fn sm4_gcm_encryptor_finalize_matches_core() {
         unsafe { gmcrypto_sm4_gcm_encryptor_finalize(enc, tag.as_mut_ptr()) },
         GMCRYPTO_OK
     );
-    let (core_ct, core_tag) = gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, pt);
+    let (core_ct, core_tag) =
+        gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, pt).expect("under ceiling");
     assert_eq!(ct, core_ct);
     assert_eq!(tag, core_tag);
 
@@ -1626,7 +1631,8 @@ fn sm4_gcm_decryptor_chunked_round_trip() {
     let nonce = [0x01u8; 12];
     let aad = b"associated header";
     let pt: Vec<u8> = (0..200u8).map(|i| i ^ (i >> 3)).collect();
-    let (ct, tag) = gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, &pt);
+    let (ct, tag) =
+        gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, &pt).expect("under ceiling");
 
     let dec = unsafe {
         gmcrypto_sm4_gcm_decryptor_new(
@@ -1666,7 +1672,8 @@ fn sm4_gcm_decryptor_tamper_and_bad_len_return_err() {
     let nonce = [0x01u8; 12];
     let aad = b"h";
     let pt = b"tamper target across the c boundary";
-    let (ct, mut tag) = gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, pt);
+    let (ct, mut tag) =
+        gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, pt).expect("under ceiling");
 
     // tampered tag → ERR, out_actual_len zeroed, no plaintext.
     tag[0] ^= 0x01;
@@ -1696,7 +1703,8 @@ fn sm4_gcm_decryptor_tamper_and_bad_len_return_err() {
     assert_eq!(actual, 0);
 
     // invalid tag_len (5 ∉ valid set) → ERR.
-    let (ct2, tag2) = gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, pt);
+    let (ct2, tag2) =
+        gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, pt).expect("under ceiling");
     let dec2 = unsafe {
         gmcrypto_sm4_gcm_decryptor_new(
             key.as_ptr(),
@@ -1856,7 +1864,8 @@ fn sm4_gcm_streaming_empty_plaintext() {
     assert_eq!(actual, 0);
 
     // cross-check the tag matches core single-shot on empty plaintext.
-    let (_core_ct, core_tag) = gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, &[]);
+    let (_core_ct, core_tag) =
+        gmcrypto_core::sm4::mode_gcm::encrypt(&key, &nonce, aad, &[]).expect("under ceiling");
     assert_eq!(tag, core_tag);
 }
 

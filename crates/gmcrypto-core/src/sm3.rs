@@ -4,6 +4,8 @@
 
 use core::convert::TryInto;
 
+use zeroize::Zeroize;
+
 const IV: [u32; 8] = [
     0x7380_166f,
     0x4914_b2b9,
@@ -127,6 +129,25 @@ impl Sm3 {
             out[i * 4..(i + 1) * 4].copy_from_slice(&w.to_be_bytes());
         }
         out
+    }
+}
+
+/// Wipe the compression state + input buffer on drop (B-2, v0.23).
+///
+/// When an [`Sm3`] is keyed — e.g. the inner/outer instances inside
+/// [`crate::hmac::HmacSm3`] — `state` and `buffer` hold key-derived
+/// material. This `Drop` scrubs them at the field layer so the keyed
+/// state never lingers in freed memory; `buffer_len` / `total_len` are
+/// public-structure metadata (not secret) and are left as-is.
+///
+/// `state: [u32; 8]` and `buffer: [u8; 64]` are `Copy`, and
+/// [`Sm3::finalize`] only *copies* them out (never moves a field out of
+/// `self`), so adding `Drop` does not conflict with the by-value
+/// `finalize`/`finalize_into` paths.
+impl Drop for Sm3 {
+    fn drop(&mut self) {
+        self.state.zeroize();
+        self.buffer.zeroize();
     }
 }
 

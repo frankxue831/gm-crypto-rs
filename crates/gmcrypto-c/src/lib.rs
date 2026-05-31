@@ -1017,7 +1017,13 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_encrypt(
             Some(s) => s,
             None => return GMCRYPTO_ERR,
         };
-        let (ciphertext, tag) = mode_gcm::encrypt(k_arr, n, a, p);
+        // `None` only when `pt_len > 2^36 − 32` (the GCM keystream
+        // ceiling). Collapses to the single error code like every other
+        // failure path.
+        let (ciphertext, tag) = match mode_gcm::encrypt(k_arr, n, a, p) {
+            Some(out) => out,
+            None => return GMCRYPTO_ERR,
+        };
         // SAFETY: ct_out valid for ct_capacity bytes; ct_actual_len valid.
         let rc = unsafe { write_output(&ciphertext, ct_out, ct_capacity, ct_actual_len) };
         if rc != GMCRYPTO_OK {
@@ -1136,7 +1142,12 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_encrypt_with_tag_len(
             Some(s) => s,
             None => return GMCRYPTO_ERR,
         };
-        let (ciphertext, tag) = mode_gcm::encrypt_with_tag_len(k_arr, n, a, p, tl);
+        // `None` only when `pt_len > 2^36 − 32` (the GCM keystream
+        // ceiling). Collapses to the single error code.
+        let (ciphertext, tag) = match mode_gcm::encrypt_with_tag_len(k_arr, n, a, p, tl) {
+            Some(out) => out,
+            None => return GMCRYPTO_ERR,
+        };
         // SAFETY: ct_out valid for ct_capacity bytes; ct_actual_len valid.
         let rc = unsafe { write_output(&ciphertext, ct_out, ct_capacity, ct_actual_len) };
         if rc != GMCRYPTO_OK {
@@ -2035,7 +2046,7 @@ pub unsafe extern "C" fn gmcrypto_sm2_sign(
             None => return GMCRYPTO_ERR,
         };
         let k = unsafe { &*key };
-        let mut rng = rand_core::UnwrapErr(getrandom::SysRng);
+        let mut rng = getrandom::SysRng;
         let sig = match sign_with_id(&k.inner, id, m, &mut rng) {
             Ok(s) => s,
             Err(_) => return GMCRYPTO_ERR,
@@ -2106,7 +2117,7 @@ pub unsafe extern "C" fn gmcrypto_sm2_encrypt(
             None => return GMCRYPTO_ERR,
         };
         let k = unsafe { &*key };
-        let mut rng = rand_core::UnwrapErr(getrandom::SysRng);
+        let mut rng = getrandom::SysRng;
         let ct = match sm2_encrypt(&k.inner, p, &mut rng) {
             Ok(c) => c,
             Err(_) => return GMCRYPTO_ERR,
@@ -2161,10 +2172,13 @@ impl core::fmt::Display for CallbackRngError {
 impl core::error::Error for CallbackRngError {}
 
 /// Bridge from the C ABI function pointer + opaque context to
-/// `rand_core::TryRng + TryCryptoRng`. Wrapping in
-/// `rand_core::UnwrapErr` gives an infallible `Rng + CryptoRng` that
-/// panics on callback failure; the panic is caught by `ffi_guard` and
-/// converted to `GMCRYPTO_FAILED`.
+/// `rand_core::TryRng + TryCryptoRng`. Passed **directly** (no
+/// `UnwrapErr`) to the core `sign_with_id` / `encrypt`, whose public
+/// bound is now the fallible `TryCryptoRng` (v0.23): a callback failure
+/// surfaces as `Err(CallbackRngError)`, the core collapses it to
+/// `Error::Failed`, and the FFI maps that to `GMCRYPTO_FAILED` — a
+/// defined, no-panic RNG-failure path (the previous design panicked via
+/// `UnwrapErr` and relied on `ffi_guard` to catch it).
 struct CallbackRng {
     callback: unsafe extern "C" fn(context: *mut c_void, buf: *mut u8, buf_len: usize) -> c_int,
     context: *mut c_void,
@@ -2291,7 +2305,7 @@ pub unsafe extern "C" fn gmcrypto_sm2_encrypt_c1c3c2(
         };
         // SAFETY: key non-null per check above.
         let k = unsafe { &*key };
-        let mut rng = rand_core::UnwrapErr(getrandom::SysRng);
+        let mut rng = getrandom::SysRng;
         let der_bytes = match sm2_encrypt(&k.inner, p, &mut rng) {
             Ok(b) => b,
             Err(_) => return GMCRYPTO_ERR,
@@ -2455,10 +2469,10 @@ pub unsafe extern "C" fn gmcrypto_sm2_sign_with_rng(
         };
         // SAFETY: key non-null per check above.
         let k = unsafe { &*key };
-        let mut rng = rand_core::UnwrapErr(CallbackRng {
+        let mut rng = CallbackRng {
             callback,
             context: rng_context,
-        });
+        };
         let sig = match sign_with_id(&k.inner, id, m, &mut rng) {
             Ok(s) => s,
             Err(_) => return GMCRYPTO_ERR,
@@ -2505,10 +2519,10 @@ pub unsafe extern "C" fn gmcrypto_sm2_encrypt_with_rng(
         };
         // SAFETY: key non-null per check above.
         let k = unsafe { &*key };
-        let mut rng = rand_core::UnwrapErr(CallbackRng {
+        let mut rng = CallbackRng {
             callback,
             context: rng_context,
-        });
+        };
         let ct = match sm2_encrypt(&k.inner, p, &mut rng) {
             Ok(c) => c,
             Err(_) => return GMCRYPTO_ERR,
