@@ -74,6 +74,19 @@ pub mod sm4;
 pub mod spki;
 pub mod traits;
 
+/// Internal helper: canonical 32-byte big-endian encoding of a `U256`.
+///
+/// `crypto-bigint`'s `Encoding::to_be_bytes` returns an `EncodedUint`
+/// wrapper, not a `[u8; 32]`. v0.22 reshaped the byte-adjacent public
+/// types (`asn1::sig` signatures, `asn1::ciphertext::Sm2Ciphertext`) to
+/// `[u8; 32]` so the public API names no `crypto-bigint` type; this pins
+/// the conversion in one place for the internal producers (sign / encrypt /
+/// raw-ciphertext). Not part of the public API.
+#[inline]
+pub(crate) fn u256_to_be32(v: &crypto_bigint::U256) -> [u8; 32] {
+    v.to_be_bytes().into()
+}
+
 /// Workspace-wide failure type (v0.5 W5).
 ///
 /// Every fallible public surface in `gmcrypto-core` that does not

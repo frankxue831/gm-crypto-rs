@@ -35,9 +35,15 @@ pub fn verify_with_id(public: &Sm2PublicKey, id: &[u8], message: &[u8], sig_der:
         return false;
     }
 
-    let Some((r, s)) = decode_sig(sig_der) else {
+    let Some((r_be, s_be)) = decode_sig(sig_der) else {
         return false;
     };
+    // v0.22: `decode_sig` now yields 32-byte big-endian scalars (it keeps all
+    // its strict-canonical + zero/length rejects internally). Reconstruct the
+    // numeric `U256` here for the verify-side range / field checks below — the
+    // checks are byte-for-byte the same as before the reshape.
+    let r = U256::from_be_slice(&r_be);
+    let s = U256::from_be_slice(&s_be);
 
     let n = *Fn::MODULUS.as_ref();
     if r == U256::ZERO || s == U256::ZERO {

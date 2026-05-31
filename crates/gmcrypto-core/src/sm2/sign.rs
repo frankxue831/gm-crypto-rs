@@ -98,7 +98,12 @@ pub fn sign_with_id<R: CryptoRng + Rng>(
     rng: &mut R,
 ) -> Result<Vec<u8>, crate::Error> {
     let (r, s) = sign_raw_with_id(key, id, message, rng)?;
-    Ok(encode_sig(&r, &s))
+    // `sign_raw_with_id` stays `U256`-typed (it is `#[doc(hidden)]`, dudect-only);
+    // the public `encode_sig` boundary takes 32-byte big-endian scalars (v0.22).
+    Ok(encode_sig(
+        &crate::u256_to_be32(&r),
+        &crate::u256_to_be32(&s),
+    ))
 }
 
 /// Sign and return the raw `(r, s)` scalar pair *without* DER encoding.
@@ -366,12 +371,16 @@ mod sign_tests {
         let (r, s) = crate::asn1::sig::decode_sig(&der).expect("our own DER decodes");
         assert_eq!(
             r,
-            U256::from_be_hex("88348A09A3E324C4FE946843123E40C175468F3E36481885844A144D2167EA4C"),
+            crate::u256_to_be32(&U256::from_be_hex(
+                "88348A09A3E324C4FE946843123E40C175468F3E36481885844A144D2167EA4C"
+            )),
             "r mismatch"
         );
         assert_eq!(
             s,
-            U256::from_be_hex("0AD2CE552FD33EAB792E5A2805E0504D014C96135F8E03891087132ABB24D48D"),
+            crate::u256_to_be32(&U256::from_be_hex(
+                "0AD2CE552FD33EAB792E5A2805E0504D014C96135F8E03891087132ABB24D48D"
+            )),
             "s mismatch"
         );
     }

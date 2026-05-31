@@ -55,17 +55,23 @@ pub const C3_LEN: usize = 32;
 /// SEC1 uncompressed-point tag byte.
 const SEC1_UNCOMPRESSED: u8 = 0x04;
 
+/// A 32-byte big-endian SM2 field-element coordinate (`C1.x` / `C1.y`).
+/// v0.22 reshaped these from `crypto_bigint::U256` to byte arrays; the
+/// alias keeps the multi-return splitter signature readable.
+type FieldBytes = [u8; 32];
+
 /// Encode a parsed [`Sm2Ciphertext`] into the modern raw byte
 /// concatenation: `C1 || C3 || C2`.
 ///
-/// The `Sm2Ciphertext` carries `(x, y)` as canonical `U256`s already
-/// reduced mod `p`; this encoder serializes them as 32-byte big-endian.
+/// The `Sm2Ciphertext` carries `(x, y)` as 32-byte big-endian field
+/// elements (v0.22; previously `U256`); this encoder serializes them
+/// directly into the `0x04 || X || Y` C1 field.
 #[must_use]
 pub fn encode_c1c3c2(ct: &Sm2Ciphertext) -> Vec<u8> {
     let mut out = Vec::with_capacity(C1_LEN + C3_LEN + ct.ciphertext.len());
     out.push(SEC1_UNCOMPRESSED);
-    out.extend_from_slice(&ct.x.to_be_bytes());
-    out.extend_from_slice(&ct.y.to_be_bytes());
+    out.extend_from_slice(&ct.x);
+    out.extend_from_slice(&ct.y);
     out.extend_from_slice(&ct.hash);
     out.extend_from_slice(&ct.ciphertext);
     out
@@ -117,8 +123,8 @@ pub fn decode_c1c2c3_legacy(input: &[u8]) -> Option<Sm2Ciphertext> {
     }
     let x = read_field_element(&input[1..33])?;
     let y = read_field_element(&input[33..65])?;
-    let x_fp = Fp::new(&x);
-    let y_fp = Fp::new(&y);
+    let x_fp = Fp::new(&U256::from_be_slice(&x));
+    let y_fp = Fp::new(&U256::from_be_slice(&y));
     if !point_on_curve(&x_fp, &y_fp) {
         return None;
     }
@@ -139,7 +145,7 @@ pub fn decode_c1c2c3_legacy(input: &[u8]) -> Option<Sm2Ciphertext> {
 
 /// Common modern-layout splitter. Returns `(x, y, c3, c2_slice)` or
 /// `None` on any validation failure.
-fn split_c1_c3_c2(input: &[u8]) -> Option<(U256, U256, [u8; C3_LEN], &[u8])> {
+fn split_c1_c3_c2(input: &[u8]) -> Option<(FieldBytes, FieldBytes, [u8; C3_LEN], &[u8])> {
     if input.len() < C1_LEN + C3_LEN {
         return None;
     }
@@ -148,8 +154,8 @@ fn split_c1_c3_c2(input: &[u8]) -> Option<(U256, U256, [u8; C3_LEN], &[u8])> {
     }
     let x = read_field_element(&input[1..33])?;
     let y = read_field_element(&input[33..65])?;
-    let x_fp = Fp::new(&x);
-    let y_fp = Fp::new(&y);
+    let x_fp = Fp::new(&U256::from_be_slice(&x));
+    let y_fp = Fp::new(&U256::from_be_slice(&y));
     if !point_on_curve(&x_fp, &y_fp) {
         return None;
     }
@@ -160,9 +166,11 @@ fn split_c1_c3_c2(input: &[u8]) -> Option<(U256, U256, [u8; C3_LEN], &[u8])> {
 }
 
 /// Read a 32-byte big-endian slice as a field element, enforcing
-/// `< p`. Returns `None` if the value is out of range. Same field
-/// bound the GM/T 0009 DER decoder enforces.
-fn read_field_element(bytes: &[u8]) -> Option<U256> {
+/// `< p`. Returns the canonical `[u8; 32]` (v0.22; was `U256`) or
+/// `None` if the value is out of range. Same field bound the GM/T 0009
+/// DER decoder enforces; the caller reconstructs `Fp` for the on-curve
+/// check.
+fn read_field_element(bytes: &[u8]) -> Option<FieldBytes> {
     if bytes.len() != 32 {
         return None;
     }
@@ -171,7 +179,9 @@ fn read_field_element(bytes: &[u8]) -> Option<U256> {
     if !bool::from(v.ct_lt(&p)) {
         return None;
     }
-    Some(v)
+    let mut out = [0u8; 32];
+    out.copy_from_slice(bytes);
+    Some(out)
 }
 
 #[cfg(test)]
@@ -189,8 +199,8 @@ mod tests {
         let g = ProjectivePoint::generator();
         let (x, y) = g.to_affine().expect("G finite");
         Sm2Ciphertext {
-            x: x.retrieve(),
-            y: y.retrieve(),
+            x: crate::u256_to_be32(&x.retrieve()),
+            y: crate::u256_to_be32(&y.retrieve()),
             hash: [0xA5; C3_LEN],
             ciphertext: c2.to_vec(),
         }
