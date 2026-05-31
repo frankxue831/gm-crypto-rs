@@ -121,6 +121,9 @@ streaming targets' layouts are:
 - `fuzz_sm4_cbc_streaming_decrypt`: `[key:16][iv:16][chunk_len:1][ct:rest]`
 - `fuzz_sm4_gcm_streaming_decrypt`:
   `[key:16][tag:16][nonce_len:1][nonce][aad_len:1][aad][chunk_len:1][ct:rest]`
+  where the source reads `nonce_len` as `u8 % 17` (0..=16) and `aad_len` as
+  `u8 % 33` (0..=32), so both valid and malformed nonce/aad lengths are explored;
+  the GCM `tag` is a fixed 16 bytes (the `mode_gcm::decrypt` path).
 
-where `chunk_len` (a `u8`, `0` ⇒ one chunk) sets the streaming chunk size the
+where `chunk_len` (a `u8`, fed as `max(1, chunk_len)` so `0` ⇒ 1-byte chunks) sets the streaming chunk size the
 ciphertext is fed in. Their seeds are valid encrypts generated under a fixed key.

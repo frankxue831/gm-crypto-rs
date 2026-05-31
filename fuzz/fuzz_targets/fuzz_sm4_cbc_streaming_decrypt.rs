@@ -3,7 +3,7 @@
 //!
 //! Layout (front-to-back): `[key:16][iv:16][chunk_len:1][ciphertext:rest]`.
 //! The ciphertext is fed to the streaming decryptor in fixed-size chunks of
-//! `max(1, chunk_len)` (a `chunk_len` of 0 ⇒ one chunk), then `finalize()`.
+//! `max(1, chunk_len)` (a `chunk_len` of 0 ⇒ 1-byte chunks), then `finalize()`.
 //! The result MUST byte-equal `mode_cbc::decrypt` fed all-at-once — both
 //! `None`, or both `Some(pt)` with equal plaintext — for EVERY input (the
 //! streaming path is just a chunked re-expression of the same computation,
