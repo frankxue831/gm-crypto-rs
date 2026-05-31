@@ -145,8 +145,6 @@ jobs:
         run: |
           LLVM_COV="$(find "$(rustc +nightly --print sysroot)" -name llvm-cov -type f | head -1)"
           echo "llvm-cov: ${LLVM_COV:-<not found>}"
-          # One-shot diagnostic: where do the coverage build + binary actually land?
-          echo "DIAG target dirs:"; find . -maxdepth 4 -type d -name target 2>/dev/null
           mkdir -p fuzz/coverage
           SUMMARY=fuzz/coverage/SUMMARY.txt
           : > "$SUMMARY"
