@@ -145,6 +145,8 @@ jobs:
         run: |
           LLVM_COV="$(find "$(rustc +nightly --print sysroot)" -name llvm-cov -type f | head -1)"
           echo "llvm-cov: ${LLVM_COV:-<not found>}"
+          # One-shot diagnostic: where do the coverage build + binary actually land?
+          echo "DIAG target dirs:"; find . -maxdepth 4 -type d -name target 2>/dev/null
           mkdir -p fuzz/coverage
           SUMMARY=fuzz/coverage/SUMMARY.txt
           : > "$SUMMARY"
@@ -154,16 +156,20 @@ jobs:
             # Replay corpus+seeds through an instrumented build → coverage.profdata.
             if cargo +nightly fuzz coverage "$t" "fuzz/corpus/$t" "fuzz/seeds/$t"; then
               prof="fuzz/coverage/$t/coverage.profdata"
-              # Locate the coverage-instrumented binary broadly (the only file
-              # under fuzz/target named exactly "$t"; its release/coverage
-              # subpath varies by cargo-fuzz/host), excluding build sidecars.
-              echo "bin candidates: $(find fuzz/target -type f -name "$t" 2>/dev/null | tr '\n' ' ')"
-              bin="$(find fuzz/target -type f -name "$t" 2>/dev/null | grep -Ev '\.(d|rlib|rmeta|o)$' | head -1)"
+              # Locate the coverage-instrumented binary anywhere under the repo or
+              # cargo target tree (its subpath varies by cargo-fuzz/host), excluding
+              # build sidecars. Whole-tree search avoids brittle path assumptions.
+              bin="$(find . "$HOME/.cargo" -type f -name "$t" 2>/dev/null | grep -E '/(coverage|release|debug)/' | grep -Ev '\.(d|rlib|rmeta|o)$' | head -1)"
               if [ -n "$LLVM_COV" ] && [ -f "$prof" ] && [ -n "$bin" ]; then
                 line="$("$LLVM_COV" report "$bin" -instr-profile="$prof" 2>/dev/null | tail -1)"
-                printf '%-34s %s\n' "$t" "$line" | tee -a "$SUMMARY"
+                printf '%-34s %s\n' "$t" "${line:-render-failed (bin=$bin)}" | tee -a "$SUMMARY"
+              elif [ -f "$prof" ]; then
+                # Profdata IS the coverage data (the real artifact); rendering is a
+                # convenience. Report honestly + point at the local render recipe.
+                sz="$(wc -c < "$prof" 2>/dev/null || echo 0)"
+                printf '%-34s %s\n' "$t" "profdata OK (${sz} bytes); render locally per fuzz/README.md (bin=${bin:-unresolved})" | tee -a "$SUMMARY"
               else
-                printf '%-34s %s\n' "$t" "report-skipped (prof=$prof bin=$bin)" | tee -a "$SUMMARY"
+                printf '%-34s %s\n' "$t" "coverage-build-failed" | tee -a "$SUMMARY"
               fi
             else
               printf '%-34s %s\n' "$t" "coverage-build-failed" | tee -a "$SUMMARY"
