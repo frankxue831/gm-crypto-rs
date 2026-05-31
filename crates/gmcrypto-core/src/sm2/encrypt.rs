@@ -126,11 +126,18 @@ pub fn encrypt<R: TryCryptoRng>(
         return Err(crate::Error::Failed);
     }
     for _ in 0..ENCRYPT_RETRY_BUDGET {
-        // RNG failure / sampler budget exhaustion collapses to `Failed`
-        // (the no-panic RNG-failure path); not secret-derived.
-        let Some(k) = sample_nonzero_scalar(rng) else {
+        // `None` is an RNG failure (public) → `Failed`. `sample_ok == 0`
+        // is the (≈2^-128) budget-exhaustion case: `k` is then a dummy
+        // and MUST NOT be used to encrypt, so we fail closed. Unlike the
+        // signing path (dudect-gated, fully masked), the SM2 encrypt path
+        // is not constant-time-gated and this exhaustion check is a benign
+        // fail-closed reject (see `docs/v1.0-reaudit.md` B-9/B-10).
+        let Some((k, sample_ok)) = sample_nonzero_scalar(rng) else {
             return Err(crate::Error::Failed);
         };
+        if !bool::from(sample_ok) {
+            return Err(crate::Error::Failed);
+        }
         if let Some(ct) = try_encrypt_once(public, plaintext, &k) {
             return Ok(encode(&ct));
         }
@@ -222,7 +229,12 @@ pub(super) fn kdf(z: &[u8], output: &mut [u8]) {
         let copy_len = block_remaining.min(DIGEST_SIZE);
         output[written..written + copy_len].copy_from_slice(&digest[..copy_len]);
         written += copy_len;
-        counter += 1;
+        // `wrapping_add` so the post-increment after the final block (which
+        // is never read — the loop exits on `written == output.len()`)
+        // cannot debug-overflow at the `KDF_MAX_OUTPUT` boundary. Callers
+        // already reject `output.len() > KDF_MAX_OUTPUT`, so no in-spec
+        // output ever consumes a wrapped counter.
+        counter = counter.wrapping_add(1);
     }
 }
 

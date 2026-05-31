@@ -186,10 +186,14 @@ impl ConditionallySelectable for RsPair {
 
 #[allow(clippy::similar_names, clippy::many_single_char_names)]
 fn try_sign_once<R: TryCryptoRng>(key: &Sm2PrivateKey, e: &Fn, rng: &mut R) -> CtOption<RsPair> {
-    // RNG failure / budget exhaustion in the sampler is NOT secret-
-    // derived, so collapsing it to an invalid `CtOption` here is a
-    // public-path early return (it becomes `Error::Failed` upstream).
-    let Some(mut k) = sample_nonzero_scalar(rng) else {
+    // RNG FAILURE is public (not secret-derived) → an invalid `CtOption`
+    // early return is fine. Budget EXHAUSTION, by contrast, IS secret-
+    // derived (it depends on the random nonce bytes), so the sampler
+    // returns it as the `sample_ok` Choice rather than as `None`: on
+    // exhaustion `k` is a dummy (1) and the FULL signing computation still
+    // runs in constant time, with the result masked out by folding
+    // `sample_ok` into `valid` below. No branch on the exhaustion bit.
+    let Some((mut k, sample_ok)) = sample_nonzero_scalar(rng) else {
         return CtOption::new(RsPair::default(), Choice::from(0u8));
     };
     let kg = mul_g(&k);
@@ -206,7 +210,7 @@ fn try_sign_once<R: TryCryptoRng>(key: &Sm2PrivateKey, e: &Fn, rng: &mut R) -> C
 
     let d = key.scalar();
     let one = Fn::new(&U256::ONE);
-    let one_plus_d = one + *d;
+    let mut one_plus_d = one + *d;
     let one_plus_d_inv = one_plus_d.invert();
     let mut rd = r * *d;
     let mut k_minus_rd = k - rd;
@@ -218,19 +222,26 @@ fn try_sign_once<R: TryCryptoRng>(key: &Sm2PrivateKey, e: &Fn, rng: &mut R) -> C
     let s_u = s.retrieve();
     let s_zero: Choice = s_u.ct_eq(&U256::ZERO);
 
-    let valid = !bad_r & !s_zero & inv_ok;
+    // Fold the sampler's `sample_ok` in: on budget exhaustion the dummy `k`
+    // produced an (r, s) that must be rejected without a branch.
+    let valid = !bad_r & !s_zero & inv_ok & sample_ok;
     let out = CtOption::new(RsPair { r: r_u, s: s_u }, valid);
 
     // B-4 (v0.23): wipe the secret-derived scalar intermediates. `Fn`
     // (`ConstMontyForm`) implements `zeroize::DefaultIsZeroes` under
     // crypto-bigint's `zeroize` feature (enabled in the workspace
     // `Cargo.toml`), giving a real `.zeroize()` on the Montgomery
-    // representation. The nonce `k`, the inverse `(1+d)^-1`, `r·d`,
-    // `k − r·d`, and `s` are all functions of the secret `k`/`d`; a
-    // nonce leak alone permits private-key recovery from `(r, s)`. The
-    // public outputs `r_u`/`s_u` (already in `out`) are deliberately
-    // NOT wiped.
+    // representation. The nonce `k`, `1 + d` (which reveals `d`
+    // additively), the inverse `(1+d)^-1`, `r·d`, `k − r·d`, and `s` are
+    // all functions of the secret `k`/`d`; a nonce leak alone permits
+    // private-key recovery from `(r, s)`. The public outputs `r_u`/`s_u`
+    // (already in `out`) are deliberately NOT wiped. (The `subtle::CtOption`
+    // `one_plus_d_inv` is `Copy` and holds the same inverse value as the
+    // wiped `inv_unwrapped`; subtle exposes no `zeroize` on `CtOption`, so
+    // that duplicate bit-pattern falls under the documented best-effort
+    // stack-zeroization posture — see `SECURITY.md`.)
     k.zeroize();
+    one_plus_d.zeroize();
     inv_unwrapped.zeroize();
     rd.zeroize();
     k_minus_rd.zeroize();
@@ -240,14 +251,23 @@ fn try_sign_once<R: TryCryptoRng>(key: &Sm2PrivateKey, e: &Fn, rng: &mut R) -> C
 }
 
 /// Fixed-budget constant-time nonzero-scalar sampler. Per-draw reject
-/// probability ≈ 2^-32 (n ≈ 2^256 − 2^224), so a 4-draw budget fails
-/// (all invalid) with probability ≈ 2^-128. Returns `None` on RNG error
-/// or budget exhaustion (collapsed to `Failed` upstream). No `if`/`bool`
-/// branch on secret-derived bytes — the first valid candidate is kept by
-/// masked select; the loop always runs `NONCE_SAMPLE_BUDGET` iterations.
+/// probability ≈ 2^-32 (n ≈ 2^256 − 2^224), so a 4-draw budget exhausts
+/// (all draws invalid) with probability ≈ 2^-128.
+///
+/// Returns:
+/// - `None` **only** on RNG failure — a *public* (not secret-derived)
+///   condition the caller may branch on (it collapses to `Failed`).
+/// - `Some((k, sample_ok))` otherwise, where `sample_ok` is a constant-time
+///   [`Choice`] that is set iff a valid draw was found. On exhaustion
+///   (`sample_ok == 0`) `k` is a **dummy** scalar (1, a valid curve scalar
+///   that cannot panic `mul_g`); the caller folds `sample_ok` into its own
+///   validity mask instead of branching on the exhaustion bit (which IS
+///   secret-derived). The loop always runs `NONCE_SAMPLE_BUDGET` iterations
+///   and the first valid draw is kept by masked select — no `if`/`bool` on
+///   secret-derived bytes.
 pub(crate) const NONCE_SAMPLE_BUDGET: usize = 4;
 
-pub(crate) fn sample_nonzero_scalar<R: TryCryptoRng>(rng: &mut R) -> Option<Fn> {
+pub(crate) fn sample_nonzero_scalar<R: TryCryptoRng>(rng: &mut R) -> Option<(Fn, Choice)> {
     let n = *Fn::MODULUS.as_ref();
     let mut chosen = U256::ONE;
     let mut found = Choice::from(0u8);
@@ -266,10 +286,11 @@ pub(crate) fn sample_nonzero_scalar<R: TryCryptoRng>(rng: &mut R) -> Option<Fn> 
         found |= valid;
         buf.zeroize();
     }
-    let out: Option<Fn> = CtOption::new(Fn::new(&chosen), found).into();
-    // best-effort wipe of the chosen representative if it wasn't used
+    // Always return the (possibly dummy) scalar + the CT validity bit;
+    // budget exhaustion is folded into the caller's mask, never branched.
+    let k = Fn::new(&chosen);
     chosen.zeroize();
-    out
+    Some((k, found))
 }
 
 fn ct_or_else<T: ConditionallySelectable + Default>(a: CtOption<T>, b: CtOption<T>) -> CtOption<T> {
@@ -373,28 +394,28 @@ mod tests {
             index: 0,
         };
 
-        let sampled = sample_nonzero_scalar(&mut rng)
-            .expect("a valid draw")
-            .retrieve();
-
-        assert_eq!(sampled, U256::from_u64(2), "first valid draw is kept");
+        let (k, sample_ok) = sample_nonzero_scalar(&mut rng).expect("rng ok");
+        assert!(bool::from(sample_ok), "a valid draw was found");
+        assert_eq!(k.retrieve(), U256::from_u64(2), "first valid draw is kept");
         assert_eq!(
             rng.index, NONCE_SAMPLE_BUDGET,
             "fixed-budget sampler consumes exactly NONCE_SAMPLE_BUDGET draws"
         );
     }
 
-    /// All-invalid draws exhaust the budget → `None` (collapsed to
-    /// `Failed` upstream). Uses `n` itself (rejected by `< n`) for
-    /// every draw.
+    /// All-invalid draws exhaust the budget → `Some((dummy, sample_ok=0))`
+    /// (NOT `None`, which is reserved for RNG failure). The exhaustion bit
+    /// is folded into the caller's CT validity mask, never branched.
+    /// Uses `n` itself (rejected by `< n`) for every draw.
     #[test]
-    fn sample_nonzero_scalar_exhausts_budget_to_none() {
+    fn sample_nonzero_scalar_exhausts_budget_to_invalid_choice() {
         let n = *Fn::MODULUS.as_ref();
         let mut rng = SequenceRng {
             values: [n; NONCE_SAMPLE_BUDGET],
             index: 0,
         };
-        assert!(sample_nonzero_scalar(&mut rng).is_none());
+        let (_dummy, sample_ok) = sample_nonzero_scalar(&mut rng).expect("rng ok");
+        assert!(!bool::from(sample_ok), "exhaustion yields sample_ok == 0");
         assert_eq!(rng.index, NONCE_SAMPLE_BUDGET);
     }
 
