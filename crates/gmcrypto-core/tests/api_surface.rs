@@ -69,9 +69,15 @@ fn group_a_low_level_curve_surface_exists() {
     const _: fn(&Fn) -> ProjectivePoint = gmcrypto_core::sm2::scalar_mul::mul_g;
     const _: fn(&Fn, &ProjectivePoint) -> ProjectivePoint = gmcrypto_core::sm2::scalar_mul::mul_var;
 
-    // The `sm2`-level re-exports of the same hidden items stay reachable.
-    const _: fn(&Fn) -> ProjectivePoint = gmcrypto_core::sm2::mul_g;
-    const _: fn(&Fn, &ProjectivePoint) -> ProjectivePoint = gmcrypto_core::sm2::mul_var;
+    // The `sm2`-level re-exports stay reachable — both the fn re-exports
+    // (`sm2::mul_g` / `sm2::mul_var`) AND the type re-exports (`sm2::Fn` /
+    // `sm2::Fp`), which are paths distinct from the `curve::` source above.
+    // Naming `sm2::Fn` / `sm2::Fp` here pins the `pub use curve::{Fn, Fp}` line
+    // (it would otherwise still compile via the `curve::{Fn, Fp}` import).
+    const _: fn(&gmcrypto_core::sm2::Fn) -> ProjectivePoint = gmcrypto_core::sm2::mul_g;
+    const _: fn(&gmcrypto_core::sm2::Fn, &ProjectivePoint) -> ProjectivePoint =
+        gmcrypto_core::sm2::mul_var;
+    const _: fn() -> gmcrypto_core::sm2::Fp = gmcrypto_core::sm2::curve::b;
 
     // `ProjectivePoint::to_affine` returns the hidden `Fp` pair.
     const _: fn(&ProjectivePoint) -> Option<(Fp, Fp)> = ProjectivePoint::to_affine;
