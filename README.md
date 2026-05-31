@@ -15,10 +15,13 @@ detectable-leak regression harness.
 certified by any upstream cryptography project, payment gateway, standards body,
 or vendor.
 
-> ⚠️ **Not independently audited.** This is a solo-maintained, best-effort
-> open-source project with no security audit and no support SLA. Review the
-> code and **use at your own risk.** See [`SECURITY.md`](SECURITY.md) for the
-> threat model and disclosure process.
+> ⚠️ **Not independently audited.** No third-party / external security audit has
+> been performed. Assurance is internal: a multi-model adversarial pre-publish
+> re-audit (see [`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md)), KAT + GM/T-standard
+> interop (gmssl 3.1.1, 11/11), an in-CI `dudect` timing-leak harness, and an
+> 18-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
+> project with no support SLA. Review the code and **use at your own risk.** See
+> [`SECURITY.md`](SECURITY.md) for the threat model and disclosure process.
 
 ## What this is
 
@@ -88,11 +91,13 @@ the design intent in isolation.
 
 The crate line is **pre-1.0 (0.x)**: minor releases may contain breaking changes,
 and crates.io versions can be skipped for non-publishing assurance cycles (v0.14,
-v0.17–v0.22 are infra/assurance milestones; crates.io is at **0.16.0**). The public
+v0.17–v0.23 are infra/assurance milestones; crates.io is at **0.16.0**). The public
 API has been stable in practice since v0.5; the **v1.0 readiness audit** (v0.21)
-froze and tooling-guarded it ahead of a `1.0` commitment, and the **v0.22
-API-tightening cycle** decoupled it from `crypto-bigint 0.7` — see
-[`docs/v1.0-readiness.md`](docs/v1.0-readiness.md).
+froze and tooling-guarded it ahead of a `1.0` commitment, the **v0.22
+API-tightening cycle** decoupled it from `crypto-bigint 0.7`, and the **v0.23
+pre-1.0 re-audit remediation cycle** applied the API/ABI-finality + hardening
+fixes from a multi-model adversarial re-audit ([`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md))
+— see [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md).
 
 - **What's covered by SemVer:** the public Rust API of `gmcrypto-core` (the
   surface snapshotted in [`docs/api-baseline/gmcrypto-core.txt`](docs/api-baseline/gmcrypto-core.txt),
@@ -100,11 +105,28 @@ API-tightening cycle** decoupled it from `crypto-bigint 0.7` — see
   `crates/gmcrypto-c/include/gmcrypto.h`, drift-checked in CI).
 - **What's NOT covered:** anything `#[doc(hidden)]` — `sm2::sign_raw_with_id` (the
   dudect harness hook), `Sm4Cbc{Encryptor,Decryptor}::take_output` (FFI-shim drains),
-  and (v0.22) the low-level SM2 curve arithmetic `sm2::curve` / `sm2::scalar_mul` /
-  `ProjectivePoint::to_affine` (kept `pub` only for in-repo dev crates); and the
-  entire **`gmcrypto-simd`** crate, which is an internal acceleration backend with
-  **no stable Rust API** (use `gmcrypto-core` from Rust, `gmcrypto-c` from C). These
-  may change or be removed in any release.
+  (v0.22) the low-level SM2 curve arithmetic `sm2::curve` / `sm2::scalar_mul` /
+  `ProjectivePoint::to_affine`, and (v0.23) the raw EC point surface
+  `sm2::point` / `ProjectivePoint` (the type + module + re-export) +
+  `Sm2PublicKey::{from_point, point}`, the low-level `asn1::{reader, writer, oid}`
+  modules, and the in-crate `traits::{Hash, Mac, BlockCipher}` module (all kept
+  `pub` only for in-repo dev crates); and the entire **`gmcrypto-simd`** crate, which
+  is an internal acceleration backend with **no stable Rust API** (use `gmcrypto-core`
+  from Rust, `gmcrypto-c` from C). These may change or be removed in any release.
+- **High-level key path speaks keys, not points (v0.23).**
+  `Sm2PrivateKey::public_key()` returns `Sm2PublicKey` (not the now-internal
+  `ProjectivePoint`); `Sm2PublicKey::from_sec1_bytes` is the on-curve-checked public
+  point constructor. `spki::{encode, decode}` and `sec1::EcPrivateKey.public` speak
+  `Sm2PublicKey`.
+- **RNG bound (v0.23).** `sm2::{sign_with_id, encrypt}` name the **fallible**
+  `rand_core::TryCryptoRng` bound — a deliberate, documented ecosystem coupling
+  (`rand_core` is the RNG interop point, the RustCrypto-wide convention; unlike the
+  v0.22 `crypto-bigint` decoupling, replacing it would hurt interop). An RNG failure
+  collapses to the single `Failed`, never a panic.
+- **Single-shot SM4-GCM `encrypt` is fallible (v0.23).**
+  `mode_gcm::{encrypt, encrypt_with_tag_len}` return `Option<…>`, rejecting plaintext
+  past the `2^36 − 32`-byte GCM counter ceiling (matching the streaming path and
+  `decrypt`).
 - **Features are additive** (`default = []`; all 7 are opt-in) and the build is
   `no_std` + `alloc`-only with `unsafe_code = "forbid"` on the core.
 - **MSRV is 1.85** (edition 2024); an MSRV bump is treated as a minor, not a patch.
@@ -579,7 +601,8 @@ Everything v0.2 shipped is unchanged:
 | v0.20 (infra-assurance; not a crates.io release) | **Streaming-decryptor differential fuzzing + `cargo fuzz coverage` + codified v1.0 CT baseline.** Per `docs/v0.20-scope.md` Q20.1–Q20.5. Two new differential targets (`fuzz_sm4_{cbc,gcm}_streaming_decrypt`) assert the streaming decryptors fed in arbitrary chunks equal the single-shot oracle; fuzz sweep → 18 targets (zero crashes, zero divergences); a non-gating `cargo fuzz coverage` nightly job (llvm-cov TOTALS artifact). Codified the settled v1.0 CT baseline in `SECURITY.md` (composite targets gated <0.20; the two single-inversion diagnostics on telemetry/sentinel @0.55, narrow revisit door). Theme chosen after a Codex+Grok discussion. Only `fuzz/` + `fuzz-nightly.yml` + docs changed (workspace stays `0.16.0`; crates.io skips `0.20.0`). |
 | v0.21 (infra-assurance; not a crates.io release) | **v1.0 readiness audit.** Per `docs/v0.21-scope.md` Q21.1–Q21.9. Froze + tooling-guarded the public API ahead of 1.0: committed `cargo-public-api` baselines + an enforced drift-check, `cargo-semver-checks` (informational pre-1.0), a `cargo doc -D warnings` gate, and a `--no-default-features`/`--all-features` matrix (new `.github/workflows/api-stability.yml`); finalized the `#[doc(hidden)]` surface (3 core items + the whole `gmcrypto-simd` internal backend) with "not public / not SemVer" notes + existence tests; froze the docs. Non-publishing (doc-attributes + tests only, no behavior change; workspace stays `0.16.0`, crates.io skips `0.21.0`). **Headline finding:** the always-on public API names `crypto-bigint 0.7` types — a decision to resolve before 1.0 ([`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) §3.A). Deferred to post-1.0: class-split-aware "noise-twin" dudect reference; round-trip/differential parser fuzzing; `aead 0.6` (upstream `0.6.0-rc.10`); AVX-512 `sbox_x64`; CCM buffered input; the `dudect-nightly` leg-cancellation fix. |
 | v0.22 (infra-assurance; not a crates.io release) | **API-tightening — decouple `crypto-bigint 0.7` from the 1.0 contract.** Per `docs/v0.22-scope.md` Q22.1–Q22.8 (resolves the v0.21 §3.A finding via Option 2). Group A: `#[doc(hidden)]` (kept `pub`) the low-level `sm2::curve` / `sm2::scalar_mul` / `ProjectivePoint::to_affine` surface. Group B: reshape `asn1::{encode,decode}_sig` + `Sm2Ciphertext::{x,y}` from `U256` to `[u8; 32]`, **byte-output-identical** (KAT + gmssl interop 11/11). Group C: `ProjectivePoint` stays public + unchanged. The always-on (default-features) public API now names **zero** `crypto-bigint` types; only the opt-in `crypto-bigint-scalar` `from_scalar(U256)` retains it (documented escape hatch). **BREAKING** for consumers that named `Fn`/`Fp`/`encode_sig`/`Sm2Ciphertext::x`; ships with 1.0 (non-publishing — workspace stays `0.16.0`, crates.io skips `0.22.0`). |
-| v1.0 | **API stabilization + crates.io publish** (the deliberate cut after the audit + tightening: the `crypto-bigint`-exposure decision is **resolved** [v0.22], bump `0.16.0 → 1.0.0` with exact sibling pins, publish `gmcrypto-simd → core → c`, flip `cargo-semver-checks` to enforced — see the runbook in [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) §4). |
+| v0.23 (infra-assurance; not a crates.io release) | **Pre-1.0 re-audit remediation.** Per `docs/v0.23-scope.md` Q23.1–Q23.9 + `docs/v1.0-reaudit.md`. A multi-model adversarial pre-publish re-audit (Codex `gpt-5.5` + Grok, source-verified) returned NO-GO as-is — core primitives sound, but 2 API/ABI BLOCKERs + API-finality / zeroize-on-failure / spec-ceiling / doc should-fixes. Remediated: **W1 (API)** `Sm2PrivateKey::public_key() -> Sm2PublicKey`, the raw `ProjectivePoint` surface + `asn1::{reader,writer,oid}` + `traits::*` made `#[doc(hidden)]`; **W2 (crypto)** single-shot SM4-GCM `encrypt` made fallible (`2^36−32` ceiling), the fallible `rand_core::TryCryptoRng` bound on SM2 sign/encrypt (no-panic RNG-failure path), a fixed-budget constant-time SM2 nonce sampler, sign-nonce / CCM-tentative-plaintext / `Sm3`-on-drop zeroization, SM2 KDF wrap guard; **W3 (C ABI)** the SM4-GCM/CCM/XTS FFI symbols made always-on so `gmcrypto.h` == the default build. **Runtime output byte-identical** (gmssl interop 11/11) except the deliberately-changed signatures; the breaking API/ABI changes ship with 1.0 (non-publishing — workspace stays `0.16.0`, crates.io skips `0.23.0`). |
+| v1.0 | **API stabilization + crates.io publish** (the deliberate cut after the audit + tightening + re-audit: the `crypto-bigint`-exposure decision is **resolved** [v0.22] and the pre-publish re-audit findings **remediated** [v0.23], bump `0.16.0 → 1.0.0` with exact sibling pins, publish `gmcrypto-simd → core → c`, flip `cargo-semver-checks` to enforced — see the runbook in [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) §4). |
 
 ## Quick-start
 
