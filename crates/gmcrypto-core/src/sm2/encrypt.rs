@@ -373,7 +373,7 @@ mod tests {
         let d =
             U256::from_be_hex("1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0");
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid d");
-        let pk = Sm2PublicKey::from_point(key.public_key());
+        let pk = key.public_key();
         let k_bytes =
             U256::from_be_hex("4C62EEFD6ECFC2B95B92FD6C3D9575148AFA17425546D49018E5388D49DD7B4F")
                 .to_be_bytes();

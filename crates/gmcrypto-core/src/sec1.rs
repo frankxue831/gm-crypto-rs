@@ -145,9 +145,9 @@ pub struct EcPrivateKey {
     /// curve order here — the caller must reject `d == 0` and
     /// `d == n-1` via [`crate::sm2::Sm2PrivateKey::from_bytes_be`].
     pub scalar_be: [u8; 32],
-    /// Decoded uncompressed public point, if the optional
+    /// Decoded uncompressed public key, if the optional
     /// `publicKey` field was present and well-formed.
-    pub public: Option<ProjectivePoint>,
+    pub public: Option<crate::sm2::Sm2PublicKey>,
 }
 
 impl Drop for EcPrivateKey {
@@ -189,7 +189,7 @@ pub fn decode(input: &[u8]) -> Option<EcPrivateKey> {
     let mut scalar_be = [0u8; 32];
     scalar_be.copy_from_slice(scalar_bytes);
 
-    let mut public: Option<ProjectivePoint> = None;
+    let mut public: Option<crate::sm2::Sm2PublicKey> = None;
 
     // [0] EXPLICIT parameters (OPTIONAL).
     if let Some((params_inner, after)) = reader::read_context_tagged_explicit(body, 0) {
@@ -209,7 +209,7 @@ pub fn decode(input: &[u8]) -> Option<EcPrivateKey> {
             return None;
         }
         if let Some(p) = decode_uncompressed_point(pk_bytes) {
-            public = Some(p);
+            public = Some(crate::sm2::Sm2PublicKey::from_point(p));
         } else {
             scalar_be.zeroize();
             return None;
@@ -315,14 +315,19 @@ mod tests {
         // Use the GB/T 32918.2 sample — its public point is on-curve.
         let d = U256::from_be_slice(&scalar_be);
         let key = crate::sm2::Sm2PrivateKey::from_scalar_inner(d).expect("valid d");
-        let (x, y) = key.public_key().to_affine().expect("finite");
+        let (x, y) = key.public_key().point().to_affine().expect("finite");
         let pk = encode_uncompressed_point(&x, &y);
         let der = encode(&scalar_be, Some(&pk));
 
         let recovered = decode(&der).expect("decode");
         assert_eq!(recovered.scalar_be, scalar_be);
         assert!(recovered.public.is_some());
-        let (rx, ry) = recovered.public.unwrap().to_affine().expect("finite");
+        let (rx, ry) = recovered
+            .public
+            .unwrap()
+            .point()
+            .to_affine()
+            .expect("finite");
         assert_eq!(rx.retrieve(), x.retrieve());
         assert_eq!(ry.retrieve(), y.retrieve());
     }
@@ -350,7 +355,7 @@ mod tests {
                 .public
                 .as_ref()
                 .map(|p| {
-                    let (x, y) = p.to_affine().expect("finite");
+                    let (x, y) = p.point().to_affine().expect("finite");
                     encode_uncompressed_point(&x, &y)
                 })
                 .as_ref(),

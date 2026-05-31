@@ -303,7 +303,7 @@ fn gmssl_sm2_sign_them_verify_us() {
 
     let der_sig = fs::read(&sig_path).expect("read sig");
     let priv_key = load_w3_private();
-    let pub_key = sm2::Sm2PublicKey::from_point(priv_key.public_key());
+    let pub_key = priv_key.public_key();
     let ok = sm2::verify_with_id(&pub_key, sm2::DEFAULT_SIGNER_ID, message, &der_sig);
     assert!(
         ok,
@@ -417,7 +417,7 @@ fn gmssl_sm2_encrypt_us_decrypt_them() {
     let plaintext: &[u8] = b"v0.3 W3 SM2 encrypt-us cross-validation";
 
     let priv_key = load_w3_private();
-    let pub_key = sm2::Sm2PublicKey::from_point(priv_key.public_key());
+    let pub_key = priv_key.public_key();
     let mut rng = rand_core::UnwrapErr(getrandom::SysRng);
     let ct = sm2::encrypt(&pub_key, plaintext, &mut rng).expect("encrypt");
     fs::write(&ct_path, &ct).expect("write ct");

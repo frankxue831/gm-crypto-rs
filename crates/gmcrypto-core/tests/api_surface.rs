@@ -86,3 +86,41 @@ fn group_a_low_level_curve_surface_exists() {
     let affine = ProjectivePoint::generator().to_affine();
     assert!(affine.is_some(), "generator is finite");
 }
+
+#[test]
+#[allow(clippy::type_complexity)]
+fn group_w1_reshaped_surface_exists() {
+    // v0.23 W1 — the high-level path no longer NAMES `ProjectivePoint` in any
+    // visible signature (`Sm2PrivateKey::public_key()` now returns
+    // `Sm2PublicKey`); the point type + its `Sm2PublicKey::{from_point, point}`
+    // bridge + the `asn1::{reader,writer,oid}` DER primitives + the in-crate
+    // `traits::*` surface were all made `#[doc(hidden)]` (kept `pub`) so the
+    // stable 1.0 public API stays clean while in-repo dev crates + cross-module
+    // code keep reaching them. These `const _` / generic assertions pin their
+    // continued existence + signatures (NOT an endorsement of public use).
+    use gmcrypto_core::sm2::Sm2PublicKey;
+    use gmcrypto_core::sm2::point::ProjectivePoint;
+    use gmcrypto_core::traits::BlockCipher;
+
+    // The doc-hidden `ProjectivePoint` <-> `Sm2PublicKey` bridge stays callable.
+    const _: fn(ProjectivePoint) -> Sm2PublicKey = Sm2PublicKey::from_point;
+    const _: fn(&Sm2PublicKey) -> ProjectivePoint = Sm2PublicKey::point;
+
+    // The doc-hidden DER reader/writer/oid primitives stay reachable.
+    const _: fn(&[u8]) -> Option<(&[u8], &[u8])> = gmcrypto_core::asn1::reader::read_sequence;
+    const _: fn(&mut Vec<u8>, &[u8]) = gmcrypto_core::asn1::writer::write_sequence;
+    // `oid::encode` is a const-generic fn; pin a concrete instantiation.
+    const _: fn(&[u32]) -> [u8; 3] = gmcrypto_core::asn1::oid::encode::<3>;
+
+    // The doc-hidden in-crate `BlockCipher` trait stays reachable as a bound.
+    fn _assert_block_cipher<T: BlockCipher>() {}
+    let _ = _assert_block_cipher::<gmcrypto_core::sm4::Sm4Cipher>;
+
+    // Runtime smoke: the reshaped `public_key()` returns an `Sm2PublicKey`
+    // whose underlying point round-trips through the doc-hidden bridge.
+    let key = Sm2PrivateKey::from_bytes_be(&[0x11; 32])
+        .into_option()
+        .expect("0x11..11 is a valid SM2 scalar");
+    let pk: Sm2PublicKey = key.public_key();
+    let _: ProjectivePoint = pk.point();
+}

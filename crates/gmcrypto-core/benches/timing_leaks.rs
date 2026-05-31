@@ -124,8 +124,8 @@ use getrandom::SysRng;
 use gmcrypto_core::hmac::hmac_sm3;
 use gmcrypto_core::pkcs8;
 use gmcrypto_core::sm2::{
-    DEFAULT_SIGNER_ID, Fn as Scalar, Fp, ProjectivePoint, Sm2PrivateKey, Sm2PublicKey, decrypt,
-    encrypt, mul_g, mul_var, sign_raw_with_id,
+    DEFAULT_SIGNER_ID, Fn as Scalar, Fp, ProjectivePoint, Sm2PrivateKey, decrypt, encrypt, mul_g,
+    mul_var, sign_raw_with_id,
 };
 use gmcrypto_core::sm4::Sm4Cipher;
 use rand_core::{TryCryptoRng, TryRng, UnwrapErr};
@@ -877,7 +877,7 @@ fn ct_sm2_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
         "B9E5B7C12E48BAB7CC0E91A57F8A48E8C8F87DDD25EBF52F2A75E612CB1A9E4F",
     ))
     .expect("valid d for recipient");
-    let recipient_pk = Sm2PublicKey::from_point(recipient_priv.public_key());
+    let recipient_pk = recipient_priv.public_key();
     let mut sys_rng = UnwrapErr(SysRng);
     let ciphertext =
         encrypt(&recipient_pk, b"timing target", &mut sys_rng).expect("encrypt to recipient");

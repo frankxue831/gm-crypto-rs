@@ -119,10 +119,7 @@ pub const PBKDF2_MAX_ITERATIONS: u32 = 10_000_000;
 #[must_use]
 pub fn encode(key: &Sm2PrivateKey) -> Vec<u8> {
     let mut scalar_be = key.to_bytes_be();
-    let pub_uncompressed = {
-        let pub_key = crate::sm2::Sm2PublicKey::from_point(key.public_key());
-        pub_key.to_sec1_uncompressed()
-    };
+    let pub_uncompressed = key.public_key().to_sec1_uncompressed();
     let mut inner = sec1::encode(&scalar_be, Some(&pub_uncompressed));
     scalar_be.zeroize();
 
@@ -546,7 +543,7 @@ mod tests {
         let key1 = Sm2PrivateKey::from_scalar_inner(d1).expect("d1");
         let key2 = Sm2PrivateKey::from_scalar_inner(d2).expect("d2");
         let scalar1 = key1.to_bytes_be();
-        let pk2 = crate::sm2::Sm2PublicKey::from_point(key2.public_key()).to_sec1_uncompressed();
+        let pk2 = key2.public_key().to_sec1_uncompressed();
         let inner_bad = sec1::encode(&scalar1, Some(&pk2));
 
         // Wrap in unencrypted PKCS#8 manually (re-using what encode does).

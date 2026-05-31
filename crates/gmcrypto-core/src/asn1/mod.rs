@@ -6,9 +6,15 @@
 //! against the v0.2 surface.
 
 pub mod ciphertext;
+// Not public API / not SemVer — low-level DER primitives kept pub for internal cross-module + dev-crate use.
+#[doc(hidden)]
 pub mod oid;
+// Not public API / not SemVer — low-level DER primitives kept pub for internal cross-module + dev-crate use.
+#[doc(hidden)]
 pub mod reader;
 pub mod sig;
+// Not public API / not SemVer — low-level DER primitives kept pub for internal cross-module + dev-crate use.
+#[doc(hidden)]
 pub mod writer;
 
 pub use sig::{decode_sig, encode_sig};

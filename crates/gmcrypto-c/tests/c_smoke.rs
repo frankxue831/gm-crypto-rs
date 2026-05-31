@@ -520,7 +520,7 @@ fn sm4_cbc_streaming_free_null_is_noop() {
 // ============================================================
 
 fn fresh_sm2_keys() -> (*mut gmcrypto_sm2_privkey_t, *mut gmcrypto_sm2_pubkey_t) {
-    use gmcrypto_core::sm2::{Sm2PrivateKey, Sm2PublicKey};
+    use gmcrypto_core::sm2::Sm2PrivateKey;
 
     // v0.5 W5 — `Sm2PrivateKey::new(U256)` renamed to `from_scalar` and
     // gated behind `crypto-bigint-scalar`. The c_smoke test uses the
@@ -528,7 +528,7 @@ fn fresh_sm2_keys() -> (*mut gmcrypto_sm2_privkey_t, *mut gmcrypto_sm2_pubkey_t)
     let d_be: [u8; 32] = hex!("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
     let key = Sm2PrivateKey::from_bytes_be(&d_be).expect("valid d");
     let scalar_bytes: [u8; 32] = key.to_bytes_be();
-    let pub_bytes: [u8; 65] = Sm2PublicKey::from_point(key.public_key()).to_sec1_uncompressed();
+    let pub_bytes: [u8; 65] = key.public_key().to_sec1_uncompressed();
 
     let priv_ptr = unsafe { gmcrypto_sm2_privkey_new(scalar_bytes.as_ptr()) };
     let pub_ptr = unsafe { gmcrypto_sm2_pubkey_new(pub_bytes.as_ptr()) };
@@ -724,12 +724,12 @@ fn sm2_decrypt_c1c2c3_legacy_via_ffi() {
     // surface (no encode-legacy emit fn — by design).
     use gmcrypto_core::asn1::ciphertext::decode as der_decode;
     use gmcrypto_core::sm2::raw_ciphertext::{C1_LEN, C3_LEN, encode_c1c3c2};
-    use gmcrypto_core::sm2::{Sm2PrivateKey, Sm2PublicKey, encrypt as core_encrypt};
+    use gmcrypto_core::sm2::{Sm2PrivateKey, encrypt as core_encrypt};
 
     // v0.5 W5 — use `from_bytes_be` (always-on); `new(U256)` removed.
     let d_be: [u8; 32] = hex!("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
     let key = Sm2PrivateKey::from_bytes_be(&d_be).expect("valid d");
-    let pub_key = Sm2PublicKey::from_point(key.public_key());
+    let pub_key = key.public_key();
 
     let pt = b"legacy ordering";
     let mut rng = rand_core::UnwrapErr(getrandom::SysRng);

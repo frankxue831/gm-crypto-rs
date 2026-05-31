@@ -136,7 +136,7 @@ pub fn sign_raw_with_id<R: CryptoRng + Rng>(
     if id.len() > MAX_ID_LEN {
         return Err(crate::Error::Failed);
     }
-    let public = Sm2PublicKey::from_point(key.public_key());
+    let public = key.public_key();
     let z = compute_z(&public, id);
 
     let e_bytes = {
@@ -272,7 +272,7 @@ mod tests {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid scalar");
-        let public = Sm2PublicKey::from_point(key.public_key());
+        let public = key.public_key();
         let z = compute_z(&public, b"ALICE123@YAHOO.COM");
 
         #[allow(clippy::format_collect)]

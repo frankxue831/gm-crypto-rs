@@ -130,8 +130,8 @@ impl Sm2PrivateKey {
 
     /// The public key `d·G`.
     #[must_use]
-    pub const fn public_key(&self) -> ProjectivePoint {
-        self.public
+    pub const fn public_key(&self) -> crate::sm2::Sm2PublicKey {
+        crate::sm2::Sm2PublicKey::from_point(self.public)
     }
 }
 
@@ -151,7 +151,11 @@ mod tests {
         let d =
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("D in [1, n-2]");
-        let (x, _y) = key.public_key().to_affine().expect("public is finite");
+        let (x, _y) = key
+            .public_key()
+            .point()
+            .to_affine()
+            .expect("public is finite");
         assert_eq!(
             x.retrieve(),
             U256::from_be_hex("09F9DF311E5421A150DD7D161E4BC5C672179FAD1833FC076BB08FF356F35020")

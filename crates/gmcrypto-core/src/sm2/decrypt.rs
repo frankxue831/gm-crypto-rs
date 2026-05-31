@@ -176,7 +176,6 @@ mod tests {
     use crate::asn1::ciphertext::{Sm2Ciphertext, encode};
     use crate::sm2::encrypt::encrypt;
     use crate::sm2::private_key::Sm2PrivateKey;
-    use crate::sm2::public_key::Sm2PublicKey;
     use crypto_bigint::U256;
     use getrandom::SysRng;
     use rand_core::UnwrapErr;
@@ -188,7 +187,7 @@ mod tests {
         let d =
             U256::from_be_hex("1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0");
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid d");
-        let pk = Sm2PublicKey::from_point(key.public_key());
+        let pk = key.public_key();
         let plaintext = b"encryption standard";
         let mut rng = UnwrapErr(SysRng);
         let der = encrypt(&pk, plaintext, &mut rng).expect("encrypt");
@@ -205,7 +204,7 @@ mod tests {
         let d =
             U256::from_be_hex("1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0");
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid d");
-        let pk = Sm2PublicKey::from_point(key.public_key());
+        let pk = key.public_key();
         let mut rng = UnwrapErr(SysRng);
 
         for len in [0usize, 1, 31, 32, 33, 64, 65, 128] {
@@ -263,7 +262,7 @@ mod tests {
         let d =
             U256::from_be_hex("1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0");
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid d");
-        let pk = Sm2PublicKey::from_point(key.public_key());
+        let pk = key.public_key();
         let mut rng = UnwrapErr(SysRng);
         let der = encrypt(&pk, b"encryption standard", &mut rng).expect("encrypt");
 
@@ -283,7 +282,7 @@ mod tests {
             U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
         let key_a = Sm2PrivateKey::from_scalar_inner(d_a).expect("valid d_a");
         let key_b = Sm2PrivateKey::from_scalar_inner(d_b).expect("valid d_b");
-        let pk_a = Sm2PublicKey::from_point(key_a.public_key());
+        let pk_a = key_a.public_key();
         let mut rng = UnwrapErr(SysRng);
         let der = encrypt(&pk_a, b"top secret", &mut rng).expect("encrypt to A");
         // Decrypt with B's key — must fail.
@@ -298,7 +297,7 @@ mod tests {
         let d =
             U256::from_be_hex("1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0");
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid d");
-        let pk = Sm2PublicKey::from_point(key.public_key());
+        let pk = key.public_key();
         let mut rng = UnwrapErr(SysRng);
         let der = encrypt(&pk, b"some plaintext data", &mut rng).expect("encrypt");
 
@@ -330,7 +329,7 @@ mod tests {
         let d =
             U256::from_be_hex("1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0");
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid d");
-        let pk = Sm2PublicKey::from_point(key.public_key());
+        let pk = key.public_key();
         let mut rng = UnwrapErr(SysRng);
 
         // Encrypt many distinct 1-byte messages so we exercise lots
@@ -362,7 +361,7 @@ mod tests {
         let d =
             U256::from_be_hex("1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0");
         let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid d");
-        let pk = Sm2PublicKey::from_point(key.public_key());
+        let pk = key.public_key();
         let mut rng = UnwrapErr(SysRng);
         let der = encrypt(&pk, b"", &mut rng).expect("encrypt empty");
         let recovered = decrypt(&key, &der).expect("decrypt empty");
