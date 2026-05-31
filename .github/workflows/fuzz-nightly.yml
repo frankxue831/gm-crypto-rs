@@ -154,7 +154,10 @@ jobs:
             # Replay corpus+seeds through an instrumented build → coverage.profdata.
             if cargo +nightly fuzz coverage "$t" "fuzz/corpus/$t" "fuzz/seeds/$t"; then
               prof="fuzz/coverage/$t/coverage.profdata"
-              bin="$(find fuzz/target -type f -path '*coverage*release*' -name "$t" | head -1)"
+              # cargo-fuzz builds the coverage-instrumented binary into the
+              # normal per-triple release dir (NOT a `coverage/` subpath):
+              # fuzz/target/<triple>/release/<target>.
+              bin="$(find fuzz/target -type f -path '*/release/*' -name "$t" | head -1)"
               if [ -n "$LLVM_COV" ] && [ -f "$prof" ] && [ -n "$bin" ]; then
                 line="$("$LLVM_COV" report "$bin" -instr-profile="$prof" 2>/dev/null | tail -1)"
                 printf '%-34s %s\n' "$t" "$line" | tee -a "$SUMMARY"
