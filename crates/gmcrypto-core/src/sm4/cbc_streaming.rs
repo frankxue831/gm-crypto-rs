@@ -118,9 +118,12 @@ impl Sm4CbcEncryptor {
     /// which emits ciphertext incrementally as `update` produces full
     /// blocks.
     ///
-    /// **Not SemVer-stable.** Same posture as
-    /// [`crate::sm2::sign_raw_with_id`]: `#[doc(hidden)] pub` for FFI-
-    /// shim consumption; its signature may change in any v0.5+ minor.
+    /// **Not part of the public API — not covered by SemVer.** Same posture as
+    /// [`crate::sm2::sign_raw_with_id`]: `#[doc(hidden)] pub` for `gmcrypto-c`
+    /// FFI-shim consumption only; it may change or be removed in any release,
+    /// including patch releases, without notice. Internal cross-crate use stays
+    /// sound via the workspace's lockstep publishing policy (sibling crates
+    /// release together; exact-version sibling pins enforced at the 1.0 publish).
     #[doc(hidden)]
     pub fn take_output(&mut self) -> Vec<u8> {
         core::mem::take(&mut self.output)
@@ -262,7 +265,9 @@ impl Sm4CbcDecryptor {
     /// Drain the emitted plaintext so far (i.e. all decrypted blocks
     /// EXCEPT the held-back final-candidate block). Same FFI-helper
     /// posture as [`Sm4CbcEncryptor::take_output`]: `#[doc(hidden)] pub`
-    /// for the v0.5 W1 streaming FFI; not SemVer-stable.
+    /// for `gmcrypto-c` streaming-FFI consumption only — **not part of the
+    /// public API, not covered by SemVer** (may change or be removed in any
+    /// release, including patch releases, without notice).
     ///
     /// **Note**: the held-back block is *not* drained — the buffer-
     /// back-by-one invariant is preserved across this call.

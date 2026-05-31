@@ -12,11 +12,11 @@
 //! runtime based on available CPU features, with silent fallback to
 //! the software path:
 //!
-//! - **x86_64 with PCLMULQDQ + SSE2**: [`clmul::ghash_mul_clmul`]. Single
+//! - **x86_64 with PCLMULQDQ + SSE2**: `clmul::ghash_mul_clmul`. Single
 //!   carryless-multiplication instruction available since Intel Westmere
 //!   (2010) / AMD Bulldozer (2011). Detected at runtime via
 //!   [`crate::detect::has_pclmulqdq`].
-//! - **aarch64 with PMULL (AES extension)**: [`pmull::ghash_mul_pmull`].
+//! - **aarch64 with PMULL (AES extension)**: `pmull::ghash_mul_pmull`.
 //!   ARMv8.0 Crypto Extensions; present on all Apple Silicon and most
 //!   modern aarch64 server / mobile chips. Detected at runtime via
 //!   [`crate::detect::has_pmull`].

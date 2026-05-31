@@ -39,7 +39,7 @@
 //! Callers know the source format (e.g. "this came from gmssl 3.x"
 //! → modern; "this came from the OpenSSL GM-patch" → legacy).
 //! Mismatched format yields `None` from the SM3 hash check inside
-//! [`crate::sm2::decrypt`] — never silently-corrupted plaintext.
+//! [`crate::sm2::decrypt()`] — never silently-corrupted plaintext.
 
 use crate::asn1::ciphertext::Sm2Ciphertext;
 use crate::sm2::curve::Fp;
@@ -82,7 +82,7 @@ pub fn encode_c1c3c2(ct: &Sm2Ciphertext) -> Vec<u8> {
 ///
 /// Returns `None` for any malformed input. Does not check `C3`'s
 /// hash relationship to `(X, Y)` and `C2` — that lives in
-/// [`crate::sm2::decrypt`] and runs constant-time on the recipient
+/// [`crate::sm2::decrypt()`] and runs constant-time on the recipient
 /// private key.
 #[must_use]
 pub fn decode_c1c3c2(input: &[u8]) -> Option<Sm2Ciphertext> {

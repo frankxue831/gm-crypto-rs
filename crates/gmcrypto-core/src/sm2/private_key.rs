@@ -81,7 +81,7 @@ impl Sm2PrivateKey {
     /// **Recommended public constructor.** Callers don't need to
     /// name `crypto_bigint::U256` and the SDK keeps its `crypto-bigint`
     /// transitive-dep major version a private implementation detail.
-    /// Same constant-time `[1, n-2]` range check as [`from_scalar`].
+    /// Same constant-time `[1, n-2]` range check as [`Self::from_scalar`].
     ///
     /// Returns `CtOption::none()` for any out-of-range input
     /// (`d == 0`, `d == n - 1`, or `d > n - 1`).

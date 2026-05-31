@@ -10,28 +10,28 @@
 //!
 //! # Dispatch
 //!
-//! - On `x86_64` with AVX2 available at runtime: [`sbox_x32_avx2`]
+//! - On `x86_64` with AVX2 available at runtime: `sbox_x32_avx2`
 //!   — the full 32-byte AVX2 path. Same shared gate sequence as
-//!   [`super::sbox_x8`] ([`super::avx2::sbox_round`]); the only
+//!   [`super::sbox_x8`] (`super::avx2::sbox_round`); the only
 //!   difference is no staging-buffer overhead.
 //! - Elsewhere (non-x86_64, or x86_64 without AVX2): falls back to
 //!   [`sbox_x32_scalar`] — a 32-iteration loop calling the local
-//!   single-block [`super::scalar::sbox_byte`]. Designed so the
+//!   single-block `super::scalar::sbox_byte`. Designed so the
 //!   non-AVX2 fallback is not slower than calling
-//!   [`super::sbox_x8_scalar`] four times (codex flag #1 from the
+//!   `super::sbox_x8_scalar` four times (codex flag #1 from the
 //!   v0.6 W6 phase 3 scope consultation).
 //!
 //! # Constant-time discipline
 //!
 //! Same as [`super::sbox_x8`]: shared AVX2 gate sequence (no table
 //! lookups, no secret-derived branches); scalar path is the same
-//! gate-only `sbox_byte` from [`super::scalar`].
+//! gate-only `sbox_byte` from `super::scalar`.
 
 use super::scalar::sbox_byte;
 use crate::detect::has_avx2;
 
 /// Scalar fallback: 32 sequential calls into
-/// [`super::scalar::sbox_byte`]. Always available.
+/// `super::scalar::sbox_byte`. Always available.
 #[must_use]
 pub fn sbox_x32_scalar(input: &[u8; 32]) -> [u8; 32] {
     let mut out = [0u8; 32];
@@ -45,10 +45,10 @@ pub fn sbox_x32_scalar(input: &[u8; 32]) -> [u8; 32] {
 
 /// 32-way packed bitsliced SM4 S-box dispatch.
 ///
-/// On `x86_64` with AVX2: calls [`sbox_x32_avx2`]. Otherwise
+/// On `x86_64` with AVX2: calls `sbox_x32_avx2`. Otherwise
 /// [`sbox_x32_scalar`].
 ///
-/// Byte-identical output to applying [`super::scalar::sbox_byte`]
+/// Byte-identical output to applying `super::scalar::sbox_byte`
 /// to each input byte (verified exhaustively in
 /// `tests/lane_position_x32.rs` with lane-position-shifted sweeps
 /// per Q6.8 / codex's phase 3 flag #4).

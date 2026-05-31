@@ -2,9 +2,9 @@
 //!
 //! Uses [`cpufeatures`] for `no_std`-compatible, cached detection of:
 //! - x86_64 AVX2 (used by [`crate::sm4::sbox_x8`] / [`crate::sm4::sbox_x32`]).
-//! - x86_64 PCLMULQDQ (v0.8 W1; used by [`crate::ghash::ghash_mul_clmul`]).
+//! - x86_64 PCLMULQDQ (v0.8 W1; used by `crate::ghash::ghash_mul_clmul`).
 //! - aarch64 AES extension a.k.a. PMULL64 (v0.8 W1; used by
-//!   [`crate::ghash::ghash_mul_pmull`]).
+//!   `crate::ghash::ghash_mul_pmull`).
 //!
 //! On targets that don't support a feature, the corresponding getter
 //! returns a compile-time `false` constant (the `cpufeatures::new!`

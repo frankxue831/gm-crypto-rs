@@ -71,7 +71,7 @@
 //!
 //! gmssl 3.1.1 does not ship `sm4 -ccm`. KAT vectors for this module
 //! come from OpenSSL 3.x EVP `SM4-CCM` (vendor-neutral GB/T 0009 OID
-//! `1.2.156.10197.1.104.9`). See [`docs/v0.8-ccm-kat-sourcing.md`] for
+//! `1.2.156.10197.1.104.9`). See `docs/v0.8-ccm-kat-sourcing.md` for
 //! the sourcing rationale and reference-oracle C harness.
 //!
 //! # API
