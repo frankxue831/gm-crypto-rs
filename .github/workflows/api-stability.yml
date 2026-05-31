@@ -1,0 +1,129 @@
+# v0.21 — API-stability guards for the v1.0 readiness audit (docs/v0.21-scope.md Q21.6).
+#
+# Four legs:
+#   1. public-api drift-check (ENFORCED) — regenerate the committed
+#      docs/api-baseline/*.txt with the PINNED tool + nightly and `git diff
+#      --exit-code`. The cbindgen-header-drift pattern, applied to the Rust API.
+#   2. cargo-semver-checks (INFORMATIONAL, pre-1.0) — log the 0.16.0->HEAD delta
+#      but never gate: 0.x SemVer permits breakage and 0.16->1.0 is a major bump
+#      (e.g. the v0.21 gmcrypto-simd doc-hiding reads as a removal). Becomes the
+#      ENFORCED forward gate from 1.0 onward (current-vs-last-release).
+#   3. docs (ENFORCED) — `cargo doc` with -D warnings; allows the one
+#      `private_intra_doc_links` lint (intentional internal cross-refs that render
+#      as code text on docs.rs — not broken links).
+#   4. feature-matrix (ENFORCED) — --no-default-features (no_std) + --all-features.
+#
+# The C ABI's stability guard remains the cbindgen header drift-check in ci.yml.
+# NOT a publish gate; informational/assurance for the readiness audit.
+name: api-stability
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: api-stability-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # PINNED so the committed public-api baseline is reproducible: cargo-public-api
+  # output is tied to the rustdoc-JSON format (= the nightly toolchain) and to the
+  # tool version. Bumping either is a REVIEWED re-baseline — update both pins and
+  # regenerate docs/api-baseline/*.txt with the exact command in the `public-api`
+  # job below (see also docs/v1.0-readiness.md §2), then confirm this stays green.
+  PUBLIC_API_NIGHTLY: nightly-2026-05-23
+  CARGO_PUBLIC_API_VERSION: 0.52.0
+
+jobs:
+  public-api:
+    name: public-api drift-check (enforced)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned nightly (rustdoc JSON)
+        run: rustup toolchain install "$PUBLIC_API_NIGHTLY" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: api-stability-publicapi
+      - name: Install cargo-public-api (pinned)
+        run: cargo install cargo-public-api --version "$CARGO_PUBLIC_API_VERSION" --locked
+      - name: Regenerate baselines + diff against committed
+        run: |
+          set -euo pipefail
+          cargo "+$PUBLIC_API_NIGHTLY" public-api -p gmcrypto-core --all-features \
+            --omit blanket-impls --omit auto-trait-impls --omit auto-derived-impls \
+            > docs/api-baseline/gmcrypto-core.txt
+          cargo "+$PUBLIC_API_NIGHTLY" public-api -p gmcrypto-simd \
+            --omit blanket-impls --omit auto-trait-impls --omit auto-derived-impls \
+            > docs/api-baseline/gmcrypto-simd.txt
+          echo "::group::public-api diff (empty == no drift)"
+          git --no-pager diff -- docs/api-baseline/ || true
+          echo "::endgroup::"
+          git diff --exit-code -- docs/api-baseline/ \
+            || { echo "::error::Public Rust API changed. If intended, regenerate docs/api-baseline/*.txt with the pinned tool+nightly and commit."; exit 1; }
+
+  semver-checks:
+    name: cargo-semver-checks (informational, pre-1.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install pinned nightly (semver-checks rustdoc JSON)
+        run: rustup toolchain install "$PUBLIC_API_NIGHTLY" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: api-stability-semver
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-semver-checks
+      # continue-on-error (not `|| true`): keeps the job green while still showing a
+      # ✗ on this step when semver-checks reports findings — clearer signal than
+      # swallowing the exit code. At 1.0 this becomes a REQUIRED gate (drop this).
+      - name: Report 0.16.0 -> HEAD delta (non-gating)
+        continue-on-error: true
+        run: |
+          echo "INFORMATIONAL ONLY — not a gate (docs/v0.21-scope.md Q21.6)."
+          echo "Compares HEAD against the latest crates.io release (0.16.0). 0.x permits"
+          echo "breakage and 0.16->1.0 is a major bump (e.g. the v0.21 simd doc-hiding"
+          echo "reads as a removal), so a non-empty delta here is expected. This becomes"
+          echo "the enforced forward gate from 1.0 onward (current-vs-last-release)."
+          cargo semver-checks check-release -p gmcrypto-core --all-features
+          cargo semver-checks check-release -p gmcrypto-simd
+
+  docs:
+    name: cargo doc (deny warnings + broken intra-doc links)
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: "-D warnings -A rustdoc::private_intra_doc_links"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: api-stability-docs
+      - name: doc gmcrypto-core (all opt-in features)
+        run: cargo doc --no-deps -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar
+      - name: doc gmcrypto-simd
+        run: cargo doc --no-deps -p gmcrypto-simd
+      - name: doc gmcrypto-c (sm4-aead,sm4-xts; NOT regen-header)
+        run: cargo doc --no-deps -p gmcrypto-c --features sm4-aead,sm4-xts
+
+  feature-matrix:
+    name: feature matrix (no-default-features / all-features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: api-stability-featmatrix
+      - name: build --no-default-features (no_std posture)
+        run: cargo build -p gmcrypto-core --no-default-features
+      - name: test --all-features (feature-interaction)
+        run: cargo test -p gmcrypto-core --all-features

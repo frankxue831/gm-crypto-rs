@@ -84,6 +84,34 @@ the design intent in isolation.
   x86, some embedded).
 - Not a comprehensive SM-crypto library yet — see the milestone roadmap.
 
+## Stability & SemVer
+
+The crate line is **pre-1.0 (0.x)**: minor releases may contain breaking changes,
+and crates.io versions can be skipped for non-publishing assurance cycles (v0.14,
+v0.17–v0.21 are infra/assurance milestones; crates.io is at **0.16.0**). The public
+API has been stable in practice since v0.5; the **v1.0 readiness audit** (v0.21)
+froze and tooling-guarded it ahead of a `1.0` commitment — see
+[`docs/v1.0-readiness.md`](docs/v1.0-readiness.md).
+
+- **What's covered by SemVer:** the public Rust API of `gmcrypto-core` (the
+  surface snapshotted in [`docs/api-baseline/gmcrypto-core.txt`](docs/api-baseline/gmcrypto-core.txt),
+  drift-checked in CI) and the `gmcrypto-c` **C ABI** (the committed
+  `crates/gmcrypto-c/include/gmcrypto.h`, drift-checked in CI).
+- **What's NOT covered:** anything `#[doc(hidden)]` — `sm2::sign_raw_with_id` (the
+  dudect harness hook) and `Sm4Cbc{Encryptor,Decryptor}::take_output` (FFI-shim
+  drains); and the entire **`gmcrypto-simd`** crate, which is an internal
+  acceleration backend with **no stable Rust API** (use `gmcrypto-core` from Rust,
+  `gmcrypto-c` from C). These may change or be removed in any release.
+- **Features are additive** (`default = []`; all 7 are opt-in) and the build is
+  `no_std` + `alloc`-only with `unsafe_code = "forbid"` on the core.
+- **MSRV is 1.85** (edition 2024); an MSRV bump is treated as a minor, not a patch.
+- **Note (pre-1.0):** the always-on public API currently names a few
+  `crypto-bigint 0.7` types (in `asn1::{encode,decode}_sig`, `Sm2Ciphertext`, and
+  the `curve`/`point`/`scalar_mul` surface). The recommended high-level paths
+  (`Sm2PrivateKey::from_bytes_be`, `sign_with_id`, `verify_with_id`, the cipher
+  modes) avoid this. Decoupling before 1.0 is a tracked decision —
+  see [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) §3.A.
+
 ## v0.16 scope (shipped)
 
 **C FFI for the SM4-XTS multi-sector helper.** v0.16 exposes the v0.15
@@ -542,8 +570,8 @@ Everything v0.2 shipped is unchanged:
 | v0.18 (infra-assurance; not a crates.io release) | **dudect-gate hardening.** Per `docs/v0.18-scope.md` Q18.1–Q18.7. Pinned the dudect CI workflows' drift axes (`ubuntu-24.04` OS-label + exact `dtolnay/rust-toolchain@1.95.0`) and gate on a CI-level multi-run median `\|tau\|` (PR 3 runs / nightly 5 runs; `required_low` + the nightly sentinel on the median, `negative_control` on the min, completeness gate on `< N` runs). `timing_leaks.rs` byte-unchanged — the loop + median live in CI. A 100K×5 calibration showed `ct_fn_invert`/`ct_fp_invert` back near baseline (medians 0.006–0.028) but **kept on telemetry / sentinel — not re-promoted** (the noise is runner-image-sensitive; a tight gate would re-flake if it returns). Also a comma-free `rust-cache` `shared-key`. A *repository / infra-assurance* milestone — no crate code change (workspace stays `0.16.0`; crates.io skips `0.18.0` per the v0.14 / v0.17 precedent). See [`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md) (v0.18 resolution). |
 | v0.19 (infra-assurance; not a crates.io release) | **Self-calibrating relative dudect gate — TESTED and FALSIFIED → honest fallback.** Per `docs/v0.19-scope.md` Q19.1–Q19.7. Added two fix-vs-fix noise-floor probes (`noise_floor_f{n,p}_invert`) + a relative gate `median(target) ≤ max(0.20, 4·median(probe))` to re-promote `ct_fn_invert`/`ct_fp_invert`. The 100K calibration disproved the matched-sensitivity premise: the probes stay quiet (~0.005) while the targets spike to [0.26–0.32] (`ct_fp_invert` median 0.2606, ratio 50) — the noise is in the two-input class split, not the operation, so a same-input probe can't track it. Reverted to telemetry / sentinel @0.55; probes kept as telemetry (evidence for a v0.21+ class-split-aware "noise-twin"). Only the dev-only bench harness changed (workspace stays `0.16.0`; crates.io skips `0.19.0`). See [`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md) (v0.19 resolution). |
 | v0.20 (infra-assurance; not a crates.io release) | **Streaming-decryptor differential fuzzing + `cargo fuzz coverage` + codified v1.0 CT baseline.** Per `docs/v0.20-scope.md` Q20.1–Q20.5. Two new differential targets (`fuzz_sm4_{cbc,gcm}_streaming_decrypt`) assert the streaming decryptors fed in arbitrary chunks equal the single-shot oracle; fuzz sweep → 18 targets (zero crashes, zero divergences); a non-gating `cargo fuzz coverage` nightly job (llvm-cov TOTALS artifact). Codified the settled v1.0 CT baseline in `SECURITY.md` (composite targets gated <0.20; the two single-inversion diagnostics on telemetry/sentinel @0.55, narrow revisit door). Theme chosen after a Codex+Grok discussion. Only `fuzz/` + `fuzz-nightly.yml` + docs changed (workspace stays `0.16.0`; crates.io skips `0.20.0`). |
-| v0.21+ | **v1.0 readiness audit** (the confirmed next theme: API-stability/SemVer review across core+FFI+SIMD, feature-flag & `no_std` promises, docs/CHANGELOG freeze — v0.20's fuzz harnesses + coverage are input evidence); plus, deferred: a **class-split-aware "noise-twin"** dudect reference (the only design that could re-promote the invert diagnostics); round-trip / differential parser fuzzing; RustCrypto `aead` trait fit (upstream still on `0.6.0-rc.10`); AVX-512 16-way `sbox_x64`; CCM buffered input; the recurring `dudect-nightly` leg-cancellation CI-health fix. Each lands behind its own scope-doc cycle. |
-| v1.0 | API stabilization (readiness pass: API-stability review + the v0.18/v0.19 hardening). |
+| v0.21 (infra-assurance; not a crates.io release) | **v1.0 readiness audit.** Per `docs/v0.21-scope.md` Q21.1–Q21.9. Froze + tooling-guarded the public API ahead of 1.0: committed `cargo-public-api` baselines + an enforced drift-check, `cargo-semver-checks` (informational pre-1.0), a `cargo doc -D warnings` gate, and a `--no-default-features`/`--all-features` matrix (new `.github/workflows/api-stability.yml`); finalized the `#[doc(hidden)]` surface (3 core items + the whole `gmcrypto-simd` internal backend) with "not public / not SemVer" notes + existence tests; froze the docs. Non-publishing (doc-attributes + tests only, no behavior change; workspace stays `0.16.0`, crates.io skips `0.21.0`). **Headline finding:** the always-on public API names `crypto-bigint 0.7` types — a decision to resolve before 1.0 ([`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) §3.A). Deferred to post-1.0: class-split-aware "noise-twin" dudect reference; round-trip/differential parser fuzzing; `aead 0.6` (upstream `0.6.0-rc.10`); AVX-512 `sbox_x64`; CCM buffered input; the `dudect-nightly` leg-cancellation fix. |
+| v1.0 | **API stabilization + crates.io publish** (the deliberate cut after the audit: resolve the `crypto-bigint`-exposure decision, bump `0.16.0 → 1.0.0` with exact sibling pins, publish `gmcrypto-simd → core → c`, flip `cargo-semver-checks` to enforced — see the runbook in [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) §4). |
 
 ## Quick-start
 

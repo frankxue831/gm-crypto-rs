@@ -1,7 +1,7 @@
 //! Software GHASH multiplication: constant-time bit-serial fallback.
 //!
 //! Always available. Used as a correctness reference for the hardware
-//! paths ([`super::clmul`] on x86_64, [`super::pmull`] on aarch64) and
+//! paths (`super::clmul` on x86_64, `super::pmull` on aarch64) and
 //! as the fallback on targets without those features.
 //!
 //! # Algorithm

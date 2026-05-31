@@ -6,9 +6,15 @@
 //! posture mirrors the established [`gmcrypto-c`] precedent (FFI
 //! shim with `unsafe_code = "warn"`).
 //!
-//! The crate exposes a small Rust-internal API surface only (no raw
-//! pointers, no C ABI). It is `rlib`-only; the single C-ABI surface
-//! for downstream callers remains [`gmcrypto-c`].
+//! **No stable Rust API.** The crate exposes a small Rust-internal API
+//! surface only (no raw pointers, no C ABI), present solely for
+//! `gmcrypto-core`'s cross-crate use. Every public entry point is
+//! `#[doc(hidden)]` and **not covered by SemVer** — it may change or be
+//! removed in any release without notice. It is `rlib`-only; the supported
+//! downstream surfaces are the `gmcrypto-core` Rust API and the
+//! [`gmcrypto-c`] C ABI. Internal cross-crate use stays sound via the
+//! workspace's lockstep publishing policy (sibling crates release together;
+//! exact-version sibling pins enforced at the 1.0 publish).
 //!
 //! # v0.5 W4 phase 2 scope
 //!
@@ -47,10 +53,21 @@
 // `gmcrypto-core` itself stays `unsafe_code = "forbid"`.
 #![allow(unsafe_code)]
 
+// v0.21 (Q21.5 of `docs/v0.21-scope.md`) — internal-backend contract. Every
+// item below is `pub` only so `gmcrypto-core` can call it across the crate
+// boundary; it is NOT a stable Rust API. All entry points are `#[doc(hidden)]`
+// (kept out of rustdoc + the committed public-api baseline) and not covered by
+// SemVer for any external consumer. Internal cross-crate use stays sound via the
+// workspace's lockstep publishing policy (sibling crates release together;
+// exact-version sibling pins enforced at the 1.0 publish).
+#[doc(hidden)]
 pub mod ghash;
+#[doc(hidden)]
 pub mod sm4;
 
 mod detect;
 
+#[doc(hidden)]
 pub use detect::{has_avx2, has_pclmulqdq, has_pmull};
+#[doc(hidden)]
 pub use ghash::ghash_mul;

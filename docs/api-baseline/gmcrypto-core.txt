@@ -1,0 +1,435 @@
+pub mod gmcrypto_core
+pub mod gmcrypto_core::asn1
+pub mod gmcrypto_core::asn1::ciphertext
+pub struct gmcrypto_core::asn1::ciphertext::Sm2Ciphertext
+pub gmcrypto_core::asn1::ciphertext::Sm2Ciphertext::ciphertext: alloc::vec::Vec<u8>
+pub gmcrypto_core::asn1::ciphertext::Sm2Ciphertext::hash: [u8; 32]
+pub gmcrypto_core::asn1::ciphertext::Sm2Ciphertext::x: crypto_bigint::uint::U256
+pub gmcrypto_core::asn1::ciphertext::Sm2Ciphertext::y: crypto_bigint::uint::U256
+pub fn gmcrypto_core::asn1::ciphertext::decode(&[u8]) -> core::option::Option<gmcrypto_core::asn1::ciphertext::Sm2Ciphertext>
+pub fn gmcrypto_core::asn1::ciphertext::encode(&gmcrypto_core::asn1::ciphertext::Sm2Ciphertext) -> alloc::vec::Vec<u8>
+pub mod gmcrypto_core::asn1::oid
+pub const gmcrypto_core::asn1::oid::ID_EC_PUBLIC_KEY: &[u8]
+pub const gmcrypto_core::asn1::oid::ID_HMAC_WITH_SM3: &[u8]
+pub const gmcrypto_core::asn1::oid::ID_PBKDF2: &[u8]
+pub const gmcrypto_core::asn1::oid::PBES2: &[u8]
+pub const gmcrypto_core::asn1::oid::SM2P256V1: &[u8]
+pub const gmcrypto_core::asn1::oid::SM2_SIGN_WITH_SM3: &[u8]
+pub const gmcrypto_core::asn1::oid::SM4_CBC: &[u8]
+pub const fn gmcrypto_core::asn1::oid::encode<const LEN: usize>(&[u32]) -> [u8; LEN]
+pub const fn gmcrypto_core::asn1::oid::encoded_len(&[u32]) -> usize
+pub mod gmcrypto_core::asn1::reader
+pub const gmcrypto_core::asn1::reader::MAX_DER_LEN: usize
+pub const gmcrypto_core::asn1::reader::TAG_BIT_STRING: u8
+pub const gmcrypto_core::asn1::reader::TAG_INTEGER: u8
+pub const gmcrypto_core::asn1::reader::TAG_NULL: u8
+pub const gmcrypto_core::asn1::reader::TAG_OCTET_STRING: u8
+pub const gmcrypto_core::asn1::reader::TAG_OID: u8
+pub const gmcrypto_core::asn1::reader::TAG_SEQUENCE: u8
+pub const gmcrypto_core::asn1::reader::TAG_SET: u8
+pub fn gmcrypto_core::asn1::reader::collect_sequence_of<'a, T, F>(&'a [u8], F) -> core::option::Option<alloc::vec::Vec<T>> where F: core::ops::function::FnMut(&'a [u8]) -> core::option::Option<(T, &'a [u8])>
+pub fn gmcrypto_core::asn1::reader::read_bit_string(&[u8]) -> core::option::Option<(u8, &[u8], &[u8])>
+pub fn gmcrypto_core::asn1::reader::read_context_tagged_explicit(&[u8], u8) -> core::option::Option<(&[u8], &[u8])>
+pub fn gmcrypto_core::asn1::reader::read_context_tagged_implicit(&[u8], u8) -> core::option::Option<(&[u8], &[u8])>
+pub fn gmcrypto_core::asn1::reader::read_integer(&[u8]) -> core::option::Option<(&[u8], &[u8])>
+pub fn gmcrypto_core::asn1::reader::read_length(&[u8]) -> core::option::Option<(usize, &[u8])>
+pub fn gmcrypto_core::asn1::reader::read_null(&[u8]) -> core::option::Option<&[u8]>
+pub fn gmcrypto_core::asn1::reader::read_octet_string(&[u8]) -> core::option::Option<(&[u8], &[u8])>
+pub fn gmcrypto_core::asn1::reader::read_oid(&[u8]) -> core::option::Option<(&[u8], &[u8])>
+pub fn gmcrypto_core::asn1::reader::read_sequence(&[u8]) -> core::option::Option<(&[u8], &[u8])>
+pub fn gmcrypto_core::asn1::reader::read_tag(&[u8], u8) -> core::option::Option<&[u8]>
+pub fn gmcrypto_core::asn1::reader::read_tlv(&[u8], u8) -> core::option::Option<(&[u8], &[u8])>
+pub mod gmcrypto_core::asn1::sig
+pub fn gmcrypto_core::asn1::sig::decode_sig(&[u8]) -> core::option::Option<(crypto_bigint::uint::U256, crypto_bigint::uint::U256)>
+pub fn gmcrypto_core::asn1::sig::encode_sig(&crypto_bigint::uint::U256, &crypto_bigint::uint::U256) -> alloc::vec::Vec<u8>
+pub mod gmcrypto_core::asn1::writer
+pub fn gmcrypto_core::asn1::writer::write_bit_string(&mut alloc::vec::Vec<u8>, u8, &[u8])
+pub fn gmcrypto_core::asn1::writer::write_context_tagged_explicit(&mut alloc::vec::Vec<u8>, u8, &[u8])
+pub fn gmcrypto_core::asn1::writer::write_context_tagged_implicit(&mut alloc::vec::Vec<u8>, u8, &[u8])
+pub fn gmcrypto_core::asn1::writer::write_integer(&mut alloc::vec::Vec<u8>, &[u8])
+pub fn gmcrypto_core::asn1::writer::write_length(&mut alloc::vec::Vec<u8>, usize)
+pub fn gmcrypto_core::asn1::writer::write_null(&mut alloc::vec::Vec<u8>)
+pub fn gmcrypto_core::asn1::writer::write_octet_string(&mut alloc::vec::Vec<u8>, &[u8])
+pub fn gmcrypto_core::asn1::writer::write_oid(&mut alloc::vec::Vec<u8>, &[u8])
+pub fn gmcrypto_core::asn1::writer::write_sequence(&mut alloc::vec::Vec<u8>, &[u8])
+pub fn gmcrypto_core::asn1::decode_sig(&[u8]) -> core::option::Option<(crypto_bigint::uint::U256, crypto_bigint::uint::U256)>
+pub fn gmcrypto_core::asn1::encode_sig(&crypto_bigint::uint::U256, &crypto_bigint::uint::U256) -> alloc::vec::Vec<u8>
+pub mod gmcrypto_core::hmac
+pub struct gmcrypto_core::hmac::HmacSm3
+impl gmcrypto_core::hmac::HmacSm3
+pub fn gmcrypto_core::hmac::HmacSm3::finalize(self) -> [u8; 32]
+pub fn gmcrypto_core::hmac::HmacSm3::new(&[u8]) -> Self
+pub fn gmcrypto_core::hmac::HmacSm3::update(&mut self, &[u8])
+pub fn gmcrypto_core::hmac::HmacSm3::verify(self, &[u8; 32]) -> bool
+impl crypto_common::KeyInit for gmcrypto_core::hmac::HmacSm3
+pub fn gmcrypto_core::hmac::HmacSm3::new(&crypto_common::Key<Self>) -> Self
+pub fn gmcrypto_core::hmac::HmacSm3::new_from_slice(&[u8]) -> core::result::Result<Self, crypto_common::InvalidLength>
+impl crypto_common::KeySizeUser for gmcrypto_core::hmac::HmacSm3
+pub type gmcrypto_core::hmac::HmacSm3::KeySize = typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UTerm, typenum::bit::B1>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>
+impl crypto_common::OutputSizeUser for gmcrypto_core::hmac::HmacSm3
+pub type gmcrypto_core::hmac::HmacSm3::OutputSize = typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UTerm, typenum::bit::B1>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>
+impl crypto_common::Reset for gmcrypto_core::hmac::HmacSm3
+pub fn gmcrypto_core::hmac::HmacSm3::reset(&mut self)
+impl digest::FixedOutput for gmcrypto_core::hmac::HmacSm3
+pub fn gmcrypto_core::hmac::HmacSm3::finalize_into(self, &mut crypto_common::Output<Self>)
+impl digest::Update for gmcrypto_core::hmac::HmacSm3
+pub fn gmcrypto_core::hmac::HmacSm3::update(&mut self, &[u8])
+impl digest::mac::MacMarker for gmcrypto_core::hmac::HmacSm3
+impl gmcrypto_core::traits::Mac for gmcrypto_core::hmac::HmacSm3
+pub type gmcrypto_core::hmac::HmacSm3::Output = [u8; 32]
+pub fn gmcrypto_core::hmac::HmacSm3::finalize(self) -> Self::Output
+pub fn gmcrypto_core::hmac::HmacSm3::new(&[u8]) -> Self
+pub fn gmcrypto_core::hmac::HmacSm3::update(&mut self, &[u8])
+pub fn gmcrypto_core::hmac::HmacSm3::verify(self, &Self::Output) -> bool
+pub fn gmcrypto_core::hmac::hmac_sm3(&[u8], &[u8]) -> [u8; 32]
+pub mod gmcrypto_core::kdf
+pub fn gmcrypto_core::kdf::pbkdf2_hmac_sm3(&[u8], &[u8], u32, &mut [u8]) -> core::option::Option<()>
+pub mod gmcrypto_core::pem
+pub fn gmcrypto_core::pem::decode(&str, &str) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::pem::Error>
+pub fn gmcrypto_core::pem::encode(&str, &[u8]) -> alloc::string::String
+pub type gmcrypto_core::pem::Error = gmcrypto_core::Error
+pub mod gmcrypto_core::pkcs8
+pub const gmcrypto_core::pkcs8::PBKDF2_MAX_ITERATIONS: u32
+pub fn gmcrypto_core::pkcs8::decode(&[u8]) -> core::result::Result<gmcrypto_core::sm2::private_key::Sm2PrivateKey, gmcrypto_core::pkcs8::Error>
+pub fn gmcrypto_core::pkcs8::decrypt(&[u8], &[u8]) -> core::result::Result<gmcrypto_core::sm2::private_key::Sm2PrivateKey, gmcrypto_core::pkcs8::Error>
+pub fn gmcrypto_core::pkcs8::encode(&gmcrypto_core::sm2::private_key::Sm2PrivateKey) -> alloc::vec::Vec<u8>
+pub fn gmcrypto_core::pkcs8::encrypt(&gmcrypto_core::sm2::private_key::Sm2PrivateKey, &[u8], &[u8], u32, &[u8; 16]) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::pkcs8::Error>
+pub type gmcrypto_core::pkcs8::Error = gmcrypto_core::Error
+pub mod gmcrypto_core::sec1
+pub struct gmcrypto_core::sec1::EcPrivateKey
+pub gmcrypto_core::sec1::EcPrivateKey::public: core::option::Option<gmcrypto_core::sm2::point::ProjectivePoint>
+pub gmcrypto_core::sec1::EcPrivateKey::scalar_be: [u8; 32]
+impl core::ops::drop::Drop for gmcrypto_core::sec1::EcPrivateKey
+pub fn gmcrypto_core::sec1::EcPrivateKey::drop(&mut self)
+pub fn gmcrypto_core::sec1::decode(&[u8]) -> core::option::Option<gmcrypto_core::sec1::EcPrivateKey>
+pub fn gmcrypto_core::sec1::encode(&[u8; 32], core::option::Option<&[u8; 65]>) -> alloc::vec::Vec<u8>
+pub mod gmcrypto_core::sm2
+pub mod gmcrypto_core::sm2::curve
+pub struct gmcrypto_core::sm2::curve::NMod
+impl crypto_bigint::modular::const_monty_form::ConstMontyParams<{ <$uint_type>::LIMBS }> for gmcrypto_core::sm2::curve::NMod
+pub const gmcrypto_core::sm2::curve::NMod::LIMBS: usize
+pub const gmcrypto_core::sm2::curve::NMod::PARAMS: crypto_bigint::modular::monty_params::FixedMontyParams<{ U256::LIMBS }>
+pub struct gmcrypto_core::sm2::curve::PMod
+impl crypto_bigint::modular::const_monty_form::ConstMontyParams<{ <$uint_type>::LIMBS }> for gmcrypto_core::sm2::curve::PMod
+pub const gmcrypto_core::sm2::curve::PMod::LIMBS: usize
+pub const gmcrypto_core::sm2::curve::PMod::PARAMS: crypto_bigint::modular::monty_params::FixedMontyParams<{ U256::LIMBS }>
+pub const fn gmcrypto_core::sm2::curve::b() -> gmcrypto_core::sm2::curve::Fp
+pub fn gmcrypto_core::sm2::curve::b3() -> gmcrypto_core::sm2::curve::Fp
+pub type gmcrypto_core::sm2::curve::Fn = crypto_bigint::modular::const_monty_form::ConstMontyForm<gmcrypto_core::sm2::curve::NMod, { U256::LIMBS }>
+pub type gmcrypto_core::sm2::curve::Fp = crypto_bigint::modular::const_monty_form::ConstMontyForm<gmcrypto_core::sm2::curve::PMod, { U256::LIMBS }>
+pub mod gmcrypto_core::sm2::decrypt
+pub fn gmcrypto_core::sm2::decrypt::decrypt(&gmcrypto_core::sm2::private_key::Sm2PrivateKey, &[u8]) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
+pub mod gmcrypto_core::sm2::encrypt
+pub fn gmcrypto_core::sm2::encrypt::encrypt<R: rand_core::CryptoRng + rand_core::Rng>(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8], &mut R) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
+pub mod gmcrypto_core::sm2::point
+pub struct gmcrypto_core::sm2::point::ProjectivePoint
+impl gmcrypto_core::sm2::point::ProjectivePoint
+pub fn gmcrypto_core::sm2::point::ProjectivePoint::add(&self, &Self) -> Self
+pub fn gmcrypto_core::sm2::point::ProjectivePoint::double(&self) -> Self
+pub const fn gmcrypto_core::sm2::point::ProjectivePoint::generator() -> Self
+pub const fn gmcrypto_core::sm2::point::ProjectivePoint::identity() -> Self
+pub fn gmcrypto_core::sm2::point::ProjectivePoint::is_identity(&self) -> subtle::Choice
+pub fn gmcrypto_core::sm2::point::ProjectivePoint::neg(&self) -> Self
+pub fn gmcrypto_core::sm2::point::ProjectivePoint::to_affine(&self) -> core::option::Option<(gmcrypto_core::sm2::curve::Fp, gmcrypto_core::sm2::curve::Fp)>
+impl core::convert::From<gmcrypto_core::sm2::point::ProjectivePoint> for gmcrypto_core::sm2::public_key::Sm2PublicKey
+pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::from(gmcrypto_core::sm2::point::ProjectivePoint) -> Self
+impl subtle::ConditionallySelectable for gmcrypto_core::sm2::point::ProjectivePoint
+pub fn gmcrypto_core::sm2::point::ProjectivePoint::conditional_select(&Self, &Self, subtle::Choice) -> Self
+impl subtle::ConstantTimeEq for gmcrypto_core::sm2::point::ProjectivePoint
+pub fn gmcrypto_core::sm2::point::ProjectivePoint::ct_eq(&self, &Self) -> subtle::Choice
+pub mod gmcrypto_core::sm2::private_key
+pub struct gmcrypto_core::sm2::private_key::Sm2PrivateKey
+impl gmcrypto_core::sm2::private_key::Sm2PrivateKey
+pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::from_bytes_be(&[u8; 32]) -> subtle::CtOption<Self>
+pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::from_scalar(crypto_bigint::uint::U256) -> subtle::CtOption<Self>
+pub const fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::public_key(&self) -> gmcrypto_core::sm2::point::ProjectivePoint
+pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::to_bytes_be(&self) -> [u8; 32]
+impl core::fmt::Debug for gmcrypto_core::sm2::private_key::Sm2PrivateKey
+pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for gmcrypto_core::sm2::private_key::Sm2PrivateKey
+pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::drop(&mut self)
+pub mod gmcrypto_core::sm2::public_key
+pub struct gmcrypto_core::sm2::public_key::Sm2PublicKey
+impl gmcrypto_core::sm2::public_key::Sm2PublicKey
+pub const fn gmcrypto_core::sm2::public_key::Sm2PublicKey::from_point(gmcrypto_core::sm2::point::ProjectivePoint) -> Self
+pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::from_sec1_bytes(&[u8]) -> core::option::Option<Self>
+pub const fn gmcrypto_core::sm2::public_key::Sm2PublicKey::point(&self) -> gmcrypto_core::sm2::point::ProjectivePoint
+pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::to_sec1_uncompressed(&self) -> [u8; 65]
+impl core::convert::From<gmcrypto_core::sm2::point::ProjectivePoint> for gmcrypto_core::sm2::public_key::Sm2PublicKey
+pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::from(gmcrypto_core::sm2::point::ProjectivePoint) -> Self
+impl subtle::ConstantTimeEq for gmcrypto_core::sm2::public_key::Sm2PublicKey
+pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::ct_eq(&self, &Self) -> subtle::Choice
+pub mod gmcrypto_core::sm2::raw_ciphertext
+pub const gmcrypto_core::sm2::raw_ciphertext::C1_LEN: usize
+pub const gmcrypto_core::sm2::raw_ciphertext::C3_LEN: usize
+pub fn gmcrypto_core::sm2::raw_ciphertext::decode_c1c2c3_legacy(&[u8]) -> core::option::Option<gmcrypto_core::asn1::ciphertext::Sm2Ciphertext>
+pub fn gmcrypto_core::sm2::raw_ciphertext::decode_c1c3c2(&[u8]) -> core::option::Option<gmcrypto_core::asn1::ciphertext::Sm2Ciphertext>
+pub fn gmcrypto_core::sm2::raw_ciphertext::encode_c1c3c2(&gmcrypto_core::asn1::ciphertext::Sm2Ciphertext) -> alloc::vec::Vec<u8>
+pub mod gmcrypto_core::sm2::scalar_mul
+pub fn gmcrypto_core::sm2::scalar_mul::mul_g(&gmcrypto_core::sm2::curve::Fn) -> gmcrypto_core::sm2::point::ProjectivePoint
+pub fn gmcrypto_core::sm2::scalar_mul::mul_var(&gmcrypto_core::sm2::curve::Fn, &gmcrypto_core::sm2::point::ProjectivePoint) -> gmcrypto_core::sm2::point::ProjectivePoint
+pub mod gmcrypto_core::sm2::sign
+pub const gmcrypto_core::sm2::sign::DEFAULT_SIGNER_ID: &[u8; 16]
+pub const gmcrypto_core::sm2::sign::MAX_ID_LEN: usize
+pub fn gmcrypto_core::sm2::sign::compute_z(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8]) -> [u8; 32]
+pub fn gmcrypto_core::sm2::sign::sign_with_id<R: rand_core::CryptoRng + rand_core::Rng>(&gmcrypto_core::sm2::private_key::Sm2PrivateKey, &[u8], &[u8], &mut R) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
+pub mod gmcrypto_core::sm2::verify
+pub fn gmcrypto_core::sm2::verify::verify_with_id(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8], &[u8], &[u8]) -> bool
+pub struct gmcrypto_core::sm2::ProjectivePoint
+impl gmcrypto_core::sm2::point::ProjectivePoint
+pub fn gmcrypto_core::sm2::point::ProjectivePoint::add(&self, &Self) -> Self
+pub fn gmcrypto_core::sm2::point::ProjectivePoint::double(&self) -> Self
+pub const fn gmcrypto_core::sm2::point::ProjectivePoint::generator() -> Self
+pub const fn gmcrypto_core::sm2::point::ProjectivePoint::identity() -> Self
+pub fn gmcrypto_core::sm2::point::ProjectivePoint::is_identity(&self) -> subtle::Choice
+pub fn gmcrypto_core::sm2::point::ProjectivePoint::neg(&self) -> Self
+pub fn gmcrypto_core::sm2::point::ProjectivePoint::to_affine(&self) -> core::option::Option<(gmcrypto_core::sm2::curve::Fp, gmcrypto_core::sm2::curve::Fp)>
+impl core::convert::From<gmcrypto_core::sm2::point::ProjectivePoint> for gmcrypto_core::sm2::public_key::Sm2PublicKey
+pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::from(gmcrypto_core::sm2::point::ProjectivePoint) -> Self
+impl subtle::ConditionallySelectable for gmcrypto_core::sm2::point::ProjectivePoint
+pub fn gmcrypto_core::sm2::point::ProjectivePoint::conditional_select(&Self, &Self, subtle::Choice) -> Self
+impl subtle::ConstantTimeEq for gmcrypto_core::sm2::point::ProjectivePoint
+pub fn gmcrypto_core::sm2::point::ProjectivePoint::ct_eq(&self, &Self) -> subtle::Choice
+pub struct gmcrypto_core::sm2::Sm2PrivateKey
+impl gmcrypto_core::sm2::private_key::Sm2PrivateKey
+pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::from_bytes_be(&[u8; 32]) -> subtle::CtOption<Self>
+pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::from_scalar(crypto_bigint::uint::U256) -> subtle::CtOption<Self>
+pub const fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::public_key(&self) -> gmcrypto_core::sm2::point::ProjectivePoint
+pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::to_bytes_be(&self) -> [u8; 32]
+impl core::fmt::Debug for gmcrypto_core::sm2::private_key::Sm2PrivateKey
+pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for gmcrypto_core::sm2::private_key::Sm2PrivateKey
+pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::drop(&mut self)
+pub struct gmcrypto_core::sm2::Sm2PublicKey
+impl gmcrypto_core::sm2::public_key::Sm2PublicKey
+pub const fn gmcrypto_core::sm2::public_key::Sm2PublicKey::from_point(gmcrypto_core::sm2::point::ProjectivePoint) -> Self
+pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::from_sec1_bytes(&[u8]) -> core::option::Option<Self>
+pub const fn gmcrypto_core::sm2::public_key::Sm2PublicKey::point(&self) -> gmcrypto_core::sm2::point::ProjectivePoint
+pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::to_sec1_uncompressed(&self) -> [u8; 65]
+impl core::convert::From<gmcrypto_core::sm2::point::ProjectivePoint> for gmcrypto_core::sm2::public_key::Sm2PublicKey
+pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::from(gmcrypto_core::sm2::point::ProjectivePoint) -> Self
+impl subtle::ConstantTimeEq for gmcrypto_core::sm2::public_key::Sm2PublicKey
+pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::ct_eq(&self, &Self) -> subtle::Choice
+pub const gmcrypto_core::sm2::DEFAULT_SIGNER_ID: &[u8; 16]
+pub fn gmcrypto_core::sm2::compute_z(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8]) -> [u8; 32]
+pub fn gmcrypto_core::sm2::decrypt(&gmcrypto_core::sm2::private_key::Sm2PrivateKey, &[u8]) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
+pub fn gmcrypto_core::sm2::encrypt<R: rand_core::CryptoRng + rand_core::Rng>(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8], &mut R) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
+pub fn gmcrypto_core::sm2::mul_g(&gmcrypto_core::sm2::curve::Fn) -> gmcrypto_core::sm2::point::ProjectivePoint
+pub fn gmcrypto_core::sm2::mul_var(&gmcrypto_core::sm2::curve::Fn, &gmcrypto_core::sm2::point::ProjectivePoint) -> gmcrypto_core::sm2::point::ProjectivePoint
+pub fn gmcrypto_core::sm2::sign_with_id<R: rand_core::CryptoRng + rand_core::Rng>(&gmcrypto_core::sm2::private_key::Sm2PrivateKey, &[u8], &[u8], &mut R) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
+pub fn gmcrypto_core::sm2::verify_with_id(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8], &[u8], &[u8]) -> bool
+pub type gmcrypto_core::sm2::Error = gmcrypto_core::Error
+pub type gmcrypto_core::sm2::Fn = crypto_bigint::modular::const_monty_form::ConstMontyForm<gmcrypto_core::sm2::curve::NMod, { U256::LIMBS }>
+pub type gmcrypto_core::sm2::Fp = crypto_bigint::modular::const_monty_form::ConstMontyForm<gmcrypto_core::sm2::curve::PMod, { U256::LIMBS }>
+pub mod gmcrypto_core::sm3
+pub struct gmcrypto_core::sm3::Sm3
+impl gmcrypto_core::sm3::Sm3
+pub fn gmcrypto_core::sm3::Sm3::finalize(self) -> [u8; 32]
+pub const fn gmcrypto_core::sm3::Sm3::new() -> Self
+pub fn gmcrypto_core::sm3::Sm3::update(&mut self, &[u8])
+impl core::default::Default for gmcrypto_core::sm3::Sm3
+pub fn gmcrypto_core::sm3::Sm3::default() -> Self
+impl crypto_common::OutputSizeUser for gmcrypto_core::sm3::Sm3
+pub type gmcrypto_core::sm3::Sm3::OutputSize = typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UTerm, typenum::bit::B1>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>
+impl crypto_common::Reset for gmcrypto_core::sm3::Sm3
+pub fn gmcrypto_core::sm3::Sm3::reset(&mut self)
+impl digest::FixedOutput for gmcrypto_core::sm3::Sm3
+pub fn gmcrypto_core::sm3::Sm3::finalize_into(self, &mut crypto_common::Output<Self>)
+impl digest::FixedOutputReset for gmcrypto_core::sm3::Sm3
+pub fn gmcrypto_core::sm3::Sm3::finalize_into_reset(&mut self, &mut crypto_common::Output<Self>)
+impl digest::Update for gmcrypto_core::sm3::Sm3
+pub fn gmcrypto_core::sm3::Sm3::update(&mut self, &[u8])
+impl digest::digest::HashMarker for gmcrypto_core::sm3::Sm3
+impl gmcrypto_core::traits::Hash for gmcrypto_core::sm3::Sm3
+pub type gmcrypto_core::sm3::Sm3::Output = [u8; 32]
+pub fn gmcrypto_core::sm3::Sm3::finalize(self) -> Self::Output
+pub fn gmcrypto_core::sm3::Sm3::new() -> Self
+pub fn gmcrypto_core::sm3::Sm3::update(&mut self, &[u8])
+pub const gmcrypto_core::sm3::BLOCK_SIZE: usize
+pub const gmcrypto_core::sm3::DIGEST_SIZE: usize
+pub fn gmcrypto_core::sm3::hash(&[u8]) -> [u8; 32]
+pub mod gmcrypto_core::sm4
+pub mod gmcrypto_core::sm4::cbc_streaming
+pub struct gmcrypto_core::sm4::cbc_streaming::Sm4CbcDecryptor
+impl gmcrypto_core::sm4::cbc_streaming::Sm4CbcDecryptor
+pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcDecryptor::finalize(self) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcDecryptor::new(&[u8; 16], &[u8; 16]) -> Self
+pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcDecryptor::update(&mut self, &[u8])
+pub struct gmcrypto_core::sm4::cbc_streaming::Sm4CbcEncryptor
+impl gmcrypto_core::sm4::cbc_streaming::Sm4CbcEncryptor
+pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcEncryptor::finalize(self) -> alloc::vec::Vec<u8>
+pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcEncryptor::new(&[u8; 16], &[u8; 16]) -> Self
+pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcEncryptor::update(&mut self, &[u8])
+pub mod gmcrypto_core::sm4::cipher
+pub struct gmcrypto_core::sm4::cipher::Sm4Cipher
+impl gmcrypto_core::sm4::cipher::Sm4Cipher
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::decrypt_block(&self, &mut [u8; 16])
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::decrypt_blocks(&self, &mut [[u8; 16]])
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::encrypt_block(&self, &mut [u8; 16])
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::encrypt_blocks(&self, &mut [[u8; 16]])
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::new(&[u8; 16]) -> Self
+impl cipher::block::BlockCipherDecrypt for gmcrypto_core::sm4::cipher::Sm4Cipher
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::decrypt_with_backend(&self, impl cipher::block::backends::BlockCipherDecClosure<BlockSize = Self::BlockSize>)
+impl cipher::block::BlockCipherEncrypt for gmcrypto_core::sm4::cipher::Sm4Cipher
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::encrypt_with_backend(&self, impl cipher::block::backends::BlockCipherEncClosure<BlockSize = Self::BlockSize>)
+impl core::ops::drop::Drop for gmcrypto_core::sm4::cipher::Sm4Cipher
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::drop(&mut self)
+impl crypto_common::BlockSizeUser for gmcrypto_core::sm4::cipher::Sm4Cipher
+pub type gmcrypto_core::sm4::cipher::Sm4Cipher::BlockSize = typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UTerm, typenum::bit::B1>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>
+impl crypto_common::KeyInit for gmcrypto_core::sm4::cipher::Sm4Cipher
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::new(&crypto_common::Key<Self>) -> Self
+impl crypto_common::KeySizeUser for gmcrypto_core::sm4::cipher::Sm4Cipher
+pub type gmcrypto_core::sm4::cipher::Sm4Cipher::KeySize = typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UTerm, typenum::bit::B1>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>
+impl gmcrypto_core::traits::BlockCipher for gmcrypto_core::sm4::cipher::Sm4Cipher
+pub const gmcrypto_core::sm4::cipher::Sm4Cipher::BLOCK_SIZE: usize
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::decrypt_block(&self, &mut [u8])
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::encrypt_block(&self, &mut [u8])
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::new(&[u8]) -> Self
+impl zeroize::Zeroize for gmcrypto_core::sm4::cipher::Sm4Cipher
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::zeroize(&mut self)
+pub const gmcrypto_core::sm4::cipher::BLOCK_SIZE: usize
+pub const gmcrypto_core::sm4::cipher::KEY_SIZE: usize
+pub mod gmcrypto_core::sm4::ctr_streaming
+pub struct gmcrypto_core::sm4::ctr_streaming::Sm4CtrCipher
+impl gmcrypto_core::sm4::ctr_streaming::Sm4CtrCipher
+pub fn gmcrypto_core::sm4::ctr_streaming::Sm4CtrCipher::finalize(self)
+pub fn gmcrypto_core::sm4::ctr_streaming::Sm4CtrCipher::new(&[u8; 16], &[u8; 16]) -> Self
+pub fn gmcrypto_core::sm4::ctr_streaming::Sm4CtrCipher::update(&mut self, &[u8], &mut [u8])
+pub mod gmcrypto_core::sm4::gcm_streaming
+pub struct gmcrypto_core::sm4::gcm_streaming::Sm4GcmDecryptor
+impl gmcrypto_core::sm4::gcm_streaming::Sm4GcmDecryptor
+pub fn gmcrypto_core::sm4::gcm_streaming::Sm4GcmDecryptor::finalize_verify(self, &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn gmcrypto_core::sm4::gcm_streaming::Sm4GcmDecryptor::new(&[u8; 16], &[u8], &[u8]) -> Self
+pub fn gmcrypto_core::sm4::gcm_streaming::Sm4GcmDecryptor::update(&mut self, &[u8])
+pub struct gmcrypto_core::sm4::gcm_streaming::Sm4GcmEncryptor
+impl gmcrypto_core::sm4::gcm_streaming::Sm4GcmEncryptor
+pub fn gmcrypto_core::sm4::gcm_streaming::Sm4GcmEncryptor::finalize(self) -> [u8; 16]
+pub fn gmcrypto_core::sm4::gcm_streaming::Sm4GcmEncryptor::finalize_with_tag_len(self, gmcrypto_core::sm4::mode_gcm::GcmTagLen) -> alloc::vec::Vec<u8>
+pub fn gmcrypto_core::sm4::gcm_streaming::Sm4GcmEncryptor::new(&[u8; 16], &[u8], &[u8]) -> Self
+pub fn gmcrypto_core::sm4::gcm_streaming::Sm4GcmEncryptor::update(&mut self, &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
+pub mod gmcrypto_core::sm4::mode_cbc
+pub fn gmcrypto_core::sm4::mode_cbc::decrypt(&[u8; 16], &[u8; 16], &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn gmcrypto_core::sm4::mode_cbc::encrypt(&[u8; 16], &[u8; 16], &[u8]) -> alloc::vec::Vec<u8>
+pub mod gmcrypto_core::sm4::mode_ccm
+pub fn gmcrypto_core::sm4::mode_ccm::decrypt(&[u8; 16], &[u8], &[u8], &[u8], usize) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn gmcrypto_core::sm4::mode_ccm::encrypt(&[u8; 16], &[u8], &[u8], &[u8], usize) -> core::option::Option<alloc::vec::Vec<u8>>
+pub mod gmcrypto_core::sm4::mode_ctr
+pub fn gmcrypto_core::sm4::mode_ctr::decrypt(&[u8; 16], &[u8; 16], &[u8]) -> alloc::vec::Vec<u8>
+pub fn gmcrypto_core::sm4::mode_ctr::encrypt(&[u8; 16], &[u8; 16], &[u8]) -> alloc::vec::Vec<u8>
+pub mod gmcrypto_core::sm4::mode_gcm
+pub struct gmcrypto_core::sm4::mode_gcm::GcmTagLen(_)
+impl gmcrypto_core::sm4::mode_gcm::GcmTagLen
+pub const fn gmcrypto_core::sm4::mode_gcm::GcmTagLen::as_usize(self) -> usize
+pub const fn gmcrypto_core::sm4::mode_gcm::GcmTagLen::new(usize) -> core::option::Option<Self>
+pub const gmcrypto_core::sm4::mode_gcm::TAG_SIZE: usize
+pub fn gmcrypto_core::sm4::mode_gcm::decrypt(&[u8; 16], &[u8], &[u8], &[u8], &[u8; 16]) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn gmcrypto_core::sm4::mode_gcm::decrypt_with_tag_len(&[u8; 16], &[u8], &[u8], &[u8], &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn gmcrypto_core::sm4::mode_gcm::encrypt(&[u8; 16], &[u8], &[u8], &[u8]) -> (alloc::vec::Vec<u8>, [u8; 16])
+pub fn gmcrypto_core::sm4::mode_gcm::encrypt_with_tag_len(&[u8; 16], &[u8], &[u8], &[u8], gmcrypto_core::sm4::mode_gcm::GcmTagLen) -> (alloc::vec::Vec<u8>, alloc::vec::Vec<u8>)
+pub mod gmcrypto_core::sm4::mode_xts
+pub const gmcrypto_core::sm4::mode_xts::XTS_KEY_SIZE: usize
+pub fn gmcrypto_core::sm4::mode_xts::decrypt(&[u8; 32], &[u8; 16], &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn gmcrypto_core::sm4::mode_xts::decrypt_sectors(&[u8; 32], usize, u128, &mut [u8]) -> core::option::Option<()>
+pub fn gmcrypto_core::sm4::mode_xts::encrypt(&[u8; 32], &[u8; 16], &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn gmcrypto_core::sm4::mode_xts::encrypt_sectors(&[u8; 32], usize, u128, &mut [u8]) -> core::option::Option<()>
+pub struct gmcrypto_core::sm4::GcmTagLen(_)
+impl gmcrypto_core::sm4::mode_gcm::GcmTagLen
+pub const fn gmcrypto_core::sm4::mode_gcm::GcmTagLen::as_usize(self) -> usize
+pub const fn gmcrypto_core::sm4::mode_gcm::GcmTagLen::new(usize) -> core::option::Option<Self>
+pub struct gmcrypto_core::sm4::Sm4CbcDecryptor
+impl gmcrypto_core::sm4::cbc_streaming::Sm4CbcDecryptor
+pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcDecryptor::finalize(self) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcDecryptor::new(&[u8; 16], &[u8; 16]) -> Self
+pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcDecryptor::update(&mut self, &[u8])
+pub struct gmcrypto_core::sm4::Sm4CbcEncryptor
+impl gmcrypto_core::sm4::cbc_streaming::Sm4CbcEncryptor
+pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcEncryptor::finalize(self) -> alloc::vec::Vec<u8>
+pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcEncryptor::new(&[u8; 16], &[u8; 16]) -> Self
+pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcEncryptor::update(&mut self, &[u8])
+pub struct gmcrypto_core::sm4::Sm4Cipher
+impl gmcrypto_core::sm4::cipher::Sm4Cipher
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::decrypt_block(&self, &mut [u8; 16])
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::decrypt_blocks(&self, &mut [[u8; 16]])
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::encrypt_block(&self, &mut [u8; 16])
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::encrypt_blocks(&self, &mut [[u8; 16]])
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::new(&[u8; 16]) -> Self
+impl cipher::block::BlockCipherDecrypt for gmcrypto_core::sm4::cipher::Sm4Cipher
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::decrypt_with_backend(&self, impl cipher::block::backends::BlockCipherDecClosure<BlockSize = Self::BlockSize>)
+impl cipher::block::BlockCipherEncrypt for gmcrypto_core::sm4::cipher::Sm4Cipher
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::encrypt_with_backend(&self, impl cipher::block::backends::BlockCipherEncClosure<BlockSize = Self::BlockSize>)
+impl core::ops::drop::Drop for gmcrypto_core::sm4::cipher::Sm4Cipher
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::drop(&mut self)
+impl crypto_common::BlockSizeUser for gmcrypto_core::sm4::cipher::Sm4Cipher
+pub type gmcrypto_core::sm4::cipher::Sm4Cipher::BlockSize = typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UTerm, typenum::bit::B1>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>
+impl crypto_common::KeyInit for gmcrypto_core::sm4::cipher::Sm4Cipher
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::new(&crypto_common::Key<Self>) -> Self
+impl crypto_common::KeySizeUser for gmcrypto_core::sm4::cipher::Sm4Cipher
+pub type gmcrypto_core::sm4::cipher::Sm4Cipher::KeySize = typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UTerm, typenum::bit::B1>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>
+impl gmcrypto_core::traits::BlockCipher for gmcrypto_core::sm4::cipher::Sm4Cipher
+pub const gmcrypto_core::sm4::cipher::Sm4Cipher::BLOCK_SIZE: usize
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::decrypt_block(&self, &mut [u8])
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::encrypt_block(&self, &mut [u8])
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::new(&[u8]) -> Self
+impl zeroize::Zeroize for gmcrypto_core::sm4::cipher::Sm4Cipher
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::zeroize(&mut self)
+pub struct gmcrypto_core::sm4::Sm4CtrCipher
+impl gmcrypto_core::sm4::ctr_streaming::Sm4CtrCipher
+pub fn gmcrypto_core::sm4::ctr_streaming::Sm4CtrCipher::finalize(self)
+pub fn gmcrypto_core::sm4::ctr_streaming::Sm4CtrCipher::new(&[u8; 16], &[u8; 16]) -> Self
+pub fn gmcrypto_core::sm4::ctr_streaming::Sm4CtrCipher::update(&mut self, &[u8], &mut [u8])
+pub struct gmcrypto_core::sm4::Sm4GcmDecryptor
+impl gmcrypto_core::sm4::gcm_streaming::Sm4GcmDecryptor
+pub fn gmcrypto_core::sm4::gcm_streaming::Sm4GcmDecryptor::finalize_verify(self, &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn gmcrypto_core::sm4::gcm_streaming::Sm4GcmDecryptor::new(&[u8; 16], &[u8], &[u8]) -> Self
+pub fn gmcrypto_core::sm4::gcm_streaming::Sm4GcmDecryptor::update(&mut self, &[u8])
+pub struct gmcrypto_core::sm4::Sm4GcmEncryptor
+impl gmcrypto_core::sm4::gcm_streaming::Sm4GcmEncryptor
+pub fn gmcrypto_core::sm4::gcm_streaming::Sm4GcmEncryptor::finalize(self) -> [u8; 16]
+pub fn gmcrypto_core::sm4::gcm_streaming::Sm4GcmEncryptor::finalize_with_tag_len(self, gmcrypto_core::sm4::mode_gcm::GcmTagLen) -> alloc::vec::Vec<u8>
+pub fn gmcrypto_core::sm4::gcm_streaming::Sm4GcmEncryptor::new(&[u8; 16], &[u8], &[u8]) -> Self
+pub fn gmcrypto_core::sm4::gcm_streaming::Sm4GcmEncryptor::update(&mut self, &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
+pub const gmcrypto_core::sm4::BLOCK_SIZE: usize
+pub const gmcrypto_core::sm4::KEY_SIZE: usize
+pub const gmcrypto_core::sm4::XTS_KEY_SIZE: usize
+pub mod gmcrypto_core::spki
+pub fn gmcrypto_core::spki::decode(&[u8]) -> core::option::Option<gmcrypto_core::sm2::point::ProjectivePoint>
+pub fn gmcrypto_core::spki::encode(&gmcrypto_core::sm2::point::ProjectivePoint) -> alloc::vec::Vec<u8>
+pub fn gmcrypto_core::spki::encode_uncompressed(&[u8; 65]) -> alloc::vec::Vec<u8>
+pub mod gmcrypto_core::traits
+pub trait gmcrypto_core::traits::BlockCipher
+pub const gmcrypto_core::traits::BlockCipher::BLOCK_SIZE: usize
+pub fn gmcrypto_core::traits::BlockCipher::decrypt_block(&self, &mut [u8])
+pub fn gmcrypto_core::traits::BlockCipher::encrypt_block(&self, &mut [u8])
+pub fn gmcrypto_core::traits::BlockCipher::new(&[u8]) -> Self
+impl gmcrypto_core::traits::BlockCipher for gmcrypto_core::sm4::cipher::Sm4Cipher
+pub const gmcrypto_core::sm4::cipher::Sm4Cipher::BLOCK_SIZE: usize
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::decrypt_block(&self, &mut [u8])
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::encrypt_block(&self, &mut [u8])
+pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::new(&[u8]) -> Self
+pub trait gmcrypto_core::traits::Hash
+pub type gmcrypto_core::traits::Hash::Output
+pub fn gmcrypto_core::traits::Hash::finalize(self) -> Self::Output
+pub fn gmcrypto_core::traits::Hash::new() -> Self
+pub fn gmcrypto_core::traits::Hash::update(&mut self, &[u8])
+impl gmcrypto_core::traits::Hash for gmcrypto_core::sm3::Sm3
+pub type gmcrypto_core::sm3::Sm3::Output = [u8; 32]
+pub fn gmcrypto_core::sm3::Sm3::finalize(self) -> Self::Output
+pub fn gmcrypto_core::sm3::Sm3::new() -> Self
+pub fn gmcrypto_core::sm3::Sm3::update(&mut self, &[u8])
+pub trait gmcrypto_core::traits::Mac
+pub type gmcrypto_core::traits::Mac::Output
+pub fn gmcrypto_core::traits::Mac::finalize(self) -> Self::Output
+pub fn gmcrypto_core::traits::Mac::new(&[u8]) -> Self
+pub fn gmcrypto_core::traits::Mac::update(&mut self, &[u8])
+pub fn gmcrypto_core::traits::Mac::verify(self, &Self::Output) -> bool where Self: core::marker::Sized
+impl gmcrypto_core::traits::Mac for gmcrypto_core::hmac::HmacSm3
+pub type gmcrypto_core::hmac::HmacSm3::Output = [u8; 32]
+pub fn gmcrypto_core::hmac::HmacSm3::finalize(self) -> Self::Output
+pub fn gmcrypto_core::hmac::HmacSm3::new(&[u8]) -> Self
+pub fn gmcrypto_core::hmac::HmacSm3::update(&mut self, &[u8])
+pub fn gmcrypto_core::hmac::HmacSm3::verify(self, &Self::Output) -> bool
+#[non_exhaustive] pub enum gmcrypto_core::Error
+pub gmcrypto_core::Error::Failed
+impl core::error::Error for gmcrypto_core::Error
+impl core::fmt::Display for gmcrypto_core::Error
+pub fn gmcrypto_core::Error::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result

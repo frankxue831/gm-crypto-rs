@@ -110,9 +110,11 @@ pub fn sign_with_id<R: CryptoRng + Rng>(
 /// this function instead of [`sign_with_id`] to test the crypto path in
 /// isolation.
 ///
-/// Hidden from rustdoc; this surface is provided for the dudect harness
-/// and is not covered by the v0.1 SemVer stability promise. Use
-/// [`sign_with_id`] in application code.
+/// **Not part of the public API — not covered by SemVer.** This surface is
+/// provided solely for the in-repo dudect timing-leak harness; it is
+/// `#[doc(hidden)]` (hidden from rustdoc) and may change or be removed in any
+/// release, including patch releases, without notice. Application code must use
+/// [`sign_with_id`].
 ///
 /// # Errors
 ///

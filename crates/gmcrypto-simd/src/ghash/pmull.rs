@@ -7,7 +7,7 @@
 //! # Algorithm
 //!
 //! Same bit-reversal-within-byte transformation as [`super::software`]
-//! and [`super::clmul`]. Schoolbook 4-PMULL64 over the 64-bit halves,
+//! and `super::clmul`. Schoolbook 4-PMULL64 over the 64-bit halves,
 //! reduction via bit-serial shift-XOR with the reduction constant.
 //!
 //! # CPU feature requirement

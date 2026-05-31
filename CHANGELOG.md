@@ -3,6 +3,38 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — v1.0 prep (not published)
+
+**v0.21 — v1.0 readiness audit (non-publishing assurance cycle).** No published
+crate changed: this entry covers docs + CI + dev-only changes; the workspace stays
+**0.16.0** and crates.io skips `0.21.0` (the v0.14/v0.17/v0.18/v0.19/v0.20
+precedent). The `1.0.0` publish is a separate, deliberate step — see
+[`docs/v1.0-readiness.md`](docs/v1.0-readiness.md). Per `docs/v0.21-scope.md`
+(Q21.1–Q21.9), codex-reviewed W0–W3.
+
+### Added
+- **API-stability CI guards** (`.github/workflows/api-stability.yml`): a committed
+  `cargo-public-api` baseline + enforced drift-check (pinned `cargo-public-api
+  0.52.0` + `nightly-2026-05-23`), `cargo-semver-checks` (informational pre-1.0),
+  a `cargo doc -D warnings` gate, and a `--no-default-features`/`--all-features`
+  matrix. Baselines committed under `docs/api-baseline/`.
+- **`docs/v1.0-readiness.md`** — the GO/NO-GO checklist + the `1.0.0` publish
+  runbook; surfaces the load-bearing pre-1.0 decision (the always-on public API
+  names `crypto-bigint 0.7` types — §3.A).
+- Compile-time existence tests pinning the `#[doc(hidden)]`/internal hooks
+  (`tests/api_surface.rs`, `tests/internal_surface.rs`).
+
+### Changed (docs/attributes only — no behavior change)
+- Finalized the `#[doc(hidden)]` surface for 1.0: canonical "not part of the public
+  API / not covered by SemVer" notes on `sm2::sign_raw_with_id` and
+  `Sm4Cbc{Encryptor,Decryptor}::take_output`; `gmcrypto-simd`'s crate-root entry
+  points are now `#[doc(hidden)]` (kept `pub` for cross-crate use) with a "no
+  stable Rust API; internal acceleration backend" contract.
+- Fixed pre-existing latent intra-doc-link breakage surfaced by the new `cargo doc`
+  gate (de-linked arch-gated internal refs; disambiguated one link). Doc-only;
+  default-features build output unchanged.
+- README gained a **Stability & SemVer** section; SECURITY.md cross-refs it.
+
 ## [0.16.0] — 2026-05-29
 
 C FFI for the v0.15 **SM4-XTS multi-sector (disk) helper** — the deferred

@@ -55,7 +55,7 @@
 //! # KAT sourcing
 //!
 //! gmssl 3.1.1 lacks XTS. KAT vectors come from OpenSSL 3.x EVP `SM4-XTS`
-//! (`xts_standard=GB`); see [`docs/v0.12-xts-kat-sourcing.md`].
+//! (`xts_standard=GB`); see `docs/v0.12-xts-kat-sourcing.md`.
 //!
 //! # API
 //!

@@ -4,7 +4,7 @@
 //! inputs packed as `[u8; 8]`, returning `[u8; 8]`. Internally
 //! dispatches to one of two paths:
 //!
-//! - [`sbox_x8_avx2`] (x86_64 only, guarded by runtime AVX2 detection
+//! - `sbox_x8_avx2` (x86_64 only, guarded by runtime AVX2 detection
 //!   via [`crate::has_avx2`]) — translates the v0.4 W3 single-block
 //!   Itoh-Tsujii gate sequence to byte-parallel AVX2 intrinsics on
 //!   `__m256i`. Only the low 8 bytes of the 256-bit register carry
@@ -12,7 +12,7 @@
 //!   [`super::sbox_x32`] which uses the full 32-byte width for the
 //!   `Sm4CbcDecryptor` batch fanout path.
 //! - [`sbox_x8_scalar`] (always available) — calls the local
-//!   single-block [`super::scalar::sbox_byte`] 8 times.
+//!   single-block `super::scalar::sbox_byte` 8 times.
 //!
 //! # Algorithm — re-implementation note
 //!
@@ -37,7 +37,7 @@ use super::scalar::sbox_byte;
 use crate::detect::has_avx2;
 
 /// Scalar fallback: 8 sequential calls into
-/// [`super::scalar::sbox_byte`]. Always available; selected at
+/// `super::scalar::sbox_byte`. Always available; selected at
 /// runtime when AVX2 is not present.
 #[must_use]
 pub fn sbox_x8_scalar(input: &[u8; 8]) -> [u8; 8] {
@@ -53,7 +53,7 @@ pub fn sbox_x8_scalar(input: &[u8; 8]) -> [u8; 8] {
 /// 8-way packed bitsliced SM4 S-box dispatch.
 ///
 /// On x86_64 with AVX2 available at runtime, calls
-/// [`sbox_x8_avx2`]. Otherwise delegates to [`sbox_x8_scalar`].
+/// `sbox_x8_avx2`. Otherwise delegates to [`sbox_x8_scalar`].
 ///
 /// Byte-identical output to the v0.4 W3 single-block bitslice for
 /// every input byte across every lane (verified exhaustively in

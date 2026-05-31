@@ -10,22 +10,22 @@
 //!
 //! # Dispatch
 //!
-//! - On `aarch64`: [`sbox_x16_neon`] — NEON is a compile-time
+//! - On `aarch64`: `sbox_x16_neon` — NEON is a compile-time
 //!   architectural baseline (Q5.12 + Q6.3); no runtime CPU detect.
 //! - Elsewhere (any non-aarch64 target): falls back to
 //!   [`sbox_x16_scalar`] — a 16-iteration loop calling the local
-//!   single-block [`super::scalar::sbox_byte`].
+//!   single-block `super::scalar::sbox_byte`.
 //!
 //! # Constant-time discipline
 //!
 //! Same as [`super::sbox_x8`]: shared NEON gate sequence (no table
 //! lookups, no secret-derived branches); scalar path is the same
-//! gate-only `sbox_byte` from [`super::scalar`].
+//! gate-only `sbox_byte` from `super::scalar`.
 
 use super::scalar::sbox_byte;
 
 /// Scalar fallback: 16 sequential calls into
-/// [`super::scalar::sbox_byte`]. Always available.
+/// `super::scalar::sbox_byte`. Always available.
 #[must_use]
 pub fn sbox_x16_scalar(input: &[u8; 16]) -> [u8; 16] {
     let mut out = [0u8; 16];
@@ -39,10 +39,10 @@ pub fn sbox_x16_scalar(input: &[u8; 16]) -> [u8; 16] {
 
 /// 16-way packed bitsliced SM4 S-box dispatch.
 ///
-/// On `aarch64`: calls [`sbox_x16_neon`]. Otherwise
+/// On `aarch64`: calls `sbox_x16_neon`. Otherwise
 /// [`sbox_x16_scalar`].
 ///
-/// Byte-identical output to applying [`super::scalar::sbox_byte`]
+/// Byte-identical output to applying `super::scalar::sbox_byte`
 /// to each input byte (verified exhaustively in
 /// `tests/lane_position_x16.rs` with lane-position-shifted sweeps
 /// per Q6.8 / codex's phase 3 flag #4).
