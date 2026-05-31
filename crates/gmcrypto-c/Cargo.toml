@@ -18,7 +18,15 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 # is `std`-OK (it's the language-binding layer, not the no_std crypto
 # primitives). RNG is sourced via `getrandom::SysRng` internally
 # per Q4.18; the C surface does not pass an RNG callback in v0.4.
-gmcrypto-core = { path = "../gmcrypto-core", version = "0.16" }
+#
+# v0.23 W3 (A-1, 1.0 contract): the AEAD (SM4-GCM/CCM) and SM4-XTS
+# modes are ALWAYS compiled into the C ABI. Unlike `gmcrypto-core`
+# (where Rust callers opt in via cargo features), the C shim is the
+# language-binding layer and must export ONE complete, permanent ABI:
+# the committed `include/gmcrypto.h` always matches a default
+# `cargo build -p gmcrypto-c`. So `sm4-aead` + `sm4-xts` are enabled
+# unconditionally on the core dep here (no forwarding C-shim feature).
+gmcrypto-core = { path = "../gmcrypto-core", version = "0.16", features = ["sm4-aead", "sm4-xts"] }
 getrandom.workspace = true
 rand_core.workspace = true
 
@@ -41,31 +49,15 @@ default = []
 # Default builds skip cbindgen entirely (saves ~5s per build and
 # avoids the cbindgen dependency on every consumer's machine).
 #
-# v0.10: regen-header IMPLIES sm4-aead. cbindgen does not evaluate
-# `#[cfg(feature)]` for free functions (so the AEAD prototypes appear
-# unconditionally), BUT it *does* drop cfg-gated opaque struct types
-# (and the functions referencing them) when the feature is inactive.
-# The v0.10 streaming AEAD FFI adds such structs
-# (gmcrypto_sm4_gcm_encryptor_t / _decryptor_t), so the header is only
-# complete + deterministic when sm4-aead is active during regen. Tying
-# it to regen-header keeps the documented `--features regen-header`
-# command (and the CI drift gate) producing the full, stable header
-# with no extra flags.
-regen-header = ["dep:cbindgen", "sm4-aead"]
-# v0.9 W4 — forward the core AEAD gate so the single-shot SM4-GCM /
-# SM4-CCM FFI surface compiles. Streaming AEAD FFI is deferred to
-# v0.10 (ABI-permanence risk before the Rust streaming API settles —
-# see docs/v0.9-scope.md Q9.6). No new transitive deps: gmcrypto-core's
-# sm4-aead pulls gmcrypto-simd::ghash, which is already in the tree.
-sm4-aead = ["gmcrypto-core/sm4-aead"]
-# v0.13 — forward the core SM4-XTS gate so the single-shot XTS FFI
-# (gmcrypto_sm4_xts_encrypt / _decrypt) compiles. No new transitive dep:
-# gmcrypto-core's sm4-xts is pure-core (the GF(2^128) tweak doubling is a
-# trivial multiply-by-x, not GHASH). Unlike sm4-aead's streaming handles,
-# XTS adds only free functions + an always-on const (no opaque struct
-# types), so `regen-header` does NOT need to imply sm4-xts — cbindgen
-# emits free-fn prototypes + `#define`s from source regardless of cfg.
-sm4-xts = ["gmcrypto-core/sm4-xts"]
+# v0.23 W3 (A-1, 1.0 contract): the AEAD (SM4-GCM/CCM, single-shot +
+# streaming) and SM4-XTS FFI surfaces are now compiled UNCONDITIONALLY
+# into the C ABI (the `sm4-aead` / `sm4-xts` forwarding features were
+# removed — see the `gmcrypto-core` dep above). The committed
+# `include/gmcrypto.h` therefore always matches a default
+# `cargo build -p gmcrypto-c`, so `regen-header` no longer needs to
+# "imply" anything — every prototype, opaque struct type, and const
+# is present in any build.
+regen-header = ["dep:cbindgen"]
 
 [lints.rust]
 # v0.4 W4 / Q4.7 — `unsafe_code = "forbid"` is impossible on an FFI

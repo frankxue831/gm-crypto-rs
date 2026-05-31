@@ -1169,7 +1169,6 @@ fn version_string_matches_crate() {
 // SM4 AEAD — single-shot (v0.9 W4). Gated on `sm4-aead`.
 // ============================================================
 
-#[cfg(feature = "sm4-aead")]
 use gmcrypto_c::{
     gmcrypto_sm4_ccm_decrypt, gmcrypto_sm4_ccm_encrypt, gmcrypto_sm4_gcm_decrypt,
     gmcrypto_sm4_gcm_decrypt_with_tag_len, gmcrypto_sm4_gcm_decryptor_finalize_verify,
@@ -1180,7 +1179,6 @@ use gmcrypto_c::{
     gmcrypto_sm4_gcm_encryptor_new, gmcrypto_sm4_gcm_encryptor_update,
 };
 
-#[cfg(feature = "sm4-aead")]
 #[test]
 fn sm4_gcm_round_trip_matches_core() {
     let key = [0x42u8; 16];
@@ -1238,7 +1236,6 @@ fn sm4_gcm_round_trip_matches_core() {
     assert_eq!(pt_back.as_slice(), pt.as_slice());
 }
 
-#[cfg(feature = "sm4-aead")]
 #[test]
 fn sm4_gcm_tampered_tag_returns_err() {
     let key = [0x42u8; 16];
@@ -1268,7 +1265,6 @@ fn sm4_gcm_tampered_tag_returns_err() {
     assert_eq!(r, GMCRYPTO_ERR);
 }
 
-#[cfg(feature = "sm4-aead")]
 #[test]
 fn sm4_gcm_tag_len_12_round_trip_matches_core() {
     let key = [0x42u8; 16];
@@ -1328,7 +1324,6 @@ fn sm4_gcm_tag_len_12_round_trip_matches_core() {
     assert_eq!(pt_back.as_slice(), pt.as_slice());
 }
 
-#[cfg(feature = "sm4-aead")]
 #[test]
 fn sm4_gcm_invalid_tag_len_returns_err() {
     let key = [0x42u8; 16];
@@ -1358,7 +1353,6 @@ fn sm4_gcm_invalid_tag_len_returns_err() {
     assert_eq!(r, GMCRYPTO_ERR);
 }
 
-#[cfg(feature = "sm4-aead")]
 #[test]
 fn sm4_ccm_round_trip_matches_core() {
     let key = [0x42u8; 16];
@@ -1415,7 +1409,6 @@ fn sm4_ccm_round_trip_matches_core() {
     assert_eq!(pt_back.as_slice(), pt.as_slice());
 }
 
-#[cfg(feature = "sm4-aead")]
 #[test]
 fn sm4_ccm_invalid_nonce_len_returns_err() {
     let key = [0x42u8; 16];
@@ -1448,7 +1441,6 @@ fn sm4_ccm_invalid_nonce_len_returns_err() {
 // `sm4-aead`.
 // ============================================================
 
-#[cfg(feature = "sm4-aead")]
 #[test]
 fn sm4_gcm_encryptor_new_then_free_is_clean() {
     let key = [0x42u8; 16];
@@ -1470,7 +1462,6 @@ fn sm4_gcm_encryptor_new_then_free_is_clean() {
     unsafe { gmcrypto_sm4_gcm_encryptor_free(core::ptr::null_mut()) };
 }
 
-#[cfg(feature = "sm4-aead")]
 #[test]
 fn sm4_gcm_encryptor_chunked_matches_core() {
     let key = [0x42u8; 16];
@@ -1516,7 +1507,6 @@ fn sm4_gcm_encryptor_chunked_matches_core() {
     assert_eq!(ct, core_ct);
 }
 
-#[cfg(feature = "sm4-aead")]
 #[test]
 fn sm4_gcm_encryptor_finalize_matches_core() {
     let key = [0x42u8; 16];
@@ -1602,7 +1592,6 @@ fn sm4_gcm_encryptor_finalize_matches_core() {
     assert_eq!(tag12.as_slice(), &core_tag[..12]);
 }
 
-#[cfg(feature = "sm4-aead")]
 #[test]
 fn sm4_gcm_decryptor_new_then_free_is_clean() {
     let key = [0x42u8; 16];
@@ -1624,7 +1613,6 @@ fn sm4_gcm_decryptor_new_then_free_is_clean() {
     unsafe { gmcrypto_sm4_gcm_decryptor_free(core::ptr::null_mut()) };
 }
 
-#[cfg(feature = "sm4-aead")]
 #[test]
 fn sm4_gcm_decryptor_chunked_round_trip() {
     let key = [0x42u8; 16];
@@ -1665,7 +1653,6 @@ fn sm4_gcm_decryptor_chunked_round_trip() {
     assert_eq!(out, pt);
 }
 
-#[cfg(feature = "sm4-aead")]
 #[test]
 fn sm4_gcm_decryptor_tamper_and_bad_len_return_err() {
     let key = [0x42u8; 16];
@@ -1730,7 +1717,6 @@ fn sm4_gcm_decryptor_tamper_and_bad_len_return_err() {
     assert_eq!(r2, GMCRYPTO_ERR);
 }
 
-#[cfg(feature = "sm4-aead")]
 #[test]
 fn sm4_gcm_streaming_c_encrypt_c_decrypt_with_truncated_tag() {
     let key = [0x42u8; 16];
@@ -1817,7 +1803,6 @@ fn sm4_gcm_streaming_c_encrypt_c_decrypt_with_truncated_tag() {
     assert_eq!(out, pt);
 }
 
-#[cfg(feature = "sm4-aead")]
 #[test]
 fn sm4_gcm_streaming_empty_plaintext() {
     let key = [0x42u8; 16];
@@ -1873,10 +1858,8 @@ fn sm4_gcm_streaming_empty_plaintext() {
 // v0.13 — SM4-XTS single-shot FFI (cfg-gated on `sm4-xts`).
 // ============================================================
 
-#[cfg(feature = "sm4-xts")]
 use gmcrypto_c::{GMCRYPTO_SM4_XTS_KEY_SIZE, gmcrypto_sm4_xts_decrypt, gmcrypto_sm4_xts_encrypt};
 
-#[cfg(feature = "sm4-xts")]
 fn xts_key() -> [u8; GMCRYPTO_SM4_XTS_KEY_SIZE] {
     let mut k = [0u8; GMCRYPTO_SM4_XTS_KEY_SIZE];
     k[..16].fill(0x11);
@@ -1886,7 +1869,6 @@ fn xts_key() -> [u8; GMCRYPTO_SM4_XTS_KEY_SIZE] {
 
 /// Encrypt via FFI == core `mode_xts::encrypt`, then FFI decrypt round-trips,
 /// on a whole-block (48-byte = 3-block) data unit.
-#[cfg(feature = "sm4-xts")]
 #[test]
 fn sm4_xts_round_trip_whole_block_matches_core() {
     let key = xts_key();
@@ -1932,7 +1914,6 @@ fn sm4_xts_round_trip_whole_block_matches_core() {
 
 /// Same equivalence + round-trip on a CTS (non-block-multiple, 50-byte) data
 /// unit — exercises the ciphertext-stealing tail across the FFI boundary.
-#[cfg(feature = "sm4-xts")]
 #[test]
 fn sm4_xts_round_trip_cts_matches_core() {
     let key = xts_key();
@@ -1977,7 +1958,6 @@ fn sm4_xts_round_trip_cts_matches_core() {
 }
 
 /// Data unit shorter than one block (15 bytes) → single `GMCRYPTO_ERR`.
-#[cfg(feature = "sm4-xts")]
 #[test]
 fn sm4_xts_short_data_returns_err() {
     let key = xts_key();
@@ -2001,7 +1981,6 @@ fn sm4_xts_short_data_returns_err() {
 
 /// Weak key (`Key1 == Key2`) → single `GMCRYPTO_ERR` (stricter than OpenSSL's
 /// default provider; matches the core GB/T 17964 guard).
-#[cfg(feature = "sm4-xts")]
 #[test]
 fn sm4_xts_weak_key_returns_err() {
     let key = [0x11u8; GMCRYPTO_SM4_XTS_KEY_SIZE]; // both halves identical
@@ -2025,7 +2004,6 @@ fn sm4_xts_weak_key_returns_err() {
 
 /// Too-small output buffer → `GMCRYPTO_ERR`, with `*out_actual_len` set to the
 /// required (== data) length.
-#[cfg(feature = "sm4-xts")]
 #[test]
 fn sm4_xts_small_buffer_returns_err_with_required_len() {
     let key = xts_key();
@@ -2057,12 +2035,10 @@ fn sm4_xts_small_buffer_returns_err_with_required_len() {
 // transform is in place + length-preserving), start_sector is uint64_t.
 // ============================================================
 
-#[cfg(feature = "sm4-xts")]
 use gmcrypto_c::{gmcrypto_sm4_xts_decrypt_sectors, gmcrypto_sm4_xts_encrypt_sectors};
 
 /// Deterministic test pattern of `len` bytes (mirrors the v0.15 core sector
 /// test). The `i as u8` truncation is the intended byte-cycling pattern.
-#[cfg(feature = "sm4-xts")]
 #[allow(clippy::cast_possible_truncation)]
 fn xts_pattern(len: usize) -> Vec<u8> {
     (0..len)
@@ -2072,7 +2048,6 @@ fn xts_pattern(len: usize) -> Vec<u8> {
 
 /// Multi-sector (3 × 512 B) in-place encrypt via FFI == core
 /// `encrypt_sectors`; FFI decrypt restores the original in place.
-#[cfg(feature = "sm4-xts")]
 #[test]
 fn sm4_xts_sectors_round_trip_matches_core() {
     let key = xts_key();
@@ -2120,7 +2095,6 @@ fn sm4_xts_sectors_round_trip_matches_core() {
 
 /// Small sectors (3 × 32 B) at `start_sector = 0xfe` so the LE counter crosses
 /// a byte boundary (0xfe → 0xff → 0x100) mid-run; FFI == core.
-#[cfg(feature = "sm4-xts")]
 #[test]
 fn sm4_xts_sectors_byte_boundary_matches_core() {
     let key = xts_key();
@@ -2155,7 +2129,6 @@ fn sm4_xts_sectors_byte_boundary_matches_core() {
 /// A high 64-bit starting LBA (crosses the 2^32 boundary in the LE tweak
 /// counter) round-trips — exercises the `uint64_t → u128` widening with no
 /// overflow (the overflow `None` is unreachable through this FFI).
-#[cfg(feature = "sm4-xts")]
 #[test]
 fn sm4_xts_sectors_high_lba_round_trip() {
     let key = xts_key();
@@ -2199,7 +2172,6 @@ fn sm4_xts_sectors_high_lba_round_trip() {
 }
 
 /// `sector_size` not a multiple of 16 → `GMCRYPTO_ERR`; `buf` untouched.
-#[cfg(feature = "sm4-xts")]
 #[test]
 fn sm4_xts_sectors_bad_sector_size_buf_untouched() {
     let key = xts_key();
@@ -2214,7 +2186,6 @@ fn sm4_xts_sectors_bad_sector_size_buf_untouched() {
 
 /// `buf_len` not a whole multiple of `sector_size` → `GMCRYPTO_ERR`; `buf`
 /// untouched.
-#[cfg(feature = "sm4-xts")]
 #[test]
 fn sm4_xts_sectors_non_multiple_buf_untouched() {
     let key = xts_key();
@@ -2228,7 +2199,6 @@ fn sm4_xts_sectors_non_multiple_buf_untouched() {
 }
 
 /// Weak key (`Key1 == Key2`) → `GMCRYPTO_ERR`; `buf` untouched.
-#[cfg(feature = "sm4-xts")]
 #[test]
 fn sm4_xts_sectors_weak_key_buf_untouched() {
     let key = [0x11u8; GMCRYPTO_SM4_XTS_KEY_SIZE]; // both halves identical
@@ -2244,7 +2214,6 @@ fn sm4_xts_sectors_weak_key_buf_untouched() {
 /// Empty `buf` passed as `(NULL, 0)` (the natural C "no data" call) is a vacuous
 /// `GMCRYPTO_OK`; but the key is still validated, so an empty run under a weak
 /// key is still `GMCRYPTO_ERR`.
-#[cfg(feature = "sm4-xts")]
 #[test]
 fn sm4_xts_sectors_empty_buf_ok_weak_err() {
     let key = xts_key();
@@ -2257,7 +2226,6 @@ fn sm4_xts_sectors_empty_buf_ok_weak_err() {
 }
 
 /// Null `buf` with non-zero `buf_len` → `GMCRYPTO_ERR`.
-#[cfg(feature = "sm4-xts")]
 #[test]
 fn sm4_xts_sectors_null_buf_returns_err() {
     let key = xts_key();
@@ -2266,7 +2234,6 @@ fn sm4_xts_sectors_null_buf_returns_err() {
 }
 
 /// Null `key` → `GMCRYPTO_ERR`; `buf` untouched (reject before any mutation).
-#[cfg(feature = "sm4-xts")]
 #[test]
 fn sm4_xts_sectors_null_key_buf_untouched() {
     let mut buf = [0x5Cu8; 32];
@@ -2279,7 +2246,6 @@ fn sm4_xts_sectors_null_key_buf_untouched() {
 /// Decrypt-side error path (guards against encrypt/decrypt copy-paste
 /// asymmetry): weak key + bad `sector_size` both → `GMCRYPTO_ERR`, buf
 /// untouched, via `gmcrypto_sm4_xts_decrypt_sectors`.
-#[cfg(feature = "sm4-xts")]
 #[test]
 fn sm4_xts_sectors_decrypt_errors_buf_untouched() {
     let weak = [0x11u8; GMCRYPTO_SM4_XTS_KEY_SIZE];
@@ -2311,7 +2277,6 @@ fn sm4_xts_sectors_decrypt_errors_buf_untouched() {
 /// constructing `&mut buf`, so the result equals encrypting the original
 /// plaintext under the original key — captured here from non-overlapping
 /// copies taken before the call.
-#[cfg(feature = "sm4-xts")]
 #[test]
 fn sm4_xts_sectors_key_buf_overlap_ok() {
     // backing[0..32] is the key view (Key1 = [0..16], Key2 = [16..32], which
