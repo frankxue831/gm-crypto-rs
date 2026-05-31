@@ -160,7 +160,15 @@ pub fn sign_raw_with_id<R: TryCryptoRng>(
 
     let mut chosen: CtOption<RsPair> = CtOption::new(RsPair::default(), Choice::from(0));
     for _ in 0..SIGN_RETRY_BUDGET {
-        let candidate = try_sign_once(key, &e_scalar, rng);
+        // `None` == an RNG failure (public, not secret-derived). Short-circuit
+        // to `Failed` so a transient RNG error is never masked by a later
+        // retry succeeding — honoring the A-3 / FFI no-panic-RNG contract
+        // (the RNG must produce entropy on every attempt). Candidate
+        // invalidity (`r`/`s`/exhaustion) stays a masked `CtOption`, not a
+        // branch.
+        let Some(candidate) = try_sign_once(key, &e_scalar, rng) else {
+            return Err(crate::Error::Failed);
+        };
         chosen = ct_or_else(chosen, candidate);
     }
 
@@ -184,18 +192,24 @@ impl ConditionallySelectable for RsPair {
     }
 }
 
+/// Returns `None` on RNG failure (a *public* condition the caller short-
+/// circuits to `Failed`); `Some(CtOption)` otherwise, where the `CtOption`
+/// is the masked candidate signature (invalid if `r`/`s` rejected or the
+/// nonce sampler exhausted its budget).
 #[allow(clippy::similar_names, clippy::many_single_char_names)]
-fn try_sign_once<R: TryCryptoRng>(key: &Sm2PrivateKey, e: &Fn, rng: &mut R) -> CtOption<RsPair> {
-    // RNG FAILURE is public (not secret-derived) → an invalid `CtOption`
-    // early return is fine. Budget EXHAUSTION, by contrast, IS secret-
-    // derived (it depends on the random nonce bytes), so the sampler
-    // returns it as the `sample_ok` Choice rather than as `None`: on
-    // exhaustion `k` is a dummy (1) and the FULL signing computation still
+fn try_sign_once<R: TryCryptoRng>(
+    key: &Sm2PrivateKey,
+    e: &Fn,
+    rng: &mut R,
+) -> Option<CtOption<RsPair>> {
+    // RNG FAILURE is public (not secret-derived): the `?` propagates it as
+    // `None` so the caller fails the whole operation. Budget EXHAUSTION, by
+    // contrast, IS secret-derived (it depends on the random nonce bytes), so
+    // the sampler returns it as the `sample_ok` Choice rather than as `None`:
+    // on exhaustion `k` is a dummy (1) and the FULL signing computation still
     // runs in constant time, with the result masked out by folding
     // `sample_ok` into `valid` below. No branch on the exhaustion bit.
-    let Some((mut k, sample_ok)) = sample_nonzero_scalar(rng) else {
-        return CtOption::new(RsPair::default(), Choice::from(0u8));
-    };
+    let (mut k, sample_ok) = sample_nonzero_scalar(rng)?;
     let kg = mul_g(&k);
     let (x1, _y1) = kg.to_affine().expect("k·G is finite for k != 0");
 
@@ -247,7 +261,7 @@ fn try_sign_once<R: TryCryptoRng>(key: &Sm2PrivateKey, e: &Fn, rng: &mut R) -> C
     k_minus_rd.zeroize();
     s.zeroize();
 
-    out
+    Some(out)
 }
 
 /// Fixed-budget constant-time nonzero-scalar sampler. Per-draw reject
@@ -274,9 +288,12 @@ pub(crate) fn sample_nonzero_scalar<R: TryCryptoRng>(rng: &mut R) -> Option<(Fn,
     for _ in 0..NONCE_SAMPLE_BUDGET {
         let mut buf = [0u8; 32];
         // RNG failure is NOT secret-derived: collapsing it to None here is
-        // a public-path early return (becomes Error::Failed upstream).
+        // a public-path early return (becomes Error::Failed upstream). Wipe
+        // both this draw's buffer AND any already-selected `chosen` scalar
+        // (an earlier valid draw) before bailing.
         if rng.try_fill_bytes(&mut buf).is_err() {
             buf.zeroize();
+            chosen.zeroize();
             return None;
         }
         let candidate = U256::from_be_slice(&buf);

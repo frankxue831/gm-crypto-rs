@@ -12,6 +12,14 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 /// A point on the SM2 curve in projective coordinates (X:Y:Z).
 ///
 /// The point at infinity is represented as (0:1:0).
+///
+/// **Not part of the public API / not covered by SemVer; may change or be
+/// removed in any release.** The whole `sm2::point` module and the
+/// `sm2::ProjectivePoint` re-export are `#[doc(hidden)]` (v0.23); this
+/// attribute on the struct itself makes the contract explicit. Rust users
+/// hold public keys as [`crate::sm2::Sm2PublicKey`] (construct via
+/// `from_sec1_bytes` / `Sm2PrivateKey::public_key`); C users use `gmcrypto-c`.
+#[doc(hidden)]
 #[derive(Clone, Copy, Debug)]
 pub struct ProjectivePoint {
     pub(crate) x: Fp,

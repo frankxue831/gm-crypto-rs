@@ -35,12 +35,14 @@
 //! # Failure-mode invariant
 //!
 //! [`encrypt`] returns `Result<Vec<u8>, crate::Error>` with a single
-//! `Failed` variant — collapses every retry-budget-exhausted, identity-
-//! point, RNG-failure, or KDF-zero outcome to one uninformative shape.
-//! With a [`rand_core::TryCryptoRng`], the cumulative-failure
-//! probability is `≤ 2^-512` per call across all plaintext lengths
-//! (1-byte through arbitrary), per the [`ENCRYPT_RETRY_BUDGET`] table —
-//! i.e. never observed in practice.
+//! `Failed` variant — collapses every nonce-sampler-exhausted, KDF-zero-
+//! retry-exhausted, identity-point, or RNG-failure outcome to one
+//! uninformative shape. With a [`rand_core::TryCryptoRng`] the dominant
+//! spurious-failure term is the fixed-budget nonce sampler exhausting all
+//! `NONCE_SAMPLE_BUDGET` draws (≈ `2^-128`; v0.23 fails closed here rather
+//! than encrypting under a dummy nonce); the KDF-zero retry adds a far
+//! smaller term (`≤ 2^-512` for plaintext ≥ 4 bytes). Never observed in
+//! practice.
 //!
 //! # Constant-time stance
 //!
