@@ -87,8 +87,8 @@ pub unsafe fn ghash_mul_clmul(h: &[u8; 16], x: &[u8; 16]) -> [u8; 16] {
     //   P[128..256] ^= t11
     //
     // We can compute this directly via 192-bit (24-byte) buffer:
-    let mut p_low = _mm_xor_si128(_mm_setzero_si128(), t00);
-    let mut p_high = _mm_xor_si128(_mm_setzero_si128(), t11);
+    let p_low = _mm_xor_si128(_mm_setzero_si128(), t00);
+    let p_high = _mm_xor_si128(_mm_setzero_si128(), t11);
 
     // Combine the middle products: t01 ^ t10 spans bits 64..192.
     let middle = _mm_xor_si128(t01, t10);
