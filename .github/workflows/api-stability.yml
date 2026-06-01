@@ -4,10 +4,11 @@
 #   1. public-api drift-check (ENFORCED) — regenerate the committed
 #      docs/api-baseline/*.txt with the PINNED tool + nightly and `git diff
 #      --exit-code`. The cbindgen-header-drift pattern, applied to the Rust API.
-#   2. cargo-semver-checks (INFORMATIONAL, pre-1.0) — log the 0.16.0->HEAD delta
-#      but never gate: 0.x SemVer permits breakage and 0.16->1.0 is a major bump
-#      (e.g. the v0.21 gmcrypto-simd doc-hiding reads as a removal). Becomes the
-#      ENFORCED forward gate from 1.0 onward (current-vs-last-release).
+#   2. cargo-semver-checks (ENFORCED, >=1.0) — gate HEAD against the last published
+#      release (1.0.0). From 1.0 the public API is a binding SemVer contract: a
+#      breaking change to the covered surface must be a major bump, so a non-empty
+#      report FAILS the job. Flipped enforced after the 1.0.0 publish
+#      (docs/v1.0-readiness.md §4 step 7); #[doc(hidden)] items are excluded.
 #   3. docs (ENFORCED) — `cargo doc` with -D warnings; allows the one
 #      `private_intra_doc_links` lint (intentional internal cross-refs that render
 #      as code text on docs.rs — not broken links).
@@ -69,7 +70,7 @@ jobs:
             || { echo "::error::Public Rust API changed. If intended, regenerate docs/api-baseline/*.txt with the pinned tool+nightly and commit."; exit 1; }
 
   semver-checks:
-    name: cargo-semver-checks (informational, pre-1.0)
+    name: cargo-semver-checks (enforced, >=1.0)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -82,17 +83,16 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-semver-checks
-      # continue-on-error (not `|| true`): keeps the job green while still showing a
-      # ✗ on this step when semver-checks reports findings — clearer signal than
-      # swallowing the exit code. At 1.0 this becomes a REQUIRED gate (drop this).
-      - name: Report 0.16.0 -> HEAD delta (non-gating)
-        continue-on-error: true
+      # ENFORCED from 1.0 (flipped after the 1.0.0 publish; docs/v1.0-readiness.md §4
+      # step 7). No continue-on-error: semver-checks compares HEAD against the latest
+      # crates.io release (now 1.0.0), and a breaking change to the SemVer-covered
+      # public API FAILS the job — it must instead be a 2.0. #[doc(hidden)] items are
+      # excluded, so the internal curve/asn1/traits surface does not gate.
+      - name: Enforce no breaking change vs last release
         run: |
-          echo "INFORMATIONAL ONLY — not a gate (docs/v0.21-scope.md Q21.6)."
-          echo "Compares HEAD against the latest crates.io release (0.16.0). 0.x permits"
-          echo "breakage and 0.16->1.0 is a major bump (e.g. the v0.21 simd doc-hiding"
-          echo "reads as a removal), so a non-empty delta here is expected. This becomes"
-          echo "the enforced forward gate from 1.0 onward (current-vs-last-release)."
+          echo "ENFORCED forward gate (>=1.0): HEAD vs the latest crates.io release."
+          echo "A breaking change to the SemVer-covered public API fails here and"
+          echo "requires a major bump (see docs/v1.0-readiness.md §3.D / §4)."
           cargo semver-checks check-release -p gmcrypto-core --all-features
           cargo semver-checks check-release -p gmcrypto-simd
 
