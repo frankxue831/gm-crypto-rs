@@ -31,10 +31,13 @@
 //! - `default` — `no_std`, `alloc`-only. No optional dependencies.
 //! - `digest-traits` — opt-in (v0.4 W2). Implements `digest::Digest` for
 //!   [`sm3::Sm3`] and `digest::Mac` for [`hmac::HmacSm3`]. Pulls
-//!   `digest = "0.11"`.
+//!   `digest = "0.11"` — a pre-1.0 ecosystem crate, so a breaking `digest`
+//!   release is **not** covered by `gmcrypto-core`'s `SemVer` (bump your own).
 //! - `cipher-traits` — opt-in (v0.4 W2). Implements
 //!   `cipher::{BlockCipherEncrypt, BlockCipherDecrypt, BlockSizeUser,
-//!   KeySizeUser, KeyInit}` for [`sm4::Sm4Cipher`]. Pulls `cipher = "0.5"`.
+//!   KeySizeUser, KeyInit}` for [`sm4::Sm4Cipher`]. Pulls `cipher = "0.5"` —
+//!   a pre-1.0 ecosystem crate, so a breaking `cipher` release is **not**
+//!   covered by `gmcrypto-core`'s `SemVer` (bump your own).
 //! - `sm4-bitsliced` — opt-in (v0.4 W3). Routes the SM4 S-box through
 //!   a bitsliced (table-less, gate-only) Itoh-Tsujii inversion in
 //!   GF(2^8). Byte-identical output to the default linear-scan path;

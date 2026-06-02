@@ -192,7 +192,7 @@ jobs:
       - name: cargo build (all targets)
         run: cargo build --workspace --all-targets
       - name: cargo build with opt-in features
-        run: cargo build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,crypto-bigint-scalar --all-targets
+        run: cargo build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar --all-targets
 
   cabi:
     name: gmcrypto-c FFI build + header drift
@@ -276,7 +276,7 @@ jobs:
       # transitive deps). Uses --features on the workspace-default crate
       # (`gmcrypto-core`).
       - name: Run cargo-deny (runtime opt-in features, excluding dev-deps)
-        run: cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/crypto-bigint-scalar check --exclude-dev
+        run: cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar check --exclude-dev
 
   wasm32:
     name: build wasm32-unknown-unknown (Rust ${{ matrix.toolchain }})
@@ -326,3 +326,8 @@ jobs:
       # dispatch falls back to the software path; no CLMUL/PMULL there).
       - name: cargo +${{ matrix.toolchain }} build --target wasm32-unknown-unknown --features sm4-aead
         run: cargo +${{ matrix.toolchain }} build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features --features sm4-aead
+      # sm4-xts is pure-core / no_std (no new dep, no GHASH), so it must also
+      # build on wasm32. (Closes the doc-vs-CI gap: CLAUDE.md documented a
+      # wasm32 sm4-xts repro command with no matching CI leg.)
+      - name: cargo +${{ matrix.toolchain }} build --target wasm32-unknown-unknown --features sm4-xts
+        run: cargo +${{ matrix.toolchain }} build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features --features sm4-xts
