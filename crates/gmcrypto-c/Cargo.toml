@@ -26,7 +26,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 # the committed `include/gmcrypto.h` always matches a default
 # `cargo build -p gmcrypto-c`. So `sm4-aead` + `sm4-xts` are enabled
 # unconditionally on the core dep here (no forwarding C-shim feature).
-gmcrypto-core = { path = "../gmcrypto-core", version = "=1.0.0", features = ["sm4-aead", "sm4-xts"] }
+gmcrypto-core = { path = "../gmcrypto-core", version = "=1.0.1", features = ["sm4-aead", "sm4-xts"] }
 getrandom.workspace = true
 rand_core.workspace = true
 
