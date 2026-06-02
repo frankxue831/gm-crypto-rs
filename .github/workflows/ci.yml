@@ -257,6 +257,11 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny@0.19
+      # Cargo.lock is gitignored (lib-crate policy), so generate a fresh
+      # lockfile for a reproducible, fully-resolved dependency graph before
+      # the deny passes (per the documented recipe in CLAUDE.md).
+      - name: Generate lockfile
+        run: cargo generate-lockfile
       # Default deny pass — gates the zero-runtime-deps surface of the
       # default-features build.
       - name: Run cargo-deny (default features, excluding dev-deps)

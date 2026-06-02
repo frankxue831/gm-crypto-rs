@@ -19,8 +19,11 @@ plus a set of crypto/zeroize/doc should-fixes. From 1.0, `cargo-semver-checks`
 becomes the enforced forward breaking-change gate.
 
 The crates.io history **skips 0.17.0–0.23.0** (the non-publishing assurance +
-API-finalization cycles, detailed in the `### v0.17`–`### v0.23` subsections
-below); their changes all ship together in this first published `1.0.0`. The
+API-finalization cycles; the v0.21–v0.23 cycles are detailed in the subsections
+below, and the v0.17–v0.20 infra/assurance cycles — including the fuzz-suite
+growth to **18 targets** in v0.20, the two streaming-decryptor differential
+targets — are summarized in `CLAUDE.md` and the `docs/` scope files); their
+changes all ship together in this first published `1.0.0`. The
 **only migration is 0.16 → 1.0** — no published 0.x consumer ever saw an
 intermediate break. The runtime wire output (SM2 signatures / ciphertexts, SM4
 mode bytes) is **byte-identical to 0.16.0** (KAT + gmssl 3.1.1 interop 11/11); the

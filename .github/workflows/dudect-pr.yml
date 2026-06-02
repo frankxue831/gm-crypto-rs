@@ -9,6 +9,11 @@ on:
       - 'crates/gmcrypto-core/src/**'
       - 'crates/gmcrypto-core/Cargo.toml'
       - 'crates/gmcrypto-core/benches/**'
+      # The SIMD backend drives the cfg-gated CT targets
+      # (ct_sm4_*_bitsliced_simd, ct_sm4_cbc_decrypt_fanout, the AEAD/XTS
+      # paths via ghash), so a change there must trigger the smoke too.
+      - 'crates/gmcrypto-simd/src/**'
+      - 'crates/gmcrypto-simd/Cargo.toml'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/dudect-pr.yml'

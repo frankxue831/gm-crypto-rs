@@ -1,7 +1,9 @@
 //! Cross-validation against the gmssl v3.1.1 CLI.
 //!
-//! Skipped silently when `GMCRYPTO_GMSSL=1` is not set; CI sets it
-//! on one matrix slot when gmssl is available on the runner.
+//! Skipped silently when `GMCRYPTO_GMSSL=1` is not set. No CI workflow
+//! currently sets it (gmssl is not installed on the GitHub-hosted runners),
+//! so this suite is maintainer-run locally, not a CI gate; the committed KAT
+//! fixtures are the in-CI wire-format guard.
 //!
 //! # v0.3 scope (W3)
 //!

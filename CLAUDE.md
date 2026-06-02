@@ -773,10 +773,10 @@ fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN 
 
 .github/workflows/
   ci.yml                    # 5 jobs on GitHub-hosted macos-14 (aarch64, v0.17+): build/test (stable, full) + msrv (1.85, build-only) + cabi + cargo-deny + wasm32 matrix. Per-feature clippy passes (digest-traits, cipher-traits, sm4-bitsliced, sm4-bitsliced-simd, crypto-bigint-scalar). concurrency: cancel-in-progress. UNAFFECTED by fuzz/ (excluded).
-  dudect-pr.yml             # 10K samples on ubuntu-latest, |tau| gate, matrix on features=[default, sm4-bitsliced, sm4-bitsliced-simd], path-allowlisted, concurrency: cancel-in-progress
-  dudect-nightly.yml        # 100K samples on ubuntu-latest, same gate + matrix, 30-day artifact retention; concurrency: cancel-in-progress=false (a partial 100K run is wasted compute). PR #38 drops the push:main trigger in favour of cron-only (regression watch) + workflow_dispatch (manual reruns).
+  dudect-pr.yml             # 10K samples on ubuntu-24.04 (v0.18 pin), |tau| gate, matrix on features=[default, sm4-bitsliced, sm4-bitsliced-simd, "sm4-bitsliced-simd,sm4-aead,sm4-xts"] (4 legs; the 4th gates the AEAD/XTS CT targets), path-allowlisted (incl. gmcrypto-simd/src/**), concurrency: cancel-in-progress
+  dudect-nightly.yml        # 100K samples on ubuntu-24.04 (v0.18 pin), same gate + matrix, 30-day artifact retention; concurrency: cancel-in-progress=false (a partial 100K run is wasted compute). PR #38 drops the push:main trigger in favour of cron-only (regression watch) + workflow_dispatch (manual reruns).
   fuzz-nightly.yml          # v0.14 — capped cargo-fuzz sweep over all 18 targets (v0.20: FUZZ_TARGETS env is the single source of truth) on GitHub-hosted ubuntu-latest (v0.17+; cron 06:00 UTC + workflow_dispatch w/ max_total_time input; installs nightly + pinned cargo-fuzz 0.13.1 per run; -max_total_time/-rss_limit_mb/-timeout caps; crash-artifact upload 30d; concurrency cancel-in-progress=false). NOT a PR gate. v0.20 adds a SEPARATE non-gating `coverage` job: cargo +nightly fuzz coverage per target over committed seeds → llvm-cov TOTALS SUMMARY.txt artifact (report-as-deliverable, no %-gate).
-  api-stability.yml         # v0.21 — 4 legs on ubuntu-latest (PR + push:main + workflow_dispatch): (1) public-api drift-check ENFORCED — regenerate docs/api-baseline/*.txt with PINNED cargo-public-api 0.52.0 + nightly-2026-05-23 (--omit blanket/auto-trait/auto-derived) + git diff --exit-code (the cbindgen-header pattern; bumping a pin = a reviewed re-baseline); (2) cargo-semver-checks INFORMATIONAL pre-1.0 (continue-on-error; vs crates.io 0.16.0; becomes the enforced forward gate from 1.0); (3) cargo doc -D warnings -A rustdoc::private_intra_doc_links (per-crate so gmcrypto-c regen-header isn't triggered); (4) feature matrix --no-default-features + --all-features. The C ABI's guard stays the cbindgen header drift-check in ci.yml. NOT a publish gate.
+  api-stability.yml         # v0.21 — 4 legs on ubuntu-latest (PR + push:main + workflow_dispatch): (1) public-api drift-check ENFORCED — regenerate docs/api-baseline/*.txt with PINNED cargo-public-api 0.52.0 + nightly-2026-05-23 (--omit blanket/auto-trait/auto-derived) + git diff --exit-code (the cbindgen-header pattern; bumping a pin = a reviewed re-baseline); (2) cargo-semver-checks ENFORCED from 1.0 (no continue-on-error; check-release vs the latest crates.io release; the forward breaking-change gate, flipped in #86); (3) cargo doc -D warnings -A rustdoc::private_intra_doc_links (per-crate so gmcrypto-c regen-header isn't triggered); (4) feature matrix --no-default-features + --all-features. The C ABI's guard stays the cbindgen header drift-check in ci.yml. NOT a publish gate.
 
 docs/
   v0.1.0-release-review.md      # pre-publish reviewer checklist (template)
@@ -811,7 +811,7 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
 - **GitHub-hosted CI (v0.17+).** `ci.yml`'s five jobs (build / msrv / cabi
   / deny / wasm32) run on GitHub-hosted **`macos-14`** (aarch64);
   `fuzz-nightly.yml` runs on **`ubuntu-latest`**. The two dudect workflows
-  also stay on `ubuntu-latest` — their `|tau|` gates were empirically
+  are pinned to **`ubuntu-24.04`** (v0.18) — their `|tau|` gates were empirically
   calibrated against GitHub's `ubuntu-24.04` runner-image noise floor (v0.4
   release-prep PR #22); **don't move dudect** or you invalidate the
   calibration. Through v0.16 the build jobs ran on a self-hosted macOS
