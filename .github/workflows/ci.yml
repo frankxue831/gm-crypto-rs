@@ -2,10 +2,12 @@ name: CI
 
 # v0.17+ — GitHub-hosted runners.
 #
-# The five jobs (build / msrv / cabi / deny / wasm32) run on
-# GitHub-hosted `macos-14` (aarch64) — the same macOS-aarch64 platform
-# the project targets (NEON SIMD + C-ABI coverage). GitHub Actions on
-# standard runners is free for public repositories.
+# Most jobs (build / msrv / cabi / deny / wasm32) run on GitHub-hosted
+# `macos-14` (aarch64) — the same macOS-aarch64 platform the project
+# targets (NEON SIMD + C-ABI coverage). The `simd-x86` job runs on
+# `ubuntu-latest` (x86_64) to exercise the AVX2 / PCLMULQDQ paths the
+# aarch64 hosts can't reach (F17). GitHub Actions on standard runners is
+# free for public repositories.
 #
 # History: through v0.16 these ran on a self-hosted macOS runner to dodge
 # GitHub Pro's private-repo minute cap. That runner was retired at the
@@ -193,6 +195,35 @@ jobs:
         run: cargo build --workspace --all-targets
       - name: cargo build with opt-in features
         run: cargo build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar --all-targets
+
+  simd-x86:
+    # F17 — the SIMD backend's x86_64 intrinsic paths (AVX2 S-box via
+    # sbox_x8/x32, PCLMULQDQ GHASH) are exercised by no other CI job: the
+    # build/test jobs run on macos-14 (aarch64), which only covers the
+    # NEON/PMULL paths. This job runs gmcrypto-simd's correctness tests
+    # (lane-equivalence, lane-position, ghash-KAT, software-vs-CLMUL) on an
+    # x86_64 host so the AVX2/CLMUL code is gated in CI, not just nightly-fuzzed.
+    name: gmcrypto-simd tests (x86_64)
+    runs-on: ubuntu-latest
+    if: >-
+      !contains(github.event.pull_request.title, '[skip ci]') &&
+      !contains(github.event.pull_request.title, '[ci skip]') &&
+      !contains(github.event.pull_request.title, '[no ci]') &&
+      !contains(github.event.pull_request.title, '[skip actions]') &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, '[ci skip]') &&
+      !contains(github.event.head_commit.message, '[no ci]') &&
+      !contains(github.event.head_commit.message, '[skip actions]')
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: simd-x86
+      - name: cargo test -p gmcrypto-simd (x86_64 AVX2 / CLMUL paths)
+        run: cargo test -p gmcrypto-simd
 
   cabi:
     name: gmcrypto-c FFI build + header drift

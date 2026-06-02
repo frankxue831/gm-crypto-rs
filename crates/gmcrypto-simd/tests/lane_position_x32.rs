@@ -16,6 +16,13 @@
 //! Catches any lane permutation / lane bleed bug in the AVX2 gate
 //! sequence. 256 × 32 = 8192 test cases per path.
 
+// The AVX2 tests call the `#[target_feature(enable = "avx2")] unsafe fn`
+// intrinsics directly in `unsafe { }` blocks; the lib crate's
+// `unsafe_code = "warn"` (escalated to a hard error by CI's `-D warnings`)
+// fires on them. Every unsafe block here carries a `// SAFETY:` comment.
+// (Matches the aarch64 `lane_position_x16.rs` convention.)
+#![allow(unsafe_code)]
+
 use gmcrypto_simd::sm4::sbox_x32::{sbox_x32, sbox_x32_scalar};
 
 /// GB/T 32907-2016 §6.2 SM4 S-box table (public standard;
