@@ -37,6 +37,12 @@ crate-type = ["rlib"]
 # extension) runtime detection by the GHASH path. Plain NEON is
 # still compile-time baseline on aarch64 per Q5.12 / Q6.3, so the
 # v0.6 W6 sbox_x16 path doesn't go through detect.rs.
+#
+# NB: `cpufeatures 0.2.x` is a pre-1.0 transitive runtime dep (target-gated,
+# SIMD/AEAD-only). It is isolated behind the `#[doc(hidden)]` `gmcrypto-simd`
+# surface and reaches no public `gmcrypto-core` API, so a breaking
+# `cpufeatures` release is an internal-only bump (not a `gmcrypto-core` SemVer
+# event).
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 cpufeatures = "0.2"
 

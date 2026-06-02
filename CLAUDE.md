@@ -1,25 +1,28 @@
 # CLAUDE.md
 
 Pure-Rust SM2/SM3/SM4 SDK. **v1.0.0 — the deliberate first stable crates.io
-publish (release-prep on `feat/v1.0-release`)** — the graduation of the v0.21→v0.23
-readiness arc, now that the two load-bearing pre-1.0 items are closed (§3.A
-`crypto-bigint` exposure **resolved** in v0.22; the multi-model pre-publish re-audit
-findings **remediated** in v0.23, merged #83) and `docs/v1.0-readiness.md` reads
-**GO**. The release-prep branch does the mechanical core of the runbook
-(`docs/v1.0-readiness.md` §4): bump `[workspace.package].version` **0.16.0 → 1.0.0**;
-pin the intra-workspace path-deps **exactly** (`gmcrypto-core`→`gmcrypto-simd` and
-`gmcrypto-c`→`gmcrypto-core` both `version = "=1.0.0"`, the §3.D lockstep contract);
-add the CHANGELOG `[1.0.0]` section + README "1.0 stable" flip + the
-`docs/v1.0.0-release-review.md` checklist. **crates.io history jumps 0.16.0 → 1.0.0**
-(0.17.0–0.23.0 were non-publishing assurance/API-finalization cycles; their changes
-all ship in this first published `1.0.0`); the **only migration is 0.16 → 1.0**, and
-the **runtime wire output is byte-identical to 0.16.0** (KAT + gmssl 3.1.1 interop
-**11/11**) — the breaking changes are API *shape* only. The **irreversible steps are
-NOT in this branch**: `cargo publish` in order **`gmcrypto-simd` → `gmcrypto-core` →
-`gmcrypto-c`**, the SSH-signed `v1.0.0` tag + GitHub release, and the follow-up flip
-of `cargo-semver-checks` to **enforced** (`api-stability.yml`, drop
-`continue-on-error`) are the maintainer's deliberate post-merge step (§4 steps 6–7).
-The agent path stays branch + PR; **the merge and the publish are the user's calls.**
+publish; release-prep MERGED to `main` and the SSH-signed `v1.0.0` tag landed** — the
+graduation of the v0.21→v0.23 readiness arc, with the two load-bearing pre-1.0 items
+closed (§3.A `crypto-bigint` exposure **resolved** in v0.22; the multi-model
+pre-publish re-audit findings **remediated** in v0.23, merged #83) and
+`docs/v1.0-readiness.md` reading **GO**. Release-prep landed the mechanical core of
+the runbook (`docs/v1.0-readiness.md` §4): `[workspace.package].version` is **1.0.0**;
+the intra-workspace path-deps are pinned **exactly** (`gmcrypto-core`→`gmcrypto-simd`
+and `gmcrypto-c`→`gmcrypto-core` both `version = "=1.0.0"`, the §3.D lockstep
+contract); the CHANGELOG `[1.0.0]` section + README "1.0 stable" flip + the
+`docs/v1.0.0-release-review.md` checklist all shipped (PR #85), and the post-publish
+`cargo-semver-checks`-**enforced** flip merged (PR #86, dropping `continue-on-error`).
+**crates.io history jumps 0.16.0 → 1.0.0** (0.17.0–0.23.0 were non-publishing
+assurance/API-finalization cycles; their changes all ship in this first published
+`1.0.0`); the **only migration is 0.16 → 1.0**, and the **runtime wire output is
+byte-identical to 0.16.0** (KAT + gmssl 3.1.1 interop **11/11**) — the breaking
+changes are API *shape* only. **The one irreversible step that remains is
+`cargo publish`** in order **`gmcrypto-simd` → `gmcrypto-core` → `gmcrypto-c`** (+ the
+GitHub release) — a deliberate maintainer action whose completion is **not verifiable
+from this repo** (the `v1.0.0` tag + #86 commit messages describe it as done; confirm
+the three crates are live at `=1.0.0` on crates.io before treating any
+publish-pending wording elsewhere as merely stale). The agent path stays branch + PR;
+**the publish is the user's call.**
 **Earlier — v0.23 — pre-1.0 re-audit remediation
 (non-publishing, on `main`)** — a multi-model adversarial pre-publish re-audit
 (Codex `gpt-5.5` + Grok `--sandbox read-only`, each finding source-verified by the
