@@ -8,6 +8,14 @@
  * every int return is 0 on success, non-zero on failure. Non-zero
  * codes are NOT enumerated — they are equivalent `Failed` per the
  * crate's failure-mode discipline.
+ *
+ * Pointer / length preconditions (caller-upheld — violating them is
+ * undefined behavior, NOT a GMCRYPTO_ERR): every non-null pointer argument
+ * must point to at least the stated number of bytes (e.g. a key pointer to
+ * its KEY_SIZE, an iv to 16 bytes), each *_len must not exceed the real
+ * allocation, and out/out_capacity pairs must describe a writable buffer of
+ * at least out_capacity bytes. A null pointer is reported as GMCRYPTO_ERR;
+ * an out-of-bounds or mis-sized non-null pointer is undefined behavior.
  */
 
 #ifndef GMCRYPTO_H_
@@ -137,9 +145,10 @@ typedef struct gmcrypto_sm4_t gmcrypto_sm4_t;
 typedef int (*gmcrypto_rng_callback)(void *context, uint8_t *buf, uintptr_t buf_len);
 
 /*
- Returns a NUL-terminated string with the `gmcrypto-c` version
- (e.g. `"0.4.0"`). The returned pointer is to a static `&'static
- CStr` and must NOT be freed by the caller.
+ Returns a NUL-terminated string with the `gmcrypto-c` crate version,
+ tracking Cargo's `CARGO_PKG_VERSION` at build time (e.g. `"1.0.0"`).
+ The returned pointer is to a static `&'static CStr` and must NOT be
+ freed by the caller.
  */
  const char *gmcrypto_version(void) ;
 
@@ -239,11 +248,22 @@ int gmcrypto_pbkdf2_hmac_sm3(const uint8_t *pwd,
 
 /*
  Encrypt one 16-byte block in place under the SM4 cipher.
+
+ WARNING: this is the raw SM4 block, not a cipher mode. Calling it in a
+ loop over a multi-block buffer is ECB — it leaks plaintext-block equality
+ and has no semantic security. To encrypt messages use a mode
+ (`gmcrypto_sm4_gcm_*` / `_ccm_*` authenticated; or `_cbc_*` / `_ctr_*` /
+ `_xts_*` confidentiality-only with a unique IV/nonce/tweak).
  */
  int gmcrypto_sm4_encrypt_block(const gmcrypto_sm4_t *cipher, uint8_t *block) ;
 
 /*
  Decrypt one 16-byte block in place under the SM4 cipher.
+
+ WARNING: raw SM4 block, not a cipher mode (see
+ `gmcrypto_sm4_encrypt_block`). Looping it over a buffer is ECB
+ decryption — no semantic security, no authentication. Decrypt real
+ messages with a mode.
  */
  int gmcrypto_sm4_decrypt_block(const gmcrypto_sm4_t *cipher, uint8_t *block) ;
 
@@ -556,7 +576,10 @@ int gmcrypto_sm4_xts_decrypt(const uint8_t *key,
  multiple of `sector_size`). Sector `i` is encrypted under
  tweak = little-endian-128(`start_sector + i`) — the data-unit / LBA
  convention; sector numbers must be unique within the XTS-key namespace
- (caller's contract). Returns [`GMCRYPTO_OK`] / [`GMCRYPTO_ERR`] (single
+ (caller's contract). `start_sector` is a `uint64_t` (LBA width), so the
+ addressable range is `[0, 2^64 − 1]`; for the full u128 sector space use
+ the Rust `mode_xts::encrypt_sectors` API. Returns [`GMCRYPTO_OK`] /
+ [`GMCRYPTO_ERR`] (single
  failure mode: `sector_size` outside `[16, 16 MiB]` or not a multiple of 16,
  `buf_len` not a whole multiple of `sector_size`, `Key1 == Key2`, or null
  pointer). **`buf` is untouched on [`GMCRYPTO_ERR`].** `buf_len == 0` is a
@@ -786,6 +809,10 @@ int gmcrypto_sm2_privkey_from_pkcs8(const uint8_t *pem,
  `signer_id` (or [`DEFAULT_SIGNER_ID`] = `"1234567812345678"` if
  `signer_id_len == 0`). Output is DER-encoded
  `SEQUENCE { r, s }`. RNG is sourced from `getrandom::SysRng`.
+
+ May return [`GMCRYPTO_ERR`] if the system RNG fails (in addition to the
+ usual null / short-buffer errors); the error is terminal — do not retry
+ on the same inputs expecting success.
  */
 
 int gmcrypto_sm2_sign(const gmcrypto_sm2_privkey_t *key,
@@ -816,6 +843,9 @@ int gmcrypto_sm2_verify(const gmcrypto_sm2_pubkey_t *key,
 /*
  SM2 public-key encrypt. Output is GM/T 0009-2012 DER. RNG from
  `getrandom::SysRng`.
+
+ May return [`GMCRYPTO_ERR`] if the system RNG fails (in addition to the
+ usual null / short-buffer errors); the error is terminal.
  */
 
 int gmcrypto_sm2_encrypt(const gmcrypto_sm2_pubkey_t *key,

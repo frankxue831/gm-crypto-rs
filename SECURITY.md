@@ -15,21 +15,37 @@ LTS branch.
 
 ## API stability & SemVer
 
-The crate line is pre-1.0 (0.x); the **v1.0 readiness audit** (v0.21) froze and
-CI-guarded the public surface ahead of a `1.0` commitment, and the **v0.22
-API-tightening cycle** decoupled it from `crypto-bigint 0.7` (the audit's §3.A
-finding — the always-on/default-features public API now names **zero**
+The crate line is **1.0 (stable)** as of the `1.0.0` release; **from 1.0, SemVer
+is enforced** — the `cargo-semver-checks` forward gate in
+`.github/workflows/api-stability.yml` runs `check-release` against the latest
+crates.io release and is no longer informational. The **v1.0 readiness audit**
+(v0.21) froze and CI-guarded the public surface ahead of the commitment, and the
+**v0.22 API-tightening cycle** decoupled it from `crypto-bigint 0.7` (the audit's
+§3.A finding — the always-on/default-features public API now names **zero**
 `crypto-bigint` types; only the opt-in `crypto-bigint-scalar` `from_scalar(U256)`
 retains one, a documented escape hatch). The SemVer contract covers the public Rust
 API of `gmcrypto-core` (snapshotted in `docs/api-baseline/gmcrypto-core.txt`,
 drift-checked in CI) and the `gmcrypto-c` **C ABI** (the committed
 `crates/gmcrypto-c/include/gmcrypto.h`, drift-checked in CI). It does **not** cover
-any `#[doc(hidden)]` item (`sm2::sign_raw_with_id`; the
-`Sm4Cbc{Encryptor,Decryptor}::take_output` FFI-shim drains; and, since v0.22, the
-low-level `sm2::curve` / `sm2::scalar_mul` / `ProjectivePoint::to_affine` curve
-arithmetic) or the **`gmcrypto-simd`** crate (an internal acceleration backend with
-no stable Rust API). See [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) for the
-full posture, the guard tooling, and the (now-resolved) §3.A decision.
+any `#[doc(hidden)]` item or the **`gmcrypto-simd`** crate (an internal acceleration
+backend with no stable Rust API). The `#[doc(hidden)]`, not-SemVer-covered surface
+is, as of v0.23: `sm2::sign_raw_with_id`; the
+`Sm4Cbc{Encryptor,Decryptor}::take_output` FFI-shim drains; the low-level
+`sm2::curve` / `sm2::scalar_mul` / `ProjectivePoint::to_affine` curve arithmetic
+(v0.22); and the v0.23-hidden raw EC-point + low-level surface — the `sm2::point`
+module + `ProjectivePoint` type + re-export, `Sm2PublicKey::{from_point, point}` +
+`From<ProjectivePoint>`, the `asn1::{reader, writer, oid}` modules, and the
+in-crate `traits::{Hash, Mac, BlockCipher}` module.
+
+**Public dependency coupling.** The always-on public API takes an
+`rand_core::TryCryptoRng` bound (sign / encrypt), so `rand_core 0.10.x` is part of
+the 1.0 SemVer contract — a breaking `rand_core` release would require a
+`gmcrypto-core` major bump. `crypto-bigint 0.7` is an always-on **internal**
+dependency, but (per v0.22) no `crypto-bigint` type appears in the default public
+API unless the opt-in `crypto-bigint-scalar` feature is enabled.
+
+See [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) for the full posture, the
+guard tooling, and the (now-resolved) §3.A decision.
 
 ## Threat model
 

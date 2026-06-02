@@ -1,7 +1,7 @@
 # cargo-deny configuration for gm-crypto-rs.
 #
 # Hard rule: gmcrypto-core ships only crypto-bigint, subtle, zeroize,
-# rand_core in its NORMAL + BUILD dep classes. Dev-deps (dudect-bencher,
+# rand_core, spin in its NORMAL + BUILD dep classes. Dev-deps (dudect-bencher,
 # getrandom, hex-literal) are unrestricted because they don't reach downstream
 # consumers.
 
@@ -16,7 +16,7 @@ yanked = "deny"
 ignore = []
 
 [licenses]
-allow = ["Apache-2.0", "MIT", "BSD-3-Clause", "ISC", "Unicode-3.0", "Unicode-DFS-2016"]
+allow = ["Apache-2.0", "MIT", "BSD-3-Clause", "Unicode-3.0"]
 confidence-threshold = 0.8
 
 [bans]

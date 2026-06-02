@@ -149,11 +149,31 @@ impl Sm4Cipher {
     }
 
     /// Encrypt one 16-byte block in place.
+    ///
+    /// # Warning — this is the raw block, not a cipher mode
+    ///
+    /// This applies the bare SM4 permutation to a single block: a low-level
+    /// building block, **not** a way to encrypt messages. Encrypting a
+    /// multi-block buffer by calling this in a loop is ECB, which leaks
+    /// plaintext-block equality (equal plaintext blocks produce equal
+    /// ciphertext blocks) and has **no semantic security**. To encrypt data,
+    /// use a mode: `sm4::mode_gcm` / `sm4::mode_ccm` (authenticated;
+    /// preferred), or `sm4::mode_cbc` / `sm4::mode_ctr` / `sm4::mode_xts`
+    /// (confidentiality only — supply a unique IV/nonce/tweak and add your
+    /// own authentication).
     pub fn encrypt_block(&self, block: &mut [u8; BLOCK_SIZE]) {
         crypt(block, &self.round_keys, false);
     }
 
     /// Decrypt one 16-byte block in place.
+    ///
+    /// # Warning — raw block, not a cipher mode
+    ///
+    /// Inverse of `encrypt_block`; the same caveat applies. This is the bare
+    /// SM4 block permutation, not a mode — looping it over a buffer is ECB
+    /// decryption (no semantic security, no authentication). Decrypt real
+    /// messages with a mode (`sm4::mode_gcm` / `sm4::mode_ccm` /
+    /// `sm4::mode_cbc` / `sm4::mode_ctr` / `sm4::mode_xts`).
     pub fn decrypt_block(&self, block: &mut [u8; BLOCK_SIZE]) {
         crypt(block, &self.round_keys, true);
     }

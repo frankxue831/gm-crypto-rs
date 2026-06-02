@@ -292,13 +292,18 @@ fn ffi_guard<F: FnOnce() -> c_int + std::panic::UnwindSafe>(f: F) -> c_int {
 // Version string.
 // ============================================================
 
-/// Returns a NUL-terminated string with the `gmcrypto-c` version
-/// (e.g. `"0.4.0"`). The returned pointer is to a static `&'static
-/// CStr` and must NOT be freed by the caller.
+/// Returns a NUL-terminated string with the `gmcrypto-c` crate version,
+/// tracking Cargo's `CARGO_PKG_VERSION` at build time (e.g. `"1.0.0"`).
+/// The returned pointer is to a static `&'static CStr` and must NOT be
+/// freed by the caller.
 #[unsafe(no_mangle)]
 pub extern "C" fn gmcrypto_version() -> *const c_char {
-    // The version string lives in the binary; static lifetime.
-    const VERSION: &core::ffi::CStr = match core::ffi::CStr::from_bytes_with_nul(b"0.4.0\0") {
+    // The version string lives in the binary; static lifetime. Derived from
+    // CARGO_PKG_VERSION so it auto-tracks the workspace version bump (the
+    // literal previously drifted — it still read "0.4.0" on the 1.0.0 crate).
+    const VERSION: &core::ffi::CStr = match core::ffi::CStr::from_bytes_with_nul(
+        concat!(env!("CARGO_PKG_VERSION"), "\0").as_bytes(),
+    ) {
         Ok(s) => s,
         Err(_) => unreachable!(),
     };
@@ -594,6 +599,12 @@ pub unsafe extern "C" fn gmcrypto_sm4_new(key: *const u8) -> *mut gmcrypto_sm4_t
 }
 
 /// Encrypt one 16-byte block in place under the SM4 cipher.
+///
+/// WARNING: this is the raw SM4 block, not a cipher mode. Calling it in a
+/// loop over a multi-block buffer is ECB — it leaks plaintext-block equality
+/// and has no semantic security. To encrypt messages use a mode
+/// (`gmcrypto_sm4_gcm_*` / `_ccm_*` authenticated; or `_cbc_*` / `_ctr_*` /
+/// `_xts_*` confidentiality-only with a unique IV/nonce/tweak).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_encrypt_block(
     cipher: *const gmcrypto_sm4_t,
@@ -618,6 +629,11 @@ pub unsafe extern "C" fn gmcrypto_sm4_encrypt_block(
 }
 
 /// Decrypt one 16-byte block in place under the SM4 cipher.
+///
+/// WARNING: raw SM4 block, not a cipher mode (see
+/// `gmcrypto_sm4_encrypt_block`). Looping it over a buffer is ECB
+/// decryption — no semantic security, no authentication. Decrypt real
+/// messages with a mode.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_decrypt_block(
     cipher: *const gmcrypto_sm4_t,
@@ -1440,7 +1456,10 @@ pub unsafe extern "C" fn gmcrypto_sm4_xts_decrypt(
 /// multiple of `sector_size`). Sector `i` is encrypted under
 /// tweak = little-endian-128(`start_sector + i`) — the data-unit / LBA
 /// convention; sector numbers must be unique within the XTS-key namespace
-/// (caller's contract). Returns [`GMCRYPTO_OK`] / [`GMCRYPTO_ERR`] (single
+/// (caller's contract). `start_sector` is a `uint64_t` (LBA width), so the
+/// addressable range is `[0, 2^64 − 1]`; for the full u128 sector space use
+/// the Rust `mode_xts::encrypt_sectors` API. Returns [`GMCRYPTO_OK`] /
+/// [`GMCRYPTO_ERR`] (single
 /// failure mode: `sector_size` outside `[16, 16 MiB]` or not a multiple of 16,
 /// `buf_len` not a whole multiple of `sector_size`, `Key1 == Key2`, or null
 /// pointer). **`buf` is untouched on [`GMCRYPTO_ERR`].** `buf_len == 0` is a
@@ -1997,6 +2016,10 @@ pub unsafe extern "C" fn gmcrypto_sm2_privkey_from_pkcs8(
 /// `signer_id` (or [`DEFAULT_SIGNER_ID`] = `"1234567812345678"` if
 /// `signer_id_len == 0`). Output is DER-encoded
 /// `SEQUENCE { r, s }`. RNG is sourced from `getrandom::SysRng`.
+///
+/// May return [`GMCRYPTO_ERR`] if the system RNG fails (in addition to the
+/// usual null / short-buffer errors); the error is terminal — do not retry
+/// on the same inputs expecting success.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm2_sign(
     key: *const gmcrypto_sm2_privkey_t,
@@ -2078,6 +2101,9 @@ pub unsafe extern "C" fn gmcrypto_sm2_verify(
 
 /// SM2 public-key encrypt. Output is GM/T 0009-2012 DER. RNG from
 /// `getrandom::SysRng`.
+///
+/// May return [`GMCRYPTO_ERR`] if the system RNG fails (in addition to the
+/// usual null / short-buffer errors); the error is terminal.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm2_encrypt(
     key: *const gmcrypto_sm2_pubkey_t,

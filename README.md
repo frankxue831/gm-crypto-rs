@@ -17,9 +17,9 @@ or vendor.
 
 > ⚠️ **Not independently audited.** No third-party / external security audit has
 > been performed. Assurance is internal: a multi-model adversarial pre-publish
-> re-audit (see [`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md)), KAT + GM/T-standard
-> interop (gmssl 3.1.1, 11/11), an in-CI `dudect` timing-leak harness, and an
-> 18-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
+> re-audit (see [`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md)), in-CI KAT vectors,
+> maintainer-run gmssl 3.1.1 interop (11/11, gated on `GMCRYPTO_GMSSL` — not run in
+> CI), an in-CI `dudect` timing-leak harness, and an 18-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
 > project with no support SLA. Review the code and **use at your own risk.** See
 > [`SECURITY.md`](SECURITY.md) for the threat model and disclosure process.
 
@@ -616,11 +616,10 @@ Everything v0.2 shipped is unchanged:
 
 ```rust
 use gmcrypto_core::sm2::{
-    sign_with_id, verify_with_id, Sm2PrivateKey, Sm2PublicKey, DEFAULT_SIGNER_ID,
+    sign_with_id, verify_with_id, Sm2PrivateKey, DEFAULT_SIGNER_ID,
 };
 use getrandom::SysRng;
 use hex_literal::hex;
-use rand_core::UnwrapErr;
 
 // v0.5 W5 — `from_bytes_be` is the recommended public constructor
 // (always-on, doesn't expose `crypto_bigint::U256` to callers).
@@ -628,9 +627,12 @@ let d_be: [u8; 32] = hex!(
     "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8"
 );
 let key = Sm2PrivateKey::from_bytes_be(&d_be).expect("d in [1, n-2]");
-let public = Sm2PublicKey::from_point(key.public_key());
+// `public_key()` returns an `Sm2PublicKey` directly (v0.23).
+let public = key.public_key();
 
-let mut rng = UnwrapErr(SysRng);
+// SM2 sign/encrypt take a fallible `rand_core::TryCryptoRng` (v0.23), so
+// `getrandom::SysRng` is passed directly — no `UnwrapErr` wrapper.
+let mut rng = SysRng;
 let sig = sign_with_id(&key, DEFAULT_SIGNER_ID, b"hello", &mut rng).unwrap();
 assert!(verify_with_id(&public, DEFAULT_SIGNER_ID, b"hello", &sig));
 ```
@@ -673,17 +675,16 @@ by enabling `getrandom`'s `wasm_js` feature in *their* `Cargo.toml`:
 
 ```toml
 [dependencies]
-gmcrypto-core = "0.7"
+gmcrypto-core = "1.0"
 rand_core = { version = "0.10", default-features = false }
 getrandom = { version = "0.4", default-features = false, features = ["wasm_js"] }
 ```
 
 ```rust
 use gmcrypto_core::sm2::{sign_with_id, Sm2PrivateKey, DEFAULT_SIGNER_ID};
-use rand_core::UnwrapErr;
 use getrandom::SysRng;
 
-let mut rng = UnwrapErr(SysRng); // wasm_js-backed when targeting wasm32
+let mut rng = SysRng; // wasm_js-backed when targeting wasm32
 let sig = sign_with_id(&priv_key, DEFAULT_SIGNER_ID, b"msg", &mut rng).unwrap();
 ```
 

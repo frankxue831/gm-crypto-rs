@@ -1157,11 +1157,13 @@ fn version_string_matches_crate() {
     assert!(!p.is_null());
     // SAFETY: gmcrypto_version returns a static NUL-terminated CStr.
     let s = unsafe { core::ffi::CStr::from_ptr(p) };
-    // v0.4 release-prep PR will bump the version to "0.4.0".
+    // gmcrypto_version() is derived from CARGO_PKG_VERSION, so it must track
+    // the crate version exactly (the literal previously drifted to "0.4.0").
     let v = s.to_str().expect("ASCII version string");
-    assert!(
-        v == env!("CARGO_PKG_VERSION") || v == "0.4.0",
-        "FFI version {v} should track crate version",
+    assert_eq!(
+        v,
+        env!("CARGO_PKG_VERSION"),
+        "FFI version {v} must equal the crate version",
     );
 }
 

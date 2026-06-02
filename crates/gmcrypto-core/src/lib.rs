@@ -58,7 +58,7 @@
 
 #![no_std]
 #![deny(missing_docs)]
-#![doc(html_root_url = "https://docs.rs/gmcrypto-core/0.5.0")]
+#![doc(html_root_url = "https://docs.rs/gmcrypto-core/1.0.0")]
 
 extern crate alloc;
 
