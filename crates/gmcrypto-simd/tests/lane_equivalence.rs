@@ -16,6 +16,13 @@
 //! - **aarch64** (self-hosted macOS `gmcrypto` runner): the AVX2
 //!   path is `cfg`-gated out entirely; scalar path runs.
 
+// The AVX2 tests call the `#[target_feature(enable = "avx2")] unsafe fn`
+// intrinsics directly in `unsafe { }` blocks; the lib crate's
+// `unsafe_code = "warn"` (escalated to a hard error by CI's `-D warnings`)
+// fires on them. Every unsafe block here carries a `// SAFETY:` comment.
+// (Matches the aarch64 `lane_position_x16.rs` convention.)
+#![allow(unsafe_code)]
+
 use gmcrypto_simd::sm4::sbox_x8::{sbox_x8, sbox_x8_scalar};
 
 /// GB/T 32907-2016 §6.2 SM4 S-box table.
