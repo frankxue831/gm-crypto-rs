@@ -28,9 +28,10 @@ name: CI
 on:
   push:
     branches: [main]
-    # Skip doc-only / repo-meta-only changes. The dudect workflows use
-    # their own (allowlist) `paths:` filter; this list is the inverse
-    # for ci.yml's broader build/test surface.
+    # Skip doc-only / repo-meta-only changes on PUSH only (a post-merge doc
+    # push to `main` was already validated by its PR). The dudect workflows use
+    # their own (allowlist) `paths:` filter; this list is the inverse for
+    # ci.yml's broader build/test surface.
     paths-ignore:
       - '**/*.md'
       - 'LICENSE'
@@ -41,14 +42,13 @@ on:
       - '.github/CODEOWNERS'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'LICENSE'
-      - '.gitignore'
-      - 'docs/**'
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/PULL_REQUEST_TEMPLATE.md'
-      - '.github/CODEOWNERS'
+    # NO paths-ignore here (deliberately, unlike `push` above): several of this
+    # workflow's jobs are REQUIRED status checks in `main`'s branch protection.
+    # If a doc-only PR skipped them, those required checks would never report
+    # and the PR would be permanently blocked ("Expected/pending", as #90 hit).
+    # Running them on a doc-only PR is cheap (no crate source changed, so they
+    # pass quickly) and keeps the gate honest — the real checks actually run,
+    # rather than being reported green by a no-op shim.
   # Manual fire — useful for stacked PRs (where the PR base isn't `main`,
   # so the `pull_request: branches: [main]` filter wouldn't fire) and
   # for re-running CI on a branch without an empty-commit push.
