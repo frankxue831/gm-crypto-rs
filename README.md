@@ -89,8 +89,9 @@ the design intent in isolation.
 
 ## Stability & SemVer
 
-The line graduates to **1.0 (stable)** with this release. crates.io history goes
-**0.16.0 → 1.0.0**, skipping 0.17.0–0.23.0 (those were non-publishing assurance +
+The line graduates to **1.0 (stable)** with the **1.0.0** release; the current release is
+**1.0.1**, a readiness-cleanup patch (no API/ABI change — see the v1.0.1 scope below).
+crates.io history goes **0.16.0 → 1.0.0 → 1.0.1**, skipping 0.17.0–0.23.0 (those were non-publishing assurance +
 API-finalization milestones; their changes all ship together in the first stable
 `1.0.0`). The only migration is 0.16 → 1.0, a single major bump — no published 0.x
 consumer ever saw an intermediate break. The public API had been stable in
@@ -104,7 +105,7 @@ see [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md).
 **From 1.0, SemVer is enforced**: breaking changes to the covered surface require a
 major bump, and `cargo-semver-checks` runs as the forward breaking-change gate in
 CI (the three crates always release together at one lockstep version, with
-intra-workspace deps pinned exactly — `=1.0.0`). The runtime wire output (SM2
+intra-workspace deps pinned exactly — `=1.0.1`). The runtime wire output (SM2
 signatures / ciphertexts, SM4 mode bytes) is byte-identical to 0.16.0.
 
 - **What's covered by SemVer:** the public Rust API of `gmcrypto-core` (the
@@ -148,6 +149,37 @@ signatures / ciphertexts, SM4 mode bytes) is byte-identical to 0.16.0.
   `crypto-bigint` major bump would be breaking for that feature). The recommended
   always-on path (`Sm2PrivateKey::from_bytes_be`) avoids it entirely. See
   [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) §3.A.
+
+## v1.0.1 scope (shipped)
+
+**Readiness-cleanup patch — the first post-1.0 publish.** v1.0.1 ships the
+GO-WITH-FOLLOWUP cleanup from a release-readiness synthesis of the prior audits
+([`docs/audits/2026-06-02-release-readiness-synthesis.md`](docs/audits/2026-06-02-release-readiness-synthesis.md)):
+0 blockers, all non-blocking polish.
+
+- **Functional fix (the one behavior change):** the `gmcrypto-c` C ABI
+  `gmcrypto_version()` returned a hardcoded `"0.4.0"` regardless of the built
+  version — it now reports the real `CARGO_PKG_VERSION` (so a C caller linking
+  1.0.1 reads `"1.0.1"`). This is the single reason 1.0.1 is a crates.io release
+  rather than a docs-only update.
+- **Doc improvements:** raw-block "not a cipher mode" ECB warnings on
+  `Sm4Cipher::{encrypt,decrypt}_block` and the corresponding block FFI; cbindgen
+  header pointer/length preconditions; FFI notes on the fallible RNG path and the
+  XTS `start_sector` range; pre-1.0-stability caveats on the `digest-traits` /
+  `cipher-traits` trait impls; and `SECURITY.md` / `README.md` / `deny.toml`
+  corrections.
+- **CI-health fixes:** `sm4-xts` added to the MSRV / wasm32 / `cargo deny` passes;
+  the dudect path-allowlist gained `gmcrypto-simd/src/**`; `cargo generate-lockfile`
+  runs before `cargo deny`; a new `simd-x86` job (`cargo test -p gmcrypto-simd` on
+  `ubuntu-latest`) that immediately **caught a real latent bug** — the x86-only SIMD
+  test files lacked `#![allow(unsafe_code)]`, so they had never compiled under CI's
+  `-D warnings` (fixed); and the `pull_request` `paths-ignore` was removed from
+  `ci.yml` so docs-only PRs are no longer permanently blocked by branch-protection
+  required checks.
+
+**No API or ABI change; runtime crypto wire output is byte-identical to 1.0.0** —
+`cargo-semver-checks` runs enforced as the patch-non-breaking gate. 6 merged PRs
+(#87–#92). Consumers move 1.0.0 → 1.0.1 with a plain `cargo update`.
 
 ## v0.16 scope (shipped)
 
@@ -611,6 +643,7 @@ Everything v0.2 shipped is unchanged:
 | v0.22 (infra-assurance; not a crates.io release) | **API-tightening — decouple `crypto-bigint 0.7` from the 1.0 contract.** Per `docs/v0.22-scope.md` Q22.1–Q22.8 (resolves the v0.21 §3.A finding via Option 2). Group A: `#[doc(hidden)]` (kept `pub`) the low-level `sm2::curve` / `sm2::scalar_mul` / `ProjectivePoint::to_affine` surface. Group B: reshape `asn1::{encode,decode}_sig` + `Sm2Ciphertext::{x,y}` from `U256` to `[u8; 32]`, **byte-output-identical** (KAT + gmssl interop 11/11). Group C: `ProjectivePoint` stays public + unchanged. The always-on (default-features) public API now names **zero** `crypto-bigint` types; only the opt-in `crypto-bigint-scalar` `from_scalar(U256)` retains it (documented escape hatch). **BREAKING** for consumers that named `Fn`/`Fp`/`encode_sig`/`Sm2Ciphertext::x`; ships with 1.0 (non-publishing — workspace stays `0.16.0`, crates.io skips `0.22.0`). |
 | v0.23 (infra-assurance; not a crates.io release) | **Pre-1.0 re-audit remediation.** Per `docs/v0.23-scope.md` Q23.1–Q23.9 + `docs/v1.0-reaudit.md`. A multi-model adversarial pre-publish re-audit (Codex `gpt-5.5` + Grok, source-verified) returned NO-GO as-is — core primitives sound, but 2 API/ABI BLOCKERs + API-finality / zeroize-on-failure / spec-ceiling / doc should-fixes. Remediated: **W1 (API)** `Sm2PrivateKey::public_key() -> Sm2PublicKey`, the raw `ProjectivePoint` surface + `asn1::{reader,writer,oid}` + `traits::*` made `#[doc(hidden)]`; **W2 (crypto)** single-shot SM4-GCM `encrypt` made fallible (`2^36−32` ceiling), the fallible `rand_core::TryCryptoRng` bound on SM2 sign/encrypt (no-panic RNG-failure path), a fixed-budget constant-time SM2 nonce sampler, sign-nonce / CCM-tentative-plaintext / `Sm3`-on-drop zeroization, SM2 KDF wrap guard; **W3 (C ABI)** the SM4-GCM/CCM/XTS FFI symbols made always-on so `gmcrypto.h` == the default build. **Runtime output byte-identical** (gmssl interop 11/11) except the deliberately-changed signatures; the breaking API/ABI changes ship with 1.0 (non-publishing — workspace stays `0.16.0`, crates.io skips `0.23.0`). |
 | v1.0 | **API stabilization + crates.io publish** (the deliberate cut after the audit + tightening + re-audit: the `crypto-bigint`-exposure decision is **resolved** [v0.22] and the pre-publish re-audit findings **remediated** [v0.23], bump `0.16.0 → 1.0.0` with exact sibling pins, publish `gmcrypto-simd → core → c`, flip `cargo-semver-checks` to enforced — see the runbook in [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) §4). |
+| v1.0.1 (shipped) | **Readiness-cleanup patch — first post-1.0 publish.** Per the release-readiness synthesis [`docs/audits/2026-06-02-release-readiness-synthesis.md`](docs/audits/2026-06-02-release-readiness-synthesis.md) (GO-WITH-FOLLOWUP, 0 blockers). **Functional fix:** the `gmcrypto-c` `gmcrypto_version()` returned a hardcoded `"0.4.0"` → now the real `CARGO_PKG_VERSION` (the one behavior change justifying a patch publish). Plus doc improvements (raw-block ECB warnings, cbindgen header preconditions, FFI RNG/XTS notes, trait-stability caveats) + CI-health fixes (`sm4-xts` in MSRV/wasm/deny; dudect allowlist; `generate-lockfile` before deny; a new `simd-x86` job that caught a latent `unsafe_code` compile bug; removed `pull_request` `paths-ignore` so docs PRs aren't blocked). **No API/ABI change; wire output byte-identical to 1.0.0** (enforced `cargo-semver-checks`). 6 merged PRs (#87–#92). See [`CHANGELOG.md`](CHANGELOG.md) `[1.0.1]`. |
 
 ## Quick-start
 
