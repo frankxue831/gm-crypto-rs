@@ -5,6 +5,33 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-06-03
+
+Patch release — the v1.0 release-readiness cleanup. **No API / ABI / wire change**
+(`cargo-public-api` + `cargo-semver-checks` stayed green across the change); a `1.0.0`
+consumer upgrades freely.
+
+### Fixed
+- `gmcrypto_version()` (C ABI) now returns the real crate version, derived from
+  `CARGO_PKG_VERSION`; it previously returned the stale literal `"0.4.0"` on the
+  `1.0.0` crate. (#87)
+- `SECURITY.md` / `README.md` / `CLAUDE.md` / `docs/` corrected to the shipped post-1.0
+  state: SemVer-enforced wording, the complete v0.23 `#[doc(hidden)]` enumeration, a
+  README quick-start that compiles against 1.0, and a working `getrandom::SysRng`
+  example (dropped the stale `UnwrapErr` wrapper). (#87 / #88)
+
+### Added (documentation / CI — no runtime API change)
+- ECB / no-semantic-security warnings on the raw single-block `Sm4Cipher::{encrypt,
+  decrypt}_block` and their C symbols; a module-level pointer/length precondition block
+  and RNG-fallible notes in `gmcrypto.h`. (#87)
+- Disclosure of the `rand_core 0.10.x` public bound and the `crypto-bigint` /
+  `cpufeatures` / `digest` / `cipher` pre-1.0 couplings in `SECURITY.md` / feature
+  docstrings. (#87 / #88)
+- CI: an x86_64 `gmcrypto-simd` test job covering the AVX2 / PCLMULQDQ paths (and the
+  latent `unsafe_code` test-gap it surfaced); `sm4-xts` added to the MSRV / wasm32 /
+  cargo-deny coverage; `cargo generate-lockfile` before `cargo-deny`; and doc-only PRs
+  now run the required checks. (#88 / #89 / #91)
+
 ## [1.0.0] - 2026-06-01
 
 First **stable** release — the deliberate 1.0 publish to crates.io of all three
