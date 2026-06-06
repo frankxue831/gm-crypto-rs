@@ -80,6 +80,9 @@ env:
 # YAML anchors don't work inside GitHub Actions `if:` directly, so the
 # expression is repeated per-job below. Keep them in lock-step.
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: build & test (Rust stable)

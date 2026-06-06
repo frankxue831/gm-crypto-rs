@@ -8,6 +8,16 @@ this repository — open a draft advisory at
 
 We aim to acknowledge within 5 business days. There is no bug bounty.
 
+On a confirmed vulnerability, the fix ships in a new release of the latest
+supported minor (see below), accompanied by a published **GitHub Security
+Advisory** — which syndicates to the GitHub Advisory Database, so `cargo audit`
+/ RustSec consumers are notified — and a CVE requested via the advisory when
+warranted. Affected crates.io versions are **yanked** when a safe upgrade exists
+and the flaw is remotely exploitable (yanking blocks new resolutions without
+deleting the version, so it never breaks existing pinned `Cargo.lock` builds).
+Because the three crates release in lockstep at one exact version, a fix is
+published across `gmcrypto-simd`, `gmcrypto-core`, and `gmcrypto-c` together.
+
 ## Supported versions
 
 Only the latest released minor version receives security fixes. There is no
