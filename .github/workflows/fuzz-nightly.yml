@@ -55,6 +55,9 @@ env:
     fuzz_sm4_gcm_decrypt fuzz_sm4_ccm_decrypt fuzz_sm4_xts_decrypt
     fuzz_sm4_cbc_streaming_decrypt fuzz_sm4_gcm_streaming_decrypt
 
+permissions:
+  contents: read
+
 jobs:
   fuzz:
     name: cargo-fuzz nightly sweep

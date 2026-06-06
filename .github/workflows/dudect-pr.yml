@@ -29,6 +29,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+
 jobs:
   smoke:
     name: timing-leak smoke (10K×3 median, |tau|<0.20, features=${{ matrix.features }})

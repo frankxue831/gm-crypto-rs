@@ -33,6 +33,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+
 jobs:
   full:
     name: timing-leak nightly (100K×5 median, |tau|<0.20, features=${{ matrix.features }})
