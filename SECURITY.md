@@ -91,8 +91,14 @@ CLAUDE.md carries the canonical per-target gate table.
   private key `d`.
 - `ct_sign_k_class`  — same, class-split by nonce `k` magnitude with `d` held
   fixed (W0; closes the v0.1 structural blind spot to nonce-only leaks).
-  Nightly-only gate at `|tau| < 0.25`; dropped from the PR-smoke 10K
-  allowlist (telemetry-only there).
+  Dropped from the PR-smoke 10K allowlist (telemetry-only there); its nightly
+  `|tau| < 0.25` gate was **demoted to the gross-regression sentinel @0.55 on
+  2026-06-07** — it shares the two-input class-split image-noise of the invert
+  diagnostics (nightly median 0.2570–0.2768 while the direct diagnostics stayed
+  quiet → false alarm, not a leak). `ct_fn_invert` / `ct_fp_invert` remain the
+  authoritative invert-leak guards; a medium `k`-only leak in [0.25, 0.55] is
+  unguarded until a class-split-aware "noise-twin" exists. See
+  `docs/v0.5-dudect-recalibration.md`.
 - `ct_fn_invert`     — direct `Fn::invert((1+d) mod n)` diagnostic (W0).
   PR-smoke telemetry-only; nightly gross-regression sentinel at
   `|tau| ≥ 0.55`.
