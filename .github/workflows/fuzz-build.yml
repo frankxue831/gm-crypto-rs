@@ -1,0 +1,110 @@
+name: fuzz build (PR bitrot check)
+
+# F18 (post-1.0 hardening) — compile-check the cargo-fuzz targets on PRs.
+#
+# Before this, fuzz targets were only built in `fuzz-nightly.yml` (cron), so a
+# PR that broke a fuzz target's *compilation* — e.g. a change to a
+# `gmcrypto-core` public type a target constructs, or a renamed decode entry
+# point — would land on `main` and only surface ~24h later in the nightly. This
+# workflow runs `cargo +nightly fuzz build` (BUILD ONLY, no fuzzing) so that
+# bitrot fails at PR time instead.
+#
+# Scope: BUILD only. The actual fuzzing RUN (the crash search) stays in
+# `fuzz-nightly.yml` — running libFuzzer to find crashes is unbounded-by-nature
+# and belongs on a capped schedule, not a PR gate.
+#
+# NOT a required check, and PATH-FILTERED to fuzz-relevant changes (the
+# `dudect-pr.yml` model). IMPORTANT: do NOT add this to branch protection as a
+# required check while it keeps a `paths:` filter — a docs-only PR would then
+# never trigger it and would be permanently blocked on a never-reported
+# "Expected" check (exactly the #90/#91 trap that made `ci.yml`'s
+# `pull_request` drop its `paths-ignore`). If it must become required, drop the
+# filter first so it reports on every PR.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'fuzz/**'
+      - 'crates/gmcrypto-core/**'
+      - 'crates/gmcrypto-simd/**'
+      - 'Cargo.toml'
+      - '.github/workflows/fuzz-build.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'fuzz/**'
+      - 'crates/gmcrypto-core/**'
+      - 'crates/gmcrypto-simd/**'
+      - 'Cargo.toml'
+      - '.github/workflows/fuzz-build.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: fuzz-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Pinned for reproducibility — same version as fuzz-nightly.yml (W0 codex
+  # finding; the cbindgen 0.29 / cargo-deny 0.19 pinning posture).
+  CARGO_FUZZ_VERSION: '0.13.1'
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz-build:
+    name: cargo-fuzz build (all targets compile)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Skip-CI gate (mirrors ci.yml / dudect-pr.yml). On push / dispatch
+    # `github.event.pull_request` is null, so every `!contains(null, …)` is
+    # true and the job always runs; on a PR it honours the title markers.
+    if: >-
+      !contains(github.event.pull_request.title, '[skip ci]') &&
+      !contains(github.event.pull_request.title, '[ci skip]') &&
+      !contains(github.event.pull_request.title, '[no ci]') &&
+      !contains(github.event.pull_request.title, '[skip actions]')
+    steps:
+      - uses: actions/checkout@v4
+
+      # Hosted runners start clean — libFuzzer needs the nightly compiler's
+      # sanitizer support (same as fuzz-nightly.yml).
+      - name: Install Rust nightly
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustc +nightly --version
+
+      # Cache the fuzz crate's build artifacts. The fuzz crate is its OWN
+      # workspace (fuzz/Cargo.lock), so point rust-cache at it. Comma-free
+      # shared-key (the Swatinem/rust-cache comma constraint — see the dudect
+      # workflows' job-index keying).
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+          shared-key: fuzz-build
+
+      # Cache the prebuilt cargo-fuzz binary keyed on its pinned version, so a
+      # warm cache skips the ~2-3 min source compile that `cargo install` does
+      # (taiki-e/install-action has no cargo-fuzz manifest, so the
+      # cargo-deny-style prebuilt path isn't available — this cache is the
+      # equivalent; addresses the v1.0.1 ci-gate-review CG-13 recompile-cost
+      # note for the PR cadence).
+      - name: Cache cargo-fuzz binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-bin-${{ runner.os }}-${{ env.CARGO_FUZZ_VERSION }}
+
+      - name: Install pinned cargo-fuzz (if not cached)
+        run: |
+          if ! cargo fuzz --version 2>/dev/null | grep -q "$CARGO_FUZZ_VERSION"; then
+            cargo install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
+          fi
+          cargo fuzz --version
+
+      # The whole point: every fuzz target must COMPILE. Build-only — no run.
+      # Run from the repo root (the dir containing fuzz/); `cargo fuzz build`
+      # builds all 18 [[bin]] targets declared in fuzz/Cargo.toml.
+      - name: Build all fuzz targets
+        run: cargo +nightly fuzz build
