@@ -25,6 +25,12 @@ arbitrary = { version = "1", features = ["derive"] }
 path = "../crates/gmcrypto-core"
 features = ["sm4-aead", "sm4-xts"]
 
+# The C ABI shim, pulled in via its `rlib` crate-type so the `fuzz_c_abi`
+# target can drive the `extern "C"` entry points directly (raw pointers +
+# caller-owned buffers) exactly as a C caller would.
+[dependencies.gmcrypto-c]
+path = "../crates/gmcrypto-c"
+
 # Fuzz binaries are not unit-tested / doc-tested / benched.
 [profile.release]
 debug = 1
@@ -156,6 +162,48 @@ bench = false
 [[bin]]
 name = "fuzz_sm4_gcm_streaming_decrypt"
 path = "fuzz_targets/fuzz_sm4_gcm_streaming_decrypt.rs"
+test = false
+doc = false
+bench = false
+
+# post-1.0 hardening — coverage gaps surfaced by audit: SM3 was only reached
+# indirectly via parsers; the gmcrypto-c C ABI shim had no fuzz target at all.
+[[bin]]
+name = "fuzz_sm3"
+path = "fuzz_targets/fuzz_sm3.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_c_abi"
+path = "fuzz_targets/fuzz_c_abi.rs"
+test = false
+doc = false
+bench = false
+
+# post-1.0 hardening — encrypt-side + MAC coverage. The pre-existing SM4
+# targets only fuzz the decrypt path; these add differential single-shot vs
+# streaming oracles for the encrypt side, plus HMAC-SM3 (one-shot/streaming +
+# verify). CCM/XTS have no streaming API, so an encrypt->decrypt round-trip is
+# the natural follow-up there.
+[[bin]]
+name = "fuzz_sm4_cbc_encrypt"
+path = "fuzz_targets/fuzz_sm4_cbc_encrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm4_gcm_encrypt"
+path = "fuzz_targets/fuzz_sm4_gcm_encrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_hmac_sm3"
+path = "fuzz_targets/fuzz_hmac_sm3.rs"
 test = false
 doc = false
 bench = false

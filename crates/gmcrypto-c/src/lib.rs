@@ -344,7 +344,9 @@ pub unsafe extern "C" fn gmcrypto_sm3_hash(
 /// Construct a fresh streaming SM3 hasher. Returns an opaque handle;
 /// must be freed via [`gmcrypto_sm3_free`].
 ///
-/// Returns NULL on allocation failure.
+/// Never returns NULL: construction is infallible apart from heap allocation,
+/// and allocation failure aborts the process via Rust's global allocator
+/// (it does not — and cannot, on stable Rust — return NULL here).
 #[unsafe(no_mangle)]
 pub extern "C" fn gmcrypto_sm3_new() -> *mut gmcrypto_sm3_t {
     let boxed = Box::new(gmcrypto_sm3_t {
