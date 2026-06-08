@@ -31,6 +31,28 @@
 #include <stdint.h>
 
 /*
+ * Output-buffer size required by gmcrypto_sm4_cbc_encrypt() for a plaintext of
+ * `pt_len` bytes: PKCS#7 always appends a full padding block, so the size is
+ * ((pt_len / 16) + 1) * 16. The caller must ensure this does not overflow
+ * size_t.
+ */
+#define GMCRYPTO_SM4_CBC_OUTPUT_SIZE(pt_len) ((((size_t)(pt_len) / 16u) + 1u) * 16u)
+
+/*
+ * Best-effort secret scrub: overwrite `len` bytes at `ptr` with zeros through a
+ * volatile pointer the compiler may not optimize away. Evaluates `ptr` and
+ * `len` exactly once. Prefer a platform secure-zero (memset_s / explicit_bzero
+ * / SecureZeroMemory) where one is available.
+ */
+#define GMCRYPTO_ZEROIZE(ptr, len) \
+    do { \
+        volatile unsigned char *gmcrypto_zptr_ = (volatile unsigned char *)(ptr); \
+        size_t gmcrypto_zlen_ = (size_t)(len); \
+        while (gmcrypto_zlen_ != 0u) { *gmcrypto_zptr_++ = 0u; gmcrypto_zlen_--; } \
+    } while (0)
+
+
+/*
  Success return code.
  */
 #define GMCRYPTO_OK 0
@@ -165,7 +187,9 @@ typedef int (*gmcrypto_rng_callback)(void *context, uint8_t *buf, uintptr_t buf_
  Construct a fresh streaming SM3 hasher. Returns an opaque handle;
  must be freed via [`gmcrypto_sm3_free`].
 
- Returns NULL on allocation failure.
+ Never returns NULL: construction is infallible apart from heap allocation,
+ and allocation failure aborts the process via Rust's global allocator
+ (it does not — and cannot, on stable Rust — return NULL here).
  */
  gmcrypto_sm3_t *gmcrypto_sm3_new(void) ;
 

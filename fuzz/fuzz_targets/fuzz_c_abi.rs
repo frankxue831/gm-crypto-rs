@@ -7,20 +7,24 @@
 //! `gmcrypto-c/src/lib.rs`. Closes the "the C ABI layer has no dedicated fuzz
 //! target" gap (every Rust-side parser is fuzzed; the FFI shim was not).
 //!
-//! Invariant: for ANY input, every entry point returns OK/ERR (or a NULL
-//! handle) and never triggers UB or a panic across the FFI boundary, *provided
-//! the caller obeys the documented contract*. This harness obeys that contract
-//! by construction:
-//!   * fixed-size inputs (SM4 key/IV, SEC1 point) are passed at exactly the
-//!     required length; only the byte values are adversarial;
-//!   * opaque handles are freed exactly once — a handle consumed by a
-//!     `finalize()` call is never also passed to `free()` (and vice-versa).
-//! It does NOT test that contract *violations* (e.g. double-free) are safe —
-//! those are documented UB and out of scope.
+//! The first byte selects an operation family:
+//!   * ops 0–4 drive the happy-path contract (valid pointers, adequately sized
+//!     buffers, each opaque handle freed exactly once — a handle consumed by
+//!     `finalize()` is never also `free()`d);
+//!   * op 5 drives NULL-pointer rejection: every guarded entry point must
+//!     return `GMCRYPTO_ERR` (asserted), never deref or panic across FFI;
+//!   * op 6 drives the output-capacity check with a deliberately undersized
+//!     `out_capacity`: the call must reject (return value) without writing past
+//!     the buffer (ASAN would catch an overflow).
+//!
+//! It does NOT probe documented-UB contract *violations* (e.g. double-free, or
+//! passing a non-null but too-small fixed-size buffer) — those are caller UB by
+//! design and out of scope.
 #![no_main]
 
 use gmcrypto_c::*;
 use libfuzzer_sys::fuzz_target;
+use std::ptr;
 
 // A fixed, valid SM2 private scalar in [1, n-2] (same value the SM2 decrypt
 // seed generator uses), so the decrypt path is reachable with attacker DER.
@@ -37,12 +41,14 @@ fuzz_target!(|data: &[u8]| {
     let op = data[0];
     let body = &data[1..];
 
-    // SAFETY: every call passes a valid (ptr, len) for the documented fixed
-    // sizes, output buffers large enough for the worst-case write, and frees
-    // each opaque handle exactly once. The fuzzed bytes only affect *values*,
-    // never the pointer/length contract.
+    // SAFETY: ops 0–4 pass valid (ptr, len) for the documented fixed sizes,
+    // output buffers large enough for the worst-case write, and free each
+    // opaque handle exactly once. Op 5 passes NULL pointers to guarded entry
+    // points (which must report GMCRYPTO_ERR). Op 6 passes a real but small
+    // buffer with a matching (small) out_capacity, exercising the capacity
+    // check. No call violates the documented pointer/length contract.
     unsafe {
-        match op % 5 {
+        match op % 7 {
             // (0) Single-shot SM3 over arbitrary bytes.
             0 => {
                 let mut digest = [0u8; GMCRYPTO_SM3_DIGEST_SIZE];
@@ -101,7 +107,7 @@ fuzz_target!(|data: &[u8]| {
             // (4) SM2 decrypt with a FIXED valid private key + attacker DER
             //     ciphertext. Plaintext <= ciphertext length, so out=body.len()
             //     is a safe upper bound.
-            _ => {
+            4 => {
                 let sk = gmcrypto_sm2_privkey_new(FIXED_D.as_ptr());
                 if !sk.is_null() {
                     let mut out = vec![0u8; body.len().max(1)];
@@ -112,6 +118,82 @@ fuzz_target!(|data: &[u8]| {
                         body.len(),
                         out.as_mut_ptr(),
                         out.len(),
+                        &mut out_len,
+                    );
+                    gmcrypto_sm2_privkey_free(sk);
+                }
+            }
+
+            // (5) NULL-pointer rejection: guarded entry points must return
+            //     GMCRYPTO_ERR rather than dereference or panic across FFI.
+            5 => {
+                let mut digest = [0u8; GMCRYPTO_SM3_DIGEST_SIZE];
+                let mut out = [0u8; 32];
+                let mut out_len = 0usize;
+                assert_eq!(
+                    gmcrypto_sm3_hash(ptr::null(), 1, digest.as_mut_ptr()),
+                    GMCRYPTO_ERR
+                );
+                assert_eq!(
+                    gmcrypto_sm3_hash(body.as_ptr(), body.len(), ptr::null_mut()),
+                    GMCRYPTO_ERR
+                );
+                assert_eq!(
+                    gmcrypto_sm3_finalize(ptr::null_mut(), digest.as_mut_ptr()),
+                    GMCRYPTO_ERR
+                );
+                assert_eq!(
+                    gmcrypto_sm4_cbc_decrypt(
+                        ptr::null(),
+                        ptr::null(),
+                        body.as_ptr(),
+                        body.len(),
+                        out.as_mut_ptr(),
+                        out.len(),
+                        &mut out_len,
+                    ),
+                    GMCRYPTO_ERR
+                );
+                assert_eq!(
+                    gmcrypto_sm2_decrypt(
+                        ptr::null::<gmcrypto_sm2_privkey_t>(),
+                        body.as_ptr(),
+                        body.len(),
+                        out.as_mut_ptr(),
+                        out.len(),
+                        &mut out_len,
+                    ),
+                    GMCRYPTO_ERR
+                );
+            }
+
+            // (6) Undersized output buffer: a real 1-byte buffer with
+            //     out_capacity=1. The capacity check must reject without
+            //     writing past the buffer (ASAN catches any overflow).
+            _ => {
+                let mut tiny = [0u8; 1];
+                let mut out_len = 0usize;
+                if body.len() >= GMCRYPTO_SM4_KEY_SIZE + GMCRYPTO_SM4_BLOCK_SIZE {
+                    let (key, r1) = body.split_at(GMCRYPTO_SM4_KEY_SIZE);
+                    let (iv, ct) = r1.split_at(GMCRYPTO_SM4_BLOCK_SIZE);
+                    let _ = gmcrypto_sm4_cbc_decrypt(
+                        key.as_ptr(),
+                        iv.as_ptr(),
+                        ct.as_ptr(),
+                        ct.len(),
+                        tiny.as_mut_ptr(),
+                        tiny.len(),
+                        &mut out_len,
+                    );
+                }
+                let sk = gmcrypto_sm2_privkey_new(FIXED_D.as_ptr());
+                if !sk.is_null() {
+                    let _ = gmcrypto_sm2_decrypt(
+                        sk,
+                        body.as_ptr(),
+                        body.len(),
+                        tiny.as_mut_ptr(),
+                        tiny.len(),
                         &mut out_len,
                     );
                     gmcrypto_sm2_privkey_free(sk);

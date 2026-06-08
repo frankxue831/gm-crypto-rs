@@ -182,5 +182,31 @@ test = false
 doc = false
 bench = false
 
+# post-1.0 hardening — encrypt-side + MAC coverage. The pre-existing SM4
+# targets only fuzz the decrypt path; these add differential single-shot vs
+# streaming oracles for the encrypt side, plus HMAC-SM3 (one-shot/streaming +
+# verify). CCM/XTS have no streaming API, so an encrypt->decrypt round-trip is
+# the natural follow-up there.
+[[bin]]
+name = "fuzz_sm4_cbc_encrypt"
+path = "fuzz_targets/fuzz_sm4_cbc_encrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm4_gcm_encrypt"
+path = "fuzz_targets/fuzz_sm4_gcm_encrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_hmac_sm3"
+path = "fuzz_targets/fuzz_hmac_sm3.rs"
+test = false
+doc = false
+bench = false
+
 # v0.14 — its own workspace so it is excluded from the parent.
 [workspace]
