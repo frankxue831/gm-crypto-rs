@@ -118,6 +118,11 @@ int main(void) {
     }
 
 cleanup:
+    /* Best-effort scrub of the raw private-scalar copy still in our stack
+       buffer. The opaque key created from it is zeroized on free, but this
+       caller-owned copy is our responsibility — see GMCRYPTO_ZEROIZE in
+       gmcrypto.h. (Prefer a platform secure-zero where available.) */
+    GMCRYPTO_ZEROIZE(d, sizeof d);
     gmcrypto_sm2_privkey_free(sk);
     gmcrypto_sm2_pubkey_free(pk);
     return rc;

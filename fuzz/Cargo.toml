@@ -208,5 +208,21 @@ test = false
 doc = false
 bench = false
 
+# CCM/XTS have no streaming API, so these are encrypt->decrypt round-trip
+# oracles (decrypt recovers the plaintext; AEAD rejects a tampered tag).
+[[bin]]
+name = "fuzz_sm4_ccm_encrypt"
+path = "fuzz_targets/fuzz_sm4_ccm_encrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sm4_xts_encrypt"
+path = "fuzz_targets/fuzz_sm4_xts_encrypt.rs"
+test = false
+doc = false
+bench = false
+
 # v0.14 — its own workspace so it is excluded from the parent.
 [workspace]
