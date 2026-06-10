@@ -61,6 +61,36 @@ pub mod gmcrypto_core::sm2::decrypt
 pub fn gmcrypto_core::sm2::decrypt::decrypt(&gmcrypto_core::sm2::private_key::Sm2PrivateKey, &[u8]) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
 pub mod gmcrypto_core::sm2::encrypt
 pub fn gmcrypto_core::sm2::encrypt::encrypt<R: rand_core::TryCryptoRng>(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8], &mut R) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
+pub mod gmcrypto_core::sm2::key_exchange
+pub struct gmcrypto_core::sm2::key_exchange::Sm2KxConfirm(_)
+impl gmcrypto_core::sm2::key_exchange::Sm2KxConfirm
+pub const fn gmcrypto_core::sm2::key_exchange::Sm2KxConfirm::from_bytes(&[u8; 32]) -> Self
+pub const fn gmcrypto_core::sm2::key_exchange::Sm2KxConfirm::to_bytes(&self) -> [u8; 32]
+pub struct gmcrypto_core::sm2::key_exchange::Sm2KxEphemeralPoint(_)
+impl gmcrypto_core::sm2::key_exchange::Sm2KxEphemeralPoint
+pub const fn gmcrypto_core::sm2::key_exchange::Sm2KxEphemeralPoint::from_bytes(&[u8; 65]) -> Self
+pub const fn gmcrypto_core::sm2::key_exchange::Sm2KxEphemeralPoint::to_bytes(&self) -> [u8; 65]
+pub struct gmcrypto_core::sm2::key_exchange::Sm2KxInitiator
+impl gmcrypto_core::sm2::key_exchange::Sm2KxInitiator
+pub fn gmcrypto_core::sm2::key_exchange::Sm2KxInitiator::new(&gmcrypto_core::sm2::private_key::Sm2PrivateKey, &gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8], &[u8], usize) -> core::result::Result<Self, gmcrypto_core::Error>
+impl gmcrypto_core::sm2::key_exchange::Sm2KxInitiator
+pub fn gmcrypto_core::sm2::key_exchange::Sm2KxInitiator::produce_ephemeral<R: rand_core::TryCryptoRng>(self, &mut R) -> core::result::Result<(gmcrypto_core::sm2::key_exchange::Sm2KxEphemeralPoint, gmcrypto_core::sm2::key_exchange::Sm2KxInitiatorWaiting), gmcrypto_core::Error>
+pub struct gmcrypto_core::sm2::key_exchange::Sm2KxInitiatorWaiting
+impl gmcrypto_core::sm2::key_exchange::Sm2KxInitiatorWaiting
+pub fn gmcrypto_core::sm2::key_exchange::Sm2KxInitiatorWaiting::confirm(self, &gmcrypto_core::sm2::key_exchange::Sm2KxEphemeralPoint, &gmcrypto_core::sm2::key_exchange::Sm2KxConfirm) -> core::result::Result<(gmcrypto_core::sm2::key_exchange::Sm2SharedKey, gmcrypto_core::sm2::key_exchange::Sm2KxConfirm), gmcrypto_core::Error>
+pub struct gmcrypto_core::sm2::key_exchange::Sm2KxResponder
+impl gmcrypto_core::sm2::key_exchange::Sm2KxResponder
+pub fn gmcrypto_core::sm2::key_exchange::Sm2KxResponder::new(&gmcrypto_core::sm2::private_key::Sm2PrivateKey, &gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8], &[u8], usize) -> core::result::Result<Self, gmcrypto_core::Error>
+impl gmcrypto_core::sm2::key_exchange::Sm2KxResponder
+pub fn gmcrypto_core::sm2::key_exchange::Sm2KxResponder::respond<R: rand_core::TryCryptoRng>(self, &gmcrypto_core::sm2::key_exchange::Sm2KxEphemeralPoint, &mut R) -> core::result::Result<(gmcrypto_core::sm2::key_exchange::Sm2KxEphemeralPoint, gmcrypto_core::sm2::key_exchange::Sm2KxConfirm, gmcrypto_core::sm2::key_exchange::Sm2KxResponderWaiting), gmcrypto_core::Error>
+pub struct gmcrypto_core::sm2::key_exchange::Sm2KxResponderWaiting
+impl gmcrypto_core::sm2::key_exchange::Sm2KxResponderWaiting
+pub fn gmcrypto_core::sm2::key_exchange::Sm2KxResponderWaiting::finish(self, &gmcrypto_core::sm2::key_exchange::Sm2KxConfirm) -> core::result::Result<gmcrypto_core::sm2::key_exchange::Sm2SharedKey, gmcrypto_core::Error>
+pub struct gmcrypto_core::sm2::key_exchange::Sm2SharedKey(_)
+impl gmcrypto_core::sm2::key_exchange::Sm2SharedKey
+pub fn gmcrypto_core::sm2::key_exchange::Sm2SharedKey::as_bytes(&self) -> &[u8]
+impl core::ops::drop::Drop for gmcrypto_core::sm2::key_exchange::Sm2SharedKey
+pub fn gmcrypto_core::sm2::key_exchange::Sm2SharedKey::drop(&mut self)
 pub mod gmcrypto_core::sm2::private_key
 pub struct gmcrypto_core::sm2::private_key::Sm2PrivateKey
 impl gmcrypto_core::sm2::private_key::Sm2PrivateKey
