@@ -1,6 +1,34 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3/SM4 SDK. **v1.0.1 — the current stable release, live on crates.io**
+Pure-Rust SM2/SM3/SM4 SDK.
+**v1.1.0 — SM2 key exchange (GM/T 0003.3 ≡ GB/T 32918.3-2016) with key
+confirmation — implemented on `feat/sm2-key-exchange` (PR #100); the `cargo
+publish` + SSH-signed tag are the maintainer's authenticated call (publish
+order simd → core → c).** Completes the SM2 family behind the opt-in
+**`sm2-key-exchange = []`** feature (pure-core, NO new dep; default build
+byte-identical). New `sm2/key_exchange.rs`: role state-machines
+`Sm2KxInitiator` (`new` → `produce_ephemeral` → `confirm`) / `Sm2KxResponder`
+(`new` → `respond` → `finish`) + `Sm2KxEphemeralPoint`/`Sm2KxConfirm`/
+`Sm2SharedKey` (ZeroizeOnDrop); typestate enforces single-use ephemerals +
+commit-on-confirm key release. Reuses the existing assets only: `compute_z`,
+the fixed-budget masked sampler (`sample_nonzero_scalar`, called ONCE — it
+already carries the 4-draw masked budget), `mul_g`/`mul_var`, the SM3 `kdf`,
+`from_sec1_bytes` on-curve validation. CT: tags via `ConstantTimeEq`; `t`,
+`x̄·r`, KDF input, `x_U`/`y_U` zeroized (drop-wipe on an inner `EphScalar`
+wrapper — Drop can't live on the consuming waiting-structs). Single
+`Error::Failed` everywhere (incl. the deliberate all-zero-K reject, scope
+Q1.7). **KAT = the GM/T 0003.5-2012 RECOMMENDED-CURVE worked example**
+(`K = 6C893473…`, S_A/S_B asserted byte-for-byte) — ⚠ the example uses the
+**default ID `1234567812345678` for BOTH parties**, NOT ALICE/BILL (those are
+the 32918.3 test-curve Annex's; using them reproduces every point but the
+wrong Z/K — the Task 1.5 diagnosis, `docs/v1.1-sm2kx-kat-sourcing.md`).
+Assurance: dudect `ct_sm2_key_exchange` (initiator side, class-split by
+static `d_A`, per-class valid transcripts, 10K smoke ≈0.02) on the 4th matrix
+leg; fuzz `fuzz_sm2_kx` (19 FUZZ_TARGETS); clippy/deny/MSRV/wasm32 legs.
+C FFI deferred to v1.2 (core-in-vN / FFI-in-vN+1). Workspace 1.0.1 → 1.1.0,
+sibling pins `=1.1.0`. Per `docs/v1.1-scope.md` Q1.1–Q1.10 +
+`docs/v1.1-sm2-key-exchange-design.md` + the Fable-5 reviewed plan.
+**Earlier — v1.0.1 — the prior stable release, live on crates.io**
 (all three crates, published `gmcrypto-simd` → `gmcrypto-core` → `gmcrypto-c`), with an
 SSH-signed `v1.0.1` tag on the #92 merge commit + a published GitHub release. 1.0.1 is a
 **readiness-cleanup patch** over the 1.0.0 graduation — the GO-WITH-FOLLOWUP findings of
@@ -485,6 +513,9 @@ cargo clippy -p gmcrypto-core --features sm4-bitsliced --all-targets -- -D warni
 cargo clippy -p gmcrypto-core --features sm4-aead --all-targets -- -D warnings
 # v0.12 — SM4-XTS opt-in clippy pass.
 cargo clippy -p gmcrypto-core --features sm4-xts --all-targets -- -D warnings
+# v1.1 — SM2 key-exchange opt-in clippy pass (crypto-bigint-scalar added so
+# the bench target, which has required-features on it, also lints).
+cargo clippy -p gmcrypto-core --features sm2-key-exchange,crypto-bigint-scalar --all-targets -- -D warnings
 
 # Supply chain — note: --exclude-dev (dev-deps are exempt from the ban list).
 cargo deny check --exclude-dev
@@ -492,17 +523,19 @@ cargo deny check --exclude-dev
 # feature flags (digest/cipher/inout/crypto-common allowlisted in deny.toml;
 # sm4-aead pulls gmcrypto-simd::ghash which has no new transitive deps; sm4-xts
 # adds NO new dep — pure-core).
-cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar check --exclude-dev
+cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange check --exclude-dev
 
 # MSRV reproducibility.
 cargo +1.85 build -p gmcrypto-core
-cargo +1.85 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar
+cargo +1.85 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar,sm2-key-exchange
 cargo build -p gmcrypto-core --no-default-features  # confirms no_std posture
 
 # v0.4 W1 — wasm32 build (caller-supplied RNG only).
 cargo build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features
 # v0.12 — sm4-xts is pure-core/no_std, so it must build on wasm32 too.
 cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features sm4-xts --no-default-features
+# v1.1 — sm2-key-exchange is pure-core/no_std too (caller-supplied RNG).
+cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features sm2-key-exchange --no-default-features
 
 # v0.4 W4 — C ABI shim build + header drift check.
 cargo build -p gmcrypto-c --release
@@ -531,6 +564,9 @@ DUDECT_SAMPLES=10000  cargo bench --bench timing_leaks --features sm4-aead,sm4-b
 # v0.12 W3 — SM4-XTS dudect (the CI matrix's 4th slot carries all three).
 DUDECT_SAMPLES=10000  cargo bench --bench timing_leaks --features sm4-xts,sm4-aead,sm4-bitsliced-simd,crypto-bigint-scalar
 # Gate: |tau| < 0.20 on ct_sm4_xts_decrypt (CTS-length data unit).
+# v1.1 W3 — SM2 key-exchange dudect (the CI matrix's 4th slot carries all four).
+DUDECT_SAMPLES=10000  cargo bench --bench timing_leaks --features sm2-key-exchange,sm4-xts,sm4-aead,sm4-bitsliced-simd,crypto-bigint-scalar
+# Gate: |tau| < 0.20 on ct_sm2_key_exchange (full initiator side, class-split by static d_A).
 
 # gmssl interop (gated; needs gmssl 3.1.1 installed).
 GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
@@ -554,7 +590,9 @@ cargo +nightly fuzz run fuzz_pem fuzz/corpus/fuzz_pem fuzz/seeds/fuzz_pem -- \
 Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. **Fifteen
 targets at the default / `sm4-bitsliced` budget; seventeen under
 `sm4-bitsliced-simd`; twenty under `sm4-bitsliced-simd,sm4-aead`;
-twenty-one under `sm4-bitsliced-simd,sm4-aead,sm4-xts`** (v0.3 added
+twenty-one under `sm4-bitsliced-simd,sm4-aead,sm4-xts`; twenty-two under
+`sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange` — v1.1 W3 added
+`ct_sm2_key_exchange` cfg-gated on `sm2-key-exchange`** (v0.3 added
 `ct_pkcs8_decrypt`; v0.5 W4 phase 1 added
 `ct_sm4_encrypt_block_bitsliced_simd` cfg-gated on `sm4-bitsliced-simd`;
 v0.6 W6 added `ct_sm4_cbc_decrypt_fanout` cfg-gated on the same feature
@@ -623,6 +661,7 @@ under every cipher dispatch path:
 | `ct_sm4_ccm_decrypt` | `\|tau\| < 0.20` (cfg-gated on `sm4-aead`) | v0.8 W4 — SM4-CCM decrypt timed under the same shape as `ct_sm4_gcm_decrypt`, fixed `tag_len = 16` and 12-byte nonce. Class-split by master key; valid `(ct‖tag)` pair per class. Exercises CBC-MAC chain (sequential `Sm4Cipher::encrypt_block` loop) + CTR stream (rides v0.7 W1 batch API + v0.6 SIMD fanout under `sm4-bitsliced-simd`) + constant-time tag compare. 5K-sample local smoke on aarch64: `\|tau\| ≈ 0.063`. Per Q8.7 of `docs/v0.7-aead-scope.md`. |
 | `ct_sm4_gcm_decrypt_buffered` | `\|tau\| < 0.20` (cfg-gated on `sm4-aead`) | v0.9 W3 — incremental-input buffered SM4-GCM decrypt via `Sm4GcmDecryptor`, timed over a fixed 256-byte plaintext + 16-byte AAD + 12-byte nonce fed in two chunks (100 bytes + rest) to straddle block boundaries. Class-split by master key; both classes' `(chunked ct, tag)` verify under their own keys so both reach `finalize_verify` (commit-on-verify) via identical control flow. Exercises the running-GHASH accumulator (`GhashAcc`) + the buffered-then-decrypt path. 5K-sample local smoke on aarch64: `\|tau\| ≈ 0.029`. Per Q9.5 of `docs/v0.9-scope.md`. |
 | `ct_sm4_xts_decrypt` | `\|tau\| < 0.20` (cfg-gated on `sm4-xts`) | v0.12 W3 — SM4-XTS decrypt via `mode_xts::decrypt`, timed over a fixed **CTS (non-block-multiple) data unit** (100 B = 6 blocks + 4) so the final-pair ciphertext-stealing path — the riskiest tweak arithmetic — gates, not just whole-block. Class-split by master key; both classes' data units are valid encrypts under their own 32-byte key so both decrypt via identical control flow. Exercises key schedule, `T_0 = SM4_E(Key2, tweak)`, the constant-time bit-reflected α-doubling chain (`mul_alpha`: right-shift + masked `0xE1`), the `decrypt_blocks` batch path (rides SIMD fanout under `sm4-bitsliced-simd`), and the CTS tail. 10K-sample local smoke on aarch64: `\|tau\| ≈ 0.03`. Per Q12.9 of `docs/v0.12-scope.md`. **v0.15** reuses this target for the multi-sector helper (`encrypt_sectors`/`decrypt_sectors`) — the per-sector secret-dependent work is the same `split_keys`/`encrypt_blocks`/`mul_alpha` path; the only new logic is the sector-number→LE-128-tweak arithmetic, which is on **public** sector addresses, so no new target (Q15.9). |
+| `ct_sm2_key_exchange` | `\|tau\| < 0.20` (cfg-gated on `sm2-key-exchange`) | v1.1 W3 — full SM2-KX initiator side (constructor `Z` hashing + `produce_ephemeral` + `confirm`) class-split by the static `d_A`; the ephemeral is one fixed scalar for both classes so the label identifies only `d_A`. Each class confirms against its own precomputed **valid** responder transcript (the `ct_pkcs8_decrypt` per-class-valid pattern), so both classes succeed via identical control flow — `t = (d + x̄·r) mod n`, the secret-scalar `mul_var`, the KDF, and both CT tag computations/compares all execute every sample. 10K-sample local smoke on aarch64: `\|tau\| ≈ 0.02`. |
 
 Gate on **`|tau|`** (scale-free), not `|t|` (grows as `tau · sqrt(N)` so any
 fixed `|t|` threshold is budget-dependent). Same gate at every sample budget;

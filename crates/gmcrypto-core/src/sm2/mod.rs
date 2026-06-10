@@ -14,6 +14,11 @@ pub(crate) mod comb_table;
 pub mod curve;
 pub mod decrypt;
 pub mod encrypt;
+// v1.1 — SM2 key exchange (GM/T 0003.3 ≡ GB/T 32918.3-2016) with key
+// confirmation. Opt-in via the `sm2-key-exchange` feature; default builds
+// are byte-identical. See docs/v1.1-sm2-key-exchange-design.md.
+#[cfg(feature = "sm2-key-exchange")]
+pub mod key_exchange;
 // `point` (`ProjectivePoint`) is the internal low-level curve point. Same
 // posture as `curve`/`scalar_mul` above: `#[doc(hidden)]`, not public API /
 // not SemVer-covered, kept `pub` only for in-repo dev crates + cross-module use.

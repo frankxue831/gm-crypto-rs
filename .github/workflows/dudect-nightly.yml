@@ -79,7 +79,10 @@ jobs:
           - "default"
           - "sm4-bitsliced"
           - "sm4-bitsliced-simd"
-          - "sm4-bitsliced-simd,sm4-aead,sm4-xts"
+        # v1.1 W3 — the fourth pass also carries `sm2-key-exchange`, gating
+        # the `ct_sm2_key_exchange` target (cfg-gated on `sm2-key-exchange`);
+        # same `|tau| < 0.20` gate.
+          - "sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange"
     steps:
       - uses: actions/checkout@v4
       # v0.18 W1 — PINNED (was @stable). The toolchain is the load-bearing
@@ -297,6 +300,12 @@ jobs:
               # docs/v0.12-scope.md). Class-split by master key at a CTS
               # (non-block-multiple) length; same 0.20 gate at 100K.
               required_low["ct_sm4_xts_decrypt"] = 0.20
+          if "sm2-key-exchange" in matrix_features:
+              # v1.1 W3 — SM2 key-exchange target. Class-split by the
+              # initiator's static d_A; per-class VALID responder
+              # transcript so both classes succeed via identical control
+              # flow. Same 0.20 gate.
+              required_low["ct_sm2_key_exchange"] = 0.20
 
           # v0.5 W4 phase 2 prep — gross-regression sentinel for
           # targets too noisy for a 0.20 gate on the current

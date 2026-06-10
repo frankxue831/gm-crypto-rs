@@ -18,12 +18,16 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 # Structured input carving for the symmetric-decrypt targets (W3).
 arbitrary = { version = "1", features = ["derive"] }
+# v1.1 — fuzz_sm2_kx drives the key-exchange API, whose ephemeral step
+# takes a caller-supplied `TryCryptoRng` (deterministic in-target impl).
+rand_core = "0.10"
 
-# The crate under test. AEAD + XTS features always on so every target
-# compiles without per-target feature juggling (scope Q14.2/§2).
+# The crate under test. AEAD + XTS + key-exchange features always on so
+# every target compiles without per-target feature juggling (scope
+# Q14.2/§2; v1.1 adds sm2-key-exchange for fuzz_sm2_kx).
 [dependencies.gmcrypto-core]
 path = "../crates/gmcrypto-core"
-features = ["sm4-aead", "sm4-xts"]
+features = ["sm4-aead", "sm4-xts", "sm2-key-exchange"]
 
 # The C ABI shim, pulled in via its `rlib` crate-type so the `fuzz_c_abi`
 # target can drive the `extern "C"` entry points directly (raw pointers +
@@ -220,6 +224,15 @@ bench = false
 [[bin]]
 name = "fuzz_sm4_xts_encrypt"
 path = "fuzz_targets/fuzz_sm4_xts_encrypt.rs"
+test = false
+doc = false
+bench = false
+
+# v1.1 — SM2 key-exchange adversarial peer-bytes target (R_B + S_B wire
+# inputs into the fixed-key initiator's confirm; no-panic invariant).
+[[bin]]
+name = "fuzz_sm2_kx"
+path = "fuzz_targets/fuzz_sm2_kx.rs"
 test = false
 doc = false
 bench = false

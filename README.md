@@ -19,7 +19,7 @@ or vendor.
 > been performed. Assurance is internal: a multi-model adversarial pre-publish
 > re-audit (see [`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md)), in-CI KAT vectors,
 > maintainer-run gmssl 3.1.1 interop (11/11, gated on `GMCRYPTO_GMSSL` — not run in
-> CI), an in-CI `dudect` timing-leak harness, and an 18-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
+> CI), an in-CI `dudect` timing-leak harness, and a 19-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
 > project with no support SLA. Review the code and **use at your own risk.** See
 > [`SECURITY.md`](SECURITY.md) for the threat model and disclosure process.
 
@@ -28,9 +28,10 @@ or vendor.
 A small, auditable, pure-Rust SM2 / SM3 / SM4 SDK whose central
 differentiating commitment is that secret-touching code paths are
 **constant-time-designed and guarded by an in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/)
-detectable-leak regression harness**: 18 real `ct_*` targets (12
+detectable-leak regression harness**: 19 real `ct_*` targets (12
 always-on + 2 cfg-gated under `sm4-bitsliced-simd` + 3 cfg-gated under
-`sm4-aead` + 1 cfg-gated under `sm4-xts`) plus a deliberately-leaky
+`sm4-aead` + 1 cfg-gated under `sm4-xts` + 1 cfg-gated under
+`sm2-key-exchange`) plus a deliberately-leaky
 `negative_control` that proves
 the harness can detect leaks. Most real targets gate at `|tau| < 0.20`;
 `ct_sign_k_class` and the direct `ct_fn_invert` / `ct_fp_invert` invert
@@ -54,7 +55,10 @@ cfg-gated), v0.6's batched CBC-decrypt fanout
 cipher matrix entry), v0.8's SM4-GCM + SM4-CCM decrypt
 (`ct_sm4_gcm_decrypt` and `ct_sm4_ccm_decrypt`, cfg-gated on
 `sm4-aead`), v0.9's incremental-input buffered SM4-GCM decrypt
-(`ct_sm4_gcm_decrypt_buffered`, cfg-gated on `sm4-aead`), HMAC-SM3
+(`ct_sm4_gcm_decrypt_buffered`, cfg-gated on `sm4-aead`), v1.1's full
+SM2 key-exchange initiator flow (`ct_sm2_key_exchange`, cfg-gated on
+`sm2-key-exchange` — split by static `d_A` with per-class valid
+responder transcripts), HMAC-SM3
 (split by key), encrypted-PKCS#8
 decrypt (split by password bytes — both classes' blobs valid for their
 class's password so both succeed via identical control flow), plus
@@ -136,7 +140,7 @@ signatures / ciphertexts, SM4 mode bytes) is byte-identical to 0.16.0.
   `mode_gcm::{encrypt, encrypt_with_tag_len}` return `Option<…>`, rejecting plaintext
   past the `2^36 − 32`-byte GCM counter ceiling (matching the streaming path and
   `decrypt`).
-- **Features are additive** (`default = []`; all 7 are opt-in) and the build is
+- **Features are additive** (`default = []`; all 8 are opt-in) and the build is
   `no_std` + `alloc`-only with `unsafe_code = "forbid"` on the core.
 - **MSRV is 1.85** (edition 2024); an MSRV bump is treated as a minor, not a patch.
 - **`crypto-bigint` decoupling (v0.22):** the **always-on** (default-features) public
@@ -149,6 +153,34 @@ signatures / ciphertexts, SM4 mode bytes) is byte-identical to 0.16.0.
   `crypto-bigint` major bump would be breaking for that feature). The recommended
   always-on path (`Sm2PrivateKey::from_bytes_be`) avoids it entirely. See
   [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) §3.A.
+
+## v1.1 scope — SM2 key exchange (GM/T 0003.3)
+
+**Completes the SM2 family**: GM/T 0003.2 sign + 0003.4/.5 encrypt shipped long
+ago; v1.1 adds the missing third — **GM/T 0003.3 ≡ GB/T 32918.3-2016 key
+agreement with key confirmation** — behind the opt-in **`sm2-key-exchange`**
+feature (pure-core, **no new dependency**; the default-features build is
+byte-identical).
+
+- **API:** two role state-machines — `Sm2KxInitiator` → `produce_ephemeral` →
+  `confirm` → `(Sm2SharedKey, S_A)`, and `Sm2KxResponder` → `respond` →
+  `finish` → `Sm2SharedKey`. Each step consumes `self`: an ephemeral cannot be
+  reused, and the key is unreachable before confirmation passes. The agreed key
+  is `ZeroizeOnDrop`; every failure (off-curve peer `R`, bad tag, RNG failure,
+  identity `U`, bad `klen`/`id`) collapses to the single `Error::Failed`.
+- **Constant-time posture:** ephemeral via the existing fixed-budget masked
+  sampler; `t = (d + x̄·r) mod n` and the scalar mults branch-free; confirmation
+  tags compared with `subtle::ConstantTimeEq` only; `t`, the KDF input, and
+  `x_U`/`y_U` wiped after use. New dudect target **`ct_sm2_key_exchange`**
+  (10K smoke `|tau| ≈ 0.02`, gate `< 0.20`).
+- **KAT:** byte-identical to the **GM/T 0003.5-2012 recommended-curve worked
+  example** (`K`, `S_A`, `S_B`, all intermediate points) — note the example
+  uses the default ID `1234567812345678` for both parties; see
+  [`docs/v1.1-sm2kx-kat-sourcing.md`](docs/v1.1-sm2kx-kat-sourcing.md).
+- **Assurance:** new fuzz target `fuzz_sm2_kx` (adversarial peer `R_B`/`S_B`
+  bytes, no-panic invariant); `sm2-key-exchange` legs across the
+  clippy/deny/MSRV/wasm32/dudect CI matrices.
+- **C FFI deferred to v1.2** (the core-in-vN / FFI-in-vN+1 cadence).
 
 ## v1.0.1 scope (shipped)
 
@@ -644,6 +676,7 @@ Everything v0.2 shipped is unchanged:
 | v0.23 (infra-assurance; not a crates.io release) | **Pre-1.0 re-audit remediation.** Per `docs/v0.23-scope.md` Q23.1–Q23.9 + `docs/v1.0-reaudit.md`. A multi-model adversarial pre-publish re-audit (Codex `gpt-5.5` + Grok, source-verified) returned NO-GO as-is — core primitives sound, but 2 API/ABI BLOCKERs + API-finality / zeroize-on-failure / spec-ceiling / doc should-fixes. Remediated: **W1 (API)** `Sm2PrivateKey::public_key() -> Sm2PublicKey`, the raw `ProjectivePoint` surface + `asn1::{reader,writer,oid}` + `traits::*` made `#[doc(hidden)]`; **W2 (crypto)** single-shot SM4-GCM `encrypt` made fallible (`2^36−32` ceiling), the fallible `rand_core::TryCryptoRng` bound on SM2 sign/encrypt (no-panic RNG-failure path), a fixed-budget constant-time SM2 nonce sampler, sign-nonce / CCM-tentative-plaintext / `Sm3`-on-drop zeroization, SM2 KDF wrap guard; **W3 (C ABI)** the SM4-GCM/CCM/XTS FFI symbols made always-on so `gmcrypto.h` == the default build. **Runtime output byte-identical** (gmssl interop 11/11) except the deliberately-changed signatures; the breaking API/ABI changes ship with 1.0 (non-publishing — workspace stays `0.16.0`, crates.io skips `0.23.0`). |
 | v1.0 | **API stabilization + crates.io publish** (the deliberate cut after the audit + tightening + re-audit: the `crypto-bigint`-exposure decision is **resolved** [v0.22] and the pre-publish re-audit findings **remediated** [v0.23], bump `0.16.0 → 1.0.0` with exact sibling pins, publish `gmcrypto-simd → core → c`, flip `cargo-semver-checks` to enforced — see the runbook in [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) §4). |
 | v1.0.1 (shipped) | **Readiness-cleanup patch — first post-1.0 publish.** Per the release-readiness synthesis [`docs/audits/2026-06-02-release-readiness-synthesis.md`](docs/audits/2026-06-02-release-readiness-synthesis.md) (GO-WITH-FOLLOWUP, 0 blockers). **Functional fix:** the `gmcrypto-c` `gmcrypto_version()` returned a hardcoded `"0.4.0"` → now the real `CARGO_PKG_VERSION` (the one behavior change justifying a patch publish). Plus doc improvements (raw-block ECB warnings, cbindgen header preconditions, FFI RNG/XTS notes, trait-stability caveats) + CI-health fixes (`sm4-xts` in MSRV/wasm/deny; dudect allowlist; `generate-lockfile` before deny; a new `simd-x86` job that caught a latent `unsafe_code` compile bug; removed `pull_request` `paths-ignore` so docs PRs aren't blocked). **No API/ABI change; wire output byte-identical to 1.0.0** (enforced `cargo-semver-checks`). 6 merged PRs (#87–#92). See [`CHANGELOG.md`](CHANGELOG.md) `[1.0.1]`. |
+| v1.1.0 | **SM2 key exchange (GM/T 0003.3) with key confirmation.** Per [`docs/v1.1-sm2-key-exchange-design.md`](docs/v1.1-sm2-key-exchange-design.md) + `docs/v1.1-scope.md`. New `sm2::key_exchange` module behind the opt-in `sm2-key-exchange` feature (pure-core, no new dependency): `Sm2KxInitiator`/`Sm2KxResponder` role state-machines with typestate-enforced single-use ephemerals and commit-on-confirm key release; byte-identical to the GM/T 0003.5-2012 recommended-curve worked example (K + S_A/S_B); new dudect target `ct_sm2_key_exchange` + fuzz target `fuzz_sm2_kx`. C FFI deferred to v1.2. **Additive — no public API breakage.** |
 
 ## Quick-start
 
