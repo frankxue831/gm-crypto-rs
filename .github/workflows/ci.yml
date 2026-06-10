@@ -148,6 +148,11 @@ jobs:
         run: cargo test -p gmcrypto-core --features sm4-aead
       - name: cargo test --features sm4-aead,sm4-bitsliced-simd
         run: cargo test -p gmcrypto-core --features sm4-aead,sm4-bitsliced-simd
+
+      # v1.1 — SM2 key exchange (GM/T 0003.3). Pure-core opt-in; the KAT
+      # integration test (sm2_kx_kat) is cfg-gated on the feature.
+      - name: cargo test --features sm2-key-exchange
+        run: cargo test -p gmcrypto-core --features sm2-key-exchange
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
       - name: cargo clippy
@@ -159,9 +164,11 @@ jobs:
       - name: cargo clippy --features sm4-bitsliced-simd
         run: cargo clippy -p gmcrypto-core --features sm4-bitsliced-simd --all-targets -- -D warnings
       - name: cargo clippy --features sm4-aead (full matrix)
-        run: cargo clippy -p gmcrypto-core --features sm4-aead,sm4-bitsliced-simd,digest-traits,cipher-traits,crypto-bigint-scalar --all-targets -- -D warnings
+        run: cargo clippy -p gmcrypto-core --features sm4-aead,sm4-bitsliced-simd,digest-traits,cipher-traits,crypto-bigint-scalar,sm2-key-exchange --all-targets -- -D warnings
       - name: cargo clippy --features crypto-bigint-scalar
         run: cargo clippy -p gmcrypto-core --features crypto-bigint-scalar --all-targets -- -D warnings
+      - name: cargo clippy --features sm2-key-exchange
+        run: cargo clippy -p gmcrypto-core --features sm2-key-exchange,crypto-bigint-scalar --all-targets -- -D warnings
 
   msrv:
     # MSRV-only build check. Behaviour is rust-version-independent, so
@@ -197,7 +204,7 @@ jobs:
       - name: cargo build (all targets)
         run: cargo build --workspace --all-targets
       - name: cargo build with opt-in features
-        run: cargo build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar --all-targets
+        run: cargo build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar,sm2-key-exchange --all-targets
 
   simd-x86:
     # F17 — the SIMD backend's x86_64 intrinsic paths (AVX2 S-box via
@@ -310,7 +317,7 @@ jobs:
       # transitive deps). Uses --features on the workspace-default crate
       # (`gmcrypto-core`).
       - name: Run cargo-deny (runtime opt-in features, excluding dev-deps)
-        run: cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar check --exclude-dev
+        run: cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange check --exclude-dev
 
   wasm32:
     name: build wasm32-unknown-unknown (Rust ${{ matrix.toolchain }})
@@ -365,3 +372,7 @@ jobs:
       # wasm32 sm4-xts repro command with no matching CI leg.)
       - name: cargo +${{ matrix.toolchain }} build --target wasm32-unknown-unknown --features sm4-xts
         run: cargo +${{ matrix.toolchain }} build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features --features sm4-xts
+      # v1.1 — sm2-key-exchange is pure-core / no_std (no new dep), so it
+      # must also build on wasm32 (caller-supplied TryCryptoRng only).
+      - name: cargo +${{ matrix.toolchain }} build --target wasm32-unknown-unknown --features sm2-key-exchange
+        run: cargo +${{ matrix.toolchain }} build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features --features sm2-key-exchange

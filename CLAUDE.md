@@ -485,6 +485,9 @@ cargo clippy -p gmcrypto-core --features sm4-bitsliced --all-targets -- -D warni
 cargo clippy -p gmcrypto-core --features sm4-aead --all-targets -- -D warnings
 # v0.12 — SM4-XTS opt-in clippy pass.
 cargo clippy -p gmcrypto-core --features sm4-xts --all-targets -- -D warnings
+# v1.1 — SM2 key-exchange opt-in clippy pass (crypto-bigint-scalar added so
+# the bench target, which has required-features on it, also lints).
+cargo clippy -p gmcrypto-core --features sm2-key-exchange,crypto-bigint-scalar --all-targets -- -D warnings
 
 # Supply chain — note: --exclude-dev (dev-deps are exempt from the ban list).
 cargo deny check --exclude-dev
@@ -492,17 +495,19 @@ cargo deny check --exclude-dev
 # feature flags (digest/cipher/inout/crypto-common allowlisted in deny.toml;
 # sm4-aead pulls gmcrypto-simd::ghash which has no new transitive deps; sm4-xts
 # adds NO new dep — pure-core).
-cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar check --exclude-dev
+cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange check --exclude-dev
 
 # MSRV reproducibility.
 cargo +1.85 build -p gmcrypto-core
-cargo +1.85 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar
+cargo +1.85 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar,sm2-key-exchange
 cargo build -p gmcrypto-core --no-default-features  # confirms no_std posture
 
 # v0.4 W1 — wasm32 build (caller-supplied RNG only).
 cargo build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features
 # v0.12 — sm4-xts is pure-core/no_std, so it must build on wasm32 too.
 cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features sm4-xts --no-default-features
+# v1.1 — sm2-key-exchange is pure-core/no_std too (caller-supplied RNG).
+cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features sm2-key-exchange --no-default-features
 
 # v0.4 W4 — C ABI shim build + header drift check.
 cargo build -p gmcrypto-c --release
@@ -531,6 +536,9 @@ DUDECT_SAMPLES=10000  cargo bench --bench timing_leaks --features sm4-aead,sm4-b
 # v0.12 W3 — SM4-XTS dudect (the CI matrix's 4th slot carries all three).
 DUDECT_SAMPLES=10000  cargo bench --bench timing_leaks --features sm4-xts,sm4-aead,sm4-bitsliced-simd,crypto-bigint-scalar
 # Gate: |tau| < 0.20 on ct_sm4_xts_decrypt (CTS-length data unit).
+# v1.1 W3 — SM2 key-exchange dudect (the CI matrix's 4th slot carries all four).
+DUDECT_SAMPLES=10000  cargo bench --bench timing_leaks --features sm2-key-exchange,sm4-xts,sm4-aead,sm4-bitsliced-simd,crypto-bigint-scalar
+# Gate: |tau| < 0.20 on ct_sm2_key_exchange (full initiator side, class-split by static d_A).
 
 # gmssl interop (gated; needs gmssl 3.1.1 installed).
 GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
