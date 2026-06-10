@@ -944,6 +944,105 @@ fn ct_pkcs8_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
     }
 }
 
+/// Fixed-bytes `TryCryptoRng` for the key-exchange target's deterministic
+/// ephemerals (v1.1). Every `try_fill_bytes` returns the same 32 bytes —
+/// the sampler keeps the first valid draw, so the ephemeral scalar is the
+/// constant itself.
+#[cfg(feature = "sm2-key-exchange")]
+struct FixedEphRng([u8; 32]);
+
+#[cfg(feature = "sm2-key-exchange")]
+impl TryRng for FixedEphRng {
+    type Error = Infallible;
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        Ok(0)
+    }
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        Ok(0)
+    }
+    fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
+        dst.copy_from_slice(&self.0);
+        Ok(())
+    }
+}
+#[cfg(feature = "sm2-key-exchange")]
+impl TryCryptoRng for FixedEphRng {}
+
+/// SM2 key-exchange diagnostic (v1.1 W3). Times the full initiator side —
+/// constructor (`Z` hashing) + `produce_ephemeral` + `confirm` — class-split
+/// by the initiator's **static private key `d_A`**. The ephemeral scalar is
+/// one fixed constant for BOTH classes, so the class label identifies only
+/// `d_A` (and values derived from it). Each class confirms against its own
+/// precomputed **valid** responder transcript `(R_B, S_B)` — the
+/// `ct_pkcs8_decrypt` pattern — so both classes succeed via identical
+/// control flow: `t = (d + x̄·r) mod n`, the secret-scalar `mul_var`, the
+/// KDF, and both constant-time tag computations/compares all execute on
+/// every sample. Gate `|tau| < 0.20`.
+#[cfg(feature = "sm2-key-exchange")]
+fn ct_sm2_key_exchange(runner: &mut CtRunner, rng: &mut BenchRng) {
+    use gmcrypto_core::sm2::key_exchange::{
+        Sm2KxConfirm, Sm2KxEphemeralPoint, Sm2KxInitiator, Sm2KxResponder,
+    };
+
+    const ID_A: &[u8] = b"dudect-initiator";
+    const ID_B: &[u8] = b"dudect-responder";
+    const KLEN: usize = 16;
+    // One fixed initiator ephemeral for both classes (valid scalar < n).
+    const EPH_A: [u8; 32] = [0x5A; 32];
+    // Fixed responder ephemeral for transcript generation (setup only).
+    const EPH_B: [u8; 32] = [0x3C; 32];
+
+    let d_left = Sm2PrivateKey::from_scalar(U256::from_be_hex(
+        "1649AB77A00637BD5E2EFE283FBF353534AA7F7CB89463F208DDBC2920BB0DA0",
+    ))
+    .expect("valid d for class Left");
+    let d_right = Sm2PrivateKey::from_scalar(U256::from_be_hex(
+        "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8",
+    ))
+    .expect("valid d for class Right");
+    // Shared third-party responder static key.
+    let resp_priv = Sm2PrivateKey::from_scalar(U256::from_be_hex(
+        "B9E5B7C12E48BAB7CC0E91A57F8A48E8C8F87DDD25EBF52F2A75E612CB1A9E4F",
+    ))
+    .expect("valid d for responder");
+    let resp_pub = resp_priv.public_key();
+
+    // Per-class valid responder transcript: with the initiator ephemeral
+    // fixed, R_A is fixed per class, so (R_B, S_B) stays valid across
+    // samples.
+    let transcript = |d: &Sm2PrivateKey| -> (Sm2KxEphemeralPoint, Sm2KxConfirm) {
+        let init = Sm2KxInitiator::new(d, &resp_pub, ID_A, ID_B, KLEN).expect("initiator");
+        let (ra, _iw) = init
+            .produce_ephemeral(&mut FixedEphRng(EPH_A))
+            .expect("fixed ephemeral");
+        let resp =
+            Sm2KxResponder::new(&resp_priv, &d.public_key(), ID_A, ID_B, KLEN).expect("responder");
+        let (rb, sb, _rw) = resp
+            .respond(&ra, &mut FixedEphRng(EPH_B))
+            .expect("valid R_A must produce a transcript");
+        (rb, sb)
+    };
+    let (rb_left, sb_left) = transcript(&d_left);
+    let (rb_right, sb_right) = transcript(&d_right);
+
+    for _ in 0..sample_count() {
+        let (class, d, rb, sb) = if rng.random::<bool>() {
+            (Class::Left, &d_left, &rb_left, &sb_left)
+        } else {
+            (Class::Right, &d_right, &rb_right, &sb_right)
+        };
+        runner.run_one(class, || {
+            let init =
+                Sm2KxInitiator::new(d, &resp_pub, ID_A, ID_B, KLEN).expect("dudect: valid params");
+            let (_ra, iw) = init
+                .produce_ephemeral(&mut FixedEphRng(EPH_A))
+                .expect("dudect: fixed ephemeral");
+            iw.confirm(rb, sb)
+                .expect("dudect: valid transcript must confirm")
+        });
+    }
+}
+
 /// Custom `main` (instead of `ctbench_main!`) so we can pre-filter `--bench`
 /// from argv. `cargo bench` injects `--bench` as the first arg by libtest
 /// convention; dudect-bencher's clap parser doesn't recognize it and would
@@ -1128,6 +1227,17 @@ fn main() {
         name: BenchName("ct_sm4_xts_decrypt"),
         seed: None,
         benchfn: ct_sm4_xts_decrypt,
+    });
+
+    // v1.1 W3 — SM2 key-exchange target. Cfg-gated on `sm2-key-exchange`;
+    // class-split by the initiator's static `d_A` with a per-class VALID
+    // responder transcript (both classes succeed; identical control flow).
+    // Same `|tau| < 0.20` gate as the other composite targets.
+    #[cfg(feature = "sm2-key-exchange")]
+    benches.push(BenchMetadata {
+        name: BenchName("ct_sm2_key_exchange"),
+        seed: None,
+        benchfn: ct_sm2_key_exchange,
     });
 
     let opts = BenchOpts {
