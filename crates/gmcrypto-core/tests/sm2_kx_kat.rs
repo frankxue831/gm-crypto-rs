@@ -174,10 +174,11 @@ fn negative_off_curve_peer_r_rejected() {
     // Responder side: corrupt R_A's x-coordinate.
     let mut bad = ra.to_bytes();
     bad[10] ^= 0x01;
-    let ra_bad = Sm2KxEphemeralPoint::from_bytes(&bad);
+    let corrupt_initiator_r = Sm2KxEphemeralPoint::from_bytes(&bad);
     let resp = Sm2KxResponder::new(&db, &pa, ID_A, ID_B, KLEN).unwrap();
     assert!(
-        resp.respond(&ra_bad, &mut FixedScalarRng(R_B_EPH)).is_err(),
+        resp.respond(&corrupt_initiator_r, &mut FixedScalarRng(R_B_EPH))
+            .is_err(),
         "off-curve R_A accepted by respond"
     );
 
@@ -186,9 +187,9 @@ fn negative_off_curve_peer_r_rejected() {
     let (rb, sb, _rw) = resp.respond(&ra, &mut FixedScalarRng(R_B_EPH)).unwrap();
     let mut bad = rb.to_bytes();
     bad[40] ^= 0x01;
-    let rb_bad = Sm2KxEphemeralPoint::from_bytes(&bad);
+    let corrupt_responder_r = Sm2KxEphemeralPoint::from_bytes(&bad);
     assert!(
-        iw.confirm(&rb_bad, &sb).is_err(),
+        iw.confirm(&corrupt_responder_r, &sb).is_err(),
         "off-curve R_B accepted by confirm"
     );
 }
@@ -208,16 +209,17 @@ fn negative_bad_tag_peer_r_rejected() {
     for tag in [0x00u8, 0x02, 0x03, 0x05] {
         let mut bad = ra.to_bytes();
         bad[0] = tag;
-        let ra_bad = Sm2KxEphemeralPoint::from_bytes(&bad);
+        let corrupt_initiator_r = Sm2KxEphemeralPoint::from_bytes(&bad);
         let resp = Sm2KxResponder::new(&db, &pa, ID_A, ID_B, KLEN).unwrap();
         assert!(
-            resp.respond(&ra_bad, &mut FixedScalarRng(R_B_EPH)).is_err(),
+            resp.respond(&corrupt_initiator_r, &mut FixedScalarRng(R_B_EPH))
+                .is_err(),
             "peer R with SEC1 tag {tag:#04x} accepted"
         );
     }
 }
 
-/// Tampered S_A at `finish` → Failed (the responder never releases K).
+/// Tampered `S_A` at `finish` → Failed (the responder never releases `K`).
 #[test]
 fn negative_tampered_s_a_rejected() {
     let (da, db) = kat_parties();
