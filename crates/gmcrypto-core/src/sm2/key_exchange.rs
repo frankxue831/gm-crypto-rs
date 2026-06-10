@@ -15,6 +15,7 @@ use crate::sm2::point::ProjectivePoint;
 use crate::sm2::scalar_mul::{mul_g, mul_var};
 use crate::sm2::sign::{MAX_ID_LEN, compute_z, sample_nonzero_scalar};
 use crate::sm2::{Sm2PrivateKey, Sm2PublicKey};
+use crate::sm3::Sm3;
 use alloc::vec::Vec;
 use crypto_bigint::U256;
 use rand_core::TryCryptoRng;
@@ -269,6 +270,37 @@ fn avf(x_be: &[u8; 32]) -> Fn {
     Fn::new(&U256::from_be_slice(&buf))
 }
 
+/// Confirmation-tag hash, GB/T 32918.3 §6.1 steps A8/B7:
+///
+/// `inner = SM3(x_U ‖ Z_A ‖ Z_B ‖ x1 ‖ y1 ‖ x2 ‖ y2)`
+/// `S     = SM3(prefix ‖ y_U ‖ inner)`; prefix `0x02` → `S_B`, `0x03` → `S_A`.
+///
+/// `(x1, y1)` are **always** `R_A`'s coordinates and `(x2, y2)` always
+/// `R_B`'s, for both roles (fixed by role, not locality — M3).
+#[allow(clippy::too_many_arguments)]
+fn s_tag(
+    prefix: u8,
+    yu: &[u8; 32],
+    xu: &[u8; 32],
+    za: &[u8; 32],
+    zb: &[u8; 32],
+    x1: &[u8; 32],
+    y1: &[u8; 32],
+    x2: &[u8; 32],
+    y2: &[u8; 32],
+) -> [u8; 32] {
+    let mut hi = Sm3::new();
+    for part in [xu, za, zb, x1, y1, x2, y2] {
+        hi.update(part);
+    }
+    let inner = hi.finalize();
+    let mut ho = Sm3::new();
+    ho.update(&[prefix]);
+    ho.update(yu);
+    ho.update(&inner);
+    ho.finalize()
+}
+
 /// Compute the agreed key bytes + `(x_U, y_U)` (big-endian) for the
 /// S-tag hashes.
 ///
@@ -473,6 +505,22 @@ mod tests {
         }
     }
     impl rand_core::TryCryptoRng for FixedRng {}
+
+    #[test]
+    fn s_tag_prefixes_differ_and_deterministic() {
+        let z = [1u8; 32];
+        let xu = [2u8; 32];
+        let yu = [3u8; 32];
+        let r = [4u8; 32];
+        let sb = s_tag(0x02, &yu, &xu, &z, &z, &r, &r, &r, &r);
+        let sa = s_tag(0x03, &yu, &xu, &z, &z, &r, &r, &r, &r);
+        assert_ne!(sb, sa, "domain-separation prefix must change the tag");
+        assert_eq!(
+            sb,
+            s_tag(0x02, &yu, &xu, &z, &z, &r, &r, &r, &r),
+            "deterministic"
+        );
+    }
 
     #[test]
     fn round_trip_shared_key_matches() {
