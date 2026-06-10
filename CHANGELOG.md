@@ -5,6 +5,51 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-10
+
+**SM2 key exchange (GM/T 0003.3 ≡ GB/T 32918.3-2016) with key confirmation** —
+completes the SM2 family (sign + encrypt shipped; key agreement was the missing
+third). Additive minor: the default-features build is byte-identical to 1.0.1;
+`cargo-semver-checks` passes as non-breaking. Three crates bump in lockstep to
+1.1.0 with exact sibling pins (`=1.1.0`); `gmcrypto-c` is otherwise unchanged
+(C FFI for SM2-KX is deferred to v1.2, the core-in-vN / FFI-in-vN+1 cadence).
+
+### Added
+- `sm2::key_exchange` (opt-in feature **`sm2-key-exchange`**, pure-core, no new
+  dependency): role state-machines `Sm2KxInitiator` (`new` →
+  `produce_ephemeral` → `confirm`) and `Sm2KxResponder` (`new` → `respond` →
+  `finish`) with supporting types `Sm2KxEphemeralPoint` (SEC1 `04‖X‖Y` wire
+  form), `Sm2KxConfirm` (32-byte SM3 confirmation tag), and `Sm2SharedKey`
+  (`klen`-byte agreed key, `ZeroizeOnDrop`). Each step consumes `self`, so an
+  ephemeral cannot be reused and the key is unreachable before the peer's
+  confirmation tag verifies (commit-on-confirm; the responder holds `K` until
+  `S_A` checks out).
+- Constant-time discipline: the ephemeral rides the existing fixed-budget
+  masked nonce sampler; `t = (d + x̄·r) mod n` and both scalar multiplications
+  are branch-free on secrets; peer `R` is validated on-curve before use
+  (invalid-curve defense); confirmation tags compare via
+  `subtle::ConstantTimeEq`; `t`, the `x̄·r` product, the KDF input, and
+  `x_U`/`y_U` are zeroized after use. All failures collapse to the single
+  `Error::Failed` (off-curve `R`, bad tag, RNG failure, identity `U`,
+  all-zero `K`, bad `klen`/`id` — indistinguishable by design).
+- KAT: byte-identical to the **GM/T 0003.5-2012 / GB/T 32918.5-2017
+  recommended-curve worked example** — `K`, `S_A`, `S_B`, and every
+  intermediate point asserted (the example uses the default ID
+  `1234567812345678` for both parties; see
+  `docs/v1.1-sm2kx-kat-sourcing.md`). Plus a random round-trip property test
+  and negative tests (off-curve / bad-SEC1-tag peer `R`, tampered `S_A`/`S_B`,
+  over-long `id`, bad `klen`, identity peer key).
+- Assurance: new dudect target `ct_sm2_key_exchange` (full initiator side,
+  class-split by static `d_A`, per-class valid responder transcripts; 10K
+  smoke `|tau| ≈ 0.02`, gate `< 0.20`) wired into the dudect PR/nightly
+  matrices; new fuzz target `fuzz_sm2_kx` (adversarial peer `R_B`/`S_B`
+  bytes, no-panic invariant; 60 s smoke: 256K runs, zero crashes); new
+  `sm2-key-exchange` legs across the clippy / cargo-deny / MSRV-1.85 /
+  wasm32 CI matrices.
+
+### Changed
+- Workspace version 1.0.1 → 1.1.0 (lockstep; exact sibling pins `=1.1.0`).
+
 ## [1.0.1] - 2026-06-03
 
 Patch release — the v1.0 release-readiness cleanup. **No API / ABI / wire change**

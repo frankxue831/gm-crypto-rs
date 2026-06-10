@@ -1,6 +1,34 @@
 # CLAUDE.md
 
-Pure-Rust SM2/SM3/SM4 SDK. **v1.0.1 — the current stable release, live on crates.io**
+Pure-Rust SM2/SM3/SM4 SDK.
+**v1.1.0 — SM2 key exchange (GM/T 0003.3 ≡ GB/T 32918.3-2016) with key
+confirmation — implemented on `feat/sm2-key-exchange` (PR #100); the `cargo
+publish` + SSH-signed tag are the maintainer's authenticated call (publish
+order simd → core → c).** Completes the SM2 family behind the opt-in
+**`sm2-key-exchange = []`** feature (pure-core, NO new dep; default build
+byte-identical). New `sm2/key_exchange.rs`: role state-machines
+`Sm2KxInitiator` (`new` → `produce_ephemeral` → `confirm`) / `Sm2KxResponder`
+(`new` → `respond` → `finish`) + `Sm2KxEphemeralPoint`/`Sm2KxConfirm`/
+`Sm2SharedKey` (ZeroizeOnDrop); typestate enforces single-use ephemerals +
+commit-on-confirm key release. Reuses the existing assets only: `compute_z`,
+the fixed-budget masked sampler (`sample_nonzero_scalar`, called ONCE — it
+already carries the 4-draw masked budget), `mul_g`/`mul_var`, the SM3 `kdf`,
+`from_sec1_bytes` on-curve validation. CT: tags via `ConstantTimeEq`; `t`,
+`x̄·r`, KDF input, `x_U`/`y_U` zeroized (drop-wipe on an inner `EphScalar`
+wrapper — Drop can't live on the consuming waiting-structs). Single
+`Error::Failed` everywhere (incl. the deliberate all-zero-K reject, scope
+Q1.7). **KAT = the GM/T 0003.5-2012 RECOMMENDED-CURVE worked example**
+(`K = 6C893473…`, S_A/S_B asserted byte-for-byte) — ⚠ the example uses the
+**default ID `1234567812345678` for BOTH parties**, NOT ALICE/BILL (those are
+the 32918.3 test-curve Annex's; using them reproduces every point but the
+wrong Z/K — the Task 1.5 diagnosis, `docs/v1.1-sm2kx-kat-sourcing.md`).
+Assurance: dudect `ct_sm2_key_exchange` (initiator side, class-split by
+static `d_A`, per-class valid transcripts, 10K smoke ≈0.02) on the 4th matrix
+leg; fuzz `fuzz_sm2_kx` (19 FUZZ_TARGETS); clippy/deny/MSRV/wasm32 legs.
+C FFI deferred to v1.2 (core-in-vN / FFI-in-vN+1). Workspace 1.0.1 → 1.1.0,
+sibling pins `=1.1.0`. Per `docs/v1.1-scope.md` Q1.1–Q1.10 +
+`docs/v1.1-sm2-key-exchange-design.md` + the Fable-5 reviewed plan.
+**Earlier — v1.0.1 — the prior stable release, live on crates.io**
 (all three crates, published `gmcrypto-simd` → `gmcrypto-core` → `gmcrypto-c`), with an
 SSH-signed `v1.0.1` tag on the #92 merge commit + a published GitHub release. 1.0.1 is a
 **readiness-cleanup patch** over the 1.0.0 graduation — the GO-WITH-FOLLOWUP findings of
