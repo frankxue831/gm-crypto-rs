@@ -12,11 +12,13 @@ use crate::Error;
 use crate::sm2::curve::Fn;
 use crate::sm2::encrypt::KDF_MAX_OUTPUT;
 use crate::sm2::point::ProjectivePoint;
-use crate::sm2::sign::{MAX_ID_LEN, compute_z};
+use crate::sm2::scalar_mul::mul_g;
+use crate::sm2::sign::{MAX_ID_LEN, compute_z, sample_nonzero_scalar};
 use crate::sm2::{Sm2PrivateKey, Sm2PublicKey};
 use alloc::vec::Vec;
 use crypto_bigint::U256;
-use zeroize::ZeroizeOnDrop;
+use rand_core::TryCryptoRng;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 type Result<T> = core::result::Result<T, Error>;
 
@@ -139,6 +141,77 @@ impl Sm2KxInitiator {
     }
 }
 
+/// Ephemeral secret scalar `r`, wiped on drop.
+///
+/// The drop-wipe lives on this inner wrapper, NOT on the waiting-state
+/// structs that hold it: the consuming steps (`confirm`/`finish`) take
+/// `self` by value and move fields out, which Rust forbids on a type
+/// with `Drop` — the same reason `Sm3` drop-wipes its state instead of
+/// `HmacSm3` (whose `finalize(self)` moves fields out).
+struct EphScalar(Fn);
+
+impl Drop for EphScalar {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+/// Sample the ephemeral secret `r ∈ [1, n−1]` and compute `R = [r]G`.
+///
+/// One call into the existing fixed-budget (4-draw) constant-time
+/// masked sampler — it already implements the first-valid masked
+/// select, so no retry wrapper here (S3). On budget exhaustion
+/// (probability ≈ 2^-128) the dummy scalar still walks the full point
+/// computation and the failure surfaces only at the public `Result`
+/// boundary, mirroring `sign.rs`'s masked posture. RNG failure (a
+/// public condition) → `Failed`.
+fn sample_ephemeral<R: TryCryptoRng>(rng: &mut R) -> Result<(Fn, [u8; 65])> {
+    let (r, sample_ok) = sample_nonzero_scalar(rng).ok_or(Error::Failed)?;
+    let r_point = mul_g(&r);
+    let (x, y) = r_point.to_affine().ok_or(Error::Failed)?;
+    let mut sec1 = [0u8; 65];
+    sec1[0] = 0x04;
+    sec1[1..33].copy_from_slice(&crate::u256_to_be32(&x.retrieve()));
+    sec1[33..65].copy_from_slice(&crate::u256_to_be32(&y.retrieve()));
+    if !bool::from(sample_ok) {
+        return Err(Error::Failed);
+    }
+    Ok((r, sec1))
+}
+
+/// Initiator after `R_A` has been produced; awaiting the responder's
+/// `(R_B, S_B)`.
+pub struct Sm2KxInitiatorWaiting {
+    inner: Sm2KxInitiator,
+    r_eph: EphScalar,
+    r_point_bytes: [u8; 65],
+}
+
+impl Sm2KxInitiator {
+    /// Sample the ephemeral `r_A`, compute `R_A = [r_A]G`, and advance
+    /// to the waiting state. Consumes `self` so the ephemeral is
+    /// single-use.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Failed`] if the RNG fails or the sampler exhausts its
+    /// fixed budget (probability ≈ 2^-128).
+    pub fn produce_ephemeral<R: TryCryptoRng>(
+        self,
+        rng: &mut R,
+    ) -> Result<(Sm2KxEphemeralPoint, Sm2KxInitiatorWaiting)> {
+        let (r, r_bytes) = sample_ephemeral(rng)?;
+        Ok((
+            Sm2KxEphemeralPoint(r_bytes),
+            Sm2KxInitiatorWaiting {
+                inner: self,
+                r_eph: EphScalar(r),
+                r_point_bytes: r_bytes,
+            },
+        ))
+    }
+}
+
 /// Key-exchange responder (party B), freshly constructed.
 ///
 /// State machine: `Sm2KxResponder` → `respond` →
@@ -199,6 +272,38 @@ fn avf(x_be: &[u8; 32]) -> Fn {
 mod tests {
     use super::*;
     use crypto_bigint::U256;
+
+    /// Test-only fixed-bytes RNG (inline, per the repo's `FixedScalarRng`
+    /// idiom — `#[cfg(test)]` helpers are module-private, S10).
+    pub(super) struct FixedRng(pub [u8; 32]);
+
+    impl rand_core::TryRng for FixedRng {
+        type Error = core::convert::Infallible;
+        fn try_next_u32(&mut self) -> core::result::Result<u32, Self::Error> {
+            Ok(0)
+        }
+        fn try_next_u64(&mut self) -> core::result::Result<u64, Self::Error> {
+            Ok(0)
+        }
+        fn try_fill_bytes(&mut self, dst: &mut [u8]) -> core::result::Result<(), Self::Error> {
+            assert_eq!(dst.len(), 32);
+            dst.copy_from_slice(&self.0);
+            Ok(())
+        }
+    }
+    impl rand_core::TryCryptoRng for FixedRng {}
+
+    #[test]
+    fn produce_ephemeral_yields_on_curve_point() {
+        use crate::sm2::Sm2PrivateKey;
+        let d = Sm2PrivateKey::from_bytes_be(&[2u8; 32]).unwrap();
+        let p = d.public_key();
+        let init = Sm2KxInitiator::new(&d, &p, b"a", b"b", 16).unwrap();
+        let mut rng = FixedRng([7u8; 32]);
+        let (r_a, _waiting) = init.produce_ephemeral(&mut rng).unwrap();
+        // from_sec1_bytes validates tag/range/on-curve/non-identity.
+        assert!(Sm2PublicKey::from_sec1_bytes(&r_a.to_bytes()).is_some());
+    }
 
     #[test]
     fn avf_sets_bit_127_and_masks_low_127() {
