@@ -270,6 +270,15 @@ fn avf(x_be: &[u8; 32]) -> Fn {
     Fn::new(&U256::from_be_slice(&buf))
 }
 
+/// Split a SEC1 uncompressed point into its 32-byte X / Y halves.
+fn split_xy(sec1: &[u8; 65]) -> ([u8; 32], [u8; 32]) {
+    let mut x = [0u8; 32];
+    let mut y = [0u8; 32];
+    x.copy_from_slice(&sec1[1..33]);
+    y.copy_from_slice(&sec1[33..65]);
+    (x, y)
+}
+
 /// Confirmation-tag hash, GB/T 32918.3 §6.1 steps A8/B7:
 ///
 /// `inner = SM3(x_U ‖ Z_A ‖ Z_B ‖ x1 ‖ y1 ‖ x2 ‖ y2)`
@@ -406,12 +415,30 @@ impl Sm2KxInitiatorWaiting {
             &inner.z_b,
             inner.klen,
         )?;
-        // Confirmation lands in Task 2.2; tags are stubbed until then.
-        let _ = s_b;
-        let s_a = Sm2KxConfirm([0u8; 32]);
+        // Wrap K immediately: every return path below (including the
+        // tag-mismatch reject) zeroizes it on drop.
+        let key = Sm2SharedKey(key);
+
+        // S-tag coordinates are fixed by role: (x1,y1) = R_A (local
+        // here), (x2,y2) = R_B (peer here) — M3.
+        let (x1, y1) = split_xy(&r_point_bytes);
+        let (x2, y2) = split_xy(&r_b.0);
+        let expected_s_b = s_tag(
+            0x02, &yu_b, &xu_b, &inner.z_a, &inner.z_b, &x1, &y1, &x2, &y2,
+        );
+        let ok = expected_s_b[..].ct_eq(&s_b.0[..]);
+        if !bool::from(ok) {
+            xu_b.zeroize();
+            yu_b.zeroize();
+            return Err(Error::Failed);
+        }
+        let s_a = Sm2KxConfirm(s_tag(
+            0x03, &yu_b, &xu_b, &inner.z_a, &inner.z_b, &x1, &y1, &x2, &y2,
+        ));
+        // M2: x_U/y_U wiped only after the S-tag hashing consumed them.
         xu_b.zeroize();
         yu_b.zeroize();
-        Ok((Sm2SharedKey(key), s_a))
+        Ok((key, s_a))
     }
 }
 
@@ -450,9 +477,17 @@ impl Sm2KxResponder {
             &self.z_b,
             self.klen,
         )?;
-        // Confirmation lands in Task 2.2; tags are stubbed until then.
-        let s_b = Sm2KxConfirm([0u8; 32]);
-        let expected_s_a = [0u8; 32];
+        // S-tag coordinates are fixed by role: (x1,y1) = R_A (peer
+        // here), (x2,y2) = R_B (local here) — M3.
+        let (x1, y1) = split_xy(&r_a.0);
+        let (x2, y2) = split_xy(&rb_bytes);
+        let s_b = Sm2KxConfirm(s_tag(
+            0x02, &yu_b, &xu_b, &self.z_a, &self.z_b, &x1, &y1, &x2, &y2,
+        ));
+        let expected_s_a = s_tag(
+            0x03, &yu_b, &xu_b, &self.z_a, &self.z_b, &x1, &y1, &x2, &y2,
+        );
+        // M2: x_U/y_U wiped only after the S-tag hashing consumed them.
         xu_b.zeroize();
         yu_b.zeroize();
         Ok((
@@ -474,9 +509,11 @@ impl Sm2KxResponderWaiting {
     ///
     /// [`Error::Failed`] on an `S_A` mismatch.
     pub fn finish(self, s_a: &Sm2KxConfirm) -> Result<Sm2SharedKey> {
-        // Confirmation lands in Task 2.2; stubbed accept until then.
-        let _ = s_a;
-        let _ = self.expected_s_a;
+        let ok = self.expected_s_a[..].ct_eq(&s_a.0[..]);
+        if !bool::from(ok) {
+            // `self.key` drops here → zeroized.
+            return Err(Error::Failed);
+        }
         Ok(self.key)
     }
 }
@@ -520,6 +557,43 @@ mod tests {
             s_tag(0x02, &yu, &xu, &z, &z, &r, &r, &r, &r),
             "deterministic"
         );
+    }
+
+    #[test]
+    fn confirm_rejects_tampered_s_b() {
+        use crate::sm2::Sm2PrivateKey;
+        let da = Sm2PrivateKey::from_bytes_be(&[5u8; 32]).unwrap();
+        let db = Sm2PrivateKey::from_bytes_be(&[6u8; 32]).unwrap();
+        let (pa, pb) = (da.public_key(), db.public_key());
+        let init = Sm2KxInitiator::new(&da, &pb, b"a", b"b", 16).unwrap();
+        let (ra, iw) = init
+            .produce_ephemeral(&mut FixedRng([11u8; 32]))
+            .unwrap();
+        let resp = Sm2KxResponder::new(&db, &pa, b"a", b"b", 16).unwrap();
+        let (rb, sb, _rw) = resp.respond(&ra, &mut FixedRng([12u8; 32])).unwrap();
+        let mut bad = sb.to_bytes();
+        bad[0] ^= 1;
+        let sb_bad = Sm2KxConfirm::from_bytes(&bad);
+        assert!(iw.confirm(&rb, &sb_bad).is_err(), "tampered S_B accepted");
+    }
+
+    #[test]
+    fn finish_rejects_tampered_s_a() {
+        use crate::sm2::Sm2PrivateKey;
+        let da = Sm2PrivateKey::from_bytes_be(&[7u8; 32]).unwrap();
+        let db = Sm2PrivateKey::from_bytes_be(&[8u8; 32]).unwrap();
+        let (pa, pb) = (da.public_key(), db.public_key());
+        let init = Sm2KxInitiator::new(&da, &pb, b"a", b"b", 16).unwrap();
+        let (ra, iw) = init
+            .produce_ephemeral(&mut FixedRng([13u8; 32]))
+            .unwrap();
+        let resp = Sm2KxResponder::new(&db, &pa, b"a", b"b", 16).unwrap();
+        let (rb, sb, rw) = resp.respond(&ra, &mut FixedRng([14u8; 32])).unwrap();
+        let (_k_a, sa) = iw.confirm(&rb, &sb).unwrap();
+        let mut bad = sa.to_bytes();
+        bad[31] ^= 0x80;
+        let sa_bad = Sm2KxConfirm::from_bytes(&bad);
+        assert!(rw.finish(&sa_bad).is_err(), "tampered S_A accepted");
     }
 
     #[test]
