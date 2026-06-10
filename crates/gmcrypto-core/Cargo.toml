@@ -127,6 +127,11 @@ sm4-aead = ["dep:gmcrypto-simd"]
 # under sm4-bitsliced-simd). Default-off; byte-identical to OpenSSL 3.x
 # EVP SM4-XTS (xts_standard=GB). See docs/v0.12-scope.md.
 sm4-xts = []
+# v1.1 — SM2 key exchange (GM/T 0003.3 ≡ GB/T 32918.3-2016) with key
+# confirmation. Pure-core (no dep — reuses the SM2 curve, masked sampler,
+# SM3 KDF, compute_z, point validation). Default-off; default build
+# byte-identical. See docs/v1.1-sm2-key-exchange-design.md.
+sm2-key-exchange = []
 
 [lints.rust]
 unsafe_code = "forbid"
