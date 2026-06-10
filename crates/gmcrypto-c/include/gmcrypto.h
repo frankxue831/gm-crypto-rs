@@ -97,9 +97,37 @@
 #define GMCRYPTO_SM2_SCALAR_SIZE 32
 
 /*
+ SM2 key-exchange confirmation-tag size in bytes (`S_A` / `S_B` are
+ SM3 digests; v1.2). Ephemeral points `R_A` / `R_B` use
+ [`GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE`] (65).
+ */
+#define GMCRYPTO_SM2_KX_CONFIRM_SIZE 32
+
+/*
  Opaque handle for a streaming HMAC-SM3 keyed MAC.
  */
 typedef struct gmcrypto_hmac_sm3_t gmcrypto_hmac_sm3_t;
+
+/*
+ Opaque handle for an SM2 key-exchange INITIATOR (party A; GM/T
+ 0003.3, v1.2). Born already awaiting the responder's reply —
+ [`gmcrypto_sm2_kx_initiator_new`] samples the ephemeral internally
+ and writes `R_A` immediately, so no pre-ephemeral state exists in
+ C. Pair with exactly one [`gmcrypto_sm2_kx_initiator_confirm`]
+ (which consumes + frees) **or** one
+ [`gmcrypto_sm2_kx_initiator_free`].
+ */
+typedef struct gmcrypto_sm2_kx_initiator_t gmcrypto_sm2_kx_initiator_t;
+
+/*
+ Opaque handle for an SM2 key-exchange RESPONDER (party B; GM/T
+ 0003.3, v1.2). Lifecycle: [`gmcrypto_sm2_kx_responder_new`] →
+ [`gmcrypto_sm2_kx_responder_respond`] (takes `R_A`, emits
+ `R_B` + `S_B`) → [`gmcrypto_sm2_kx_responder_finish`] (takes
+ `S_A`, releases `K`, consumes + frees). Pair with exactly one
+ `_finish` **or** one [`gmcrypto_sm2_kx_responder_free`].
+ */
+typedef struct gmcrypto_sm2_kx_responder_t gmcrypto_sm2_kx_responder_t;
 
 /*
  Opaque handle for an SM2 private key.
@@ -1014,5 +1042,217 @@ int gmcrypto_sm2_encrypt_with_rng(const gmcrypto_sm2_pubkey_t *key,
                                   uintptr_t out_capacity,
                                   uintptr_t *out_actual_len)
 ;
+
+/*
+ Construct a key-exchange INITIATOR (party A) and write its
+ ephemeral point `R_A` (SEC1 uncompressed `04 ‖ X ‖ Y`, exactly
+ [`GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE`] = 65 bytes) to `out_r_a`.
+ The handle is created already awaiting the responder's reply: send
+ `out_r_a` to the responder, then call
+ [`gmcrypto_sm2_kx_initiator_confirm`] with its `(R_B, S_B)`.
+
+ `local_privkey` is A's static key; `peer_pubkey` is B's static
+ public key. `id_a` / `id_b` are the parties' identity strings
+ (`len == 0` selects the GM/T default ID `"1234567812345678"`).
+ `klen` is the agreed-key length in bytes (non-zero, under the KDF
+ ceiling); the SAME `klen` sizes `key_out` at confirm time.
+ Ephemeral randomness comes from the OS (`getrandom::SysRng`).
+
+ Returns the handle, or NULL on any failure (null pointer, bad
+ `klen`/`id`, RNG failure — indistinguishable by design). Pair with
+ exactly one `_confirm` (which frees) **or** one `_free`.
+
+ # Safety
+
+ `local_privkey` / `peer_pubkey` must be valid handles from this
+ library; `out_r_a` must be valid for 65 writes; `id_a` / `id_b`
+ must be valid for their lengths when non-zero.
+ */
+
+gmcrypto_sm2_kx_initiator_t *gmcrypto_sm2_kx_initiator_new(const gmcrypto_sm2_privkey_t *local_privkey,
+                                                           const gmcrypto_sm2_pubkey_t *peer_pubkey,
+                                                           const uint8_t *id_a,
+                                                           uintptr_t id_a_len,
+                                                           const uint8_t *id_b,
+                                                           uintptr_t id_b_len,
+                                                           uintptr_t klen,
+                                                           uint8_t *out_r_a)
+;
+
+/*
+ `_with_rng` variant of [`gmcrypto_sm2_kx_initiator_new`]: identical
+ contract except the ephemeral randomness comes from the caller's
+ `rng_callback` (the v0.5 `gmcrypto_rng_callback` shape) rather than
+ `getrandom::SysRng`. A null or failing callback returns NULL —
+ indistinguishable from every other failure by design.
+
+ # Safety
+
+ As [`gmcrypto_sm2_kx_initiator_new`]; additionally `rng_callback`
+ must be NULL or a valid function pointer honouring the callback
+ contract (fill `buf_len` bytes, return 0 on success).
+ */
+
+gmcrypto_sm2_kx_initiator_t *gmcrypto_sm2_kx_initiator_new_with_rng(const gmcrypto_sm2_privkey_t *local_privkey,
+                                                                    const gmcrypto_sm2_pubkey_t *peer_pubkey,
+                                                                    const uint8_t *id_a,
+                                                                    uintptr_t id_a_len,
+                                                                    const uint8_t *id_b,
+                                                                    uintptr_t id_b_len,
+                                                                    uintptr_t klen,
+                                                                    gmcrypto_rng_callback rng_callback,
+                                                                    void *rng_context,
+                                                                    uint8_t *out_r_a)
+;
+
+/*
+ Receive the responder's reply and finish the initiator side:
+ verify `S_B` (constant-time), and on success write the agreed key
+ (exactly `klen` bytes, the `klen` given at `_new`) to `key_out`
+ and the initiator's confirmation tag `S_A`
+ ([`GMCRYPTO_SM2_KX_CONFIRM_SIZE`] = 32 bytes) to `out_s_a` — send
+ `S_A` to the responder. `r_b` is the responder's ephemeral point
+ (65 bytes); `s_b` its confirmation tag (32 bytes).
+
+ CONSUMES + FREES the handle — even when the arguments are invalid
+ or the confirmation fails (the `_finalize*` precedent); do NOT
+ call `_free` afterwards. Returns [`GMCRYPTO_OK`] only when `S_B`
+ verified and the key was written; every failure (invalid `R_B`,
+ tag mismatch, null pointer) is the single [`GMCRYPTO_ERR`].
+ **The caller owns wiping `key_out`.**
+
+ # Safety
+
+ `initiator` must be a live handle from a `_new` (not yet consumed
+ or freed); `r_b` valid for 65 reads, `s_b` for 32 reads, `key_out`
+ for `klen` writes, `out_s_a` for 32 writes.
+ */
+
+int gmcrypto_sm2_kx_initiator_confirm(gmcrypto_sm2_kx_initiator_t *initiator,
+                                      const uint8_t *r_b,
+                                      const uint8_t *s_b,
+                                      uint8_t *key_out,
+                                      uint8_t *out_s_a)
+;
+
+/*
+ Free an UNCONSUMED initiator handle (abandonment path — e.g. the
+ responder never replied). Safe on NULL. Do NOT call after
+ `_confirm` (which already consumed + freed the handle).
+
+ # Safety
+
+ `initiator` must be NULL or a live handle from a `_new`.
+ */
+ void gmcrypto_sm2_kx_initiator_free(gmcrypto_sm2_kx_initiator_t *initiator) ;
+
+/*
+ Construct a key-exchange RESPONDER (party B). `local_privkey` is
+ B's static key; `peer_pubkey` is A's static public key; ids and
+ `klen` follow the [`gmcrypto_sm2_kx_initiator_new`] conventions
+ (and must match the initiator's, or the confirmation tags will
+ not verify). The handle then waits for the initiator's `R_A` —
+ call [`gmcrypto_sm2_kx_responder_respond`].
+
+ Returns the handle, or NULL on any failure. Pair with exactly one
+ [`gmcrypto_sm2_kx_responder_finish`] (which frees) **or** one
+ [`gmcrypto_sm2_kx_responder_free`].
+
+ # Safety
+
+ `local_privkey` / `peer_pubkey` must be valid handles from this
+ library; `id_a` / `id_b` must be valid for their lengths when
+ non-zero.
+ */
+
+gmcrypto_sm2_kx_responder_t *gmcrypto_sm2_kx_responder_new(const gmcrypto_sm2_privkey_t *local_privkey,
+                                                           const gmcrypto_sm2_pubkey_t *peer_pubkey,
+                                                           const uint8_t *id_a,
+                                                           uintptr_t id_a_len,
+                                                           const uint8_t *id_b,
+                                                           uintptr_t id_b_len,
+                                                           uintptr_t klen)
+;
+
+/*
+ Receive the initiator's `R_A` (65 bytes) and produce the
+ responder's reply: writes `R_B` (65 bytes) to `out_r_b` and the
+ responder's confirmation tag `S_B` (32 bytes) to `out_s_b` — send
+ both to the initiator, then call
+ [`gmcrypto_sm2_kx_responder_finish`] with its `S_A`. Ephemeral
+ randomness comes from the OS (`getrandom::SysRng`).
+
+ The handle stays alive (it now holds the agreed key, wiped on
+ drop, pending the initiator's confirmation). Calling `_respond`
+ twice returns [`GMCRYPTO_ERR`] without disturbing the in-flight
+ state. A FAILED respond (invalid `R_A`, RNG failure) spends the
+ handle — every further call fails and the caller frees it.
+
+ # Safety
+
+ `responder` must be a live handle from `_new`; `r_a` valid for 65
+ reads, `out_r_b` for 65 writes, `out_s_b` for 32 writes.
+ */
+
+int gmcrypto_sm2_kx_responder_respond(gmcrypto_sm2_kx_responder_t *responder,
+                                      const uint8_t *r_a,
+                                      uint8_t *out_r_b,
+                                      uint8_t *out_s_b)
+;
+
+/*
+ `_with_rng` variant of [`gmcrypto_sm2_kx_responder_respond`]:
+ identical contract except the ephemeral randomness comes from the
+ caller's `rng_callback` rather than `getrandom::SysRng`.
+
+ # Safety
+
+ As [`gmcrypto_sm2_kx_responder_respond`]; additionally
+ `rng_callback` must be NULL or a valid function pointer honouring
+ the callback contract.
+ */
+
+int gmcrypto_sm2_kx_responder_respond_with_rng(gmcrypto_sm2_kx_responder_t *responder,
+                                               const uint8_t *r_a,
+                                               gmcrypto_rng_callback rng_callback,
+                                               void *rng_context,
+                                               uint8_t *out_r_b,
+                                               uint8_t *out_s_b)
+;
+
+/*
+ Verify the initiator's confirmation tag `S_A` (32 bytes,
+ constant-time) and on success write the agreed key (exactly
+ `klen` bytes, the `klen` given at `_new`) to `key_out`.
+
+ CONSUMES + FREES the handle — even when the arguments are invalid
+ or the tag mismatches (the held key is wiped on drop in every
+ case); do NOT call `_free` afterwards. Returns [`GMCRYPTO_OK`]
+ only when `S_A` verified and the key was written; calling
+ `_finish` before a successful `_respond` is the same single
+ [`GMCRYPTO_ERR`]. **The caller owns wiping `key_out`.**
+
+ # Safety
+
+ `responder` must be a live handle from `_new` (not yet consumed
+ or freed); `s_a` valid for 32 reads, `key_out` for `klen` writes.
+ */
+
+int gmcrypto_sm2_kx_responder_finish(gmcrypto_sm2_kx_responder_t *responder,
+                                     const uint8_t *s_a,
+                                     uint8_t *key_out)
+;
+
+/*
+ Free an UNCONSUMED responder handle (abandonment path — e.g. the
+ initiator never confirmed, or a `_respond` failure spent the
+ handle). Safe on NULL. Do NOT call after `_finish` (which already
+ consumed + freed the handle). Any held key material is wiped.
+
+ # Safety
+
+ `responder` must be NULL or a live handle from `_new`.
+ */
+ void gmcrypto_sm2_kx_responder_free(gmcrypto_sm2_kx_responder_t *responder) ;
 
 #endif  /* GMCRYPTO_H_ */

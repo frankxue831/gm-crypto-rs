@@ -2312,3 +2312,731 @@ fn sm4_xts_sectors_key_buf_overlap_ok() {
         "overlap result must match the non-overlap reference"
     );
 }
+
+// ============================================================
+// SM2 key exchange (GM/T 0003.3) — v1.2 FFI
+// ============================================================
+
+use gmcrypto_c::{
+    GMCRYPTO_SM2_KX_CONFIRM_SIZE, gmcrypto_sm2_kx_initiator_confirm,
+    gmcrypto_sm2_kx_initiator_free, gmcrypto_sm2_kx_initiator_new,
+    gmcrypto_sm2_kx_initiator_new_with_rng, gmcrypto_sm2_kx_responder_finish,
+    gmcrypto_sm2_kx_responder_free, gmcrypto_sm2_kx_responder_new,
+    gmcrypto_sm2_kx_responder_respond, gmcrypto_sm2_kx_responder_respond_with_rng,
+};
+use gmcrypto_core::sm2::key_exchange::{
+    Sm2KxConfirm, Sm2KxEphemeralPoint, Sm2KxInitiator, Sm2KxResponder,
+};
+
+const KX_PT: usize = GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE; // R_A / R_B (65)
+const KX_CT: usize = GMCRYPTO_SM2_KX_CONFIRM_SIZE; // S_A / S_B (32)
+/// The FFI's `id_len == 0` default — also the GM/T 0003.5 KAT ID.
+const KX_ID: &[u8] = b"1234567812345678";
+
+// GM/T 0003.5 / GB/T 32918.5 recommended-curve worked example — the
+// same vectors as crates/gmcrypto-core/tests/sm2_kx_kat.rs.
+const KX_D_A: [u8; 32] = hex!("81EB26E941BB5AF16DF116495F90695272AE2CD63D6C4AE1678418BE48230029");
+const KX_D_B: [u8; 32] = hex!("785129917D45A9EA5437A59356B82338EAADDA6CEB199088F14AE10DEFA229B5");
+const KX_R_A_EPH: [u8; 32] =
+    hex!("D4DE15474DB74D06491C440D305E012400990F3E390C7E87153C12DB2EA60BB3");
+const KX_R_B_EPH: [u8; 32] =
+    hex!("7E07124814B309489125EAED101113164EBF0F3458C5BD88335C1F9D596243D6");
+const KX_R_A_SEC1: [u8; 65] = hex!(
+    "0464CED1BDBC99D590049B434D0FD73428CF608A5DB8FE5CE07F15026940BAE40E376629C7AB21E7DB260922499DDB118F07CE8EAAE3E7720AFEF6A5CC062070C0"
+);
+const KX_R_B_SEC1: [u8; 65] = hex!(
+    "04ACC27688A6F7B706098BC91FF3AD1BFF7DC2802CDB14CCCCDB0A90471F9BD7072FEDAC0494B2FFC4D6853876C79B8F301C6573AD0AA50F39FC87181E1A1B46FE"
+);
+const KX_EXPECT_K: [u8; 16] = hex!("6C89347354DE2484C60B4AB1FDE4C6E5");
+const KX_EXPECT_S_B: [u8; 32] =
+    hex!("D3A0FE15DEE185CEAE907A6B595CC32A266ED7B3367E9983A896DC32FA20F8EB");
+const KX_EXPECT_S_A: [u8; 32] =
+    hex!("18C7894B3816DF16CF07B05C5EC0BEF5D655D58F779CC1B400A4F3884644DB88");
+
+/// Build `(priv, pub)` FFI handles for a big-endian scalar.
+fn kx_keypair(d_be: &[u8; 32]) -> (*mut gmcrypto_sm2_privkey_t, *mut gmcrypto_sm2_pubkey_t) {
+    use gmcrypto_core::sm2::Sm2PrivateKey;
+    let key = Sm2PrivateKey::from_bytes_be(d_be).expect("valid d");
+    let pub_bytes: [u8; 65] = key.public_key().to_sec1_uncompressed();
+    let priv_ptr = unsafe { gmcrypto_sm2_privkey_new(d_be.as_ptr()) };
+    let pub_ptr = unsafe { gmcrypto_sm2_pubkey_new(pub_bytes.as_ptr()) };
+    assert!(!priv_ptr.is_null());
+    assert!(!pub_ptr.is_null());
+    (priv_ptr, pub_ptr)
+}
+
+fn kx_free_keys(handles: &[(*mut gmcrypto_sm2_privkey_t, *mut gmcrypto_sm2_pubkey_t)]) {
+    for &(d, p) in handles {
+        unsafe {
+            gmcrypto_sm2_privkey_free(d);
+            gmcrypto_sm2_pubkey_free(p);
+        }
+    }
+}
+
+/// Trampoline that fills EVERY draw with the same 32 bytes (context =
+/// `*mut [u8; 32]`) — the FFI twin of the core KAT's `FixedScalarRng`,
+/// so a fixed standard ephemeral can be driven through `_with_rng`.
+unsafe extern "C" fn fixed32_rng_callback(
+    context: *mut core::ffi::c_void,
+    buf: *mut u8,
+    buf_len: usize,
+) -> core::ffi::c_int {
+    if context.is_null() || buf.is_null() || buf_len != 32 {
+        return -1;
+    }
+    // SAFETY: caller asserts context is *mut [u8; 32].
+    let bytes = unsafe { &*(context.cast::<[u8; 32]>()) };
+    // SAFETY: buf is valid for buf_len bytes per the FFI contract.
+    let dst = unsafe { core::slice::from_raw_parts_mut(buf, buf_len) };
+    dst.copy_from_slice(bytes);
+    0
+}
+
+/// FFI initiator ↔ FFI responder full handshake (OS RNG): both sides
+/// must agree on a non-degenerate key and both tags must verify.
+#[test]
+fn sm2_kx_ffi_handshake_keys_match() {
+    const KLEN: usize = 32;
+    let a = kx_keypair(&[0x21u8; 32]);
+    let b = kx_keypair(&[0x47u8; 32]);
+
+    let mut r_a = [0u8; KX_PT];
+    let init = unsafe {
+        gmcrypto_sm2_kx_initiator_new(
+            a.0,
+            b.1,
+            ptr::null(),
+            0,
+            ptr::null(),
+            0,
+            KLEN,
+            r_a.as_mut_ptr(),
+        )
+    };
+    assert!(!init.is_null());
+
+    let resp =
+        unsafe { gmcrypto_sm2_kx_responder_new(b.0, a.1, ptr::null(), 0, ptr::null(), 0, KLEN) };
+    assert!(!resp.is_null());
+
+    let mut r_b = [0u8; KX_PT];
+    let mut s_b = [0u8; KX_CT];
+    let r = unsafe {
+        gmcrypto_sm2_kx_responder_respond(resp, r_a.as_ptr(), r_b.as_mut_ptr(), s_b.as_mut_ptr())
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+
+    let mut key_a = [0u8; KLEN];
+    let mut s_a = [0u8; KX_CT];
+    let r = unsafe {
+        gmcrypto_sm2_kx_initiator_confirm(
+            init,
+            r_b.as_ptr(),
+            s_b.as_ptr(),
+            key_a.as_mut_ptr(),
+            s_a.as_mut_ptr(),
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+
+    let mut key_b = [0u8; KLEN];
+    let r = unsafe { gmcrypto_sm2_kx_responder_finish(resp, s_a.as_ptr(), key_b.as_mut_ptr()) };
+    assert_eq!(r, GMCRYPTO_OK);
+
+    assert_eq!(key_a, key_b, "FFI initiator and responder keys differ");
+    assert!(key_a.iter().any(|&x| x != 0), "degenerate all-zero key");
+    kx_free_keys(&[a, b]);
+}
+
+/// FFI initiator ↔ PURE-RUST core responder: a C caller and a Rust
+/// caller must interoperate byte-for-byte on the wire.
+#[test]
+fn sm2_kx_ffi_initiator_against_rust_responder() {
+    use gmcrypto_core::sm2::Sm2PrivateKey;
+    const KLEN: usize = 16;
+    let a = kx_keypair(&[0x33u8; 32]);
+    let db = Sm2PrivateKey::from_bytes_be(&[0x55u8; 32]).unwrap();
+    let (b_priv_ffi, b_pub_ffi) = kx_keypair(&[0x55u8; 32]);
+    let pa_rust = Sm2PrivateKey::from_bytes_be(&[0x33u8; 32])
+        .unwrap()
+        .public_key();
+
+    let mut r_a = [0u8; KX_PT];
+    let init = unsafe {
+        gmcrypto_sm2_kx_initiator_new(
+            a.0,
+            b_pub_ffi,
+            ptr::null(),
+            0,
+            ptr::null(),
+            0,
+            KLEN,
+            r_a.as_mut_ptr(),
+        )
+    };
+    assert!(!init.is_null());
+
+    // Pure-Rust responder consumes the FFI initiator's wire bytes.
+    let resp = Sm2KxResponder::new(&db, &pa_rust, KX_ID, KX_ID, KLEN).unwrap();
+    let (rb, sb, waiting) = resp
+        .respond(
+            &Sm2KxEphemeralPoint::from_bytes(&r_a),
+            &mut getrandom::SysRng,
+        )
+        .unwrap();
+
+    let mut key_a = [0u8; KLEN];
+    let mut s_a = [0u8; KX_CT];
+    let r = unsafe {
+        gmcrypto_sm2_kx_initiator_confirm(
+            init,
+            rb.to_bytes().as_ptr(),
+            sb.to_bytes().as_ptr(),
+            key_a.as_mut_ptr(),
+            s_a.as_mut_ptr(),
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK, "FFI initiator rejected the Rust responder");
+
+    let key_b = waiting
+        .finish(&Sm2KxConfirm::from_bytes(&s_a))
+        .expect("Rust responder rejected the FFI initiator's S_A");
+    assert_eq!(key_a.as_slice(), key_b.as_bytes());
+    kx_free_keys(&[a, (b_priv_ffi, b_pub_ffi)]);
+}
+
+/// PURE-RUST core initiator ↔ FFI responder (the reverse direction).
+#[test]
+fn sm2_kx_rust_initiator_against_ffi_responder() {
+    use gmcrypto_core::sm2::Sm2PrivateKey;
+    const KLEN: usize = 16;
+    let da = Sm2PrivateKey::from_bytes_be(&[0x66u8; 32]).unwrap();
+    let pb_rust = Sm2PrivateKey::from_bytes_be(&[0x77u8; 32])
+        .unwrap()
+        .public_key();
+    let a = kx_keypair(&[0x66u8; 32]);
+    let b = kx_keypair(&[0x77u8; 32]);
+
+    let init = Sm2KxInitiator::new(&da, &pb_rust, KX_ID, KX_ID, KLEN).unwrap();
+    let (ra, init_waiting) = init.produce_ephemeral(&mut getrandom::SysRng).unwrap();
+
+    let resp =
+        unsafe { gmcrypto_sm2_kx_responder_new(b.0, a.1, ptr::null(), 0, ptr::null(), 0, KLEN) };
+    assert!(!resp.is_null());
+    let mut r_b = [0u8; KX_PT];
+    let mut s_b = [0u8; KX_CT];
+    let r = unsafe {
+        gmcrypto_sm2_kx_responder_respond(
+            resp,
+            ra.to_bytes().as_ptr(),
+            r_b.as_mut_ptr(),
+            s_b.as_mut_ptr(),
+        )
+    };
+    assert_eq!(
+        r, GMCRYPTO_OK,
+        "FFI responder rejected the Rust initiator's R_A"
+    );
+
+    let (key_a, sa) = init_waiting
+        .confirm(
+            &Sm2KxEphemeralPoint::from_bytes(&r_b),
+            &Sm2KxConfirm::from_bytes(&s_b),
+        )
+        .expect("Rust initiator rejected the FFI responder's reply");
+
+    let mut key_b = [0u8; KLEN];
+    let r = unsafe {
+        gmcrypto_sm2_kx_responder_finish(resp, sa.to_bytes().as_ptr(), key_b.as_mut_ptr())
+    };
+    assert_eq!(
+        r, GMCRYPTO_OK,
+        "FFI responder rejected the Rust initiator's S_A"
+    );
+    assert_eq!(key_a.as_bytes(), key_b.as_slice());
+    kx_free_keys(&[a, b]);
+}
+
+/// THE HEADLINE (scope Q2.3): the GM/T 0003.5 recommended-curve worked
+/// example reproduced byte-for-byte THROUGH THE C ABI — fixed standard
+/// ephemerals via `_with_rng`, every wire value asserted against the
+/// standard (`R_A`, `R_B`, `S_B`, `S_A`, `K` on both sides). The ids
+/// ride the FFI default (`len == 0` → `"1234567812345678"`), which is
+/// exactly the worked example's ID for both parties.
+#[test]
+fn sm2_kx_kat_through_ffi() {
+    const KLEN: usize = 16;
+    let a = kx_keypair(&KX_D_A);
+    let b = kx_keypair(&KX_D_B);
+
+    let mut eph_a = KX_R_A_EPH;
+    let mut r_a = [0u8; KX_PT];
+    let init = unsafe {
+        gmcrypto_sm2_kx_initiator_new_with_rng(
+            a.0,
+            b.1,
+            ptr::null(),
+            0,
+            ptr::null(),
+            0,
+            KLEN,
+            Some(fixed32_rng_callback),
+            (&raw mut eph_a).cast::<core::ffi::c_void>(),
+            r_a.as_mut_ptr(),
+        )
+    };
+    assert!(!init.is_null());
+    assert_eq!(r_a, KX_R_A_SEC1, "R_A != standard through the FFI");
+
+    let resp =
+        unsafe { gmcrypto_sm2_kx_responder_new(b.0, a.1, ptr::null(), 0, ptr::null(), 0, KLEN) };
+    assert!(!resp.is_null());
+    let mut eph_b = KX_R_B_EPH;
+    let mut r_b = [0u8; KX_PT];
+    let mut s_b = [0u8; KX_CT];
+    let r = unsafe {
+        gmcrypto_sm2_kx_responder_respond_with_rng(
+            resp,
+            r_a.as_ptr(),
+            Some(fixed32_rng_callback),
+            (&raw mut eph_b).cast::<core::ffi::c_void>(),
+            r_b.as_mut_ptr(),
+            s_b.as_mut_ptr(),
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert_eq!(r_b, KX_R_B_SEC1, "R_B != standard through the FFI");
+    assert_eq!(s_b, KX_EXPECT_S_B, "S_B != standard through the FFI");
+
+    let mut key_a = [0u8; KLEN];
+    let mut s_a = [0u8; KX_CT];
+    let r = unsafe {
+        gmcrypto_sm2_kx_initiator_confirm(
+            init,
+            r_b.as_ptr(),
+            s_b.as_ptr(),
+            key_a.as_mut_ptr(),
+            s_a.as_mut_ptr(),
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert_eq!(
+        key_a, KX_EXPECT_K,
+        "K (initiator) != standard through the FFI"
+    );
+    assert_eq!(s_a, KX_EXPECT_S_A, "S_A != standard through the FFI");
+
+    let mut key_b = [0u8; KLEN];
+    let r = unsafe { gmcrypto_sm2_kx_responder_finish(resp, s_a.as_ptr(), key_b.as_mut_ptr()) };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert_eq!(
+        key_b, KX_EXPECT_K,
+        "K (responder) != standard through the FFI"
+    );
+    kx_free_keys(&[a, b]);
+}
+
+/// Tampered `S_B` at confirm → ERR (handle consumed either way).
+#[test]
+fn sm2_kx_confirm_rejects_tampered_s_b() {
+    const KLEN: usize = 16;
+    let a = kx_keypair(&[0x21u8; 32]);
+    let b = kx_keypair(&[0x47u8; 32]);
+    let mut r_a = [0u8; KX_PT];
+    let init = unsafe {
+        gmcrypto_sm2_kx_initiator_new(
+            a.0,
+            b.1,
+            ptr::null(),
+            0,
+            ptr::null(),
+            0,
+            KLEN,
+            r_a.as_mut_ptr(),
+        )
+    };
+    let resp =
+        unsafe { gmcrypto_sm2_kx_responder_new(b.0, a.1, ptr::null(), 0, ptr::null(), 0, KLEN) };
+    let mut r_b = [0u8; KX_PT];
+    let mut s_b = [0u8; KX_CT];
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_kx_responder_respond(
+                resp,
+                r_a.as_ptr(),
+                r_b.as_mut_ptr(),
+                s_b.as_mut_ptr(),
+            )
+        },
+        GMCRYPTO_OK
+    );
+    s_b[0] ^= 1; // tamper
+    let mut key_a = [0u8; KLEN];
+    let mut s_a = [0u8; KX_CT];
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_kx_initiator_confirm(
+                init,
+                r_b.as_ptr(),
+                s_b.as_ptr(),
+                key_a.as_mut_ptr(),
+                s_a.as_mut_ptr(),
+            )
+        },
+        GMCRYPTO_ERR,
+        "tampered S_B accepted by the FFI"
+    );
+    unsafe { gmcrypto_sm2_kx_responder_free(resp) };
+    kx_free_keys(&[a, b]);
+}
+
+/// Tampered `S_A` at finish → ERR; the responder never releases K.
+#[test]
+fn sm2_kx_finish_rejects_tampered_s_a() {
+    const KLEN: usize = 16;
+    let a = kx_keypair(&[0x21u8; 32]);
+    let b = kx_keypair(&[0x47u8; 32]);
+    let mut r_a = [0u8; KX_PT];
+    let init = unsafe {
+        gmcrypto_sm2_kx_initiator_new(
+            a.0,
+            b.1,
+            ptr::null(),
+            0,
+            ptr::null(),
+            0,
+            KLEN,
+            r_a.as_mut_ptr(),
+        )
+    };
+    let resp =
+        unsafe { gmcrypto_sm2_kx_responder_new(b.0, a.1, ptr::null(), 0, ptr::null(), 0, KLEN) };
+    let mut r_b = [0u8; KX_PT];
+    let mut s_b = [0u8; KX_CT];
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_kx_responder_respond(
+                resp,
+                r_a.as_ptr(),
+                r_b.as_mut_ptr(),
+                s_b.as_mut_ptr(),
+            )
+        },
+        GMCRYPTO_OK
+    );
+    let mut key_a = [0u8; KLEN];
+    let mut s_a = [0u8; KX_CT];
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_kx_initiator_confirm(
+                init,
+                r_b.as_ptr(),
+                s_b.as_ptr(),
+                key_a.as_mut_ptr(),
+                s_a.as_mut_ptr(),
+            )
+        },
+        GMCRYPTO_OK
+    );
+    s_a[31] ^= 0x80; // tamper
+    let mut key_b = [0u8; KLEN];
+    assert_eq!(
+        unsafe { gmcrypto_sm2_kx_responder_finish(resp, s_a.as_ptr(), key_b.as_mut_ptr()) },
+        GMCRYPTO_ERR,
+        "tampered S_A accepted by the FFI"
+    );
+    kx_free_keys(&[a, b]);
+}
+
+/// Corrupt (off-curve) `R_A` → respond fails AND spends the handle:
+/// a retry with the GOOD bytes must also fail (the Rust responder was
+/// consumed by the failed attempt — documented `Spent` semantics).
+#[test]
+fn sm2_kx_respond_rejects_corrupt_r_a_and_spends_handle() {
+    const KLEN: usize = 16;
+    let a = kx_keypair(&[0x21u8; 32]);
+    let b = kx_keypair(&[0x47u8; 32]);
+    let mut r_a = [0u8; KX_PT];
+    let init = unsafe {
+        gmcrypto_sm2_kx_initiator_new(
+            a.0,
+            b.1,
+            ptr::null(),
+            0,
+            ptr::null(),
+            0,
+            KLEN,
+            r_a.as_mut_ptr(),
+        )
+    };
+    assert!(!init.is_null());
+    let resp =
+        unsafe { gmcrypto_sm2_kx_responder_new(b.0, a.1, ptr::null(), 0, ptr::null(), 0, KLEN) };
+    let mut bad = r_a;
+    bad[10] ^= 1; // off-curve x
+    let mut r_b = [0u8; KX_PT];
+    let mut s_b = [0u8; KX_CT];
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_kx_responder_respond(
+                resp,
+                bad.as_ptr(),
+                r_b.as_mut_ptr(),
+                s_b.as_mut_ptr(),
+            )
+        },
+        GMCRYPTO_ERR,
+        "off-curve R_A accepted"
+    );
+    // Spent: the good bytes can no longer succeed on this handle.
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_kx_responder_respond(
+                resp,
+                r_a.as_ptr(),
+                r_b.as_mut_ptr(),
+                s_b.as_mut_ptr(),
+            )
+        },
+        GMCRYPTO_ERR,
+        "spent responder accepted a retry"
+    );
+    unsafe {
+        gmcrypto_sm2_kx_responder_free(resp);
+        gmcrypto_sm2_kx_initiator_free(init);
+    }
+    kx_free_keys(&[a, b]);
+}
+
+/// A stray second `_respond` returns ERR WITHOUT disturbing the
+/// in-flight state: the handshake still completes afterwards.
+#[test]
+fn sm2_kx_double_respond_rejected_but_preserves_state() {
+    const KLEN: usize = 16;
+    let a = kx_keypair(&[0x21u8; 32]);
+    let b = kx_keypair(&[0x47u8; 32]);
+    let mut r_a = [0u8; KX_PT];
+    let init = unsafe {
+        gmcrypto_sm2_kx_initiator_new(
+            a.0,
+            b.1,
+            ptr::null(),
+            0,
+            ptr::null(),
+            0,
+            KLEN,
+            r_a.as_mut_ptr(),
+        )
+    };
+    let resp =
+        unsafe { gmcrypto_sm2_kx_responder_new(b.0, a.1, ptr::null(), 0, ptr::null(), 0, KLEN) };
+    let mut r_b = [0u8; KX_PT];
+    let mut s_b = [0u8; KX_CT];
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_kx_responder_respond(
+                resp,
+                r_a.as_ptr(),
+                r_b.as_mut_ptr(),
+                s_b.as_mut_ptr(),
+            )
+        },
+        GMCRYPTO_OK
+    );
+    // Misuse: second respond → ERR, state preserved.
+    let mut r_b2 = [0u8; KX_PT];
+    let mut s_b2 = [0u8; KX_CT];
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_kx_responder_respond(
+                resp,
+                r_a.as_ptr(),
+                r_b2.as_mut_ptr(),
+                s_b2.as_mut_ptr(),
+            )
+        },
+        GMCRYPTO_ERR,
+        "double respond accepted"
+    );
+    // The original transcript still confirms + finishes.
+    let mut key_a = [0u8; KLEN];
+    let mut s_a = [0u8; KX_CT];
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_kx_initiator_confirm(
+                init,
+                r_b.as_ptr(),
+                s_b.as_ptr(),
+                key_a.as_mut_ptr(),
+                s_a.as_mut_ptr(),
+            )
+        },
+        GMCRYPTO_OK
+    );
+    let mut key_b = [0u8; KLEN];
+    assert_eq!(
+        unsafe { gmcrypto_sm2_kx_responder_finish(resp, s_a.as_ptr(), key_b.as_mut_ptr()) },
+        GMCRYPTO_OK,
+        "in-flight state was destroyed by the misuse call"
+    );
+    assert_eq!(key_a, key_b);
+    kx_free_keys(&[a, b]);
+}
+
+/// `_finish` before a successful `_respond` → ERR (handle consumed).
+#[test]
+fn sm2_kx_finish_before_respond_rejected() {
+    const KLEN: usize = 16;
+    let a = kx_keypair(&[0x21u8; 32]);
+    let b = kx_keypair(&[0x47u8; 32]);
+    let resp =
+        unsafe { gmcrypto_sm2_kx_responder_new(b.0, a.1, ptr::null(), 0, ptr::null(), 0, KLEN) };
+    assert!(!resp.is_null());
+    let s_a = [0u8; KX_CT];
+    let mut key_b = [0u8; KLEN];
+    assert_eq!(
+        unsafe { gmcrypto_sm2_kx_responder_finish(resp, s_a.as_ptr(), key_b.as_mut_ptr()) },
+        GMCRYPTO_ERR,
+        "finish before respond accepted"
+    );
+    kx_free_keys(&[a, b]);
+}
+
+/// Null pointers → NULL handle, never a crash.
+#[test]
+fn sm2_kx_null_inputs_rejected() {
+    const KLEN: usize = 16;
+    let a = kx_keypair(&[0x21u8; 32]);
+    let b = kx_keypair(&[0x47u8; 32]);
+    let mut r_a = [0u8; KX_PT];
+
+    // Null key handles.
+    assert!(
+        unsafe {
+            gmcrypto_sm2_kx_initiator_new(
+                ptr::null(),
+                b.1,
+                ptr::null(),
+                0,
+                ptr::null(),
+                0,
+                KLEN,
+                r_a.as_mut_ptr(),
+            )
+        }
+        .is_null()
+    );
+    assert!(
+        unsafe {
+            gmcrypto_sm2_kx_initiator_new(
+                a.0,
+                ptr::null(),
+                ptr::null(),
+                0,
+                ptr::null(),
+                0,
+                KLEN,
+                r_a.as_mut_ptr(),
+            )
+        }
+        .is_null()
+    );
+    assert!(
+        unsafe {
+            gmcrypto_sm2_kx_responder_new(ptr::null(), a.1, ptr::null(), 0, ptr::null(), 0, KLEN)
+        }
+        .is_null()
+    );
+
+    // Null R_A out-buffer.
+    assert!(
+        unsafe {
+            gmcrypto_sm2_kx_initiator_new(
+                a.0,
+                b.1,
+                ptr::null(),
+                0,
+                ptr::null(),
+                0,
+                KLEN,
+                ptr::null_mut(),
+            )
+        }
+        .is_null()
+    );
+
+    // Free on NULL is a no-op.
+    unsafe {
+        gmcrypto_sm2_kx_initiator_free(ptr::null_mut());
+        gmcrypto_sm2_kx_responder_free(ptr::null_mut());
+    }
+    kx_free_keys(&[a, b]);
+}
+
+/// Bad `klen` and null / failing RNG callbacks → NULL handle.
+#[test]
+fn sm2_kx_bad_klen_and_rng_callback_rejected() {
+    const KLEN: usize = 16;
+    let a = kx_keypair(&[0x21u8; 32]);
+    let b = kx_keypair(&[0x47u8; 32]);
+    let mut r_a = [0u8; KX_PT];
+
+    // klen == 0 (core validate_params reject).
+    assert!(
+        unsafe {
+            gmcrypto_sm2_kx_initiator_new(
+                a.0,
+                b.1,
+                ptr::null(),
+                0,
+                ptr::null(),
+                0,
+                0,
+                r_a.as_mut_ptr(),
+            )
+        }
+        .is_null()
+    );
+    assert!(
+        unsafe { gmcrypto_sm2_kx_responder_new(b.0, a.1, ptr::null(), 0, ptr::null(), 0, 0) }
+            .is_null()
+    );
+
+    // Null / failing RNG callback on the _with_rng variants.
+    assert!(
+        unsafe {
+            gmcrypto_sm2_kx_initiator_new_with_rng(
+                a.0,
+                b.1,
+                ptr::null(),
+                0,
+                ptr::null(),
+                0,
+                KLEN,
+                None,
+                ptr::null_mut(),
+                r_a.as_mut_ptr(),
+            )
+        }
+        .is_null()
+    );
+    assert!(
+        unsafe {
+            gmcrypto_sm2_kx_initiator_new_with_rng(
+                a.0,
+                b.1,
+                ptr::null(),
+                0,
+                ptr::null(),
+                0,
+                KLEN,
+                Some(always_fail_rng_callback),
+                ptr::null_mut(),
+                r_a.as_mut_ptr(),
+            )
+        }
+        .is_null()
+    );
+    kx_free_keys(&[a, b]);
+}

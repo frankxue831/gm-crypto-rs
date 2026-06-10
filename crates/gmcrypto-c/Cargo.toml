@@ -26,7 +26,9 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 # the committed `include/gmcrypto.h` always matches a default
 # `cargo build -p gmcrypto-c`. So `sm4-aead` + `sm4-xts` are enabled
 # unconditionally on the core dep here (no forwarding C-shim feature).
-gmcrypto-core = { path = "../gmcrypto-core", version = "=1.1.0", features = ["sm4-aead", "sm4-xts"] }
+# v1.2 (Q2.4): `sm2-key-exchange` joins them under the same posture —
+# the SM2-KX FFI symbols + opaque types are always-on.
+gmcrypto-core = { path = "../gmcrypto-core", version = "=1.1.0", features = ["sm4-aead", "sm4-xts", "sm2-key-exchange"] }
 getrandom.workspace = true
 rand_core.workspace = true
 

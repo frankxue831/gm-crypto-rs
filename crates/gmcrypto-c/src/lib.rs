@@ -85,6 +85,14 @@ use gmcrypto_core::sm2::{
     DEFAULT_SIGNER_ID, Sm2PrivateKey, Sm2PublicKey, decrypt as sm2_decrypt, encrypt as sm2_encrypt,
     sign_with_id, verify_with_id,
 };
+// v1.2 — SM2 key-exchange (GM/T 0003.3) FFI. Always compiled into the
+// C ABI (the v0.23 W3 posture: `sm2-key-exchange` is enabled
+// unconditionally on the core dep — see Cargo.toml).
+use gmcrypto_core::sm2::key_exchange::{
+    Sm2KxConfirm, Sm2KxEphemeralPoint, Sm2KxInitiator as InnerSm2KxInitiator,
+    Sm2KxInitiatorWaiting as InnerSm2KxInitiatorWaiting, Sm2KxResponder as InnerSm2KxResponder,
+    Sm2KxResponderWaiting as InnerSm2KxResponderWaiting,
+};
 use gmcrypto_core::sm3::{Sm3 as InnerSm3, hash as sm3_hash};
 use gmcrypto_core::sm4::{
     Sm4CbcDecryptor as InnerSm4CbcDec, Sm4CbcEncryptor as InnerSm4CbcEnc, Sm4Cipher, mode_cbc,
@@ -133,6 +141,11 @@ pub const GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE: usize = 65;
 
 /// SM2 private-key scalar size in bytes (32 = 256 bits big-endian).
 pub const GMCRYPTO_SM2_SCALAR_SIZE: usize = 32;
+
+/// SM2 key-exchange confirmation-tag size in bytes (`S_A` / `S_B` are
+/// SM3 digests; v1.2). Ephemeral points `R_A` / `R_B` use
+/// [`GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE`] (65).
+pub const GMCRYPTO_SM2_KX_CONFIRM_SIZE: usize = 32;
 
 // ============================================================
 // Opaque handle types (cbindgen emits as forward-declared structs).
@@ -199,6 +212,44 @@ pub struct gmcrypto_sm2_privkey_t {
 /// Opaque handle for an SM2 public key.
 pub struct gmcrypto_sm2_pubkey_t {
     inner: Sm2PublicKey,
+}
+
+/// Opaque handle for an SM2 key-exchange INITIATOR (party A; GM/T
+/// 0003.3, v1.2). Born already awaiting the responder's reply —
+/// [`gmcrypto_sm2_kx_initiator_new`] samples the ephemeral internally
+/// and writes `R_A` immediately, so no pre-ephemeral state exists in
+/// C. Pair with exactly one [`gmcrypto_sm2_kx_initiator_confirm`]
+/// (which consumes + frees) **or** one
+/// [`gmcrypto_sm2_kx_initiator_free`].
+pub struct gmcrypto_sm2_kx_initiator_t {
+    inner: InnerSm2KxInitiatorWaiting,
+    klen: usize,
+}
+
+/// Internal state for the responder handle. The Rust `respond`
+/// consumes the responder, so a FAILED respond leaves nothing to
+/// retry with — the handle transitions to `Spent` and every further
+/// call fails (the caller frees it). A successful respond moves to
+/// `Waiting`; a second `_respond` on a `Waiting` handle returns
+/// `GMCRYPTO_ERR` **without** touching the in-flight state.
+enum InnerKxResponderState {
+    // Boxed: the live variants are large (static key + points + Z
+    // hashes) next to the zero-size `Spent` (clippy
+    // large-enum-variant); the handle itself is heap-allocated anyway.
+    Fresh(Box<InnerSm2KxResponder>),
+    Waiting(Box<InnerSm2KxResponderWaiting>),
+    Spent,
+}
+
+/// Opaque handle for an SM2 key-exchange RESPONDER (party B; GM/T
+/// 0003.3, v1.2). Lifecycle: [`gmcrypto_sm2_kx_responder_new`] →
+/// [`gmcrypto_sm2_kx_responder_respond`] (takes `R_A`, emits
+/// `R_B` + `S_B`) → [`gmcrypto_sm2_kx_responder_finish`] (takes
+/// `S_A`, releases `K`, consumes + frees). Pair with exactly one
+/// `_finish` **or** one [`gmcrypto_sm2_kx_responder_free`].
+pub struct gmcrypto_sm2_kx_responder_t {
+    state: InnerKxResponderState,
+    klen: usize,
 }
 
 // ============================================================
@@ -2536,4 +2587,541 @@ pub unsafe extern "C" fn gmcrypto_sm2_encrypt_with_rng(
         };
         unsafe { write_output(&ct, out_der_ct, out_capacity, out_actual_len) }
     })
+}
+
+// ============================================================
+// SM2 key exchange (GM/T 0003.3) — v1.2.
+//
+// C-shaped projection of the v1.1 `sm2::key_exchange` role state-
+// machines. The Rust consume-on-transition typestate cannot cross the
+// FFI, so the four Rust types collapse to TWO opaque handles (scope
+// Q2.2, docs/v1.2-scope.md):
+//
+// - the INITIATOR handle is born "waiting": `_new` samples the
+//   ephemeral internally and writes `R_A` immediately, so the
+//   pre-ephemeral state is unrepresentable in C;
+// - `_confirm` / `_finish` CONSUME + FREE their handle (the v0.10
+//   `_finalize*` precedent); `_free` is for abandonment only;
+// - a second `_respond` on a waiting responder returns GMCRYPTO_ERR
+//   with the in-flight state preserved; a FAILED `_respond` spends
+//   the handle (the Rust responder was consumed by the attempt).
+//
+// Misuse ordering, invalid peer points, tag mismatches, RNG failure,
+// and bad parameters all collapse to the single GMCRYPTO_ERR (the
+// failure-mode invariant). The agreed key is written to caller
+// memory — the CALLER owns wiping `key_out` (the
+// `gmcrypto_sm2_privkey_to_sec1_be` contract); handle-internal
+// secrets zeroize on drop/consume in the core.
+//
+// RNG: `_new` / `_respond` use `getrandom::SysRng`; the `_with_rng`
+// variants take the v0.5 `gmcrypto_rng_callback` + context (which is
+// how the c_smoke suite reproduces the GM/T 0003.5 recommended-curve
+// KAT byte-for-byte through this ABI).
+// ============================================================
+
+/// KX identity-string convention (mirrors the sign FFI): `len == 0`
+/// selects [`DEFAULT_SIGNER_ID`] (`"1234567812345678"` — also the ID
+/// the GM/T 0003.5 worked example uses for both parties). Over-long
+/// ids collapse to the single failure mode in the core constructors.
+///
+/// # Safety
+///
+/// `ptr` must be valid for `len` reads when `len > 0` (the
+/// `try_slice` contract).
+unsafe fn kx_id<'a>(ptr: *const u8, len: usize) -> Option<&'a [u8]> {
+    if len == 0 {
+        Some(DEFAULT_SIGNER_ID)
+    } else {
+        // SAFETY: forwarded caller contract — `ptr` valid for `len` reads.
+        unsafe { try_slice(ptr, len) }
+    }
+}
+
+/// Copy an exactly-`N`-byte slice (just produced by `try_slice(ptr, N)`)
+/// into an owned array for the core's fixed-size wire types.
+fn kx_to_array<const N: usize>(s: &[u8]) -> [u8; N] {
+    let mut a = [0u8; N];
+    a.copy_from_slice(s);
+    a
+}
+
+/// Shared tail of the two initiator constructors: run the core
+/// state-machine (`new` → `produce_ephemeral`) and box the waiting
+/// state. `out_r_a` is the caller's already-validated 65-byte buffer.
+fn kx_initiator_build<R: rand_core::TryCryptoRng>(
+    d: &Sm2PrivateKey,
+    p_peer: &Sm2PublicKey,
+    id_a: &[u8],
+    id_b: &[u8],
+    klen: usize,
+    out_r_a: &mut [u8],
+    rng: &mut R,
+) -> Option<*mut gmcrypto_sm2_kx_initiator_t> {
+    let initiator = InnerSm2KxInitiator::new(d, p_peer, id_a, id_b, klen).ok()?;
+    let (r_a, waiting) = initiator.produce_ephemeral(rng).ok()?;
+    out_r_a.copy_from_slice(&r_a.to_bytes());
+    Some(Box::into_raw(Box::new(gmcrypto_sm2_kx_initiator_t {
+        inner: waiting,
+        klen,
+    })))
+}
+
+/// Shared body of the two responder `_respond` entry points: state
+/// transition + the core `respond`. Returns the `(R_B, S_B)` wire
+/// bytes to write out, or `None` for the single failure mode.
+fn kx_respond<R: rand_core::TryCryptoRng>(
+    handle: &mut gmcrypto_sm2_kx_responder_t,
+    r_a: &[u8; GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE],
+    rng: &mut R,
+) -> Option<(
+    [u8; GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE],
+    [u8; GMCRYPTO_SM2_KX_CONFIRM_SIZE],
+)> {
+    // A `Waiting` handle must not be disturbed by a misuse call —
+    // check before take-and-replace so the in-flight handshake
+    // survives a stray second `_respond`.
+    if !matches!(handle.state, InnerKxResponderState::Fresh(_)) {
+        return None;
+    }
+    // The Rust `respond` consumes the responder; on failure the handle
+    // stays `Spent` (nothing remains to retry with — caller frees).
+    let prev = core::mem::replace(&mut handle.state, InnerKxResponderState::Spent);
+    let InnerKxResponderState::Fresh(responder) = prev else {
+        return None;
+    };
+    let (r_b, s_b, waiting) = (*responder)
+        .respond(&Sm2KxEphemeralPoint::from_bytes(r_a), rng)
+        .ok()?;
+    handle.state = InnerKxResponderState::Waiting(Box::new(waiting));
+    Some((r_b.to_bytes(), s_b.to_bytes()))
+}
+
+/// Construct a key-exchange INITIATOR (party A) and write its
+/// ephemeral point `R_A` (SEC1 uncompressed `04 ‖ X ‖ Y`, exactly
+/// [`GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE`] = 65 bytes) to `out_r_a`.
+/// The handle is created already awaiting the responder's reply: send
+/// `out_r_a` to the responder, then call
+/// [`gmcrypto_sm2_kx_initiator_confirm`] with its `(R_B, S_B)`.
+///
+/// `local_privkey` is A's static key; `peer_pubkey` is B's static
+/// public key. `id_a` / `id_b` are the parties' identity strings
+/// (`len == 0` selects the GM/T default ID `"1234567812345678"`).
+/// `klen` is the agreed-key length in bytes (non-zero, under the KDF
+/// ceiling); the SAME `klen` sizes `key_out` at confirm time.
+/// Ephemeral randomness comes from the OS (`getrandom::SysRng`).
+///
+/// Returns the handle, or NULL on any failure (null pointer, bad
+/// `klen`/`id`, RNG failure — indistinguishable by design). Pair with
+/// exactly one `_confirm` (which frees) **or** one `_free`.
+///
+/// # Safety
+///
+/// `local_privkey` / `peer_pubkey` must be valid handles from this
+/// library; `out_r_a` must be valid for 65 writes; `id_a` / `id_b`
+/// must be valid for their lengths when non-zero.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_kx_initiator_new(
+    local_privkey: *const gmcrypto_sm2_privkey_t,
+    peer_pubkey: *const gmcrypto_sm2_pubkey_t,
+    id_a: *const u8,
+    id_a_len: usize,
+    id_b: *const u8,
+    id_b_len: usize,
+    klen: usize,
+    out_r_a: *mut u8,
+) -> *mut gmcrypto_sm2_kx_initiator_t {
+    let result = std::panic::catch_unwind(|| {
+        if local_privkey.is_null() || peer_pubkey.is_null() {
+            return None;
+        }
+        // SAFETY: id pointers valid per the caller contract.
+        let ida = unsafe { kx_id(id_a, id_a_len) }?;
+        // SAFETY: as above.
+        let idb = unsafe { kx_id(id_b, id_b_len) }?;
+        // SAFETY: caller guarantees `out_r_a` valid for 65 writes.
+        let out = unsafe { try_slice_mut(out_r_a, GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE) }?;
+        // SAFETY: non-null per the check above; valid handles per contract.
+        let d = unsafe { &*local_privkey };
+        // SAFETY: as above.
+        let p = unsafe { &*peer_pubkey };
+        kx_initiator_build(
+            &d.inner,
+            &p.inner,
+            ida,
+            idb,
+            klen,
+            out,
+            &mut getrandom::SysRng,
+        )
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// `_with_rng` variant of [`gmcrypto_sm2_kx_initiator_new`]: identical
+/// contract except the ephemeral randomness comes from the caller's
+/// `rng_callback` (the v0.5 `gmcrypto_rng_callback` shape) rather than
+/// `getrandom::SysRng`. A null or failing callback returns NULL —
+/// indistinguishable from every other failure by design.
+///
+/// # Safety
+///
+/// As [`gmcrypto_sm2_kx_initiator_new`]; additionally `rng_callback`
+/// must be NULL or a valid function pointer honouring the callback
+/// contract (fill `buf_len` bytes, return 0 on success).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_kx_initiator_new_with_rng(
+    local_privkey: *const gmcrypto_sm2_privkey_t,
+    peer_pubkey: *const gmcrypto_sm2_pubkey_t,
+    id_a: *const u8,
+    id_a_len: usize,
+    id_b: *const u8,
+    id_b_len: usize,
+    klen: usize,
+    rng_callback: gmcrypto_rng_callback,
+    rng_context: *mut c_void,
+    out_r_a: *mut u8,
+) -> *mut gmcrypto_sm2_kx_initiator_t {
+    let result = std::panic::catch_unwind(|| {
+        if local_privkey.is_null() || peer_pubkey.is_null() {
+            return None;
+        }
+        let callback = rng_callback?;
+        // SAFETY: id pointers valid per the caller contract.
+        let ida = unsafe { kx_id(id_a, id_a_len) }?;
+        // SAFETY: as above.
+        let idb = unsafe { kx_id(id_b, id_b_len) }?;
+        // SAFETY: caller guarantees `out_r_a` valid for 65 writes.
+        let out = unsafe { try_slice_mut(out_r_a, GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE) }?;
+        // SAFETY: non-null per the check above; valid handles per contract.
+        let d = unsafe { &*local_privkey };
+        // SAFETY: as above.
+        let p = unsafe { &*peer_pubkey };
+        let mut rng = CallbackRng {
+            callback,
+            context: rng_context,
+        };
+        kx_initiator_build(&d.inner, &p.inner, ida, idb, klen, out, &mut rng)
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// Receive the responder's reply and finish the initiator side:
+/// verify `S_B` (constant-time), and on success write the agreed key
+/// (exactly `klen` bytes, the `klen` given at `_new`) to `key_out`
+/// and the initiator's confirmation tag `S_A`
+/// ([`GMCRYPTO_SM2_KX_CONFIRM_SIZE`] = 32 bytes) to `out_s_a` — send
+/// `S_A` to the responder. `r_b` is the responder's ephemeral point
+/// (65 bytes); `s_b` its confirmation tag (32 bytes).
+///
+/// CONSUMES + FREES the handle — even when the arguments are invalid
+/// or the confirmation fails (the `_finalize*` precedent); do NOT
+/// call `_free` afterwards. Returns [`GMCRYPTO_OK`] only when `S_B`
+/// verified and the key was written; every failure (invalid `R_B`,
+/// tag mismatch, null pointer) is the single [`GMCRYPTO_ERR`].
+/// **The caller owns wiping `key_out`.**
+///
+/// # Safety
+///
+/// `initiator` must be a live handle from a `_new` (not yet consumed
+/// or freed); `r_b` valid for 65 reads, `s_b` for 32 reads, `key_out`
+/// for `klen` writes, `out_s_a` for 32 writes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_kx_initiator_confirm(
+    initiator: *mut gmcrypto_sm2_kx_initiator_t,
+    r_b: *const u8,
+    s_b: *const u8,
+    key_out: *mut u8,
+    out_s_a: *mut u8,
+) -> c_int {
+    ffi_guard(|| {
+        if initiator.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        // SAFETY: came from Box::into_raw; take ownership + free
+        // (consumed even on argument errors, per the _finalize
+        // precedent — the drop wipes the ephemeral state).
+        let boxed = unsafe { Box::from_raw(initiator) };
+        let gmcrypto_sm2_kx_initiator_t { inner, klen } = *boxed;
+        let rb = match unsafe { try_slice(r_b, GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let sb = match unsafe { try_slice(s_b, GMCRYPTO_SM2_KX_CONFIRM_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let key_dst = match unsafe { try_slice_mut(key_out, klen) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let sa_dst = match unsafe { try_slice_mut(out_s_a, GMCRYPTO_SM2_KX_CONFIRM_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let r_b_point = Sm2KxEphemeralPoint::from_bytes(&kx_to_array(rb));
+        let s_b_tag = Sm2KxConfirm::from_bytes(&kx_to_array(sb));
+        match inner.confirm(&r_b_point, &s_b_tag) {
+            Ok((key, s_a)) => {
+                key_dst.copy_from_slice(key.as_bytes());
+                sa_dst.copy_from_slice(&s_a.to_bytes());
+                // `key` (Sm2SharedKey) drops here → the core zeroizes
+                // its copy; the caller owns the `key_out` bytes.
+                GMCRYPTO_OK
+            }
+            Err(_) => GMCRYPTO_ERR,
+        }
+    })
+}
+
+/// Free an UNCONSUMED initiator handle (abandonment path — e.g. the
+/// responder never replied). Safe on NULL. Do NOT call after
+/// `_confirm` (which already consumed + freed the handle).
+///
+/// # Safety
+///
+/// `initiator` must be NULL or a live handle from a `_new`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_kx_initiator_free(
+    initiator: *mut gmcrypto_sm2_kx_initiator_t,
+) {
+    if !initiator.is_null() {
+        // SAFETY: came from Box::into_raw; reclaim + drop (the core's
+        // drop-wipes run on the inner ephemeral state).
+        drop(unsafe { Box::from_raw(initiator) });
+    }
+}
+
+/// Construct a key-exchange RESPONDER (party B). `local_privkey` is
+/// B's static key; `peer_pubkey` is A's static public key; ids and
+/// `klen` follow the [`gmcrypto_sm2_kx_initiator_new`] conventions
+/// (and must match the initiator's, or the confirmation tags will
+/// not verify). The handle then waits for the initiator's `R_A` —
+/// call [`gmcrypto_sm2_kx_responder_respond`].
+///
+/// Returns the handle, or NULL on any failure. Pair with exactly one
+/// [`gmcrypto_sm2_kx_responder_finish`] (which frees) **or** one
+/// [`gmcrypto_sm2_kx_responder_free`].
+///
+/// # Safety
+///
+/// `local_privkey` / `peer_pubkey` must be valid handles from this
+/// library; `id_a` / `id_b` must be valid for their lengths when
+/// non-zero.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_kx_responder_new(
+    local_privkey: *const gmcrypto_sm2_privkey_t,
+    peer_pubkey: *const gmcrypto_sm2_pubkey_t,
+    id_a: *const u8,
+    id_a_len: usize,
+    id_b: *const u8,
+    id_b_len: usize,
+    klen: usize,
+) -> *mut gmcrypto_sm2_kx_responder_t {
+    let result = std::panic::catch_unwind(|| {
+        if local_privkey.is_null() || peer_pubkey.is_null() {
+            return None;
+        }
+        // SAFETY: id pointers valid per the caller contract.
+        let ida = unsafe { kx_id(id_a, id_a_len) }?;
+        // SAFETY: as above.
+        let idb = unsafe { kx_id(id_b, id_b_len) }?;
+        // SAFETY: non-null per the check above; valid handles per contract.
+        let d = unsafe { &*local_privkey };
+        // SAFETY: as above.
+        let p = unsafe { &*peer_pubkey };
+        let responder = InnerSm2KxResponder::new(&d.inner, &p.inner, ida, idb, klen).ok()?;
+        Some(Box::into_raw(Box::new(gmcrypto_sm2_kx_responder_t {
+            state: InnerKxResponderState::Fresh(Box::new(responder)),
+            klen,
+        })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// Receive the initiator's `R_A` (65 bytes) and produce the
+/// responder's reply: writes `R_B` (65 bytes) to `out_r_b` and the
+/// responder's confirmation tag `S_B` (32 bytes) to `out_s_b` — send
+/// both to the initiator, then call
+/// [`gmcrypto_sm2_kx_responder_finish`] with its `S_A`. Ephemeral
+/// randomness comes from the OS (`getrandom::SysRng`).
+///
+/// The handle stays alive (it now holds the agreed key, wiped on
+/// drop, pending the initiator's confirmation). Calling `_respond`
+/// twice returns [`GMCRYPTO_ERR`] without disturbing the in-flight
+/// state. A FAILED respond (invalid `R_A`, RNG failure) spends the
+/// handle — every further call fails and the caller frees it.
+///
+/// # Safety
+///
+/// `responder` must be a live handle from `_new`; `r_a` valid for 65
+/// reads, `out_r_b` for 65 writes, `out_s_b` for 32 writes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_kx_responder_respond(
+    responder: *mut gmcrypto_sm2_kx_responder_t,
+    r_a: *const u8,
+    out_r_b: *mut u8,
+    out_s_b: *mut u8,
+) -> c_int {
+    ffi_guard(|| {
+        if responder.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let ra = match unsafe { try_slice(r_a, GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let rb_dst = match unsafe { try_slice_mut(out_r_b, GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let sb_dst = match unsafe { try_slice_mut(out_s_b, GMCRYPTO_SM2_KX_CONFIRM_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: non-null per the check above; live handle per contract.
+        let handle = unsafe { &mut *responder };
+        match kx_respond(handle, &kx_to_array(ra), &mut getrandom::SysRng) {
+            Some((rb, sb)) => {
+                rb_dst.copy_from_slice(&rb);
+                sb_dst.copy_from_slice(&sb);
+                GMCRYPTO_OK
+            }
+            None => GMCRYPTO_ERR,
+        }
+    })
+}
+
+/// `_with_rng` variant of [`gmcrypto_sm2_kx_responder_respond`]:
+/// identical contract except the ephemeral randomness comes from the
+/// caller's `rng_callback` rather than `getrandom::SysRng`.
+///
+/// # Safety
+///
+/// As [`gmcrypto_sm2_kx_responder_respond`]; additionally
+/// `rng_callback` must be NULL or a valid function pointer honouring
+/// the callback contract.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_kx_responder_respond_with_rng(
+    responder: *mut gmcrypto_sm2_kx_responder_t,
+    r_a: *const u8,
+    rng_callback: gmcrypto_rng_callback,
+    rng_context: *mut c_void,
+    out_r_b: *mut u8,
+    out_s_b: *mut u8,
+) -> c_int {
+    ffi_guard(|| {
+        if responder.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let callback = match rng_callback {
+            Some(cb) => cb,
+            None => return GMCRYPTO_ERR,
+        };
+        let ra = match unsafe { try_slice(r_a, GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let rb_dst = match unsafe { try_slice_mut(out_r_b, GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let sb_dst = match unsafe { try_slice_mut(out_s_b, GMCRYPTO_SM2_KX_CONFIRM_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: non-null per the check above; live handle per contract.
+        let handle = unsafe { &mut *responder };
+        let mut rng = CallbackRng {
+            callback,
+            context: rng_context,
+        };
+        match kx_respond(handle, &kx_to_array(ra), &mut rng) {
+            Some((rb, sb)) => {
+                rb_dst.copy_from_slice(&rb);
+                sb_dst.copy_from_slice(&sb);
+                GMCRYPTO_OK
+            }
+            None => GMCRYPTO_ERR,
+        }
+    })
+}
+
+/// Verify the initiator's confirmation tag `S_A` (32 bytes,
+/// constant-time) and on success write the agreed key (exactly
+/// `klen` bytes, the `klen` given at `_new`) to `key_out`.
+///
+/// CONSUMES + FREES the handle — even when the arguments are invalid
+/// or the tag mismatches (the held key is wiped on drop in every
+/// case); do NOT call `_free` afterwards. Returns [`GMCRYPTO_OK`]
+/// only when `S_A` verified and the key was written; calling
+/// `_finish` before a successful `_respond` is the same single
+/// [`GMCRYPTO_ERR`]. **The caller owns wiping `key_out`.**
+///
+/// # Safety
+///
+/// `responder` must be a live handle from `_new` (not yet consumed
+/// or freed); `s_a` valid for 32 reads, `key_out` for `klen` writes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_kx_responder_finish(
+    responder: *mut gmcrypto_sm2_kx_responder_t,
+    s_a: *const u8,
+    key_out: *mut u8,
+) -> c_int {
+    ffi_guard(|| {
+        if responder.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        // SAFETY: came from Box::into_raw; take ownership + free
+        // (consumed even on argument errors, per the _finalize
+        // precedent — the drop wipes the held key).
+        let boxed = unsafe { Box::from_raw(responder) };
+        let gmcrypto_sm2_kx_responder_t { state, klen } = *boxed;
+        let sa = match unsafe { try_slice(s_a, GMCRYPTO_SM2_KX_CONFIRM_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let key_dst = match unsafe { try_slice_mut(key_out, klen) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let InnerKxResponderState::Waiting(waiting) = state else {
+            return GMCRYPTO_ERR;
+        };
+        match (*waiting).finish(&Sm2KxConfirm::from_bytes(&kx_to_array(sa))) {
+            Ok(key) => {
+                key_dst.copy_from_slice(key.as_bytes());
+                // `key` drops here → the core zeroizes its copy.
+                GMCRYPTO_OK
+            }
+            Err(_) => GMCRYPTO_ERR,
+        }
+    })
+}
+
+/// Free an UNCONSUMED responder handle (abandonment path — e.g. the
+/// initiator never confirmed, or a `_respond` failure spent the
+/// handle). Safe on NULL. Do NOT call after `_finish` (which already
+/// consumed + freed the handle). Any held key material is wiped.
+///
+/// # Safety
+///
+/// `responder` must be NULL or a live handle from `_new`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_kx_responder_free(
+    responder: *mut gmcrypto_sm2_kx_responder_t,
+) {
+    if !responder.is_null() {
+        // SAFETY: came from Box::into_raw; reclaim + drop (the core's
+        // drop-wipes run on any held key / waiting state).
+        drop(unsafe { Box::from_raw(responder) });
+    }
 }
