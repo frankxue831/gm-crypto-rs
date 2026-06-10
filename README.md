@@ -154,6 +154,40 @@ signatures / ciphertexts, SM4 mode bytes) is byte-identical to 0.16.0.
   always-on path (`Sm2PrivateKey::from_bytes_be`) avoids it entirely. See
   [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) §3.A.
 
+## v1.2 scope — C FFI for SM2 key exchange
+
+**Completes the core-in-vN / FFI-in-vN+1 cadence for v1.1**: the GM/T 0003.3
+key exchange is now reachable from C / C++ / Python / Go / Zig through
+`gmcrypto-c` (per `docs/v1.2-scope.md` Q2.1–Q2.10). **9 new symbols, 2 opaque
+handle types, 1 new const** (`GMCRYPTO_SM2_KX_CONFIRM_SIZE` = 32) — 72 FFI
+entry points total, always-on per the v0.23 posture (the committed
+`gmcrypto.h` == a default build; `gmcrypto-core`'s own `sm2-key-exchange`
+feature stays opt-in for Rust callers).
+
+- **Handle shape:** the Rust consume-on-transition typestate collapses to two
+  opaque handles. The **initiator** is born waiting —
+  `gmcrypto_sm2_kx_initiator_new` samples the ephemeral internally and writes
+  `R_A` immediately; `_confirm` verifies `S_B`, emits `K` + `S_A`, and
+  **consumes + frees**. The **responder**: `_new` → `_respond` (takes `R_A`,
+  emits `R_B` + `S_B`; a failed respond spends the handle, a stray second
+  respond errors without disturbing the in-flight state) → `_finish` (verifies
+  `S_A`, releases `K`, consumes + frees). Misuse ordering collapses to the
+  single `GMCRYPTO_ERR`.
+- **RNG:** OS (`getrandom::SysRng`) by default, plus `_with_rng` variants
+  taking the v0.5 `gmcrypto_rng_callback` — which lets the test suite drive
+  fixed standard ephemerals through the ABI.
+- **Assurance:** the **GM/T 0003.5 recommended-curve KAT reproduced
+  byte-for-byte through the C ABI** (`R_A`/`R_B`/`S_B`/`K`/`S_A` all
+  asserted), FFI↔Rust cross-handshakes in both directions, tamper/misuse/null
+  negative tests (c_smoke 65 → 76); `fuzz_c_abi` grows a KX op (attacker peer
+  wire bytes, asserted spent-handle semantics) + a valid-transcript seed. **No
+  new dudect target** (thin shim — core's `ct_sm2_key_exchange` covers the
+  secret-dependent path; the v0.13/v0.16 precedent). Doc-only example
+  [`crates/gmcrypto-c/examples/sm2_key_exchange.c`](crates/gmcrypto-c/examples/sm2_key_exchange.c)
+  (full two-party handshake).
+- **The caller owns wiping `key_out`** — the library zeroizes its internal
+  copies only.
+
 ## v1.1 scope — SM2 key exchange (GM/T 0003.3)
 
 **Completes the SM2 family**: GM/T 0003.2 sign + 0003.4/.5 encrypt shipped long
@@ -180,7 +214,8 @@ byte-identical).
 - **Assurance:** new fuzz target `fuzz_sm2_kx` (adversarial peer `R_B`/`S_B`
   bytes, no-panic invariant); `sm2-key-exchange` legs across the
   clippy/deny/MSRV/wasm32/dudect CI matrices.
-- **C FFI deferred to v1.2** (the core-in-vN / FFI-in-vN+1 cadence).
+- **C FFI shipped in v1.2** (the core-in-vN / FFI-in-vN+1 cadence — see the
+  v1.2 scope section above).
 
 ## v1.0.1 scope (shipped)
 
@@ -677,6 +712,7 @@ Everything v0.2 shipped is unchanged:
 | v1.0 | **API stabilization + crates.io publish** (the deliberate cut after the audit + tightening + re-audit: the `crypto-bigint`-exposure decision is **resolved** [v0.22] and the pre-publish re-audit findings **remediated** [v0.23], bump `0.16.0 → 1.0.0` with exact sibling pins, publish `gmcrypto-simd → core → c`, flip `cargo-semver-checks` to enforced — see the runbook in [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) §4). |
 | v1.0.1 (shipped) | **Readiness-cleanup patch — first post-1.0 publish.** Per the release-readiness synthesis [`docs/audits/2026-06-02-release-readiness-synthesis.md`](docs/audits/2026-06-02-release-readiness-synthesis.md) (GO-WITH-FOLLOWUP, 0 blockers). **Functional fix:** the `gmcrypto-c` `gmcrypto_version()` returned a hardcoded `"0.4.0"` → now the real `CARGO_PKG_VERSION` (the one behavior change justifying a patch publish). Plus doc improvements (raw-block ECB warnings, cbindgen header preconditions, FFI RNG/XTS notes, trait-stability caveats) + CI-health fixes (`sm4-xts` in MSRV/wasm/deny; dudect allowlist; `generate-lockfile` before deny; a new `simd-x86` job that caught a latent `unsafe_code` compile bug; removed `pull_request` `paths-ignore` so docs PRs aren't blocked). **No API/ABI change; wire output byte-identical to 1.0.0** (enforced `cargo-semver-checks`). 6 merged PRs (#87–#92). See [`CHANGELOG.md`](CHANGELOG.md) `[1.0.1]`. |
 | v1.1.0 | **SM2 key exchange (GM/T 0003.3) with key confirmation.** Per [`docs/v1.1-sm2-key-exchange-design.md`](docs/v1.1-sm2-key-exchange-design.md) + `docs/v1.1-scope.md`. New `sm2::key_exchange` module behind the opt-in `sm2-key-exchange` feature (pure-core, no new dependency): `Sm2KxInitiator`/`Sm2KxResponder` role state-machines with typestate-enforced single-use ephemerals and commit-on-confirm key release; byte-identical to the GM/T 0003.5-2012 recommended-curve worked example (K + S_A/S_B); new dudect target `ct_sm2_key_exchange` + fuzz target `fuzz_sm2_kx`. C FFI deferred to v1.2. **Additive — no public API breakage.** |
+| v1.2.0 | **C FFI for SM2 key exchange.** Per `docs/v1.2-scope.md` Q2.1–Q2.10. 9 new `gmcrypto-c` symbols + 2 opaque handles (`gmcrypto_sm2_kx_{initiator,responder}_t`) project the v1.1 typestate into C: initiator born-waiting (`_new` emits `R_A`), `_confirm`/`_finish` consume + free, failed-respond spends the handle; SysRng defaults + `_with_rng` variants; always-on per the v0.23 posture (72 FFI entry points). The GM/T 0003.5 recommended-curve KAT reproduced **byte-for-byte through the C ABI**; FFI↔Rust cross-handshakes both directions; `fuzz_c_abi` KX op + seed; doc-only `sm2_key_exchange.c` example. No core API change. **Additive — no breakage.** |
 
 ## Quick-start
 

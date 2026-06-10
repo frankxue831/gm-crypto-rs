@@ -37,6 +37,14 @@ no feature flags are needed.
 |---|---|---|
 | SM4-GCM / SM4-CCM AEAD (single-shot + streaming SM4-GCM) | `gmcrypto_sm4_gcm_*` / `gmcrypto_sm4_ccm_*` | [`examples/sm4_gcm_streaming.c`](examples/sm4_gcm_streaming.c) |
 | SM4-XTS tweakable disk/sector mode (GB/T 17964-2021): single-shot + in-place multi-sector | `gmcrypto_sm4_xts_{encrypt,decrypt}` / `gmcrypto_sm4_xts_{encrypt,decrypt}_sectors` | [`examples/sm4_xts_sector.c`](examples/sm4_xts_sector.c), [`examples/sm4_xts_multisector.c`](examples/sm4_xts_multisector.c) |
+| SM2 key exchange (GM/T 0003.3) with key confirmation (v1.2): two opaque role handles; `_confirm`/`_finish` consume + free; `_with_rng` variants for caller-supplied randomness | `gmcrypto_sm2_kx_initiator_{new,new_with_rng,confirm,free}` / `gmcrypto_sm2_kx_responder_{new,respond,respond_with_rng,finish,free}` | [`examples/sm2_key_exchange.c`](examples/sm2_key_exchange.c) |
+
+**SM2 key exchange** notes: the initiator handle is created already holding
+its ephemeral (`_new` writes `R_A`); the agreed key is written to caller
+memory and **the caller owns wiping it**; every failure (off-curve peer `R`,
+tag mismatch, misuse ordering, null, RNG failure) is the single
+`GMCRYPTO_ERR`. `id_len == 0` selects the GM/T default ID
+`"1234567812345678"`.
 
 ```bash
 cargo build -p gmcrypto-c --release   # the complete ABI — no feature flags

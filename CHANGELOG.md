@@ -5,6 +5,52 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-11
+
+**C FFI for SM2 key exchange (GM/T 0003.3)** — completes the
+core-in-vN / FFI-in-vN+1 cadence for v1.1. Additive minor: no core API
+change (the `gmcrypto-core` build is identical to 1.1.0 up to the version
+string); three crates bump in lockstep to 1.2.0 with exact sibling pins
+(`=1.2.0`). Per `docs/v1.2-scope.md` Q2.1–Q2.10.
+
+### Added
+- `gmcrypto-c`: **9 SM2-KX symbols + 2 opaque handle types + 1 const**
+  (63 → 72 FFI entry points), always-on per the v0.23 posture
+  (`sm2-key-exchange` enabled unconditionally on the C shim's core dep;
+  the committed `gmcrypto.h` matches a default build):
+  - `gmcrypto_sm2_kx_initiator_{new,new_with_rng,confirm,free}` — the
+    initiator handle is born waiting (`_new` samples the ephemeral
+    internally and writes `R_A`); `_confirm` verifies `S_B`
+    constant-time, writes the agreed key (`klen` bytes) + `S_A`, and
+    consumes + frees (the v0.10 `_finalize*` precedent).
+  - `gmcrypto_sm2_kx_responder_{new,respond,respond_with_rng,finish,free}`
+    — `_respond` takes `R_A` and emits `R_B` + `S_B` (a failed respond
+    spends the handle; a stray second respond errors without disturbing
+    the in-flight state); `_finish` verifies `S_A` and releases the key,
+    consuming + freeing.
+  - `GMCRYPTO_SM2_KX_CONFIRM_SIZE` (= 32); ephemeral points reuse
+    `GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE` (= 65). `id_len == 0` selects
+    the GM/T default ID `"1234567812345678"` (the sign-FFI convention).
+  - RNG: `getrandom::SysRng` defaults + `_with_rng` variants riding the
+    existing v0.5 `gmcrypto_rng_callback`. Every failure is the single
+    `GMCRYPTO_ERR`; **the caller owns wiping `key_out`**.
+- Assurance: c_smoke 65 → **76** — FFI↔FFI handshake, **FFI↔Rust
+  cross-handshakes in both directions**, the **GM/T 0003.5
+  recommended-curve KAT byte-for-byte through the C ABI** (fixed
+  standard ephemerals via `_with_rng`; `R_A`/`R_B`/`S_B`/`K`/`S_A` all
+  asserted), tampered-tag / off-curve / spent-handle / misuse-ordering /
+  null negative tests. `fuzz_c_abi` grows a KX op (attacker peer wire
+  bytes; asserted spent-handle semantics) + a committed valid-transcript
+  seed (60 s smoke: 184K runs, zero crashes; the fuzz census stays 26).
+  No new dudect target (thin shim — core's `ct_sm2_key_exchange` covers
+  the secret-dependent path; the v0.13/v0.16 precedent).
+- Doc-only example `crates/gmcrypto-c/examples/sm2_key_exchange.c`
+  (full two-party handshake; compiled + run locally against the
+  staticlib).
+
+### Changed
+- Workspace version 1.1.0 → 1.2.0 (lockstep; exact sibling pins `=1.2.0`).
+
 ## [1.1.0] - 2026-06-10
 
 **SM2 key exchange (GM/T 0003.3 ≡ GB/T 32918.3-2016) with key confirmation** —
