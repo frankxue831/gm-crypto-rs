@@ -1,7 +1,35 @@
 # CLAUDE.md
 
 Pure-Rust SM2/SM3/SM4 SDK.
-**v1.1.0 — SM2 key exchange (GM/T 0003.3 ≡ GB/T 32918.3-2016) with key
+**v1.2.0 — C FFI for SM2 key exchange — implemented on `feat/sm2-kx-ffi`;
+the `cargo publish` + SSH-signed tag are the maintainer's authenticated call
+(publish order simd → core → c; the v1.1.0 agent-publish was a recorded
+one-off delegation, not a precedent).** Completes the core-in-vN / FFI-in-vN+1
+cadence for v1.1: **9 new `gmcrypto-c` symbols + 2 opaque handles + 1 const**
+(63 → 72 FFI entry points), ALWAYS-ON per the v0.23 posture
+(`sm2-key-exchange` enabled unconditionally on the C shim's core dep;
+committed `gmcrypto.h` == default build; `gmcrypto-core`'s own feature stays
+opt-in). Handle shape (scope Q2.2, `docs/v1.2-scope.md`): the Rust 4-type
+consume-on-transition typestate collapses to TWO handles —
+`gmcrypto_sm2_kx_initiator_t` is **born waiting** (`_new` samples the
+ephemeral internally + writes `R_A`; no pre-ephemeral state exists in C);
+`_confirm`/`_finish` **consume + free** (v0.10 `_finalize*` precedent);
+a FAILED `_respond` **spends** the responder handle (the Rust responder was
+consumed), while a stray second `_respond` errors WITHOUT disturbing the
+in-flight `Waiting` state. RNG: SysRng defaults + `_with_rng` variants riding
+the v0.5 `CallbackRng` (Q2.3) — which is how c_smoke reproduces the **GM/T
+0003.5 recommended-curve KAT byte-for-byte THROUGH the C ABI** (fixed standard
+ephemerals; `R_A`/`R_B`/`S_B`/`K`/`S_A` all asserted). `id_len == 0` →
+`DEFAULT_SIGNER_ID` (also the KAT ID). Single `GMCRYPTO_ERR` everywhere;
+**the caller owns wiping `key_out`**. Assurance: c_smoke 65 → 76 (KAT-thru-FFI
++ FFI↔Rust cross-handshakes BOTH directions + tamper/off-curve/spent-handle/
+misuse/null negatives); `fuzz_c_abi` op 7 (attacker peer R/S bytes; asserted
+spent-handle; committed `kx_valid_transcript` seed; census stays 26); **NO new
+dudect target** (thin shim — core's `ct_sm2_key_exchange` covers it; the
+v0.13/v0.16 precedent). Doc-only example `sm2_key_exchange.c` (compiled + run
+locally). Workspace 1.1.0 → 1.2.0, sibling pins `=1.2.0`. X.509-with-SM2 is
+the v1.3 direction candidate (Q2.1).**
+**Earlier — v1.1.0 — SM2 key exchange (GM/T 0003.3 ≡ GB/T 32918.3-2016) with key
 confirmation — implemented on `feat/sm2-key-exchange` (PR #100); the `cargo
 publish` + SSH-signed tag are the maintainer's authenticated call (publish
 order simd → core → c).** Completes the SM2 family behind the opt-in
@@ -770,7 +798,7 @@ crates/gmcrypto-core/
     data/                   # v0.3 W2 binary KAT fixtures + regen recipe (Q7.9 decision); v0.8 W3 adds sm4_ccm_oracle.c (OpenSSL EVP harness)
 
 crates/gmcrypto-c/          # v0.4 W4 — C ABI shim (cdylib + staticlib + rlib)
-  src/lib.rs                # 63 FFI entry points (44 base + v0.9 W4's 6 single-shot AEAD + v0.10's 9 streaming AEAD + v0.13's 2 single-shot XTS + v0.16's 2 multi-sector XTS): opaque handles, ffi_guard catch_unwind, GMCRYPTO_ERR on every error. AEAD symbols (gmcrypto_sm4_gcm_* / gmcrypto_sm4_ccm_*) cfg-gated on a forwarding `sm4-aead` feature (= ["gmcrypto-core/sm4-aead"]). v0.10 W1-W2 adds 2 opaque types gmcrypto_sm4_gcm_{encryptor,decryptor}_t + 9 symbols (encryptor new/update/finalize/finalize_with_tag_len/free output-streaming; decryptor new/update/finalize_verify/free commit-on-verify); _finalize* consume+free. v0.13 adds gmcrypto_sm4_xts_encrypt/_decrypt (single-shot, no handles, no opaque struct) + always-on const GMCRYPTO_SM4_XTS_KEY_SIZE=32, cfg-gated on a forwarding `sm4-xts` feature (= ["gmcrypto-core/sm4-xts"]); regen-header need NOT imply sm4-xts (free fns + const emit from source regardless of cfg). v0.16 adds gmcrypto_sm4_xts_encrypt_sectors/_decrypt_sectors (in-place buf: *mut u8 + buf_len, start_sector: u64, tweak = LE-128(start_sector+i); NO out/out_capacity/out_actual_len — deliberate in-place divergence mirroring core's &mut [u8]; key copied into owned [u8;32] before &mut buf is built to avoid &/&mut aliasing UB on a caller key/buf overlap), same forwarding sm4-xts feature. **v0.23 W3: the AEAD (gcm/ccm) + XTS FFI symbols are now ALWAYS-ON** — the forwarding `sm4-aead`/`sm4-xts` cargo features on the C shim were DROPPED, so the default `cargo build -p gmcrypto-c` exports every symbol and the committed gmcrypto.h == the default build (resolves the header⟷build mismatch); the C shim's default build now transitively pulls gmcrypto-simd (gmcrypto-core keeps its own feature gates). The GCM-encrypt FFI already returned an error code, so making core's single-shot GCM encrypt fallible needs no ABI change.
+  src/lib.rs                # 72 FFI entry points (44 base + v0.9 W4's 6 single-shot AEAD + v0.10's 9 streaming AEAD + v0.13's 2 single-shot XTS + v0.16's 2 multi-sector XTS): opaque handles, ffi_guard catch_unwind, GMCRYPTO_ERR on every error. AEAD symbols (gmcrypto_sm4_gcm_* / gmcrypto_sm4_ccm_*) cfg-gated on a forwarding `sm4-aead` feature (= ["gmcrypto-core/sm4-aead"]). v0.10 W1-W2 adds 2 opaque types gmcrypto_sm4_gcm_{encryptor,decryptor}_t + 9 symbols (encryptor new/update/finalize/finalize_with_tag_len/free output-streaming; decryptor new/update/finalize_verify/free commit-on-verify); _finalize* consume+free. v0.13 adds gmcrypto_sm4_xts_encrypt/_decrypt (single-shot, no handles, no opaque struct) + always-on const GMCRYPTO_SM4_XTS_KEY_SIZE=32, cfg-gated on a forwarding `sm4-xts` feature (= ["gmcrypto-core/sm4-xts"]); regen-header need NOT imply sm4-xts (free fns + const emit from source regardless of cfg). v0.16 adds gmcrypto_sm4_xts_encrypt_sectors/_decrypt_sectors (in-place buf: *mut u8 + buf_len, start_sector: u64, tweak = LE-128(start_sector+i); NO out/out_capacity/out_actual_len — deliberate in-place divergence mirroring core's &mut [u8]; key copied into owned [u8;32] before &mut buf is built to avoid &/&mut aliasing UB on a caller key/buf overlap), same forwarding sm4-xts feature. **v0.23 W3: the AEAD (gcm/ccm) + XTS FFI symbols are now ALWAYS-ON** — the forwarding `sm4-aead`/`sm4-xts` cargo features on the C shim were DROPPED, so the default `cargo build -p gmcrypto-c` exports every symbol and the committed gmcrypto.h == the default build (resolves the header⟷build mismatch); the C shim's default build now transitively pulls gmcrypto-simd (gmcrypto-core keeps its own feature gates). The GCM-encrypt FFI already returned an error code, so making core's single-shot GCM encrypt fallible needs no ABI change. **v1.2 adds the 9 SM2-KX symbols + 2 opaque handles (gmcrypto_sm2_kx_{initiator,responder}_t) + GMCRYPTO_SM2_KX_CONFIRM_SIZE=32 (72 entry points total; always-on — sm2-key-exchange enabled unconditionally on the core dep): initiator born-waiting (_new writes R_A), _confirm/_finish consume+free, failed-_respond spends the handle / misuse second-_respond preserves Waiting; SysRng + _with_rng (CallbackRng); id_len==0 -> DEFAULT_SIGNER_ID; caller wipes key_out.**
   build.rs                  # cbindgen runs only under `regen-header` feature or GMCRYPTO_C_REGEN_HEADER=1
   cbindgen.toml             # cbindgen config (C language, include_guard = "GMCRYPTO_H_")
   include/gmcrypto.h        # committed header (CI gates drift via `git diff --exit-code`). cbindgen does NOT evaluate #[cfg(feature)] for free functions (single-shot AEAD prototypes appear unconditionally) BUT it DROPS cfg-gated opaque struct types (v0.10's gmcrypto_sm4_gcm_{encryptor,decryptor}_t) when the feature is inactive. So v0.10 makes `regen-header` IMPLY `sm4-aead` — regen is then deterministic + complete and the drift gate stays green with the documented `--features regen-header` command
@@ -778,7 +806,8 @@ crates/gmcrypto-c/          # v0.4 W4 — C ABI shim (cdylib + staticlib + rlib)
   examples/sm4_gcm_streaming.c # v0.10 — chunked SM4-GCM streaming AEAD round-trip via the C ABI (doc-only; CI does not build C examples)
   examples/sm4_xts_sector.c # v0.13 — 512-byte SM4-XTS sector encrypt/decrypt round-trip via the C ABI (sector# as tweak; doc-only)
   examples/sm4_xts_multisector.c # v0.16 — in-place 8-sector ("disk region") SM4-XTS round-trip via the C ABI (start_sector: u64, auto-incrementing tweak; doc-only)
-  tests/c_smoke.rs          # 65 Rust-equivalence tests via extern "C" interop (35 default + 14 cfg-gated on sm4-aead: 6 v0.9 single-shot + 8 v0.10 streaming; + 16 cfg-gated on sm4-xts: 5 v0.13 single-shot whole-block/CTS equivalence + round-trip + short/weak-key/small-buffer errors, + 11 v0.16 multi-sector: equivalence-vs-core + round-trip + byte-boundary/high-LBA starts + bad sector_size/buf-multiple/weak-key/null-key/null-buf/empty + decrypt-side errors + key/buf-overlap regression)
+  examples/sm2_key_exchange.c # v1.2 — full two-party GM/T 0003.3 handshake via the C ABI (both tags verified, keys agree; doc-only, but compiled+run locally at dev time)
+  tests/c_smoke.rs          # 76 Rust-equivalence tests via extern "C" interop (35 default + 14 cfg-gated on sm4-aead: 6 v0.9 single-shot + 8 v0.10 streaming; + 16 cfg-gated on sm4-xts: 5 v0.13 single-shot whole-block/CTS equivalence + round-trip + short/weak-key/small-buffer errors, + 11 v0.16 multi-sector: equivalence-vs-core + round-trip + byte-boundary/high-LBA starts + bad sector_size/buf-multiple/weak-key/null-key/null-buf/empty + decrypt-side errors + key/buf-overlap regression; + 11 v1.2 SM2-KX: FFI<->FFI handshake, FFI<->Rust cross-handshakes both directions, the GM/T 0003.5 KAT byte-for-byte through the ABI via _with_rng fixed ephemerals, tampered-S_A/S_B, off-curve-R_A + spent-handle, double-respond state preservation, finish-before-respond, null/bad-klen/null-callback rejects)
   README.md                 # C/C++/Python/Go/Zig integration docs
 
 crates/gmcrypto-simd/       # v0.5 W4 phase 2 / v0.6 W6 / v0.8 W1 — SIMD backend crate (rlib-only, opt-in via gmcrypto-core's sm4-bitsliced-simd or sm4-aead feature)
@@ -826,6 +855,7 @@ docs/
   v0.8-ccm-kat-sourcing.md      # v0.8 W0 — sourcing decision for SM4-CCM KAT vectors (OpenSSL 3.x EVP `SM4-CCM`; gmssl 3.1.1 lacks `-ccm`); embedded C harness + parametric coverage matrix
   v0.14-scope.md                # v0.14 W0 — parser-fuzzing scope (Q14.1–Q14.12, codex-reviewed); 16 cargo-fuzz targets over the untrusted-input decode/decrypt surface; assurance-only (clean run ⇒ no crates.io release per Q14.11); §6 v0.15 candidate Q-list
   v0.21-scope.md                # v0.21 W0 — v1.0-readiness-audit scope (Q21.1–Q21.9, codex-reviewed); non-publishing; Option A finalization; the public-api/semver-checks/cargo-doc guard set
+  v1.2-scope.md                 # v1.2 — C FFI for SM2 key exchange scope (Q2.1–Q2.10; maintainer-signed Q2.1–Q2.3); X.509-with-SM2 deferred to v1.3
   v0.22-scope.md                # v0.22 W0 — API-tightening scope (Q22.1–Q22.8, codex-reviewed); resolves §3.A via Option 2 (decouple crypto-bigint); three-group map (A doc-hidden / B reshaped to [u8;32] / C kept-public ProjectivePoint); non-publishing
   v1.0-readiness.md             # v0.21 W3 (updated v0.22) — the GO/NO-GO readiness report + the 1.0.0 publish runbook; §3.A = the crypto-bigint-exposure decision, now RESOLVED in v0.22 (status flipped to GO)
   api-baseline/                 # v0.21 — committed cargo-public-api baselines (gmcrypto-core.txt = full surface; gmcrypto-simd.txt = `pub mod gmcrypto_simd` only); the drift-check contract regenerated by api-stability.yml. v0.22 regenerated gmcrypto-core.txt: Group-A curve/scalar items removed, Group-B sig/ciphertext reshaped to [u8;32], only the gated from_scalar(U256) residual remains crypto-bigint-typed

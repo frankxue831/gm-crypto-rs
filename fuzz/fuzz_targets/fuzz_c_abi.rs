@@ -15,7 +15,13 @@
 //!     return `GMCRYPTO_ERR` (asserted), never deref or panic across FFI;
 //!   * op 6 drives the output-capacity check with a deliberately undersized
 //!     `out_capacity`: the call must reject (return value) without writing past
-//!     the buffer (ASAN would catch an overflow).
+//!     the buffer (ASAN would catch an overflow);
+//!   * op 7 (v1.2) drives the SM2 key-exchange handle lifecycle with
+//!     attacker-controlled peer wire bytes (`R`: 65, `S`: 32) against fixed
+//!     static keys + a fixed deterministic ephemeral: initiator `confirm` and
+//!     responder `respond`/`finish` including the consume-on-success and
+//!     spent-handle-on-failed-respond paths (the second respond after a
+//!     failure is ASSERTED to fail).
 //!
 //! It does NOT probe documented-UB contract *violations* (e.g. double-free, or
 //! passing a non-null but too-small fixed-size buffer) — those are caller UB by
@@ -33,6 +39,36 @@ const FIXED_D: [u8; GMCRYPTO_SM2_SCALAR_SIZE] = [
     0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
 ];
 
+/// The SEC1 public point for [`FIXED_D`], derived once via the core (the
+/// fuzz target plays both KX roles against itself — a valid static peer).
+fn fixed_pub_sec1() -> &'static [u8; GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE] {
+    static P: std::sync::OnceLock<[u8; GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE]> =
+        std::sync::OnceLock::new();
+    P.get_or_init(|| {
+        let key: gmcrypto_core::sm2::Sm2PrivateKey =
+            Option::from(gmcrypto_core::sm2::Sm2PrivateKey::from_bytes_be(&FIXED_D))
+                .expect("FIXED_D is a valid scalar");
+        key.public_key().to_sec1_uncompressed()
+    })
+}
+
+/// Deterministic RNG callback for the KX op (op 7): every draw is
+/// 0x5A-filled, so the local ephemeral is a fixed valid scalar and the
+/// op stays reproducible (no OS RNG nondeterminism in the fuzz loop).
+unsafe extern "C" fn fixed_fill_rng(
+    _context: *mut core::ffi::c_void,
+    buf: *mut u8,
+    buf_len: usize,
+) -> core::ffi::c_int {
+    if buf.is_null() && buf_len > 0 {
+        return -1;
+    }
+    // SAFETY: `buf` is valid for `buf_len` bytes per the callback contract
+    // (the shim always passes a real slice).
+    unsafe { std::slice::from_raw_parts_mut(buf, buf_len) }.fill(0x5A);
+    0
+}
+
 fuzz_target!(|data: &[u8]| {
     if data.is_empty() {
         return;
@@ -41,14 +77,16 @@ fuzz_target!(|data: &[u8]| {
     let op = data[0];
     let body = &data[1..];
 
-    // SAFETY: ops 0–4 pass valid (ptr, len) for the documented fixed sizes,
-    // output buffers large enough for the worst-case write, and free each
-    // opaque handle exactly once. Op 5 passes NULL pointers to guarded entry
-    // points (which must report GMCRYPTO_ERR). Op 6 passes a real but small
-    // buffer with a matching (small) out_capacity, exercising the capacity
-    // check. No call violates the documented pointer/length contract.
+    // SAFETY: ops 0–4 and 7 pass valid (ptr, len) for the documented fixed
+    // sizes, output buffers large enough for the worst-case write, and free
+    // each opaque handle exactly once (handles consumed by finalize/confirm/
+    // finish are never also freed). Op 5 passes NULL pointers to guarded
+    // entry points (which must report GMCRYPTO_ERR). Op 6 passes a real but
+    // small buffer with a matching (small) out_capacity, exercising the
+    // capacity check. No call violates the documented pointer/length
+    // contract.
     unsafe {
-        match op % 7 {
+        match op % 8 {
             // (0) Single-shot SM3 over arbitrary bytes.
             0 => {
                 let mut digest = [0u8; GMCRYPTO_SM3_DIGEST_SIZE];
@@ -165,6 +203,100 @@ fuzz_target!(|data: &[u8]| {
                     ),
                     GMCRYPTO_ERR
                 );
+            }
+
+            // (7) SM2 key exchange (v1.2): fixed static keys + fixed 0x5A
+            //     ephemeral; the PEER's wire bytes (R: 65, S: 32, carved from
+            //     the front of the body, zero-padded) are attacker-controlled.
+            //     Initiator side: new_with_rng -> confirm(attacker R_B, S_B)
+            //     [confirm consumes — no free]. Responder side: new ->
+            //     respond_with_rng(attacker R_A); on success drive
+            //     finish(attacker S_A) [consumes]; on failure the handle is
+            //     SPENT — a retry respond is asserted to fail, then freed.
+            7 => {
+                let mut r_bytes = [0u8; GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE];
+                let n = body.len().min(r_bytes.len());
+                r_bytes[..n].copy_from_slice(&body[..n]);
+                let rest = &body[n..];
+                let mut s_bytes = [0u8; GMCRYPTO_SM2_KX_CONFIRM_SIZE];
+                let m = rest.len().min(s_bytes.len());
+                s_bytes[..m].copy_from_slice(&rest[..m]);
+
+                let sk = gmcrypto_sm2_privkey_new(FIXED_D.as_ptr());
+                let pk = gmcrypto_sm2_pubkey_new(fixed_pub_sec1().as_ptr());
+                if !sk.is_null() && !pk.is_null() {
+                    // Initiator lifecycle against attacker (R_B, S_B).
+                    let mut r_a = [0u8; GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE];
+                    let init = gmcrypto_sm2_kx_initiator_new_with_rng(
+                        sk,
+                        pk,
+                        ptr::null(),
+                        0,
+                        ptr::null(),
+                        0,
+                        16,
+                        Some(fixed_fill_rng),
+                        ptr::null_mut(),
+                        r_a.as_mut_ptr(),
+                    );
+                    if !init.is_null() {
+                        let mut key = [0u8; 16];
+                        let mut s_a = [0u8; GMCRYPTO_SM2_KX_CONFIRM_SIZE];
+                        let _ = gmcrypto_sm2_kx_initiator_confirm(
+                            init,
+                            r_bytes.as_ptr(),
+                            s_bytes.as_ptr(),
+                            key.as_mut_ptr(),
+                            s_a.as_mut_ptr(),
+                        );
+                        // init was consumed by confirm; do NOT free.
+                    }
+
+                    // Responder lifecycle against attacker R_A.
+                    let resp =
+                        gmcrypto_sm2_kx_responder_new(sk, pk, ptr::null(), 0, ptr::null(), 0, 16);
+                    if !resp.is_null() {
+                        let mut r_b = [0u8; GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE];
+                        let mut s_b = [0u8; GMCRYPTO_SM2_KX_CONFIRM_SIZE];
+                        let rc = gmcrypto_sm2_kx_responder_respond_with_rng(
+                            resp,
+                            r_bytes.as_ptr(),
+                            Some(fixed_fill_rng),
+                            ptr::null_mut(),
+                            r_b.as_mut_ptr(),
+                            s_b.as_mut_ptr(),
+                        );
+                        if rc == GMCRYPTO_OK {
+                            // Valid attacker point: drive finish with the
+                            // attacker S_A (consumes the handle).
+                            let mut key = [0u8; 16];
+                            let _ = gmcrypto_sm2_kx_responder_finish(
+                                resp,
+                                s_bytes.as_ptr(),
+                                key.as_mut_ptr(),
+                            );
+                        } else {
+                            // Failed respond SPENDS the handle: a retry with
+                            // the same bytes must also fail; then free.
+                            assert_eq!(
+                                gmcrypto_sm2_kx_responder_respond(
+                                    resp,
+                                    r_bytes.as_ptr(),
+                                    r_b.as_mut_ptr(),
+                                    s_b.as_mut_ptr(),
+                                ),
+                                GMCRYPTO_ERR
+                            );
+                            gmcrypto_sm2_kx_responder_free(resp);
+                        }
+                    }
+                }
+                if !sk.is_null() {
+                    gmcrypto_sm2_privkey_free(sk);
+                }
+                if !pk.is_null() {
+                    gmcrypto_sm2_pubkey_free(pk);
+                }
             }
 
             // (6) Undersized output buffer: a real 1-byte buffer with
