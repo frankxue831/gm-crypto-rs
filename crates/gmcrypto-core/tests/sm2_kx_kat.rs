@@ -7,7 +7,6 @@
 //! (maintainer-verified against /private/tmp/sm2pdf/params-hi-01.png + -02.png,
 //! 2026-06-10). cfg-gated on `sm2-key-exchange`.
 #![cfg(feature = "sm2-key-exchange")]
-#![allow(dead_code)] // S-tag constants are asserted from Task 2.3 onward
 
 use gmcrypto_core::sm2::key_exchange::{Sm2KxInitiator, Sm2KxResponder};
 use gmcrypto_core::sm2::{Sm2PrivateKey, compute_z};
@@ -142,7 +141,11 @@ fn annex_shared_key_matches_standard() {
     let (ra, iw) = init.produce_ephemeral(&mut rng_a).unwrap();
     let resp = Sm2KxResponder::new(&db, &pa, ID_A, ID_B, KLEN).unwrap();
     let (rb, sb, rw) = resp.respond(&ra, &mut rng_b).unwrap();
+    // Confirmation tags byte-identical to the worked example (Task 2.3):
+    // S_B is the page's 选项 S_1 (0x02 prefix), S_A the 选项 S_A (0x03).
+    assert_eq!(sb.to_bytes(), EXPECT_S_B, "S_B != standard value");
     let (k_a, sa) = iw.confirm(&rb, &sb).unwrap();
+    assert_eq!(sa.to_bytes(), EXPECT_S_A, "S_A != standard value");
     let k_b = rw.finish(&sa).unwrap();
 
     assert_eq!(k_a.as_bytes(), EXPECT_K, "K != standard value");
