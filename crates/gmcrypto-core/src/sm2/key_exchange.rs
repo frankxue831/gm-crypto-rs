@@ -10,14 +10,15 @@ extern crate alloc;
 
 use crate::Error;
 use crate::sm2::curve::Fn;
-use crate::sm2::encrypt::KDF_MAX_OUTPUT;
+use crate::sm2::encrypt::{KDF_MAX_OUTPUT, kdf};
 use crate::sm2::point::ProjectivePoint;
-use crate::sm2::scalar_mul::mul_g;
+use crate::sm2::scalar_mul::{mul_g, mul_var};
 use crate::sm2::sign::{MAX_ID_LEN, compute_z, sample_nonzero_scalar};
 use crate::sm2::{Sm2PrivateKey, Sm2PublicKey};
 use alloc::vec::Vec;
 use crypto_bigint::U256;
 use rand_core::TryCryptoRng;
+use subtle::{Choice, ConstantTimeEq};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 type Result<T> = core::result::Result<T, Error>;
@@ -268,6 +269,186 @@ fn avf(x_be: &[u8; 32]) -> Fn {
     Fn::new(&U256::from_be_slice(&buf))
 }
 
+/// Compute the agreed key bytes + `(x_U, y_U)` (big-endian) for the
+/// S-tag hashes.
+///
+/// `d` = local static secret, `r_eph` = local ephemeral secret,
+/// `r_local_x` = the LOCAL `R`'s affine x-coordinate (avf input),
+/// `peer_r` = the peer's SEC1 `R`, `p_peer` = the peer's static point.
+/// The KDF input order is **always** `x_U ‖ y_U ‖ Z_A ‖ Z_B` for both
+/// roles (Z order is fixed by role, not locality — M3).
+///
+/// Returns `Failed` on an invalid peer `R` (bad tag/range/off-curve/
+/// identity — `from_sec1_bytes` is the invalid-curve defense), an
+/// identity `U`, or an all-zero `K` (deliberate hardening, scope doc
+/// Q1.7). The secret intermediates `t`, the local `(x̄·r)` product,
+/// and the KDF input buffer are wiped before returning (M2); the
+/// returned `x_U`/`y_U` copies are the *caller's* wipe obligation
+/// (after S-tag hashing).
+#[allow(clippy::too_many_arguments)]
+fn shared_secret(
+    d: &Fn,
+    r_eph: &Fn,
+    r_local_x: &[u8; 32],
+    peer_r: &[u8; 65],
+    p_peer: &ProjectivePoint,
+    z_a: &[u8; 32],
+    z_b: &[u8; 32],
+    klen: usize,
+) -> Result<(Vec<u8>, [u8; 32], [u8; 32])> {
+    // Validate + parse peer R: length/tag/coordinate-range/on-curve/
+    // non-identity all enforced by `from_sec1_bytes` (public input —
+    // branching is not secret-dependent).
+    let peer_pub = Sm2PublicKey::from_sec1_bytes(peer_r).ok_or(Error::Failed)?;
+    let peer_point = peer_pub.point();
+    let mut peer_x = [0u8; 32];
+    peer_x.copy_from_slice(&peer_r[1..33]);
+
+    let x_bar_local = avf(r_local_x); // x̄ of LOCAL R
+    let x_bar_peer = avf(&peer_x); // x̄ of PEER R
+
+    // t = (d + x̄_local · r_eph) mod n     (h = 1 for SM2)
+    let mut xr = x_bar_local * *r_eph;
+    let mut t = *d + xr;
+    // U = [t]( P_peer + [x̄_peer] R_peer )
+    let sum = p_peer.add(&mul_var(&x_bar_peer, &peer_point));
+    let u = mul_var(&t, &sum);
+    // M2: t = d + x̄·r reveals d given the (public-after-send) R, so
+    // wipe it (and the x̄·r product) as soon as U is computed.
+    t.zeroize();
+    xr.zeroize();
+
+    let (mut xu, mut yu) = u.to_affine().ok_or(Error::Failed)?; // None == U = O
+    let xu_b = crate::u256_to_be32(&xu.retrieve());
+    let yu_b = crate::u256_to_be32(&yu.retrieve());
+    xu.zeroize();
+    yu.zeroize();
+
+    // K = KDF(x_U ‖ y_U ‖ Z_A ‖ Z_B, klen); reject all-zero K.
+    let mut kin = Vec::with_capacity(128);
+    kin.extend_from_slice(&xu_b);
+    kin.extend_from_slice(&yu_b);
+    kin.extend_from_slice(z_a);
+    kin.extend_from_slice(z_b);
+    let mut key = alloc::vec![0u8; klen];
+    kdf(&kin, &mut key);
+    kin.zeroize();
+    let mut allzero = Choice::from(1u8);
+    for b in &key {
+        allzero &= b.ct_eq(&0u8);
+    }
+    if bool::from(allzero) {
+        return Err(Error::Failed);
+    }
+    Ok((key, xu_b, yu_b))
+}
+
+impl Sm2KxInitiatorWaiting {
+    /// Receive the responder's `(R_B, S_B)`: derive `K`, verify `S_B`
+    /// constant-time, and emit `S_A`. Consumes `self`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Failed`] on an invalid `R_B`, an identity `U`, an
+    /// all-zero `K`, or an `S_B` mismatch (indistinguishable by
+    /// design).
+    pub fn confirm(
+        self,
+        r_b: &Sm2KxEphemeralPoint,
+        s_b: &Sm2KxConfirm,
+    ) -> Result<(Sm2SharedKey, Sm2KxConfirm)> {
+        let Self {
+            inner,
+            r_eph,
+            r_point_bytes,
+        } = self;
+        let mut local_x = [0u8; 32];
+        local_x.copy_from_slice(&r_point_bytes[1..33]);
+        let (key, mut xu_b, mut yu_b) = shared_secret(
+            inner.d.scalar(),
+            &r_eph.0,
+            &local_x,
+            &r_b.0,
+            &inner.p_peer,
+            &inner.z_a,
+            &inner.z_b,
+            inner.klen,
+        )?;
+        // Confirmation lands in Task 2.2; tags are stubbed until then.
+        let _ = s_b;
+        let s_a = Sm2KxConfirm([0u8; 32]);
+        xu_b.zeroize();
+        yu_b.zeroize();
+        Ok((Sm2SharedKey(key), s_a))
+    }
+}
+
+/// Responder after `(R_B, S_B)` were sent; holds `K` (zeroize-on-drop)
+/// until the initiator's `S_A` verifies.
+pub struct Sm2KxResponderWaiting {
+    key: Sm2SharedKey,
+    expected_s_a: [u8; 32],
+}
+
+impl Sm2KxResponder {
+    /// Receive the initiator's `R_A`: sample `r_B`, derive `K`, emit
+    /// `(R_B, S_B)`, and hold `K` until [`Sm2KxResponderWaiting::finish`]
+    /// verifies the initiator's `S_A`. Consumes `self`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Failed`] on RNG failure, an invalid `R_A`, an identity
+    /// `V`, or an all-zero `K` (indistinguishable by design).
+    pub fn respond<R: TryCryptoRng>(
+        self,
+        r_a: &Sm2KxEphemeralPoint,
+        rng: &mut R,
+    ) -> Result<(Sm2KxEphemeralPoint, Sm2KxConfirm, Sm2KxResponderWaiting)> {
+        let (r, rb_bytes) = sample_ephemeral(rng)?;
+        let r_eph = EphScalar(r);
+        let mut local_x = [0u8; 32];
+        local_x.copy_from_slice(&rb_bytes[1..33]);
+        let (key, mut xu_b, mut yu_b) = shared_secret(
+            self.d.scalar(),
+            &r_eph.0,
+            &local_x,
+            &r_a.0,
+            &self.p_peer,
+            &self.z_a,
+            &self.z_b,
+            self.klen,
+        )?;
+        // Confirmation lands in Task 2.2; tags are stubbed until then.
+        let s_b = Sm2KxConfirm([0u8; 32]);
+        let expected_s_a = [0u8; 32];
+        xu_b.zeroize();
+        yu_b.zeroize();
+        Ok((
+            Sm2KxEphemeralPoint(rb_bytes),
+            s_b,
+            Sm2KxResponderWaiting {
+                key: Sm2SharedKey(key),
+                expected_s_a,
+            },
+        ))
+    }
+}
+
+impl Sm2KxResponderWaiting {
+    /// Verify the initiator's `S_A` (constant-time); only then release
+    /// `K`. Consumes `self`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Failed`] on an `S_A` mismatch.
+    pub fn finish(self, s_a: &Sm2KxConfirm) -> Result<Sm2SharedKey> {
+        // Confirmation lands in Task 2.2; stubbed accept until then.
+        let _ = s_a;
+        let _ = self.expected_s_a;
+        Ok(self.key)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,6 +473,29 @@ mod tests {
         }
     }
     impl rand_core::TryCryptoRng for FixedRng {}
+
+    #[test]
+    fn round_trip_shared_key_matches() {
+        use crate::sm2::Sm2PrivateKey;
+        let da = Sm2PrivateKey::from_bytes_be(&[3u8; 32]).unwrap();
+        let db = Sm2PrivateKey::from_bytes_be(&[4u8; 32]).unwrap();
+        let (pa, pb) = (da.public_key(), db.public_key());
+        let mut rng_a = FixedRng([9u8; 32]);
+        let mut rng_b = FixedRng([10u8; 32]);
+
+        let init = Sm2KxInitiator::new(&da, &pb, b"a", b"b", 32).unwrap();
+        let (ra, init_w) = init.produce_ephemeral(&mut rng_a).unwrap();
+
+        let resp = Sm2KxResponder::new(&db, &pa, b"a", b"b", 32).unwrap();
+        let (rb, sb, resp_w) = resp.respond(&ra, &mut rng_b).unwrap();
+
+        let (k_a, sa) = init_w.confirm(&rb, &sb).unwrap();
+        let k_b = resp_w.finish(&sa).unwrap();
+        assert_eq!(k_a.as_bytes(), k_b.as_bytes());
+        assert_eq!(k_a.as_bytes().len(), 32);
+        // K must not be all-zero (the degenerate-KDF reject would fire).
+        assert!(k_a.as_bytes().iter().any(|&b| b != 0));
+    }
 
     #[test]
     fn produce_ephemeral_yields_on_curve_point() {
