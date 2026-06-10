@@ -102,7 +102,17 @@ the signal is the per-target trend, not an absolute number.
 streaming-decryptor targets, `fuzz_sm4_cbc_streaming_decrypt` /
 `fuzz_sm4_gcm_streaming_decrypt`, which assert the streaming decryptor fed in
 arbitrary chunks is byte-identical to the single-shot oracle — not merely
-crash-free; see `docs/v0.20-scope.md`. **18 targets total.**)
+crash-free; see `docs/v0.20-scope.md`. The **post-1.0 hardening cycle**
+(PRs #98/#99) added seven more: primitive one-shot-vs-streaming
+differentials `fuzz_sm3` / `fuzz_hmac_sm3`, the C-ABI surface `fuzz_c_abi`
+(raw-pointer `extern "C"` entry points), encrypt-side differentials +
+round-trips `fuzz_sm4_cbc_encrypt` / `fuzz_sm4_gcm_encrypt`, and
+encrypt→decrypt round-trips `fuzz_sm4_ccm_encrypt` / `fuzz_sm4_xts_encrypt`.
+**v1.1** added `fuzz_sm2_kx` (adversarial peer wire bytes into the
+key-exchange initiator's `confirm`). **26 targets total** — the census must
+equal both `fuzz/Cargo.toml`'s `[[bin]]` entries and the `FUZZ_TARGETS`
+list in `.github/workflows/fuzz-nightly.yml`; a target absent from that
+list still compiles in CI but is never fuzzed nor coverage-measured.)
 
 ### Regenerating seeds
 
