@@ -84,12 +84,7 @@ impl Sm2KxConfirm {
 /// static key (`compute_z` requires a finite point; an identity peer
 /// collapses to `Failed` instead of panicking). All public inputs —
 /// branching here is not secret-dependent.
-fn validate_params(
-    p_peer: &Sm2PublicKey,
-    id_a: &[u8],
-    id_b: &[u8],
-    klen: usize,
-) -> Result<()> {
+fn validate_params(p_peer: &Sm2PublicKey, id_a: &[u8], id_b: &[u8], klen: usize) -> Result<()> {
     let klen64 = u64::try_from(klen).map_err(|_| Error::Failed)?;
     if klen == 0
         || klen64 > KDF_MAX_OUTPUT
@@ -484,9 +479,7 @@ impl Sm2KxResponder {
         let s_b = Sm2KxConfirm(s_tag(
             0x02, &yu_b, &xu_b, &self.z_a, &self.z_b, &x1, &y1, &x2, &y2,
         ));
-        let expected_s_a = s_tag(
-            0x03, &yu_b, &xu_b, &self.z_a, &self.z_b, &x1, &y1, &x2, &y2,
-        );
+        let expected_s_a = s_tag(0x03, &yu_b, &xu_b, &self.z_a, &self.z_b, &x1, &y1, &x2, &y2);
         // M2: x_U/y_U wiped only after the S-tag hashing consumed them.
         xu_b.zeroize();
         yu_b.zeroize();
@@ -566,9 +559,7 @@ mod tests {
         let db = Sm2PrivateKey::from_bytes_be(&[6u8; 32]).unwrap();
         let (pa, pb) = (da.public_key(), db.public_key());
         let init = Sm2KxInitiator::new(&da, &pb, b"a", b"b", 16).unwrap();
-        let (ra, iw) = init
-            .produce_ephemeral(&mut FixedRng([11u8; 32]))
-            .unwrap();
+        let (ra, iw) = init.produce_ephemeral(&mut FixedRng([11u8; 32])).unwrap();
         let resp = Sm2KxResponder::new(&db, &pa, b"a", b"b", 16).unwrap();
         let (rb, sb, _rw) = resp.respond(&ra, &mut FixedRng([12u8; 32])).unwrap();
         let mut bad = sb.to_bytes();
@@ -584,9 +575,7 @@ mod tests {
         let db = Sm2PrivateKey::from_bytes_be(&[8u8; 32]).unwrap();
         let (pa, pb) = (da.public_key(), db.public_key());
         let init = Sm2KxInitiator::new(&da, &pb, b"a", b"b", 16).unwrap();
-        let (ra, iw) = init
-            .produce_ephemeral(&mut FixedRng([13u8; 32]))
-            .unwrap();
+        let (ra, iw) = init.produce_ephemeral(&mut FixedRng([13u8; 32])).unwrap();
         let resp = Sm2KxResponder::new(&db, &pa, b"a", b"b", 16).unwrap();
         let (rb, sb, rw) = resp.respond(&ra, &mut FixedRng([14u8; 32])).unwrap();
         let (_k_a, sa) = iw.confirm(&rb, &sb).unwrap();
@@ -636,9 +625,8 @@ mod tests {
         // x = all-ones → x̄ = 2^127 + (2^127 - 1) = 2^128 - 1 (low 128 bits set).
         let x = [0xFFu8; 32];
         let got = avf(&x).retrieve();
-        let expect = U256::from_be_hex(
-            "00000000000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
-        );
+        let expect =
+            U256::from_be_hex("00000000000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
         assert_eq!(got, expect);
     }
 
@@ -670,8 +658,8 @@ mod tests {
 
     #[test]
     fn new_rejects_identity_peer_pubkey() {
-        use crate::sm2::{Sm2PrivateKey, Sm2PublicKey};
         use crate::sm2::point::ProjectivePoint;
+        use crate::sm2::{Sm2PrivateKey, Sm2PublicKey};
         let d = Sm2PrivateKey::from_bytes_be(&[1u8; 32]).unwrap();
         let identity = Sm2PublicKey::from_point(ProjectivePoint::identity());
         // An identity peer static key must collapse to Failed, not panic
@@ -685,9 +673,8 @@ mod tests {
         // x = 0 → x̄ = 2^127 (only the forced bit set).
         let x = [0u8; 32];
         let got = avf(&x).retrieve();
-        let expect = U256::from_be_hex(
-            "0000000000000000000000000000000080000000000000000000000000000000",
-        );
+        let expect =
+            U256::from_be_hex("0000000000000000000000000000000080000000000000000000000000000000");
         assert_eq!(got, expect);
     }
 }

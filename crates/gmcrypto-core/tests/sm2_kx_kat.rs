@@ -8,7 +8,9 @@
 //! 2026-06-10). cfg-gated on `sm2-key-exchange`.
 #![cfg(feature = "sm2-key-exchange")]
 
-use gmcrypto_core::sm2::key_exchange::{Sm2KxInitiator, Sm2KxResponder};
+use gmcrypto_core::sm2::key_exchange::{
+    Sm2KxConfirm, Sm2KxEphemeralPoint, Sm2KxInitiator, Sm2KxResponder,
+};
 use gmcrypto_core::sm2::{Sm2PrivateKey, compute_z};
 use hex_literal::hex;
 
@@ -22,17 +24,13 @@ const ID_B: &[u8] = b"1234567812345678";
 const KLEN: usize = 16; // 128-bit example
 
 // Static private keys (big-endian, 32 bytes) — recommended-curve example:
-const D_A: [u8; 32] =
-    hex!("81EB26E941BB5AF16DF116495F90695272AE2CD63D6C4AE1678418BE48230029");
-const D_B: [u8; 32] =
-    hex!("785129917D45A9EA5437A59356B82338EAADDA6CEB199088F14AE10DEFA229B5");
+const D_A: [u8; 32] = hex!("81EB26E941BB5AF16DF116495F90695272AE2CD63D6C4AE1678418BE48230029");
+const D_B: [u8; 32] = hex!("785129917D45A9EA5437A59356B82338EAADDA6CEB199088F14AE10DEFA229B5");
 
 // Ephemeral private keys (fed via the fixed-scalar TryCryptoRng below) —
 // human-gated, maintainer-confirmed from the recommended-curve example:
-const R_A_EPH: [u8; 32] =
-    hex!("D4DE15474DB74D06491C440D305E012400990F3E390C7E87153C12DB2EA60BB3");
-const R_B_EPH: [u8; 32] =
-    hex!("7E07124814B309489125EAED101113164EBF0F3458C5BD88335C1F9D596243D6");
+const R_A_EPH: [u8; 32] = hex!("D4DE15474DB74D06491C440D305E012400990F3E390C7E87153C12DB2EA60BB3");
+const R_B_EPH: [u8; 32] = hex!("7E07124814B309489125EAED101113164EBF0F3458C5BD88335C1F9D596243D6");
 
 // Intermediate values from the worked example (staged assertions localize
 // any divergence to the exact step that introduced it):
@@ -51,10 +49,8 @@ const R_B_SEC1: [u8; 65] = hex!(
     "04ACC27688A6F7B706098BC91FF3AD1BFF7DC2802CDB14CCCCDB0A90471F9BD7072FEDAC0494B2FFC4D6853876C79B8F301C6573AD0AA50F39FC87181E1A1B46FE"
 );
 // Party hashes Z_A / Z_B as printed in the worked example's KDF input.
-const Z_A_STD: [u8; 32] =
-    hex!("3B85A57179E11E7E513AA622991F2CA74D1807A0BD4D4B38F90987A17AC245B1");
-const Z_B_STD: [u8; 32] =
-    hex!("79C988D63229D97EF19FE02CA1056E01E6A7411ED24694AA8F834F4A4AB022F7");
+const Z_A_STD: [u8; 32] = hex!("3B85A57179E11E7E513AA622991F2CA74D1807A0BD4D4B38F90987A17AC245B1");
+const Z_B_STD: [u8; 32] = hex!("79C988D63229D97EF19FE02CA1056E01E6A7411ED24694AA8F834F4A4AB022F7");
 // Shared point U = V (not API-observable; recorded for documentation —
 // the K assertion covers it transitively):
 //   x_U = C558B44BEE5301D9F52B44D939BB59584D75B9034DD6A9FC826872109A65739F
@@ -121,9 +117,7 @@ fn ephemerals_match_standard() {
     assert_eq!(ra.to_bytes(), R_A_SEC1, "R_A != standard");
 
     let resp = Sm2KxResponder::new(&db, &pa, ID_A, ID_B, KLEN).unwrap();
-    let (rb, _sb, _rw) = resp
-        .respond(&ra, &mut FixedScalarRng(R_B_EPH))
-        .unwrap();
+    let (rb, _sb, _rw) = resp.respond(&ra, &mut FixedScalarRng(R_B_EPH)).unwrap();
     assert_eq!(rb.to_bytes(), R_B_SEC1, "R_B != standard");
 }
 
@@ -150,4 +144,96 @@ fn annex_shared_key_matches_standard() {
 
     assert_eq!(k_a.as_bytes(), EXPECT_K, "K != standard value");
     assert_eq!(k_a.as_bytes(), k_b.as_bytes(), "K_A != K_B");
+}
+
+// ---- Negative paths (Task 2.4) — every failure collapses to the single
+// Error::Failed, no panic. klen == 0 / over-long id / identity-peer rejects
+// are covered at module level (key_exchange unit tests); these exercise
+// the peer-facing wire inputs through the public API.
+
+fn kat_parties() -> (Sm2PrivateKey, Sm2PrivateKey) {
+    (
+        Sm2PrivateKey::from_bytes_be(&D_A).unwrap(),
+        Sm2PrivateKey::from_bytes_be(&D_B).unwrap(),
+    )
+}
+
+/// Off-curve peer R (flipped coordinate byte) → Failed on both the
+/// responder (`respond`) and initiator (`confirm`) sides — the
+/// invalid-curve defense.
+#[test]
+fn negative_off_curve_peer_r_rejected() {
+    let (da, db) = kat_parties();
+    let (pa, pb) = (da.public_key(), db.public_key());
+
+    let init = Sm2KxInitiator::new(&da, &pb, ID_A, ID_B, KLEN).unwrap();
+    let (ra, iw) = init
+        .produce_ephemeral(&mut FixedScalarRng(R_A_EPH))
+        .unwrap();
+
+    // Responder side: corrupt R_A's x-coordinate.
+    let mut bad = ra.to_bytes();
+    bad[10] ^= 0x01;
+    let ra_bad = Sm2KxEphemeralPoint::from_bytes(&bad);
+    let resp = Sm2KxResponder::new(&db, &pa, ID_A, ID_B, KLEN).unwrap();
+    assert!(
+        resp.respond(&ra_bad, &mut FixedScalarRng(R_B_EPH)).is_err(),
+        "off-curve R_A accepted by respond"
+    );
+
+    // Initiator side: corrupt R_B's y-coordinate.
+    let resp = Sm2KxResponder::new(&db, &pa, ID_A, ID_B, KLEN).unwrap();
+    let (rb, sb, _rw) = resp.respond(&ra, &mut FixedScalarRng(R_B_EPH)).unwrap();
+    let mut bad = rb.to_bytes();
+    bad[40] ^= 0x01;
+    let rb_bad = Sm2KxEphemeralPoint::from_bytes(&bad);
+    assert!(
+        iw.confirm(&rb_bad, &sb).is_err(),
+        "off-curve R_B accepted by confirm"
+    );
+}
+
+/// Non-`04` SEC1 tag byte on the peer R → Failed (S8). A SEC1-encoded
+/// identity is not constructible in the uncompressed form; the U = O
+/// case is covered by the internal `to_affine → None` path.
+#[test]
+fn negative_bad_tag_peer_r_rejected() {
+    let (da, db) = kat_parties();
+    let (pa, pb) = (da.public_key(), db.public_key());
+
+    let init = Sm2KxInitiator::new(&da, &pb, ID_A, ID_B, KLEN).unwrap();
+    let (ra, _iw) = init
+        .produce_ephemeral(&mut FixedScalarRng(R_A_EPH))
+        .unwrap();
+    for tag in [0x00u8, 0x02, 0x03, 0x05] {
+        let mut bad = ra.to_bytes();
+        bad[0] = tag;
+        let ra_bad = Sm2KxEphemeralPoint::from_bytes(&bad);
+        let resp = Sm2KxResponder::new(&db, &pa, ID_A, ID_B, KLEN).unwrap();
+        assert!(
+            resp.respond(&ra_bad, &mut FixedScalarRng(R_B_EPH)).is_err(),
+            "peer R with SEC1 tag {tag:#04x} accepted"
+        );
+    }
+}
+
+/// Tampered S_A at `finish` → Failed (the responder never releases K).
+#[test]
+fn negative_tampered_s_a_rejected() {
+    let (da, db) = kat_parties();
+    let (pa, pb) = (da.public_key(), db.public_key());
+
+    let init = Sm2KxInitiator::new(&da, &pb, ID_A, ID_B, KLEN).unwrap();
+    let (ra, iw) = init
+        .produce_ephemeral(&mut FixedScalarRng(R_A_EPH))
+        .unwrap();
+    let resp = Sm2KxResponder::new(&db, &pa, ID_A, ID_B, KLEN).unwrap();
+    let (rb, sb, rw) = resp.respond(&ra, &mut FixedScalarRng(R_B_EPH)).unwrap();
+    let (_k_a, sa) = iw.confirm(&rb, &sb).unwrap();
+    let mut bad = sa.to_bytes();
+    bad[15] ^= 0x10;
+    assert!(
+        rw.finish(&Sm2KxConfirm::from_bytes(&bad)).is_err(),
+        "tampered S_A accepted by finish"
+    );
 }
