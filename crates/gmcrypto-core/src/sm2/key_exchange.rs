@@ -6,8 +6,6 @@
 //! key relies on the caller keeping each ephemeral single-use (the typestate
 //! enforces it).
 
-extern crate alloc;
-
 use crate::Error;
 use crate::sm2::curve::Fn;
 use crate::sm2::encrypt::{KDF_MAX_OUTPUT, kdf};

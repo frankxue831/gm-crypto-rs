@@ -46,15 +46,22 @@ env:
   CARGO_FUZZ_VERSION: '0.13.1'
   # v0.20 — single source of truth for the target list, shared by the fuzz
   # sweep and the coverage job (`>-` folds the newlines into one space-
-  # separated string). 19 targets: 16 from v0.14 + the 2 v0.20 streaming-
-  # decryptor differential targets + v1.1's fuzz_sm2_kx (adversarial peer
-  # R_B/S_B bytes into the key-exchange initiator's confirm).
+  # separated string). 26 targets: 16 from v0.14 + the 2 v0.20 streaming-
+  # decryptor differentials + the 7 post-1.0 hardening targets (#98: SM3 /
+  # HMAC-SM3 / C-ABI / CBC+GCM-encrypt; #99: CCM+XTS encrypt round-trips)
+  # + v1.1's fuzz_sm2_kx (adversarial peer R_B/S_B bytes into the
+  # key-exchange initiator's confirm).
+  # MUST list every [[bin]] in fuzz/Cargo.toml — a target missing here
+  # still compiles (fuzz-build.yml builds all) but is silently never
+  # fuzzed nor coverage-measured (the #98/#99 drift this note guards).
   FUZZ_TARGETS: >-
     fuzz_pem fuzz_pkcs8_decode fuzz_pkcs8_decrypt fuzz_spki fuzz_sec1 fuzz_sig
     fuzz_asn1_reader fuzz_sm2_ciphertext_der fuzz_sm2_raw_ciphertext
     fuzz_sm2_pubkey_sec1 fuzz_sm2_decrypt fuzz_sm2_verify fuzz_sm4_cbc_decrypt
     fuzz_sm4_gcm_decrypt fuzz_sm4_ccm_decrypt fuzz_sm4_xts_decrypt
     fuzz_sm4_cbc_streaming_decrypt fuzz_sm4_gcm_streaming_decrypt fuzz_sm2_kx
+    fuzz_sm3 fuzz_hmac_sm3 fuzz_c_abi fuzz_sm4_cbc_encrypt
+    fuzz_sm4_gcm_encrypt fuzz_sm4_ccm_encrypt fuzz_sm4_xts_encrypt
 
 permissions:
   contents: read
