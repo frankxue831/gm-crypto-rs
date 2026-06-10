@@ -1,6 +1,8 @@
 //! C ABI for `gmcrypto-core` (v0.4 W4).
 //!
-//! Exposes SM2 / SM3 / SM4 / HMAC-SM3 / PBKDF2-HMAC-SM3 plus SM2 key
+//! Exposes SM2 (sign/verify, encrypt/decrypt, and — since v1.2 — the
+//! GM/T 0003.3 key exchange with key confirmation) / SM3 / SM4
+//! (ECB/CBC/CTR/GCM/CCM/XTS) / HMAC-SM3 / PBKDF2-HMAC-SM3 plus SM2 key
 //! import/export to C / C++ / Python / Go / Zig / Ruby callers via
 //! opaque handles and a cbindgen-generated header at
 //! `include/gmcrypto.h`.

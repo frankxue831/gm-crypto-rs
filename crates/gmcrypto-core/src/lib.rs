@@ -6,11 +6,19 @@
 //! # Modules
 //!
 //! - [`sm2`] — SM2 elliptic-curve sign / verify / encrypt / decrypt
-//!   (GB/T 32918). Comb-table fixed-base scalar mult (v0.3 W6).
+//!   (GB/T 32918). Comb-table fixed-base scalar mult (v0.3 W6). The
+//!   opt-in `sm2-key-exchange` feature (v1.1) adds
+//!   `sm2::key_exchange` — GM/T 0003.3 key agreement with key
+//!   confirmation (`Sm2KxInitiator` / `Sm2KxResponder` role
+//!   state-machines).
 //! - [`sm3`] — SM3 hash (GB/T 32905) with streaming `new/update/finalize`.
-//! - [`sm4`] — SM4 block cipher (GB/T 32907) + CBC mode (single-shot
-//!   and v0.3 W5 streaming). v0.4 W3 adds an opt-in bitsliced
-//!   (table-less, gate-only) S-box behind the `sm4-bitsliced` feature.
+//! - [`sm4`] — SM4 block cipher (GB/T 32907) + CBC and CTR modes
+//!   (single-shot and streaming). The opt-in `sm4-aead` feature adds
+//!   SM4-GCM (single-shot + incremental-input buffered) and SM4-CCM;
+//!   the opt-in `sm4-xts` feature adds SM4-XTS (GB/T 17964-2021,
+//!   single-shot + in-place multi-sector). v0.4 W3 adds an opt-in
+//!   bitsliced (table-less, gate-only) S-box behind the
+//!   `sm4-bitsliced` feature.
 //! - [`hmac`] — HMAC-SM3 (RFC 2104), single-shot + v0.3 W5 streaming.
 //! - [`kdf`] — PBKDF2-HMAC-SM3 (RFC 8018 §5.2).
 //! - [`asn1`] — strict-canonical DER reader / writer / OID constants
@@ -51,6 +59,23 @@
 //!   `crypto_bigint::U256` directly. Default-off; the always-on
 //!   `from_bytes_be` constructor is the recommended path for callers
 //!   who don't want a transitive `crypto-bigint` dep.
+//! - `sm4-aead` — opt-in (v0.8). SM4-GCM (`sm4::mode_gcm`, plus the
+//!   v0.9 incremental-input buffered `sm4::gcm_streaming`) and
+//!   SM4-CCM (`sm4::mode_ccm`) authenticated encryption. Pulls the
+//!   workspace-internal `gmcrypto-simd` for the GHASH primitive
+//!   (CLMUL / PMULL / constant-time software fallback).
+//! - `sm4-xts` — opt-in (v0.12). SM4-XTS tweakable disk/sector mode
+//!   (`sm4::mode_xts`; GB/T 17964-2021, bit-reflected α-doubling —
+//!   **not** IEEE 1619), single-shot + the v0.15 in-place
+//!   multi-sector helpers. Pure-core, no new dependency.
+//!   Confidentiality only — XTS does not authenticate.
+//! - `sm2-key-exchange` — opt-in (v1.1). GM/T 0003.3 ≡ GB/T
+//!   32918.3-2016 key agreement with mandatory key confirmation
+//!   (`sm2::key_exchange`): consume-on-transition role state-machines,
+//!   single-use ephemerals, commit-on-confirm key release,
+//!   `ZeroizeOnDrop` agreed key. Pure-core, no new dependency;
+//!   byte-identical to the GM/T 0003.5 recommended-curve worked
+//!   example. The C ABI projection ships in `gmcrypto-c` (v1.2).
 //!
 //! # `wasm32-unknown-unknown`
 //!

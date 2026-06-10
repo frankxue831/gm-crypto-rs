@@ -71,9 +71,9 @@ branches, and the SM2 sign retry loop runs a fixed number of iterations
 regardless of which (if any) candidate is valid.
 
 The in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
-(`benches/timing_leaks.rs`) ships **18 real `ct_*` targets** (12 always-on
+(`benches/timing_leaks.rs`) ships **19 real `ct_*` targets** (12 always-on
 + 2 cfg-gated under `sm4-bitsliced-simd` + 3 cfg-gated under `sm4-aead`
-+ 1 cfg-gated under `sm4-xts`)
++ 1 cfg-gated under `sm4-xts` + 1 cfg-gated under `sm2-key-exchange`)
 plus a deliberately-leaky `negative_control`. Most real targets gate on
 `|tau| < 0.20`;
 `negative_control` gates the opposite direction (`|tau| > 1.0` **must**
@@ -160,6 +160,20 @@ CLAUDE.md carries the canonical per-target gate table.
   tweak)`, the constant-time bit-reflected α-doubling chain (right-shift +
   masked `0xE1`), the `decrypt_blocks` batch path (rides SIMD fanout under
   `sm4-bitsliced-simd`), and the CTS tail.
+
+**Cfg-gated on `sm2-key-exchange` (1):**
+
+- `ct_sm2_key_exchange` — the full SM2 key-exchange initiator side
+  (constructor `Z` hashing + `produce_ephemeral` + `confirm`), class-split by
+  the **static private key `d_A`** (v1.1 W3). The ephemeral is one fixed
+  scalar for both classes, so the class label identifies only `d_A`; each
+  class confirms against its own precomputed **valid** responder transcript
+  (the `ct_pkcs8_decrypt` per-class-valid pattern), so both classes succeed
+  via identical control flow — `t = (d + x̄·r) mod n`, the secret-scalar
+  `mul_var`, the KDF, and both constant-time tag computations/compares all
+  execute on every sample. Gate `|tau| < 0.20` on the 4th dudect matrix leg.
+  The v1.2 C FFI rides this target (a thin shim adds no new secret-dependent
+  path — the v0.13/v0.16 precedent).
 
 **The harness detects leaks; it does not prove constant-time.** Low
 `|tau|` values mean the test could not detect a leak with the budget
@@ -472,6 +486,21 @@ also gained a non-gating **`cargo fuzz coverage`** job that renders per-target
 `llvm-cov` region/line totals over the committed seed corpus and uploads them as
 an artifact (the report is the deliverable, not a coverage-% gate). v0.20 is an
 infra-assurance cycle — no published-crate change; workspace stays `0.16.0`.
+
+**Post-1.0 growth (current census: 26 targets).** The post-1.0 hardening cycle
+(PRs #98/#99) added seven more: primitive one-shot-vs-streaming differentials
+`fuzz_sm3` / `fuzz_hmac_sm3`, the raw-pointer C-ABI surface `fuzz_c_abi`
+(happy-path / NULL-rejection / undersized-buffer op families over the
+`extern "C"` entry points), encrypt-side differentials `fuzz_sm4_cbc_encrypt` /
+`fuzz_sm4_gcm_encrypt`, and encrypt→decrypt round-trips `fuzz_sm4_ccm_encrypt`
+/ `fuzz_sm4_xts_encrypt`. **v1.1** added `fuzz_sm2_kx` (adversarial peer
+`R_B`/`S_B` wire bytes into the key-exchange initiator's `confirm`); **v1.2**
+extended `fuzz_c_abi` with a key-exchange op driving the new FFI handles
+(attacker peer bytes; the spent-handle-after-failed-respond semantics are
+asserted, not just no-panic). The nightly `FUZZ_TARGETS` sweep list must name
+every `fuzz/Cargo.toml` `[[bin]]` — a target absent from it builds in CI but
+is silently never fuzzed (a drift that existed for #98/#99's targets and was
+fixed in #102; the list now carries an explicit must-match note).
 
 ## Compliance posture
 

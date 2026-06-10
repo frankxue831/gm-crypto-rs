@@ -93,11 +93,12 @@ the design intent in isolation.
 
 ## Stability & SemVer
 
-The line graduates to **1.0 (stable)** with the **1.0.0** release; the current release is
-**1.0.1**, a readiness-cleanup patch (no API/ABI change — see the v1.0.1 scope below).
-crates.io history goes **0.16.0 → 1.0.0 → 1.0.1**, skipping 0.17.0–0.23.0 (those were non-publishing assurance +
-API-finalization milestones; their changes all ship together in the first stable
-`1.0.0`). The only migration is 0.16 → 1.0, a single major bump — no published 0.x
+The line graduated to **1.0 (stable)** with the **1.0.0** release; the current release is
+**1.2.0** (the C FFI for SM2 key exchange — see the v1.2 scope above). crates.io history
+goes **0.16.0 → 1.0.0 → 1.0.1 → 1.1.0 → 1.2.0**, skipping 0.17.0–0.23.0 (those were
+non-publishing assurance + API-finalization milestones; their changes all shipped together
+in the first stable `1.0.0`). Every post-1.0 release has been additive (SemVer-checked);
+the only migration ever required is 0.16 → 1.0, a single major bump — no published 0.x
 consumer ever saw an intermediate break. The public API had been stable in
 practice since v0.5; the **v1.0 readiness audit** (v0.21) froze and tooling-guarded
 it, the **v0.22 API-tightening cycle** decoupled it from `crypto-bigint 0.7`, and
@@ -109,7 +110,7 @@ see [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md).
 **From 1.0, SemVer is enforced**: breaking changes to the covered surface require a
 major bump, and `cargo-semver-checks` runs as the forward breaking-change gate in
 CI (the three crates always release together at one lockstep version, with
-intra-workspace deps pinned exactly — `=1.0.1`). The runtime wire output (SM2
+intra-workspace deps pinned exactly — `=1.2.0`). The runtime wire output (SM2
 signatures / ciphertexts, SM4 mode bytes) is byte-identical to 0.16.0.
 
 - **What's covered by SemVer:** the public Rust API of `gmcrypto-core` (the
@@ -663,12 +664,13 @@ Everything v0.2 shipped is unchanged:
 - `gmssl` CLI cross-validation for HMAC-SM3, PBKDF2-HMAC-SM3, and
   (new in v0.3) SM2 sign/verify, SM2 encrypt/decrypt, and SM4-CBC
   in both directions. Gated on `GMCRYPTO_GMSSL=1`.
-- `dudect-bencher` harness — 18 real `ct_*` targets (12 always-on + 2
+- `dudect-bencher` harness — 19 real `ct_*` targets (12 always-on + 2
   cfg-gated under `sm4-bitsliced-simd` + 3 cfg-gated under `sm4-aead` + 1
-  cfg-gated under `sm4-xts`) plus a deliberately-leaky `negative_control`
+  cfg-gated under `sm4-xts` + 1 cfg-gated under `sm2-key-exchange`) plus a
+  deliberately-leaky `negative_control`
   that proves the harness can detect leaks. Matrix-run under
   `features=default`, `sm4-bitsliced`, `sm4-bitsliced-simd`, and
-  `sm4-bitsliced-simd,sm4-aead,sm4-xts`
+  `sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange`
   — PR-smoke 10⁴ samples; nightly 10⁵ samples (more samples = tighter
   empirical confidence at the same threshold). Most real targets gate
   at `|tau| < 0.20`; per-target policy in [`SECURITY.md`](SECURITY.md).
@@ -738,6 +740,30 @@ let mut rng = SysRng;
 let sig = sign_with_id(&key, DEFAULT_SIGNER_ID, b"hello", &mut rng).unwrap();
 assert!(verify_with_id(&public, DEFAULT_SIGNER_ID, b"hello", &sig));
 ```
+
+**SM2 key exchange** (v1.1, opt-in — `gmcrypto-core = { version = "1.2",
+features = ["sm2-key-exchange"] }`): an authenticated two-party key agreement
+with mandatory key confirmation. Each step consumes the state machine, so an
+ephemeral cannot be reused and neither side sees the key before the peer's
+confirmation tag verifies:
+
+```rust
+use gmcrypto_core::sm2::key_exchange::{Sm2KxInitiator, Sm2KxResponder};
+
+// A (initiator) and B (responder) hold each other's static public keys.
+let init = Sm2KxInitiator::new(&key_a, &pub_b, b"A-id", b"B-id", 32)?;
+let (r_a, init_waiting) = init.produce_ephemeral(&mut rng)?; // R_A -> B
+
+let resp = Sm2KxResponder::new(&key_b, &pub_a, b"A-id", b"B-id", 32)?;
+let (r_b, s_b, resp_waiting) = resp.respond(&r_a, &mut rng)?; // (R_B, S_B) -> A
+
+let (k_a, s_a) = init_waiting.confirm(&r_b, &s_b)?; // verifies S_B; S_A -> B
+let k_b = resp_waiting.finish(&s_a)?;               // verifies S_A
+assert_eq!(k_a.as_bytes(), k_b.as_bytes());         // 32-byte agreed key
+```
+
+(From C, the same handshake is `gmcrypto_sm2_kx_*` — see the v1.2 scope above
+and [`crates/gmcrypto-c/examples/sm2_key_exchange.c`](crates/gmcrypto-c/examples/sm2_key_exchange.c).)
 
 ## Threat model
 
