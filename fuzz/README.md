@@ -94,6 +94,7 @@ the signal is the per-target trend, not an absolute number.
 | `fuzz_sm2_pubkey_sec1` | `Sm2PublicKey::from_sec1_bytes` |
 | `fuzz_sm2_decrypt` | `sm2::decrypt` (fixed key; parse + KDF + MAC) |
 | `fuzz_sm2_verify` | `verify_with_id` (fixed key; sig DER parse) |
+| `fuzz_sm2_kx` | key-exchange initiator `confirm` (fixed keys; adversarial peer `R_B`+`S_B`) |
 
 (v0.14 W3 added the SM4 single-shot decrypts: `fuzz_sm4_cbc_decrypt` /
 `_gcm_decrypt` / `_ccm_decrypt` / `_xts_decrypt` — negative-input, see
@@ -127,3 +128,13 @@ streaming targets' layouts are:
 
 where `chunk_len` (a `u8`, fed as `max(1, chunk_len)` so `0` ⇒ 1-byte chunks) sets the streaming chunk size the
 ciphertext is fed in. Their seeds are valid encrypts generated under a fixed key.
+
+**v1.1 — `fuzz_sm2_kx` layout:** `[R_B:65][S_B:32]`, both FRONT-consuming
+fixed-size `arbitrary` reads (a plain 97-byte concatenation). The target
+drives a fixed-key (`d_A = 0x11*32`, `d_B = 0x22*32`, ids `a`/`b`,
+`klen = 16`), fixed-ephemeral (`0x5A`-fill draws) initiator's `confirm`
+against the carved peer bytes — no panic / single `Failed` invariant. The
+committed `seeds/fuzz_sm2_kx/basic` is the responder's real `(R_B ‖ S_B)`
+reply (responder ephemeral `0x3C`-fill) to that exact deterministic
+initiator, so the seed exercises the full success path including both
+confirmation-tag computations.
