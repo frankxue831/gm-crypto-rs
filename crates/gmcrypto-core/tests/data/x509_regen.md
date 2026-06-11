@@ -20,7 +20,7 @@ gmssl reqgen -C CN -ST Beijing -L Beijing -O gmtest -OU leaf -CN "gmtest leaf" \
 gmssl reqsign -in leaf.req -serial_len 12 -days 365 \
   -key_usage digitalSignature -cacert cacert.pem -key ca.pem -pass P@ss \
   -out leafcert.pem
-gmssl certverify -in leafcert.pem -cacert cacert.pem   # MUST succeed
+gmssl certverify -in leafcert.pem -cacert cacert.pem   # MUST print "Verification success"
 gmssl certparse  -in cacert.pem                        # v3 + sm2sign-with-sm3
 # PEM -> DER (certs + the two SPKI public keys):
 python3 - <<'PY'
@@ -38,8 +38,9 @@ PY
 ```
 
 Notes:
-- `-serial_len` is REQUIRED by gmssl 3.1.1 certgen/reqsign (12-byte serials
-  here — comfortably under the RFC 5280 20-byte ceiling the parser enforces).
+- `-serial_len` is listed as required in gmssl 3.1.1's certgen/reqsign usage
+  strings but actually DEFAULTS to 12 when omitted; we pass it explicitly
+  (12-byte serials — comfortably under the parser's 20-byte ceiling).
 - The private keys (`ca.pem`, `leaf.pem`) are throwaway test keys and are NOT
   committed; regeneration produces a fresh CA/leaf pair, so the KAT asserts
   structural and verification properties, never specific key bytes.
