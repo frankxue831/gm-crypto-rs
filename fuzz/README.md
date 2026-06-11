@@ -109,7 +109,9 @@ differentials `fuzz_sm3` / `fuzz_hmac_sm3`, the C-ABI surface `fuzz_c_abi`
 round-trips `fuzz_sm4_cbc_encrypt` / `fuzz_sm4_gcm_encrypt`, and
 encrypt→decrypt round-trips `fuzz_sm4_ccm_encrypt` / `fuzz_sm4_xts_encrypt`.
 **v1.1** added `fuzz_sm2_kx` (adversarial peer wire bytes into the
-key-exchange initiator's `confirm`). **26 targets total** — the census must
+key-exchange initiator's `confirm`); **v1.3** added `fuzz_x509`
+(X.509-with-SM2 certificate decode + verify, seeded with the committed
+gmssl KAT fixtures). **27 targets total** — the census must
 equal both `fuzz/Cargo.toml`'s `[[bin]]` entries and the `FUZZ_TARGETS`
 list in `.github/workflows/fuzz-nightly.yml`; a target absent from that
 list still compiles in CI but is never fuzzed nor coverage-measured.)
