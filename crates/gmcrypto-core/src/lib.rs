@@ -100,6 +100,11 @@ pub mod sm2;
 pub mod sm3;
 pub mod sm4;
 pub mod spki;
+// v1.3 — X.509-with-SM2 leaf certificate parse + signature verify. Opt-in
+// via the `x509` feature; default builds are byte-identical. NO trust
+// decisions. See docs/v1.3-x509-sm2-design.md.
+#[cfg(feature = "x509")]
+pub mod x509;
 // Not public API / not SemVer — low-level in-crate trait surface kept pub for internal cross-module + dev-crate use; the public trait fit is the opt-in RustCrypto digest/cipher impls.
 #[doc(hidden)]
 pub mod traits;
