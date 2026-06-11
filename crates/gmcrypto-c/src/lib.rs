@@ -3216,9 +3216,7 @@ pub unsafe extern "C" fn gmcrypto_x509_certificate_from_der(
 ///
 /// `cert` must be a handle from this library, not yet freed.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn gmcrypto_x509_certificate_free(
-    cert: *mut gmcrypto_x509_certificate_t,
-) {
+pub unsafe extern "C" fn gmcrypto_x509_certificate_free(cert: *mut gmcrypto_x509_certificate_t) {
     if cert.is_null() {
         return;
     }
@@ -3483,8 +3481,7 @@ pub unsafe extern "C" fn gmcrypto_x509_certificate_is_self_issued(
     out_is_self_issued: *mut c_int,
 ) -> c_int {
     ffi_guard(|| {
-        let (Some(cert), false) = (unsafe { cert.as_ref() }, out_is_self_issued.is_null())
-        else {
+        let (Some(cert), false) = (unsafe { cert.as_ref() }, out_is_self_issued.is_null()) else {
             return GMCRYPTO_ERR;
         };
         // SAFETY: out_is_self_issued checked non-null; caller guarantees
