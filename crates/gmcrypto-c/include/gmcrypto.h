@@ -188,11 +188,51 @@ typedef struct gmcrypto_sm4_gcm_encryptor_t gmcrypto_sm4_gcm_encryptor_t;
 typedef struct gmcrypto_sm4_t gmcrypto_sm4_t;
 
 /*
+ Opaque X.509 certificate handle (v1.4). Immutable after construction —
+ every accessor takes `const *`; free with
+ [`gmcrypto_x509_certificate_free`].
+ */
+typedef struct gmcrypto_x509_certificate_t gmcrypto_x509_certificate_t;
+
+/*
  C ABI function pointer for caller-supplied RNG. Returns `0` on
  success and non-zero on failure. See module-level docs for the
  full contract.
  */
 typedef int (*gmcrypto_rng_callback)(void *context, uint8_t *buf, uintptr_t buf_len);
+
+/*
+ A certificate validity timestamp — plain calendar fields, mirroring the
+ Rust `X509Time` exactly (Zulu-only at parse). **This library has no
+ clock**: comparing these to "now" (the actual validity decision) is the
+ caller's call.
+ */
+typedef struct {
+  /*
+   Full year (the UTCTime 1950/2050 pivot is already applied at parse).
+   */
+  uint16_t year;
+  /*
+   Month, 1–12.
+   */
+  uint8_t month;
+  /*
+   Day of month, 1–31.
+   */
+  uint8_t day;
+  /*
+   Hour, 0–23.
+   */
+  uint8_t hour;
+  /*
+   Minute, 0–59.
+   */
+  uint8_t minute;
+  /*
+   Second, 0–59.
+   */
+  uint8_t second;
+} gmcrypto_x509_time_t;
 
 /*
  Returns a NUL-terminated string with the `gmcrypto-c` crate version,
@@ -1254,5 +1294,217 @@ int gmcrypto_sm2_kx_responder_finish(gmcrypto_sm2_kx_responder_t *responder,
  `responder` must be NULL or a live handle from `_new`.
  */
  void gmcrypto_sm2_kx_responder_free(gmcrypto_sm2_kx_responder_t *responder) ;
+
+/*
+ Parse a DER X.509-with-SM2 **v3 leaf** certificate (GM/T 0015 profile:
+ `sm2-sign-with-sm3` signature algorithm, SM2 SPKI). Returns NULL on ANY
+ failure (null/empty input, malformed DER, wrong profile) —
+ indistinguishable by design. **Parsing makes NO trust decisions** (no
+ chain / time / extension / revocation logic — see `gmcrypto-core`'s
+ `x509` module docs).
+
+ # Safety
+
+ `der` must be valid for `der_len` reads (or `der_len == 0`).
+ */
+
+gmcrypto_x509_certificate_t *gmcrypto_x509_certificate_from_der(const uint8_t *der,
+                                                                uintptr_t der_len)
+;
+
+/*
+ Free a certificate handle. NULL is a no-op.
+
+ # Safety
+
+ `cert` must be a handle from this library, not yet freed.
+ */
+ void gmcrypto_x509_certificate_free(gmcrypto_x509_certificate_t *cert) ;
+
+/*
+ The exact `TBSCertificate` TLV bytes as they appeared on the wire (the
+ bytes the signature covers) — NOT re-encoded, NOT trust-validated.
+ Copy-out convention: too-small buffer → [`GMCRYPTO_ERR`] + required
+ length in `*out_actual_len`.
+
+ # Safety
+
+ `cert` must be a valid handle; `out` valid for `out_capacity` writes;
+ `out_actual_len` valid for one write.
+ */
+
+int gmcrypto_x509_certificate_tbs_raw(const gmcrypto_x509_certificate_t *cert,
+                                      uint8_t *out,
+                                      uintptr_t out_capacity,
+                                      uintptr_t *out_actual_len)
+;
+
+/*
+ The serial number as unsigned big-endian value bytes (the DER
+ disambiguating pad is stripped), 1..=20 bytes; negative serials were
+ rejected at parse. Copy-out convention as
+ [`gmcrypto_x509_certificate_tbs_raw`].
+
+ # Safety
+
+ As [`gmcrypto_x509_certificate_tbs_raw`].
+ */
+
+int gmcrypto_x509_certificate_serial_raw(const gmcrypto_x509_certificate_t *cert,
+                                         uint8_t *out,
+                                         uintptr_t out_capacity,
+                                         uintptr_t *out_actual_len)
+;
+
+/*
+ The issuer `Name` as its full raw DER TLV — no interpretation; match
+ issuers by byte equality. Copy-out convention as
+ [`gmcrypto_x509_certificate_tbs_raw`].
+
+ # Safety
+
+ As [`gmcrypto_x509_certificate_tbs_raw`].
+ */
+
+int gmcrypto_x509_certificate_issuer_raw(const gmcrypto_x509_certificate_t *cert,
+                                         uint8_t *out,
+                                         uintptr_t out_capacity,
+                                         uintptr_t *out_actual_len)
+;
+
+/*
+ The subject `Name` as its full raw DER TLV — no interpretation.
+ Copy-out convention as [`gmcrypto_x509_certificate_tbs_raw`].
+
+ # Safety
+
+ As [`gmcrypto_x509_certificate_tbs_raw`].
+ */
+
+int gmcrypto_x509_certificate_subject_raw(const gmcrypto_x509_certificate_t *cert,
+                                          uint8_t *out,
+                                          uintptr_t out_capacity,
+                                          uintptr_t *out_actual_len)
+;
+
+/*
+ The `Extensions` SEQUENCE TLV if present — shape-checked at parse but
+ NEVER interpreted (`critical` flags included); a caller building trust
+ logic on top inherits RFC 5280 §4.2's reject-unrecognized-critical
+ obligation. **`*out_actual_len == 0` means the optional extensions
+ block is ABSENT** (a present block is never empty), with
+ [`GMCRYPTO_OK`]. Copy-out convention otherwise as
+ [`gmcrypto_x509_certificate_tbs_raw`].
+
+ # Safety
+
+ As [`gmcrypto_x509_certificate_tbs_raw`].
+ */
+
+int gmcrypto_x509_certificate_extensions_raw(const gmcrypto_x509_certificate_t *cert,
+                                             uint8_t *out,
+                                             uintptr_t out_capacity,
+                                             uintptr_t *out_actual_len)
+;
+
+/*
+ Verify the certificate's SM2-with-SM3 signature over the exact wire
+ `tbsCertificate` bytes against the issuer's public key
+ (`issuer_pubkey` is a KEY handle, not an issuer certificate), using the
+ GM / RFC 8998 default signer ID `"1234567812345678"`. Returns
+ [`GMCRYPTO_OK`] only on a verifying signature; [`GMCRYPTO_ERR`] on
+ invalid or any error (indistinguishable by design).
+
+ **This is NOT certificate validation** — no chain / time / extension /
+ revocation logic; success means exactly "this issuer key signed these
+ tbs bytes".
+
+ # Safety
+
+ `cert` / `issuer_pubkey` must be valid handles from this library.
+ */
+
+int gmcrypto_x509_certificate_verify_signature(const gmcrypto_x509_certificate_t *cert,
+                                               const gmcrypto_sm2_pubkey_t *issuer_pubkey)
+;
+
+/*
+ As [`gmcrypto_x509_certificate_verify_signature`] with a caller-supplied
+ SM2 signer ID; `id_len == 0` selects the default ID (the v1.2 KX
+ convention — an empty ID is unrepresentable through this ABI).
+
+ # Safety
+
+ `cert` / `issuer_pubkey` must be valid handles; `id` must be valid for
+ `id_len` reads when `id_len > 0`.
+ */
+
+int gmcrypto_x509_certificate_verify_signature_with_id(const gmcrypto_x509_certificate_t *cert,
+                                                       const gmcrypto_sm2_pubkey_t *issuer_pubkey,
+                                                       const uint8_t *id,
+                                                       uintptr_t id_len)
+;
+
+/*
+ Write the certificate's `notBefore` into `*out_time`. Exposure only —
+ NO validity decision is made (see [`gmcrypto_x509_time_t`]).
+
+ # Safety
+
+ `cert` must be a valid handle; `out_time` valid for one write.
+ */
+
+int gmcrypto_x509_certificate_not_before(const gmcrypto_x509_certificate_t *cert,
+                                         gmcrypto_x509_time_t *out_time)
+;
+
+/*
+ Write the certificate's `notAfter` into `*out_time`. Exposure only —
+ NO validity decision is made (see [`gmcrypto_x509_time_t`]).
+
+ # Safety
+
+ `cert` must be a valid handle; `out_time` valid for one write.
+ */
+
+int gmcrypto_x509_certificate_not_after(const gmcrypto_x509_certificate_t *cert,
+                                        gmcrypto_x509_time_t *out_time)
+;
+
+/*
+ Write `1` to `*out_is_self_issued` if the certificate's subject and
+ issuer `Name`s are byte-identical (the RFC 5280 self-ISSUED notion),
+ else `0`; returns [`GMCRYPTO_OK`] for a successful evaluation,
+ [`GMCRYPTO_ERR`] on null/bad arguments ("not self-issued" is NOT a
+ failure). NOT "self-signed": use
+ [`gmcrypto_x509_certificate_verify_signature`] against the cert's own
+ subject key for a self-signature check.
+
+ # Safety
+
+ `cert` must be a valid handle or NULL; `out_is_self_issued` must be
+ valid for one write or NULL.
+ */
+
+int gmcrypto_x509_certificate_is_self_issued(const gmcrypto_x509_certificate_t *cert,
+                                             int *out_is_self_issued)
+;
+
+/*
+ The subject's SM2 public key as a NEWLY allocated pubkey handle — the
+ caller owns it and frees it via [`gmcrypto_sm2_pubkey_free`]. Composes
+ with `gmcrypto_sm2_verify` / `gmcrypto_sm2_encrypt` / the KX
+ constructors — and with
+ [`gmcrypto_x509_certificate_verify_signature`] for manual leaf-vs-CA
+ chaining. NULL only on NULL input (the key was validated on-curve at
+ parse).
+
+ # Safety
+
+ `cert` must be a valid handle or NULL.
+ */
+
+gmcrypto_sm2_pubkey_t *gmcrypto_x509_certificate_subject_public_key(const gmcrypto_x509_certificate_t *cert)
+;
 
 #endif  /* GMCRYPTO_H_ */

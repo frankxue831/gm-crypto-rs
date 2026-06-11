@@ -3,9 +3,10 @@
 //! Exposes SM2 (sign/verify, encrypt/decrypt, and — since v1.2 — the
 //! GM/T 0003.3 key exchange with key confirmation) / SM3 / SM4
 //! (ECB/CBC/CTR/GCM/CCM/XTS) / HMAC-SM3 / PBKDF2-HMAC-SM3 plus SM2 key
-//! import/export to C / C++ / Python / Go / Zig / Ruby callers via
-//! opaque handles and a cbindgen-generated header at
-//! `include/gmcrypto.h`.
+//! import/export and — since v1.4 — X.509-with-SM2 leaf certificate
+//! parse + signature verify (NO trust decisions) to C / C++ / Python /
+//! Go / Zig / Ruby callers via opaque handles and a cbindgen-generated
+//! header at `include/gmcrypto.h`.
 //!
 //! # Failure-mode invariant
 //!
@@ -3143,7 +3144,6 @@ pub unsafe extern "C" fn gmcrypto_sm2_kx_responder_free(
 /// Opaque X.509 certificate handle (v1.4). Immutable after construction —
 /// every accessor takes `const *`; free with
 /// [`gmcrypto_x509_certificate_free`].
-#[allow(non_camel_case_types)]
 pub struct gmcrypto_x509_certificate_t {
     inner: Certificate,
 }
@@ -3153,7 +3153,6 @@ pub struct gmcrypto_x509_certificate_t {
 /// clock**: comparing these to "now" (the actual validity decision) is the
 /// caller's call.
 #[repr(C)]
-#[allow(non_camel_case_types)]
 pub struct gmcrypto_x509_time_t {
     /// Full year (the UTCTime 1950/2050 pivot is already applied at parse).
     pub year: u16,
