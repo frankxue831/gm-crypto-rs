@@ -109,6 +109,9 @@ use gmcrypto_core::sm4::{
 // v0.13 — single-shot SM4-XTS FFI. v0.23 W3 (A-1): always compiled into
 // the C ABI (the forwarding `sm4-xts` feature was removed).
 use gmcrypto_core::sm4::mode_xts;
+// v1.4 (Q4.10) — X.509-with-SM2 certificate parse + verify, always-on
+// in the C ABI (`x509` enabled unconditionally on the core dep).
+use gmcrypto_core::x509::{Certificate, X509Time};
 use gmcrypto_core::{pem, pkcs8};
 use rand_core::TryRng;
 
@@ -3125,5 +3128,397 @@ pub unsafe extern "C" fn gmcrypto_sm2_kx_responder_free(
         // SAFETY: came from Box::into_raw; reclaim + drop (the core's
         // drop-wipes run on any held key / waiting state).
         drop(unsafe { Box::from_raw(responder) });
+    }
+}
+
+// ============================================================
+// X.509-with-SM2 certificate parse + signature verify (v1.4).
+//
+// Full mirror of the v1.3 `gmcrypto_core::x509::Certificate`
+// surface per docs/v1.4-scope.md Q4.1–Q4.15. NO trust decisions
+// cross this ABI: no chains, no time/validity decision, no
+// extension interpretation, no revocation — see the core module.
+// ============================================================
+
+/// Opaque X.509 certificate handle (v1.4). Immutable after construction —
+/// every accessor takes `const *`; free with
+/// [`gmcrypto_x509_certificate_free`].
+#[allow(non_camel_case_types)]
+pub struct gmcrypto_x509_certificate_t {
+    inner: Certificate,
+}
+
+/// A certificate validity timestamp — plain calendar fields, mirroring the
+/// Rust `X509Time` exactly (Zulu-only at parse). **This library has no
+/// clock**: comparing these to "now" (the actual validity decision) is the
+/// caller's call.
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub struct gmcrypto_x509_time_t {
+    /// Full year (the UTCTime 1950/2050 pivot is already applied at parse).
+    pub year: u16,
+    /// Month, 1–12.
+    pub month: u8,
+    /// Day of month, 1–31.
+    pub day: u8,
+    /// Hour, 0–23.
+    pub hour: u8,
+    /// Minute, 0–59.
+    pub minute: u8,
+    /// Second, 0–59.
+    pub second: u8,
+}
+
+impl From<X509Time> for gmcrypto_x509_time_t {
+    fn from(t: X509Time) -> Self {
+        Self {
+            year: t.year,
+            month: t.month,
+            day: t.day,
+            hour: t.hour,
+            minute: t.minute,
+            second: t.second,
+        }
+    }
+}
+
+/// Parse a DER X.509-with-SM2 **v3 leaf** certificate (GM/T 0015 profile:
+/// `sm2-sign-with-sm3` signature algorithm, SM2 SPKI). Returns NULL on ANY
+/// failure (null/empty input, malformed DER, wrong profile) —
+/// indistinguishable by design. **Parsing makes NO trust decisions** (no
+/// chain / time / extension / revocation logic — see `gmcrypto-core`'s
+/// `x509` module docs).
+///
+/// # Safety
+///
+/// `der` must be valid for `der_len` reads (or `der_len == 0`).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_x509_certificate_from_der(
+    der: *const u8,
+    der_len: usize,
+) -> *mut gmcrypto_x509_certificate_t {
+    let result = std::panic::catch_unwind(|| {
+        // SAFETY: caller guarantees `der` valid for `der_len` reads.
+        let bytes = unsafe { try_slice(der, der_len) }?;
+        let inner = Certificate::from_der(bytes)?;
+        Some(Box::into_raw(Box::new(gmcrypto_x509_certificate_t {
+            inner,
+        })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// Free a certificate handle. NULL is a no-op.
+///
+/// # Safety
+///
+/// `cert` must be a handle from this library, not yet freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_x509_certificate_free(
+    cert: *mut gmcrypto_x509_certificate_t,
+) {
+    if cert.is_null() {
+        return;
+    }
+    // SAFETY: came from Box::into_raw in `_from_der`; reclaim + drop.
+    drop(unsafe { Box::from_raw(cert) });
+}
+
+/// Shared copy-out body for the raw-byte accessors.
+///
+/// The closure is `move` — a by-reference capture of the generic `get`
+/// would fail `ffi_guard`'s `UnwindSafe` bound (`&G: UnwindSafe` needs
+/// `G: RefUnwindSafe`); capture-by-value makes the declared bound suffice.
+///
+/// # Safety
+///
+/// Forwarded caller contract — `out` valid for `out_capacity` writes,
+/// `out_actual_len` valid for one write. This is the first `write_output`
+/// site whose source slice borrows from the handle itself (every prior
+/// site copies from a locally-owned buffer); a caller passing `out`
+/// overlapping the handle's interior heap would be `&`/`&mut` aliasing —
+/// unreachable without already-UB pointer forgery, since no API exposes
+/// those addresses.
+unsafe fn x509_copy_out(
+    cert: *const gmcrypto_x509_certificate_t,
+    get: impl Fn(&Certificate) -> &[u8] + std::panic::UnwindSafe,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(move || {
+        let Some(cert) = (unsafe { cert.as_ref() }) else {
+            return GMCRYPTO_ERR;
+        };
+        // SAFETY: forwarded caller contract (see above).
+        unsafe { write_output(get(&cert.inner), out, out_capacity, out_actual_len) }
+    })
+}
+
+/// The exact `TBSCertificate` TLV bytes as they appeared on the wire (the
+/// bytes the signature covers) — NOT re-encoded, NOT trust-validated.
+/// Copy-out convention: too-small buffer → [`GMCRYPTO_ERR`] + required
+/// length in `*out_actual_len`.
+///
+/// # Safety
+///
+/// `cert` must be a valid handle; `out` valid for `out_capacity` writes;
+/// `out_actual_len` valid for one write.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_x509_certificate_tbs_raw(
+    cert: *const gmcrypto_x509_certificate_t,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    // SAFETY: forwarded caller contract.
+    unsafe { x509_copy_out(cert, |c| c.tbs_raw(), out, out_capacity, out_actual_len) }
+}
+
+/// The serial number as unsigned big-endian value bytes (the DER
+/// disambiguating pad is stripped), 1..=20 bytes; negative serials were
+/// rejected at parse. Copy-out convention as
+/// [`gmcrypto_x509_certificate_tbs_raw`].
+///
+/// # Safety
+///
+/// As [`gmcrypto_x509_certificate_tbs_raw`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_x509_certificate_serial_raw(
+    cert: *const gmcrypto_x509_certificate_t,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    // SAFETY: forwarded caller contract.
+    unsafe { x509_copy_out(cert, |c| c.serial_raw(), out, out_capacity, out_actual_len) }
+}
+
+/// The issuer `Name` as its full raw DER TLV — no interpretation; match
+/// issuers by byte equality. Copy-out convention as
+/// [`gmcrypto_x509_certificate_tbs_raw`].
+///
+/// # Safety
+///
+/// As [`gmcrypto_x509_certificate_tbs_raw`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_x509_certificate_issuer_raw(
+    cert: *const gmcrypto_x509_certificate_t,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    // SAFETY: forwarded caller contract.
+    unsafe { x509_copy_out(cert, |c| c.issuer_raw(), out, out_capacity, out_actual_len) }
+}
+
+/// The subject `Name` as its full raw DER TLV — no interpretation.
+/// Copy-out convention as [`gmcrypto_x509_certificate_tbs_raw`].
+///
+/// # Safety
+///
+/// As [`gmcrypto_x509_certificate_tbs_raw`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_x509_certificate_subject_raw(
+    cert: *const gmcrypto_x509_certificate_t,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    // SAFETY: forwarded caller contract.
+    unsafe { x509_copy_out(cert, |c| c.subject_raw(), out, out_capacity, out_actual_len) }
+}
+
+/// The `Extensions` SEQUENCE TLV if present — shape-checked at parse but
+/// NEVER interpreted (`critical` flags included); a caller building trust
+/// logic on top inherits RFC 5280 §4.2's reject-unrecognized-critical
+/// obligation. **`*out_actual_len == 0` means the optional extensions
+/// block is ABSENT** (a present block is never empty), with
+/// [`GMCRYPTO_OK`]. Copy-out convention otherwise as
+/// [`gmcrypto_x509_certificate_tbs_raw`].
+///
+/// # Safety
+///
+/// As [`gmcrypto_x509_certificate_tbs_raw`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_x509_certificate_extensions_raw(
+    cert: *const gmcrypto_x509_certificate_t,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    // SAFETY: forwarded caller contract.
+    unsafe {
+        x509_copy_out(
+            cert,
+            |c| c.extensions_raw().unwrap_or(&[]),
+            out,
+            out_capacity,
+            out_actual_len,
+        )
+    }
+}
+
+/// Verify the certificate's SM2-with-SM3 signature over the exact wire
+/// `tbsCertificate` bytes against the issuer's public key
+/// (`issuer_pubkey` is a KEY handle, not an issuer certificate), using the
+/// GM / RFC 8998 default signer ID `"1234567812345678"`. Returns
+/// [`GMCRYPTO_OK`] only on a verifying signature; [`GMCRYPTO_ERR`] on
+/// invalid or any error (indistinguishable by design).
+///
+/// **This is NOT certificate validation** — no chain / time / extension /
+/// revocation logic; success means exactly "this issuer key signed these
+/// tbs bytes".
+///
+/// # Safety
+///
+/// `cert` / `issuer_pubkey` must be valid handles from this library.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_x509_certificate_verify_signature(
+    cert: *const gmcrypto_x509_certificate_t,
+    issuer_pubkey: *const gmcrypto_sm2_pubkey_t,
+) -> c_int {
+    // SAFETY: forwarded caller contract; null id + 0 len selects the
+    // default ID.
+    unsafe {
+        gmcrypto_x509_certificate_verify_signature_with_id(cert, issuer_pubkey, ptr::null(), 0)
+    }
+}
+
+/// As [`gmcrypto_x509_certificate_verify_signature`] with a caller-supplied
+/// SM2 signer ID; `id_len == 0` selects the default ID (the v1.2 KX
+/// convention — an empty ID is unrepresentable through this ABI).
+///
+/// # Safety
+///
+/// `cert` / `issuer_pubkey` must be valid handles; `id` must be valid for
+/// `id_len` reads when `id_len > 0`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_x509_certificate_verify_signature_with_id(
+    cert: *const gmcrypto_x509_certificate_t,
+    issuer_pubkey: *const gmcrypto_sm2_pubkey_t,
+    id: *const u8,
+    id_len: usize,
+) -> c_int {
+    ffi_guard(|| {
+        let (Some(cert), Some(issuer)) =
+            (unsafe { cert.as_ref() }, unsafe { issuer_pubkey.as_ref() })
+        else {
+            return GMCRYPTO_ERR;
+        };
+        // SAFETY: forwarded caller contract; `kx_id` maps len 0 to the
+        // default signer ID (shared v1.2 helper).
+        let Some(id) = (unsafe { kx_id(id, id_len) }) else {
+            return GMCRYPTO_ERR;
+        };
+        if cert.inner.verify_signature_with_id(&issuer.inner, id) {
+            GMCRYPTO_OK
+        } else {
+            GMCRYPTO_ERR
+        }
+    })
+}
+
+/// Write the certificate's `notBefore` into `*out_time`. Exposure only —
+/// NO validity decision is made (see [`gmcrypto_x509_time_t`]).
+///
+/// # Safety
+///
+/// `cert` must be a valid handle; `out_time` valid for one write.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_x509_certificate_not_before(
+    cert: *const gmcrypto_x509_certificate_t,
+    out_time: *mut gmcrypto_x509_time_t,
+) -> c_int {
+    ffi_guard(|| {
+        let (Some(cert), false) = (unsafe { cert.as_ref() }, out_time.is_null()) else {
+            return GMCRYPTO_ERR;
+        };
+        // SAFETY: out_time checked non-null; caller guarantees validity
+        // for one write.
+        unsafe { out_time.write(cert.inner.not_before().into()) };
+        GMCRYPTO_OK
+    })
+}
+
+/// Write the certificate's `notAfter` into `*out_time`. Exposure only —
+/// NO validity decision is made (see [`gmcrypto_x509_time_t`]).
+///
+/// # Safety
+///
+/// `cert` must be a valid handle; `out_time` valid for one write.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_x509_certificate_not_after(
+    cert: *const gmcrypto_x509_certificate_t,
+    out_time: *mut gmcrypto_x509_time_t,
+) -> c_int {
+    ffi_guard(|| {
+        let (Some(cert), false) = (unsafe { cert.as_ref() }, out_time.is_null()) else {
+            return GMCRYPTO_ERR;
+        };
+        // SAFETY: out_time checked non-null; caller guarantees validity
+        // for one write.
+        unsafe { out_time.write(cert.inner.not_after().into()) };
+        GMCRYPTO_OK
+    })
+}
+
+/// Write `1` to `*out_is_self_issued` if the certificate's subject and
+/// issuer `Name`s are byte-identical (the RFC 5280 self-ISSUED notion),
+/// else `0`; returns [`GMCRYPTO_OK`] for a successful evaluation,
+/// [`GMCRYPTO_ERR`] on null/bad arguments ("not self-issued" is NOT a
+/// failure). NOT "self-signed": use
+/// [`gmcrypto_x509_certificate_verify_signature`] against the cert's own
+/// subject key for a self-signature check.
+///
+/// # Safety
+///
+/// `cert` must be a valid handle or NULL; `out_is_self_issued` must be
+/// valid for one write or NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_x509_certificate_is_self_issued(
+    cert: *const gmcrypto_x509_certificate_t,
+    out_is_self_issued: *mut c_int,
+) -> c_int {
+    ffi_guard(|| {
+        let (Some(cert), false) = (unsafe { cert.as_ref() }, out_is_self_issued.is_null())
+        else {
+            return GMCRYPTO_ERR;
+        };
+        // SAFETY: out_is_self_issued checked non-null; caller guarantees
+        // validity for one write.
+        unsafe { out_is_self_issued.write(c_int::from(cert.inner.is_self_issued())) };
+        GMCRYPTO_OK
+    })
+}
+
+/// The subject's SM2 public key as a NEWLY allocated pubkey handle — the
+/// caller owns it and frees it via [`gmcrypto_sm2_pubkey_free`]. Composes
+/// with `gmcrypto_sm2_verify` / `gmcrypto_sm2_encrypt` / the KX
+/// constructors — and with
+/// [`gmcrypto_x509_certificate_verify_signature`] for manual leaf-vs-CA
+/// chaining. NULL only on NULL input (the key was validated on-curve at
+/// parse).
+///
+/// # Safety
+///
+/// `cert` must be a valid handle or NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_x509_certificate_subject_public_key(
+    cert: *const gmcrypto_x509_certificate_t,
+) -> *mut gmcrypto_sm2_pubkey_t {
+    let result = std::panic::catch_unwind(|| {
+        // SAFETY: caller guarantees `cert` is a valid handle or NULL.
+        let cert = unsafe { cert.as_ref() }?;
+        Some(Box::into_raw(Box::new(gmcrypto_sm2_pubkey_t {
+            inner: cert.inner.subject_public_key(),
+        })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
     }
 }

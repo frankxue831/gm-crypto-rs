@@ -3040,3 +3040,198 @@ fn sm2_kx_bad_klen_and_rng_callback_rejected() {
     );
     kx_free_keys(&[a, b]);
 }
+
+// ============================================================
+// v1.4 — X.509-with-SM2 certificate FFI (Q4.1–Q4.15 in
+// docs/v1.4-scope.md). Fixtures are the committed gmssl 3.1.1
+// CA + leaf from the v1.3 core KAT; every assertion is
+// structural/relational vs the Rust core, never specific bytes.
+// ============================================================
+
+use gmcrypto_c::{
+    gmcrypto_x509_certificate_extensions_raw, gmcrypto_x509_certificate_free,
+    gmcrypto_x509_certificate_from_der, gmcrypto_x509_certificate_is_self_issued,
+    gmcrypto_x509_certificate_issuer_raw, gmcrypto_x509_certificate_not_after,
+    gmcrypto_x509_certificate_not_before, gmcrypto_x509_certificate_serial_raw,
+    gmcrypto_x509_certificate_subject_public_key, gmcrypto_x509_certificate_subject_raw,
+    gmcrypto_x509_certificate_t, gmcrypto_x509_certificate_tbs_raw,
+    gmcrypto_x509_certificate_verify_signature, gmcrypto_x509_certificate_verify_signature_with_id,
+    gmcrypto_x509_time_t,
+};
+use gmcrypto_core::x509::Certificate;
+
+const X509_CA_DER: &[u8] = include_bytes!("../../gmcrypto-core/tests/data/x509_ca.der");
+const X509_LEAF_DER: &[u8] = include_bytes!("../../gmcrypto-core/tests/data/x509_leaf.der");
+
+/// Parse a fixture through the FFI; panics on NULL.
+fn x509_parse(der: &[u8]) -> *mut gmcrypto_x509_certificate_t {
+    let cert = unsafe { gmcrypto_x509_certificate_from_der(der.as_ptr(), der.len()) };
+    assert!(!cert.is_null(), "fixture must parse through the FFI");
+    cert
+}
+
+/// Drive one copy-out accessor with the two-call discovery convention.
+fn x509_copy_out_helper(
+    f: unsafe extern "C" fn(
+        *const gmcrypto_x509_certificate_t,
+        *mut u8,
+        usize,
+        *mut usize,
+    ) -> core::ffi::c_int,
+    cert: *const gmcrypto_x509_certificate_t,
+) -> Vec<u8> {
+    let mut needed = 0usize;
+    // Length discovery: zero capacity reports the required length.
+    unsafe { f(cert, ptr::null_mut(), 0, &mut needed) };
+    let mut buf = vec![0u8; needed.max(1)];
+    let mut actual = 0usize;
+    let rc = unsafe { f(cert, buf.as_mut_ptr(), buf.len(), &mut actual) };
+    assert_eq!(rc, GMCRYPTO_OK);
+    buf.truncate(actual);
+    buf
+}
+
+#[test]
+fn x509_ffi_accessors_match_core() {
+    // Both fixtures: the CA carries the real serial pad-strip pin (13 wire
+    // bytes -> 12 stripped, high bit set); the leaf serial was never padded.
+    for der in [X509_CA_DER, X509_LEAF_DER] {
+        let core = Certificate::from_der(der).unwrap();
+        let cert = x509_parse(der);
+        assert_eq!(
+            x509_copy_out_helper(gmcrypto_x509_certificate_tbs_raw, cert),
+            core.tbs_raw()
+        );
+        assert_eq!(
+            x509_copy_out_helper(gmcrypto_x509_certificate_serial_raw, cert),
+            core.serial_raw()
+        );
+        assert_eq!(
+            x509_copy_out_helper(gmcrypto_x509_certificate_issuer_raw, cert),
+            core.issuer_raw()
+        );
+        assert_eq!(
+            x509_copy_out_helper(gmcrypto_x509_certificate_subject_raw, cert),
+            core.subject_raw()
+        );
+        // gmssl emits v3 extensions — present, non-empty, byte-equal.
+        let ext = x509_copy_out_helper(gmcrypto_x509_certificate_extensions_raw, cert);
+        assert!(!ext.is_empty());
+        assert_eq!(ext, core.extensions_raw().unwrap());
+        unsafe { gmcrypto_x509_certificate_free(cert) };
+    }
+    // The pad-strip pin through the ABI (mirrors the v1.3 core KAT).
+    let ca = x509_parse(X509_CA_DER);
+    let serial = x509_copy_out_helper(gmcrypto_x509_certificate_serial_raw, ca);
+    assert_eq!(serial.len(), 12);
+    assert_ne!(serial[0] & 0x80, 0, "stripped first byte has the high bit");
+    unsafe { gmcrypto_x509_certificate_free(ca) };
+}
+
+/// Q4.6: surgically remove the `[3]` extensions block from the leaf and
+/// patch the two enclosing SEQUENCE lengths. The now-invalid signature is
+/// irrelevant — `from_der` never verifies.
+fn leaf_without_extensions() -> Vec<u8> {
+    let core = Certificate::from_der(X509_LEAF_DER).unwrap();
+    let ext_seq = core.extensions_raw().unwrap();
+    let pos = X509_LEAF_DER
+        .windows(ext_seq.len())
+        .position(|w| w == ext_seq)
+        .unwrap();
+    // The [3] EXPLICIT wrapper (0xA3 + DER length) directly precedes it.
+    let wrap_start = if X509_LEAF_DER[pos - 2] == 0xA3 {
+        pos - 2
+    } else if X509_LEAF_DER[pos - 3] == 0xA3 && X509_LEAF_DER[pos - 2] == 0x81 {
+        pos - 3
+    } else {
+        assert_eq!(X509_LEAF_DER[pos - 4], 0xA3, "unexpected [3] length form");
+        pos - 4
+    };
+    let removed = (pos + ext_seq.len()) - wrap_start;
+    let mut t = X509_LEAF_DER[..wrap_start].to_vec();
+    t.extend_from_slice(&X509_LEAF_DER[pos + ext_seq.len()..]);
+    // Patch the outer Certificate SEQUENCE and tbs SEQUENCE lengths (both
+    // long-form 0x82 for these fixtures; asserted).
+    assert_eq!((t[0], t[1]), (0x30, 0x82));
+    assert_eq!((t[4], t[5]), (0x30, 0x82));
+    for len_at in [2usize, 6] {
+        let old = (usize::from(t[len_at]) << 8) | usize::from(t[len_at + 1]);
+        let new = old - removed;
+        t[len_at] = u8::try_from(new >> 8).unwrap();
+        t[len_at + 1] = u8::try_from(new & 0xff).unwrap();
+    }
+    t
+}
+
+#[test]
+fn x509_ffi_extensions_absent_reports_zero_len() {
+    let stripped = leaf_without_extensions();
+    // Core agrees the surgery produced an extensionless parse.
+    assert!(
+        Certificate::from_der(&stripped)
+            .expect("stripped leaf must still parse")
+            .extensions_raw()
+            .is_none()
+    );
+    let cert = x509_parse(&stripped);
+    let mut buf = [0u8; 4];
+    let mut actual = 7usize;
+    let rc = unsafe {
+        gmcrypto_x509_certificate_extensions_raw(cert, buf.as_mut_ptr(), buf.len(), &mut actual)
+    };
+    assert_eq!(rc, GMCRYPTO_OK);
+    assert_eq!(actual, 0, "absent extensions == actual_len 0 (Q4.6)");
+    unsafe { gmcrypto_x509_certificate_free(cert) };
+}
+
+#[test]
+fn x509_ffi_rejects_malformed_der_and_null_args() {
+    for bad in [
+        &[][..],
+        &[0x30, 0x00][..],
+        &X509_LEAF_DER[..X509_LEAF_DER.len() - 1],
+    ] {
+        let p = unsafe { gmcrypto_x509_certificate_from_der(bad.as_ptr(), bad.len()) };
+        assert!(p.is_null());
+    }
+    assert!(unsafe { gmcrypto_x509_certificate_from_der(ptr::null(), 7) }.is_null());
+    // NULL-argument sweep on the copy-out shape: NULL cert and NULL
+    // out_actual_len both collapse to the single error.
+    let mut buf = [0u8; 64];
+    let mut actual = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_x509_certificate_serial_raw(
+                ptr::null(),
+                buf.as_mut_ptr(),
+                buf.len(),
+                &mut actual,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    let cert = x509_parse(X509_LEAF_DER);
+    assert_eq!(
+        unsafe {
+            gmcrypto_x509_certificate_serial_raw(cert, buf.as_mut_ptr(), buf.len(), ptr::null_mut())
+        },
+        GMCRYPTO_ERR
+    );
+    unsafe { gmcrypto_x509_certificate_free(cert) };
+    // free(NULL) is a no-op.
+    unsafe { gmcrypto_x509_certificate_free(ptr::null_mut()) };
+}
+
+#[test]
+fn x509_ffi_copy_out_too_small_reports_required_len() {
+    let cert = x509_parse(X509_CA_DER);
+    let mut small = [0u8; 4];
+    let mut actual = 0usize;
+    let rc = unsafe {
+        gmcrypto_x509_certificate_issuer_raw(cert, small.as_mut_ptr(), small.len(), &mut actual)
+    };
+    assert_eq!(rc, GMCRYPTO_ERR);
+    let core = Certificate::from_der(X509_CA_DER).unwrap();
+    assert_eq!(actual, core.issuer_raw().len());
+    unsafe { gmcrypto_x509_certificate_free(cert) };
+}
