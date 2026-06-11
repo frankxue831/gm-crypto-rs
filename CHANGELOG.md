@@ -5,6 +5,52 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-11
+
+**X.509-with-SM2: leaf certificate parse + signature verify** — the second
+TLCP prerequisite (SM2 key exchange was the first). Additive minor: new
+opt-in **`x509`** feature on `gmcrypto-core` (pure-core, no new dependency;
+default build byte-identical); `gmcrypto-c`/`gmcrypto-simd` unchanged but
+bump in lockstep to 1.3.0 (`=1.3.0` pins). Per `docs/v1.3-scope.md`
+Q3.1–Q3.11 + `docs/v1.3-x509-sm2-design.md` (Codex-ranked depth;
+Fable-5 adversarial review GO-WITH-FIXES, all findings applied).
+
+### Added
+- `x509::Certificate::from_der` — strict-DER parse of an X.509 **v3**
+  certificate in the GM/T 0015 profile via the existing in-repo
+  `asn1::reader` (no `x509-cert`/`der` dependency): exact wire
+  `tbsCertificate` span capture, `sm2-sign-with-sm3` AlgorithmIdentifier
+  (params absent-or-NULL; **full-span outer==inner byte equality**), SPKI
+  delegated to `spki::decode` (sm2p256v1 + on-curve), strict negative-serial
+  reject (deliberate deviation from RFC 5280's "gracefully handle"),
+  pad-stripped 1..=20 serial, Zulu-only UTCTime/GeneralizedTime with the
+  RFC 5280 pivot, one-level extensions shape-check with **zero
+  interpretation**, BIT STRING unused-bits 0. Single `None` for every
+  malformed input.
+- `x509::Certificate::verify_signature(_with_id)` — SM2-with-SM3 signature
+  verification over the **exact wire tbs bytes** via `verify_with_id`
+  (default ID `1234567812345678` per RFC 8998 §3.2.1, override available).
+  **NO trust decisions**: no chain building, no time/validity decision
+  (`X509Time` exposed; the library has no clock), no extension/keyUsage/
+  basicConstraints/critical evaluation, no revocation — documented bluntly
+  on the module, the type, and the methods.
+- Accessors: `subject_public_key` (infallible by construction), `tbs_raw`,
+  `serial_raw`, `issuer_raw`/`subject_raw` (raw DER Names),
+  `extensions_raw`, `not_before`/`not_after`, `is_self_issued`.
+- Assurance: gmssl 3.1.1-generated CA+leaf KAT fixtures (chain-verified by
+  gmssl before commit; regen recipe committed) with a full per-byte tbs
+  tamper sweep, truncation sweep, OID-swap (inner/outer/both),
+  negative-serial, pad-strip pin, unused-bits, and
+  garbage-signature-parses-but-never-verifies tests; new fuzz target
+  `fuzz_x509` (census 26 → **27**; 60 s smoke: 5.8M runs, zero crashes);
+  `x509` legs across the test/clippy/deny/MSRV/wasm32 CI matrices.
+  **No new dudect target** — certificate verification consumes only public
+  inputs (no secret-dependent path exists; SECURITY.md documents the
+  rationale).
+
+### Changed
+- Workspace version 1.2.0 → 1.3.0 (lockstep; exact sibling pins `=1.3.0`).
+
 ## [1.2.0] - 2026-06-11
 
 **C FFI for SM2 key exchange (GM/T 0003.3)** — completes the

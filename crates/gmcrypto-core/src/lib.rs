@@ -12,6 +12,10 @@
 //!   confirmation (`Sm2KxInitiator` / `Sm2KxResponder` role
 //!   state-machines).
 //! - [`sm3`] — SM3 hash (GB/T 32905) with streaming `new/update/finalize`.
+//! - `x509` (the module appears with the feature of the same name, v1.3) —
+//!   X.509-with-SM2 LEAF certificate parse + SM2-with-SM3 signature verify
+//!   over the exact wire `tbsCertificate` bytes. **No trust decisions**
+//!   (no chains / time checks / extension interpretation / revocation).
 //! - [`sm4`] — SM4 block cipher (GB/T 32907) + CBC and CTR modes
 //!   (single-shot and streaming). The opt-in `sm4-aead` feature adds
 //!   SM4-GCM (single-shot + incremental-input buffered) and SM4-CCM;
@@ -76,6 +80,11 @@
 //!   `ZeroizeOnDrop` agreed key. Pure-core, no new dependency;
 //!   byte-identical to the GM/T 0003.5 recommended-curve worked
 //!   example. The C ABI projection ships in `gmcrypto-c` (v1.2).
+//! - `x509` — opt-in (v1.3). X.509-with-SM2 leaf certificate parse +
+//!   signature verify (GM/T 0015 profile): strict in-repo DER, v3-only,
+//!   `sm2-sign-with-sm3` outer==inner, SPKI delegated to [`spki`].
+//!   Pure-core, no new dependency, public inputs only (no constant-time
+//!   obligations arise). NO trust decisions — see the module docs.
 //!
 //! # `wasm32-unknown-unknown`
 //!
