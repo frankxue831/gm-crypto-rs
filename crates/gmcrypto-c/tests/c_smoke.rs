@@ -3235,3 +3235,174 @@ fn x509_ffi_copy_out_too_small_reports_required_len() {
     assert_eq!(actual, core.issuer_raw().len());
     unsafe { gmcrypto_x509_certificate_free(cert) };
 }
+
+#[test]
+fn x509_ffi_verify_matrix() {
+    let ca = x509_parse(X509_CA_DER);
+    let leaf = x509_parse(X509_LEAF_DER);
+    // Issuer key handles via the existing pubkey FFI, from the core parse.
+    let ca_core = Certificate::from_der(X509_CA_DER).unwrap();
+    let ca_sec1 = ca_core.subject_public_key().to_sec1_uncompressed();
+    let ca_key = unsafe { gmcrypto_sm2_pubkey_new(ca_sec1.as_ptr()) };
+    let leaf_core = Certificate::from_der(X509_LEAF_DER).unwrap();
+    let leaf_sec1 = leaf_core.subject_public_key().to_sec1_uncompressed();
+    let leaf_key = unsafe { gmcrypto_sm2_pubkey_new(leaf_sec1.as_ptr()) };
+    assert!(!ca_key.is_null() && !leaf_key.is_null());
+
+    // CA is self-signed; leaf verifies under the CA key only.
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_verify_signature(ca, ca_key) },
+        GMCRYPTO_OK
+    );
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_verify_signature(leaf, ca_key) },
+        GMCRYPTO_OK
+    );
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_verify_signature(leaf, leaf_key) },
+        GMCRYPTO_ERR
+    );
+    // Explicit default ID == id_len 0 == the no-id symbol.
+    assert_eq!(
+        unsafe {
+            gmcrypto_x509_certificate_verify_signature_with_id(
+                leaf,
+                ca_key,
+                b"1234567812345678".as_ptr(),
+                16,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    // Wrong ID fails; NULL args fail.
+    assert_eq!(
+        unsafe {
+            gmcrypto_x509_certificate_verify_signature_with_id(
+                leaf,
+                ca_key,
+                b"WRONG-ID".as_ptr(),
+                8,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_verify_signature(ptr::null(), ca_key) },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_verify_signature(leaf, ptr::null()) },
+        GMCRYPTO_ERR
+    );
+
+    unsafe {
+        gmcrypto_sm2_pubkey_free(ca_key);
+        gmcrypto_sm2_pubkey_free(leaf_key);
+        gmcrypto_x509_certificate_free(ca);
+        gmcrypto_x509_certificate_free(leaf);
+    }
+}
+
+#[test]
+fn x509_ffi_tampered_tbs_fails_verify() {
+    // Flip one bit inside the tbs span (offset 20 is inside the serial for
+    // these fixtures); parse may fail OR verify must fail — never both
+    // succeed (the signature covers the exact wire bytes).
+    let mut t = X509_LEAF_DER.to_vec();
+    t[20] ^= 0x01;
+    let cert = unsafe { gmcrypto_x509_certificate_from_der(t.as_ptr(), t.len()) };
+    if !cert.is_null() {
+        let ca_core = Certificate::from_der(X509_CA_DER).unwrap();
+        let sec1 = ca_core.subject_public_key().to_sec1_uncompressed();
+        let ca_key = unsafe { gmcrypto_sm2_pubkey_new(sec1.as_ptr()) };
+        assert_eq!(
+            unsafe { gmcrypto_x509_certificate_verify_signature(cert, ca_key) },
+            GMCRYPTO_ERR
+        );
+        unsafe { gmcrypto_sm2_pubkey_free(ca_key) };
+        unsafe { gmcrypto_x509_certificate_free(cert) };
+    }
+}
+
+#[test]
+fn x509_ffi_times_and_self_issued_match_core() {
+    let cert = x509_parse(X509_LEAF_DER);
+    let core = Certificate::from_der(X509_LEAF_DER).unwrap();
+
+    let mut t = gmcrypto_x509_time_t {
+        year: 0,
+        month: 0,
+        day: 0,
+        hour: 0,
+        minute: 0,
+        second: 0,
+    };
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_not_before(cert, &mut t) },
+        GMCRYPTO_OK
+    );
+    let nb = core.not_before();
+    assert_eq!(
+        (t.year, t.month, t.day, t.hour, t.minute, t.second),
+        (nb.year, nb.month, nb.day, nb.hour, nb.minute, nb.second)
+    );
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_not_after(cert, &mut t) },
+        GMCRYPTO_OK
+    );
+    let na = core.not_after();
+    assert_eq!(
+        (t.year, t.month, t.day, t.hour, t.minute, t.second),
+        (na.year, na.month, na.day, na.hour, na.minute, na.second)
+    );
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_not_before(cert, ptr::null_mut()) },
+        GMCRYPTO_ERR
+    );
+
+    // Self-issued: out-param + status (Q4.9). Leaf no, CA yes; NULL cert
+    // and NULL out-param both ERR with the out-param untouched.
+    let mut flag = -1;
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_is_self_issued(cert, &mut flag) },
+        GMCRYPTO_OK
+    );
+    assert_eq!(flag, 0);
+    let ca = x509_parse(X509_CA_DER);
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_is_self_issued(ca, &mut flag) },
+        GMCRYPTO_OK
+    );
+    assert_eq!(flag, 1);
+    let mut untouched = -1;
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_is_self_issued(ptr::null(), &mut untouched) },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(untouched, -1);
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_is_self_issued(ca, ptr::null_mut()) },
+        GMCRYPTO_ERR
+    );
+
+    unsafe { gmcrypto_x509_certificate_free(ca) };
+    unsafe { gmcrypto_x509_certificate_free(cert) };
+}
+
+#[test]
+fn x509_ffi_subject_key_handle_composes() {
+    let cert = x509_parse(X509_LEAF_DER);
+    let key = unsafe { gmcrypto_x509_certificate_subject_public_key(cert) };
+    assert!(!key.is_null());
+    // SEC1 export through the existing pubkey FFI equals the core's.
+    let mut sec1 = [0u8; 65];
+    assert_eq!(
+        unsafe { gmcrypto_sm2_pubkey_to_sec1_uncompressed(key, sec1.as_mut_ptr()) },
+        GMCRYPTO_OK
+    );
+    let core = Certificate::from_der(X509_LEAF_DER).unwrap();
+    assert_eq!(sec1, core.subject_public_key().to_sec1_uncompressed());
+    assert!(unsafe { gmcrypto_x509_certificate_subject_public_key(ptr::null()) }.is_null());
+    unsafe { gmcrypto_sm2_pubkey_free(key) };
+    unsafe { gmcrypto_x509_certificate_free(cert) };
+}
