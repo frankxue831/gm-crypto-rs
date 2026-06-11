@@ -38,6 +38,7 @@ no feature flags are needed.
 | SM4-GCM / SM4-CCM AEAD (single-shot + streaming SM4-GCM) | `gmcrypto_sm4_gcm_*` / `gmcrypto_sm4_ccm_*` | [`examples/sm4_gcm_streaming.c`](examples/sm4_gcm_streaming.c) |
 | SM4-XTS tweakable disk/sector mode (GB/T 17964-2021): single-shot + in-place multi-sector | `gmcrypto_sm4_xts_{encrypt,decrypt}` / `gmcrypto_sm4_xts_{encrypt,decrypt}_sectors` | [`examples/sm4_xts_sector.c`](examples/sm4_xts_sector.c), [`examples/sm4_xts_multisector.c`](examples/sm4_xts_multisector.c) |
 | SM2 key exchange (GM/T 0003.3) with key confirmation (v1.2): two opaque role handles; `_confirm`/`_finish` consume + free; `_with_rng` variants for caller-supplied randomness | `gmcrypto_sm2_kx_initiator_{new,new_with_rng,confirm,free}` / `gmcrypto_sm2_kx_responder_{new,respond,respond_with_rng,finish,free}` | [`examples/sm2_key_exchange.c`](examples/sm2_key_exchange.c) |
+| X.509-with-SM2 leaf certificate parse + signature verify (v1.4): one immutable opaque handle; **NO trust decisions** (no chains / clock / extension interpretation / revocation) | `gmcrypto_x509_certificate_{from_der, free, verify_signature, verify_signature_with_id, tbs_raw, serial_raw, issuer_raw, subject_raw, extensions_raw, not_before, not_after, is_self_issued, subject_public_key}` + `gmcrypto_x509_time_t` | [`examples/x509_verify.c`](examples/x509_verify.c) |
 
 **SM2 key exchange** notes: the initiator handle is created already holding
 its ephemeral (`_new` writes `R_A`); the agreed key is written to caller
@@ -45,6 +46,17 @@ memory and **the caller owns wiping it**; every failure (off-curve peer `R`,
 tag mismatch, misuse ordering, null, RNG failure) is the single
 `GMCRYPTO_ERR`. `id_len == 0` selects the GM/T default ID
 `"1234567812345678"`.
+
+**X.509** notes: `verify_signature` answers exactly "did this issuer KEY
+sign these exact wire `tbsCertificate` bytes" — it is deliberately not
+named "validate" and makes no validity/trust decision; `not_before` /
+`not_after` fill a plain `gmcrypto_x509_time_t` that is never compared to a
+clock; the raw accessors follow the copy-out two-call discovery convention
+(`extensions_raw` reports `*out_actual_len == 0` when the optional block is
+absent); `subject_public_key` returns a normal `gmcrypto_sm2_pubkey_t` the
+caller frees — chain leaf-vs-CA manually by extracting the issuer cert's
+subject key. `is_self_issued` uses an out-param so the universal
+"`0` = success" status convention stays intact.
 
 ```bash
 cargo build -p gmcrypto-c --release   # the complete ABI — no feature flags
