@@ -27,7 +27,7 @@ rand_core = "0.10"
 # Q14.2/§2; v1.1 adds sm2-key-exchange for fuzz_sm2_kx).
 [dependencies.gmcrypto-core]
 path = "../crates/gmcrypto-core"
-features = ["sm4-aead", "sm4-xts", "sm2-key-exchange"]
+features = ["sm4-aead", "sm4-xts", "sm2-key-exchange", "x509"]
 
 # The C ABI shim, pulled in via its `rlib` crate-type so the `fuzz_c_abi`
 # target can drive the `extern "C"` entry points directly (raw pointers +
@@ -233,6 +233,15 @@ bench = false
 [[bin]]
 name = "fuzz_sm2_kx"
 path = "fuzz_targets/fuzz_sm2_kx.rs"
+test = false
+doc = false
+bench = false
+
+# v1.3 — X.509-with-SM2 certificate decode + verify (no-panic invariant;
+# seeds = the committed gmssl KAT fixtures).
+[[bin]]
+name = "fuzz_x509"
+path = "fuzz_targets/fuzz_x509.rs"
 test = false
 doc = false
 bench = false

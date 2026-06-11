@@ -306,6 +306,28 @@ pub mod gmcrypto_core::spki
 pub fn gmcrypto_core::spki::decode(&[u8]) -> core::option::Option<gmcrypto_core::sm2::public_key::Sm2PublicKey>
 pub fn gmcrypto_core::spki::encode(&gmcrypto_core::sm2::public_key::Sm2PublicKey) -> alloc::vec::Vec<u8>
 pub fn gmcrypto_core::spki::encode_uncompressed(&[u8; 65]) -> alloc::vec::Vec<u8>
+pub mod gmcrypto_core::x509
+pub struct gmcrypto_core::x509::Certificate
+impl gmcrypto_core::x509::Certificate
+pub fn gmcrypto_core::x509::Certificate::extensions_raw(&self) -> core::option::Option<&[u8]>
+pub fn gmcrypto_core::x509::Certificate::from_der(&[u8]) -> core::option::Option<Self>
+pub fn gmcrypto_core::x509::Certificate::is_self_issued(&self) -> bool
+pub fn gmcrypto_core::x509::Certificate::issuer_raw(&self) -> &[u8]
+pub const fn gmcrypto_core::x509::Certificate::not_after(&self) -> gmcrypto_core::x509::X509Time
+pub const fn gmcrypto_core::x509::Certificate::not_before(&self) -> gmcrypto_core::x509::X509Time
+pub fn gmcrypto_core::x509::Certificate::serial_raw(&self) -> &[u8]
+pub const fn gmcrypto_core::x509::Certificate::subject_public_key(&self) -> gmcrypto_core::sm2::public_key::Sm2PublicKey
+pub fn gmcrypto_core::x509::Certificate::subject_raw(&self) -> &[u8]
+pub fn gmcrypto_core::x509::Certificate::tbs_raw(&self) -> &[u8]
+pub fn gmcrypto_core::x509::Certificate::verify_signature(&self, &gmcrypto_core::sm2::public_key::Sm2PublicKey) -> bool
+pub fn gmcrypto_core::x509::Certificate::verify_signature_with_id(&self, &gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8]) -> bool
+pub struct gmcrypto_core::x509::X509Time
+pub gmcrypto_core::x509::X509Time::day: u8
+pub gmcrypto_core::x509::X509Time::hour: u8
+pub gmcrypto_core::x509::X509Time::minute: u8
+pub gmcrypto_core::x509::X509Time::month: u8
+pub gmcrypto_core::x509::X509Time::second: u8
+pub gmcrypto_core::x509::X509Time::year: u16
 #[non_exhaustive] pub enum gmcrypto_core::Error
 pub gmcrypto_core::Error::Failed
 impl core::error::Error for gmcrypto_core::Error

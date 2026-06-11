@@ -161,6 +161,14 @@ CLAUDE.md carries the canonical per-target gate table.
   masked `0xE1`), the `decrypt_blocks` batch path (rides SIMD fanout under
   `sm4-bitsliced-simd`), and the CTS tail.
 
+**The `x509` feature (v1.3) deliberately has NO dudect target**: X.509
+certificate parse + signature verification consumes only public inputs (the
+certificate bytes and the issuer's PUBLIC key) — no private key or other
+secret exists anywhere on that path, so there is no secret-dependent timing
+to gate (the first feature since v0.11 where that holds by construction).
+The underlying `verify_with_id` is the same hardened public verify path the
+SM2 signature API uses.
+
 **Cfg-gated on `sm2-key-exchange` (1):**
 
 - `ct_sm2_key_exchange` — the full SM2 key-exchange initiator side

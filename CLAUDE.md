@@ -1,7 +1,39 @@
 # CLAUDE.md
 
 Pure-Rust SM2/SM3/SM4 SDK.
-**v1.2.0 — C FFI for SM2 key exchange — implemented on `feat/sm2-kx-ffi`;
+**v1.3.0 — X.509-with-SM2 leaf certificate parse + signature verify —
+implemented on `feat/x509-sm2`; publish order simd → core → c, the
+maintainer's per-release call.** The second TLCP prerequisite (SM2-KX was
+the first). New opt-in **`x509 = []`** feature (pure-core, NO new dep;
+default build byte-identical): `x509::Certificate::from_der` (strict
+in-repo DER — NO x509-cert/der dep; v3-only; GM/T 0015 profile) +
+`verify_signature(_with_id)` over the EXACT wire tbsCertificate span via
+`verify_with_id` (default ID `1234567812345678`, RFC 8998 §3.2.1).
+**NO trust decisions** — no chains, no time/validity decision (X509Time
+exposed, no clock), no extension interpretation (one-level shape-check
+only, critical flags NEVER evaluated), no revocation; `verify_signature`
+is deliberately NOT named "validate". Strictness: sm2-sign-with-sm3 AlgId
+params absent-or-NULL with FULL-SPAN outer==inner byte equality (mixed
+forms rejected); negative serials REJECTED (deliberate deviation from RFC
+5280 "gracefully handle"); serial_raw = pad-stripped 1..=20 value bytes;
+BIT STRING unused==0; garbage sig content PARSES but never VERIFIES
+(decode_sig at verify time is the single source of truth). Composes ONLY
+existing assets (asn1::reader, spki::decode, verify_with_id,
+oid::SM2_SIGN_WITH_SM3) — zero new cryptographic code. KAT: gmssl
+3.1.1-generated CA+leaf fixtures (chain-verified by gmssl; regen recipe in
+tests/data/x509_regen.md; gotcha: certgen/reqsign list -serial_len as
+required but it defaults to 12) + full per-byte tbs tamper sweep +
+truncation sweep + OID-swap/negative-serial/pad-strip/unused-bits
+negatives. Fuzz `fuzz_x509` (census 27). **NO dudect target — public
+inputs only** (first feature since v0.11 where that holds by construction;
+SECURITY.md documents it). Scope Q3.1–Q3.11 Codex-ranked ("path validation
+is where small auditable cycles go to die" — chains/generation/Name
+parsing/TLCP all deliberately OUT) + Fable-5 adversarial review
+GO-WITH-FIXES (headline: the negative-serial tolerance the plan claimed
+was inverted vs read_integer's real strictness). Workspace 1.2.0 → 1.3.0,
+sibling pins `=1.3.0`. C FFI deferred (v1.4 candidate); X.509-with-SM2
+feeds the TLCP direction.**
+**Earlier — v1.2.0 — C FFI for SM2 key exchange — implemented on `feat/sm2-kx-ffi`;
 the `cargo publish` + SSH-signed tag are the maintainer's authenticated call
 (publish order simd → core → c; the v1.1.0 agent-publish was a recorded
 one-off delegation, not a precedent).** Completes the core-in-vN / FFI-in-vN+1
@@ -545,6 +577,8 @@ cargo clippy -p gmcrypto-core --features sm4-xts --all-targets -- -D warnings
 # v1.1 — SM2 key-exchange opt-in clippy pass (crypto-bigint-scalar added so
 # the bench target, which has required-features on it, also lints).
 cargo clippy -p gmcrypto-core --features sm2-key-exchange,crypto-bigint-scalar --all-targets -- -D warnings
+# v1.3 — X.509 opt-in clippy pass.
+cargo clippy -p gmcrypto-core --features x509 --all-targets -- -D warnings
 
 # Supply chain — note: --exclude-dev (dev-deps are exempt from the ban list).
 cargo deny check --exclude-dev
@@ -552,11 +586,11 @@ cargo deny check --exclude-dev
 # feature flags (digest/cipher/inout/crypto-common allowlisted in deny.toml;
 # sm4-aead pulls gmcrypto-simd::ghash which has no new transitive deps; sm4-xts
 # adds NO new dep — pure-core).
-cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange check --exclude-dev
+cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509 check --exclude-dev
 
 # MSRV reproducibility.
 cargo +1.85 build -p gmcrypto-core
-cargo +1.85 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar,sm2-key-exchange
+cargo +1.85 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar,sm2-key-exchange,x509
 cargo build -p gmcrypto-core --no-default-features  # confirms no_std posture
 
 # v0.4 W1 — wasm32 build (caller-supplied RNG only).
@@ -565,6 +599,8 @@ cargo build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-featur
 cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features sm4-xts --no-default-features
 # v1.1 — sm2-key-exchange is pure-core/no_std too (caller-supplied RNG).
 cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features sm2-key-exchange --no-default-features
+# v1.3 — x509 is pure-core/no_std too (public-input parse+verify).
+cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features x509 --no-default-features
 
 # v0.4 W4 — C ABI shim build + header drift check.
 cargo build -p gmcrypto-c --release
@@ -605,7 +641,7 @@ GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
 # Run from the REPO ROOT (the dir containing fuzz/). The fuzz crate is its
 # OWN workspace + parent exclude=["fuzz"], so it does NOT affect any
 # `cargo ... --workspace` / `cargo deny` / publish of the 3 crates.
-cargo +nightly fuzz build                          # build all 26 targets
+cargo +nightly fuzz build                          # build all 27 targets
 cargo +nightly fuzz run fuzz_pem fuzz/corpus/fuzz_pem fuzz/seeds/fuzz_pem -- \
     -max_len=16384 -rss_limit_mb=2048 -timeout=25 -max_total_time=60
 # Dir order: corpus FIRST (gitignored, libFuzzer writes new units here),
@@ -783,6 +819,7 @@ crates/gmcrypto-core/
       ciphertext.rs         # GM/T 0009 SM2 ciphertext SEQUENCE — ports over W1 in v0.3
     pem.rs                  # v0.3 W2 — RFC 7468 PEM + embedded base64 (hand-rolled, no_std)
     spki.rs                 # v0.3 W2 — RFC 5280 SubjectPublicKeyInfo for SM2
+    x509.rs                 # v1.3 — X.509-with-SM2 LEAF cert parse + sig verify (opt-in `x509` feature; GM/T 0015 profile, v3-only, strict in-repo DER). Certificate::from_der -> Option (exact wire tbs span; sm2-sign-with-sm3 AlgId absent-or-NULL params + FULL-SPAN outer==inner; negative serial REJECT; pad-stripped serial 1..=20; one-level extensions shape-check, ZERO interpretation; BIT STRING unused==0) + verify_signature(_with_id) -> bool via verify_with_id over tbs_raw (default ID 1234567812345678; RFC 8998 §3.2.1). NO TRUST DECISIONS (no chains/time/extension-eval/revocation — X509Time exposed, no clock). Composes asn1::reader + spki::decode + verify_with_id only; public inputs only -> NO dudect target
     sec1.rs                 # v0.3 W2 — RFC 5915 ECPrivateKey + SEC1 uncompressed point (04||X||Y)
     pkcs8.rs                # v0.3 W2 — RFC 5958 OneAsymmetricKey + RFC 8018 PBES2 (PBKDF2-HMAC-SM3 + SM4-CBC)
     traits.rs               # v0.3 W5 — in-crate Hash / Mac / BlockCipher traits (v0.4 W2 lands RustCrypto-trait fit alongside)
@@ -795,6 +832,7 @@ crates/gmcrypto-core/
     sm4_ctr_kat.rs          # v0.7 W2 — CTR derived from SM4-ECB primitive; counter-wrap KAT; encrypt/decrypt symmetry
     sm4_gcm_kat.rs          # v0.8 W2 — SM4-GCM byte-identical to gmssl 3.1.1 across 4 KAT scenarios + tamper detection (cfg-gated on `sm4-aead`)
     sm4_ccm_kat.rs          # v0.8 W3 — SM4-CCM byte-identical to OpenSSL 3.x EVP across 8 KAT scenarios (nonce_len ∈ {7,12,13}, tag_len ∈ {4,10,16}, empty PT, empty AAD, long AAD crossing block); cfg-gated on `sm4-aead`
+    x509_kat.rs             # v1.3 — gmssl-fixture KAT + adversarial negatives (cfg-gated on `x509`): field exposure vs exported SPKI keys, CA self-verify + leaf-vs-CA + wrong-key/wrong-ID rejects, FULL per-byte tbs tamper sweep, truncation sweep, negative-serial reject, serial pad-strip pin, OID swap (inner/outer/both), unused-bits reject, garbage-sig parses-but-never-verifies
     data/                   # v0.3 W2 binary KAT fixtures + regen recipe (Q7.9 decision); v0.8 W3 adds sm4_ccm_oracle.c (OpenSSL EVP harness)
 
 crates/gmcrypto-c/          # v0.4 W4 — C ABI shim (cdylib + staticlib + rlib)
@@ -829,9 +867,9 @@ crates/gmcrypto-simd/       # v0.5 W4 phase 2 / v0.6 W6 / v0.8 W1 — SIMD backe
   tests/ghash_kat.rs        # v0.8 W1 — NIST-derived GHASH triple (H, X, Y) regression KAT across all three dispatch paths
   tests/ghash_lane_equivalence.rs # v0.8 W1 — software vs CLMUL vs PMULL byte-equivalence sweep over 75 inputs (random + structural edges)
 
-fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN WORKSPACE (empty [workspace] table) + parent exclude=["fuzz"] → nightly-only libfuzzer-sys/arbitrary deps never enter the published 3-crate graph; unpublished, NOT MSRV-bound, NOT in cargo deny. fuzz/Cargo.lock IS committed (.gitignore anchors /Cargo.lock to root so it isn't swallowed). 26 targets (v0.14's 16 + v0.20's 2 streaming-decryptor differential + #98/#99's 7 post-1.0 hardening [SM3/HMAC-SM3/C-ABI/SM4-mode-encrypt] + v1.1's fuzz_sm2_kx); v0.14's prove the failure-mode invariant (no panic/OOM/hang), v0.20's prove streaming==single-shot; initial sweeps zero crashes (+ zero divergences for v0.20). The FUZZ_TARGETS list in fuzz-nightly.yml MUST name every [[bin]] — a target absent there builds (fuzz-build.yml) but is silently never fuzzed (the #98/#99 drift, fixed post-#101).
-  Cargo.toml                # gmcrypto-core path dep w/ features=["sm4-aead","sm4-xts","sm2-key-exchange"] always on (no per-target feature juggling); 26 [[bin]] entries; empty [workspace]
-  fuzz_targets/             # fuzz_pem, fuzz_pkcs8_{decode,decrypt}, fuzz_spki, fuzz_sec1, fuzz_sig, fuzz_asn1_reader, fuzz_sm2_{ciphertext_der,raw_ciphertext,pubkey_sec1,decrypt,verify}, fuzz_sm4_{cbc,gcm,ccm,xts}_decrypt + v0.20 fuzz_sm4_{cbc,gcm}_streaming_decrypt (DIFFERENTIAL: streaming Sm4{Cbc,Gcm}Decryptor fed in arbitrary chunks == single-shot mode_{cbc,gcm}::decrypt; layouts add a chunk_len byte) + #98/#99 fuzz_sm3 / fuzz_hmac_sm3 (one-shot==streaming differentials), fuzz_c_abi (raw-pointer extern "C" surface), fuzz_sm4_{cbc,gcm}_encrypt (encrypt differentials + round-trip), fuzz_sm4_{ccm,xts}_encrypt (encrypt→decrypt round-trips) + v1.1 fuzz_sm2_kx ([R_B:65][S_B:32] adversarial peer bytes into the fixed-key initiator's confirm). SM4 targets carve key/iv/nonce/aad/tag via FRONT-consuming arbitrary::Unstructured (so seeds are plain concatenations; pinned to arbitrary 1.4.2 order). sm2_decrypt/verify use a fixed test key via OnceLock.
+fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN WORKSPACE (empty [workspace] table) + parent exclude=["fuzz"] → nightly-only libfuzzer-sys/arbitrary deps never enter the published 3-crate graph; unpublished, NOT MSRV-bound, NOT in cargo deny. fuzz/Cargo.lock IS committed (.gitignore anchors /Cargo.lock to root so it isn't swallowed). 27 targets (v0.14's 16 + v0.20's 2 streaming-decryptor differential + #98/#99's 7 post-1.0 hardening [SM3/HMAC-SM3/C-ABI/SM4-mode-encrypt] + v1.1's fuzz_sm2_kx + v1.3's fuzz_x509); v0.14's prove the failure-mode invariant (no panic/OOM/hang), v0.20's prove streaming==single-shot; initial sweeps zero crashes (+ zero divergences for v0.20). The FUZZ_TARGETS list in fuzz-nightly.yml MUST name every [[bin]] — a target absent there builds (fuzz-build.yml) but is silently never fuzzed (the #98/#99 drift, fixed post-#101).
+  Cargo.toml                # gmcrypto-core path dep w/ features=["sm4-aead","sm4-xts","sm2-key-exchange","x509"] always on (no per-target feature juggling); 27 [[bin]] entries; empty [workspace]
+  fuzz_targets/             # fuzz_pem, fuzz_pkcs8_{decode,decrypt}, fuzz_spki, fuzz_sec1, fuzz_sig, fuzz_asn1_reader, fuzz_sm2_{ciphertext_der,raw_ciphertext,pubkey_sec1,decrypt,verify}, fuzz_sm4_{cbc,gcm,ccm,xts}_decrypt + v0.20 fuzz_sm4_{cbc,gcm}_streaming_decrypt (DIFFERENTIAL: streaming Sm4{Cbc,Gcm}Decryptor fed in arbitrary chunks == single-shot mode_{cbc,gcm}::decrypt; layouts add a chunk_len byte) + #98/#99 fuzz_sm3 / fuzz_hmac_sm3 (one-shot==streaming differentials), fuzz_c_abi (raw-pointer extern "C" surface), fuzz_sm4_{cbc,gcm}_encrypt (encrypt differentials + round-trip), fuzz_sm4_{ccm,xts}_encrypt (encrypt→decrypt round-trips) + v1.1 fuzz_sm2_kx ([R_B:65][S_B:32] adversarial peer bytes into the fixed-key initiator's confirm) + v1.3 fuzz_x509 (certificate decode + verify; seeds = the gmssl KAT fixtures). SM4 targets carve key/iv/nonce/aad/tag via FRONT-consuming arbitrary::Unstructured (so seeds are plain concatenations; pinned to arbitrary 1.4.2 order). sm2_decrypt/verify use a fixed test key via OnceLock.
   seeds/<target>/           # committed curated valid seeds (from a one-time generator using gmcrypto-core's encode/sign/encrypt). corpus/, target/, artifacts/ are gitignored.
   README.md                 # build/run/repro runbook + seed-regen recipe
 
@@ -839,7 +877,7 @@ fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN 
   ci.yml                    # 5 jobs on GitHub-hosted macos-14 (aarch64, v0.17+): build/test (stable, full) + msrv (1.85, build-only) + cabi + cargo-deny + wasm32 matrix. Per-feature clippy passes (digest-traits, cipher-traits, sm4-bitsliced, sm4-bitsliced-simd, crypto-bigint-scalar). concurrency: cancel-in-progress. UNAFFECTED by fuzz/ (excluded).
   dudect-pr.yml             # 10K samples on ubuntu-24.04 (v0.18 pin), |tau| gate, matrix on features=[default, sm4-bitsliced, sm4-bitsliced-simd, "sm4-bitsliced-simd,sm4-aead,sm4-xts"] (4 legs; the 4th gates the AEAD/XTS CT targets), path-allowlisted (incl. gmcrypto-simd/src/**), concurrency: cancel-in-progress
   dudect-nightly.yml        # 100K samples on ubuntu-24.04 (v0.18 pin), same gate + matrix, 30-day artifact retention; concurrency: cancel-in-progress=false (a partial 100K run is wasted compute). PR #38 drops the push:main trigger in favour of cron-only (regression watch) + workflow_dispatch (manual reruns).
-  fuzz-nightly.yml          # v0.14 — capped cargo-fuzz sweep over all 26 targets (v0.20: FUZZ_TARGETS env is the single source of truth — MUST name every fuzz/Cargo.toml [[bin]], see the fuzz/ entry above) on GitHub-hosted ubuntu-latest (v0.17+; cron 06:00 UTC + workflow_dispatch w/ max_total_time input; installs nightly + pinned cargo-fuzz 0.13.1 per run; -max_total_time/-rss_limit_mb/-timeout caps; crash-artifact upload 30d; concurrency cancel-in-progress=false). NOT a PR gate. v0.20 adds a SEPARATE non-gating `coverage` job: cargo +nightly fuzz coverage per target over committed seeds → llvm-cov TOTALS SUMMARY.txt artifact (report-as-deliverable, no %-gate).
+  fuzz-nightly.yml          # v0.14 — capped cargo-fuzz sweep over all 27 targets (v0.20: FUZZ_TARGETS env is the single source of truth — MUST name every fuzz/Cargo.toml [[bin]], see the fuzz/ entry above) on GitHub-hosted ubuntu-latest (v0.17+; cron 06:00 UTC + workflow_dispatch w/ max_total_time input; installs nightly + pinned cargo-fuzz 0.13.1 per run; -max_total_time/-rss_limit_mb/-timeout caps; crash-artifact upload 30d; concurrency cancel-in-progress=false). NOT a PR gate. v0.20 adds a SEPARATE non-gating `coverage` job: cargo +nightly fuzz coverage per target over committed seeds → llvm-cov TOTALS SUMMARY.txt artifact (report-as-deliverable, no %-gate).
   fuzz-build.yml            # F18 (post-1.0 hardening) — PR-time `cargo +nightly fuzz build` (BUILD ONLY, no run) on ubuntu-latest, so a fuzz target that stops COMPILING (a changed gmcrypto-core public type / renamed decode entry) fails at PR time instead of ~24h later in fuzz-nightly. Triggers pull_request + push:main (path-filtered: fuzz/**, crates/gmcrypto-{core,simd}/**, Cargo.toml, the workflow itself) + workflow_dispatch; permissions: contents:read; concurrency cancel-in-progress. Caches the pinned cargo-fuzz 0.13.1 binary (actions/cache, since taiki-e/install-action has no cargo-fuzz manifest) + the fuzz target dir (rust-cache, workspaces: fuzz). **NOT a required check** — do NOT add it to branch protection while it keeps the `paths:` filter (a docs-only PR would never trigger it → permanent "Expected" block, the #90/#91 trap; drop the filter first if it must be required). The fuzzing RUN stays nightly-only.
   api-stability.yml         # v0.21 — 4 legs on ubuntu-latest (PR + push:main + workflow_dispatch): (1) public-api drift-check ENFORCED — regenerate docs/api-baseline/*.txt with PINNED cargo-public-api 0.52.0 + nightly-2026-05-23 (--omit blanket/auto-trait/auto-derived) + git diff --exit-code (the cbindgen-header pattern; bumping a pin = a reviewed re-baseline); (2) cargo-semver-checks ENFORCED from 1.0 (no continue-on-error; check-release vs the latest crates.io release; the forward breaking-change gate, flipped in #86); (3) cargo doc -D warnings -A rustdoc::private_intra_doc_links (per-crate so gmcrypto-c regen-header isn't triggered); (4) feature matrix --no-default-features + --all-features. The C ABI's guard stays the cbindgen header drift-check in ci.yml. NOT a publish gate.
 
