@@ -21,7 +21,12 @@
 //!     static keys + a fixed deterministic ephemeral: initiator `confirm` and
 //!     responder `respond`/`finish` including the consume-on-success and
 //!     spent-handle-on-failed-respond paths (the second respond after a
-//!     failure is ASSERTED to fail).
+//!     failure is ASSERTED to fail);
+//!   * op 8 (v1.4) drives the X.509 certificate surface: attacker bytes →
+//!     `_from_der`; on a successful parse, every copy-out accessor (adequate
+//!     AND undersized buffers), the validity times, the self-issued
+//!     out-param, the subject-key handle (freed), and both verifies against
+//!     the fixed static pubkey; then the certificate handle is freed.
 //!
 //! It does NOT probe documented-UB contract *violations* (e.g. double-free, or
 //! passing a non-null but too-small fixed-size buffer) — those are caller UB by
@@ -77,16 +82,18 @@ fuzz_target!(|data: &[u8]| {
     let op = data[0];
     let body = &data[1..];
 
-    // SAFETY: ops 0–4 and 7 pass valid (ptr, len) for the documented fixed
-    // sizes, output buffers large enough for the worst-case write, and free
-    // each opaque handle exactly once (handles consumed by finalize/confirm/
-    // finish are never also freed). Op 5 passes NULL pointers to guarded
-    // entry points (which must report GMCRYPTO_ERR). Op 6 passes a real but
+    // SAFETY: ops 0–4, 7 and 8 pass valid (ptr, len) for the documented
+    // fixed sizes, output buffers large enough for the worst-case write
+    // (op 8's accessor spans are all subslices of the input, so an
+    // input-sized buffer is always adequate), and free each opaque handle
+    // exactly once (handles consumed by finalize/confirm/finish are never
+    // also freed). Op 5 passes NULL pointers to guarded entry points
+    // (which must report GMCRYPTO_ERR). Ops 6 and 8 also pass a real but
     // small buffer with a matching (small) out_capacity, exercising the
     // capacity check. No call violates the documented pointer/length
     // contract.
     unsafe {
-        match op % 8 {
+        match op % 9 {
             // (0) Single-shot SM3 over arbitrary bytes.
             0 => {
                 let mut digest = [0u8; GMCRYPTO_SM3_DIGEST_SIZE];
@@ -296,6 +303,67 @@ fuzz_target!(|data: &[u8]| {
                 }
                 if !pk.is_null() {
                     gmcrypto_sm2_pubkey_free(pk);
+                }
+            }
+
+            // (8) X.509-with-SM2 (v1.4): attacker bytes -> certificate
+            //     parse; on success, the full accessor + verify surface.
+            //     Every accessor span is a subslice of the parsed DER, so
+            //     a body-sized output buffer is always adequate; the tiny
+            //     buffer exercises the capacity reject (ASAN guards it).
+            8 => {
+                let cert = gmcrypto_x509_certificate_from_der(body.as_ptr(), body.len());
+                if !cert.is_null() {
+                    let mut out = vec![0u8; body.len().max(1)];
+                    let mut tiny = [0u8; 1];
+                    let mut out_len = 0usize;
+                    let accessors: [unsafe extern "C" fn(
+                        *const gmcrypto_x509_certificate_t,
+                        *mut u8,
+                        usize,
+                        *mut usize,
+                    ) -> core::ffi::c_int; 5] = [
+                        gmcrypto_x509_certificate_tbs_raw,
+                        gmcrypto_x509_certificate_serial_raw,
+                        gmcrypto_x509_certificate_issuer_raw,
+                        gmcrypto_x509_certificate_subject_raw,
+                        gmcrypto_x509_certificate_extensions_raw,
+                    ];
+                    for f in accessors {
+                        let _ = f(cert, out.as_mut_ptr(), out.len(), &mut out_len);
+                        let _ = f(cert, tiny.as_mut_ptr(), tiny.len(), &mut out_len);
+                    }
+                    let mut t = gmcrypto_x509_time_t {
+                        year: 0,
+                        month: 0,
+                        day: 0,
+                        hour: 0,
+                        minute: 0,
+                        second: 0,
+                    };
+                    let _ = gmcrypto_x509_certificate_not_before(cert, &mut t);
+                    let _ = gmcrypto_x509_certificate_not_after(cert, &mut t);
+                    let mut self_issued = 0;
+                    let _ = gmcrypto_x509_certificate_is_self_issued(cert, &mut self_issued);
+                    let subject = gmcrypto_x509_certificate_subject_public_key(cert);
+                    if !subject.is_null() {
+                        gmcrypto_sm2_pubkey_free(subject);
+                    }
+                    let pk = gmcrypto_sm2_pubkey_new(fixed_pub_sec1().as_ptr());
+                    if !pk.is_null() {
+                        let _ = gmcrypto_x509_certificate_verify_signature(cert, pk);
+                        // Attacker-controlled signer ID (first 16 body bytes;
+                        // len 0 selects the default ID).
+                        let id_len = body.len().min(16);
+                        let _ = gmcrypto_x509_certificate_verify_signature_with_id(
+                            cert,
+                            pk,
+                            body.as_ptr(),
+                            id_len,
+                        );
+                        gmcrypto_sm2_pubkey_free(pk);
+                    }
+                    gmcrypto_x509_certificate_free(cert);
                 }
             }
 
