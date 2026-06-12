@@ -3040,3 +3040,372 @@ fn sm2_kx_bad_klen_and_rng_callback_rejected() {
     );
     kx_free_keys(&[a, b]);
 }
+
+// ============================================================
+// v1.4 — X.509-with-SM2 certificate FFI (Q4.1–Q4.15 in
+// docs/v1.4-scope.md). Fixtures are the committed gmssl 3.1.1
+// CA + leaf from the v1.3 core KAT; every assertion is
+// structural/relational vs the Rust core, never specific bytes.
+// ============================================================
+
+use gmcrypto_c::{
+    gmcrypto_x509_certificate_extensions_raw, gmcrypto_x509_certificate_free,
+    gmcrypto_x509_certificate_from_der, gmcrypto_x509_certificate_is_self_issued,
+    gmcrypto_x509_certificate_issuer_raw, gmcrypto_x509_certificate_not_after,
+    gmcrypto_x509_certificate_not_before, gmcrypto_x509_certificate_serial_raw,
+    gmcrypto_x509_certificate_subject_public_key, gmcrypto_x509_certificate_subject_raw,
+    gmcrypto_x509_certificate_t, gmcrypto_x509_certificate_tbs_raw,
+    gmcrypto_x509_certificate_verify_signature, gmcrypto_x509_certificate_verify_signature_with_id,
+    gmcrypto_x509_time_t,
+};
+use gmcrypto_core::x509::Certificate;
+
+const X509_CA_DER: &[u8] = include_bytes!("../../gmcrypto-core/tests/data/x509_ca.der");
+const X509_LEAF_DER: &[u8] = include_bytes!("../../gmcrypto-core/tests/data/x509_leaf.der");
+
+/// Parse a fixture through the FFI; panics on NULL.
+fn x509_parse(der: &[u8]) -> *mut gmcrypto_x509_certificate_t {
+    let cert = unsafe { gmcrypto_x509_certificate_from_der(der.as_ptr(), der.len()) };
+    assert!(!cert.is_null(), "fixture must parse through the FFI");
+    cert
+}
+
+/// Drive one copy-out accessor with the two-call discovery convention.
+fn x509_copy_out_helper(
+    f: unsafe extern "C" fn(
+        *const gmcrypto_x509_certificate_t,
+        *mut u8,
+        usize,
+        *mut usize,
+    ) -> core::ffi::c_int,
+    cert: *const gmcrypto_x509_certificate_t,
+) -> Vec<u8> {
+    let mut needed = 0usize;
+    // Length discovery: zero capacity reports the required length.
+    unsafe { f(cert, ptr::null_mut(), 0, &mut needed) };
+    let mut buf = vec![0u8; needed.max(1)];
+    let mut actual = 0usize;
+    let rc = unsafe { f(cert, buf.as_mut_ptr(), buf.len(), &mut actual) };
+    assert_eq!(rc, GMCRYPTO_OK);
+    buf.truncate(actual);
+    buf
+}
+
+#[test]
+fn x509_ffi_accessors_match_core() {
+    // Both fixtures: the CA carries the real serial pad-strip pin (13 wire
+    // bytes -> 12 stripped, high bit set); the leaf serial was never padded.
+    for der in [X509_CA_DER, X509_LEAF_DER] {
+        let core = Certificate::from_der(der).unwrap();
+        let cert = x509_parse(der);
+        assert_eq!(
+            x509_copy_out_helper(gmcrypto_x509_certificate_tbs_raw, cert),
+            core.tbs_raw()
+        );
+        assert_eq!(
+            x509_copy_out_helper(gmcrypto_x509_certificate_serial_raw, cert),
+            core.serial_raw()
+        );
+        assert_eq!(
+            x509_copy_out_helper(gmcrypto_x509_certificate_issuer_raw, cert),
+            core.issuer_raw()
+        );
+        assert_eq!(
+            x509_copy_out_helper(gmcrypto_x509_certificate_subject_raw, cert),
+            core.subject_raw()
+        );
+        // gmssl emits v3 extensions — present, non-empty, byte-equal.
+        let ext = x509_copy_out_helper(gmcrypto_x509_certificate_extensions_raw, cert);
+        assert!(!ext.is_empty());
+        assert_eq!(ext, core.extensions_raw().unwrap());
+        unsafe { gmcrypto_x509_certificate_free(cert) };
+    }
+    // The pad-strip pin through the ABI (mirrors the v1.3 core KAT).
+    let ca = x509_parse(X509_CA_DER);
+    let serial = x509_copy_out_helper(gmcrypto_x509_certificate_serial_raw, ca);
+    assert_eq!(serial.len(), 12);
+    assert_ne!(serial[0] & 0x80, 0, "stripped first byte has the high bit");
+    unsafe { gmcrypto_x509_certificate_free(ca) };
+}
+
+/// Q4.6: surgically remove the `[3]` extensions block from the leaf and
+/// patch the two enclosing SEQUENCE lengths. The now-invalid signature is
+/// irrelevant — `from_der` never verifies.
+fn leaf_without_extensions() -> Vec<u8> {
+    let core = Certificate::from_der(X509_LEAF_DER).unwrap();
+    let ext_seq = core.extensions_raw().unwrap();
+    let pos = X509_LEAF_DER
+        .windows(ext_seq.len())
+        .position(|w| w == ext_seq)
+        .unwrap();
+    // The [3] EXPLICIT wrapper (0xA3 + DER length) directly precedes it.
+    let wrap_start = if X509_LEAF_DER[pos - 2] == 0xA3 {
+        pos - 2
+    } else if X509_LEAF_DER[pos - 3] == 0xA3 && X509_LEAF_DER[pos - 2] == 0x81 {
+        pos - 3
+    } else {
+        assert_eq!(X509_LEAF_DER[pos - 4], 0xA3, "unexpected [3] length form");
+        pos - 4
+    };
+    let removed = (pos + ext_seq.len()) - wrap_start;
+    let mut t = X509_LEAF_DER[..wrap_start].to_vec();
+    t.extend_from_slice(&X509_LEAF_DER[pos + ext_seq.len()..]);
+    // Patch the outer Certificate SEQUENCE and tbs SEQUENCE lengths (both
+    // long-form 0x82 for these fixtures; asserted).
+    assert_eq!((t[0], t[1]), (0x30, 0x82));
+    assert_eq!((t[4], t[5]), (0x30, 0x82));
+    for len_at in [2usize, 6] {
+        let old = (usize::from(t[len_at]) << 8) | usize::from(t[len_at + 1]);
+        let new = old - removed;
+        t[len_at] = u8::try_from(new >> 8).unwrap();
+        t[len_at + 1] = u8::try_from(new & 0xff).unwrap();
+    }
+    t
+}
+
+#[test]
+fn x509_ffi_extensions_absent_reports_zero_len() {
+    let stripped = leaf_without_extensions();
+    // Core agrees the surgery produced an extensionless parse.
+    assert!(
+        Certificate::from_der(&stripped)
+            .expect("stripped leaf must still parse")
+            .extensions_raw()
+            .is_none()
+    );
+    let cert = x509_parse(&stripped);
+    let mut buf = [0u8; 4];
+    let mut actual = 7usize;
+    let rc = unsafe {
+        gmcrypto_x509_certificate_extensions_raw(cert, buf.as_mut_ptr(), buf.len(), &mut actual)
+    };
+    assert_eq!(rc, GMCRYPTO_OK);
+    assert_eq!(actual, 0, "absent extensions == actual_len 0 (Q4.6)");
+    unsafe { gmcrypto_x509_certificate_free(cert) };
+}
+
+#[test]
+fn x509_ffi_rejects_malformed_der_and_null_args() {
+    for bad in [
+        &[][..],
+        &[0x30, 0x00][..],
+        &X509_LEAF_DER[..X509_LEAF_DER.len() - 1],
+    ] {
+        let p = unsafe { gmcrypto_x509_certificate_from_der(bad.as_ptr(), bad.len()) };
+        assert!(p.is_null());
+    }
+    assert!(unsafe { gmcrypto_x509_certificate_from_der(ptr::null(), 7) }.is_null());
+    // NULL-argument sweep on the copy-out shape: NULL cert and NULL
+    // out_actual_len both collapse to the single error.
+    let mut buf = [0u8; 64];
+    let mut actual = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_x509_certificate_serial_raw(
+                ptr::null(),
+                buf.as_mut_ptr(),
+                buf.len(),
+                &mut actual,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    let cert = x509_parse(X509_LEAF_DER);
+    assert_eq!(
+        unsafe {
+            gmcrypto_x509_certificate_serial_raw(cert, buf.as_mut_ptr(), buf.len(), ptr::null_mut())
+        },
+        GMCRYPTO_ERR
+    );
+    unsafe { gmcrypto_x509_certificate_free(cert) };
+    // free(NULL) is a no-op.
+    unsafe { gmcrypto_x509_certificate_free(ptr::null_mut()) };
+}
+
+#[test]
+fn x509_ffi_copy_out_too_small_reports_required_len() {
+    let cert = x509_parse(X509_CA_DER);
+    let mut small = [0u8; 4];
+    let mut actual = 0usize;
+    let rc = unsafe {
+        gmcrypto_x509_certificate_issuer_raw(cert, small.as_mut_ptr(), small.len(), &mut actual)
+    };
+    assert_eq!(rc, GMCRYPTO_ERR);
+    let core = Certificate::from_der(X509_CA_DER).unwrap();
+    assert_eq!(actual, core.issuer_raw().len());
+    unsafe { gmcrypto_x509_certificate_free(cert) };
+}
+
+/// Build a `gmcrypto_sm2_pubkey_t` handle from a fixture certificate's
+/// subject key (via the core parse + the existing pubkey FFI).
+fn x509_subject_key_handle(der: &[u8]) -> *mut gmcrypto_sm2_pubkey_t {
+    let core = Certificate::from_der(der).unwrap();
+    let sec1 = core.subject_public_key().to_sec1_uncompressed();
+    let key = unsafe { gmcrypto_sm2_pubkey_new(sec1.as_ptr()) };
+    assert!(!key.is_null());
+    key
+}
+
+#[test]
+fn x509_ffi_verify_matrix() {
+    let ca = x509_parse(X509_CA_DER);
+    let leaf = x509_parse(X509_LEAF_DER);
+    // Issuer key handles via the existing pubkey FFI, from the core parse.
+    let ca_key = x509_subject_key_handle(X509_CA_DER);
+    let leaf_key = x509_subject_key_handle(X509_LEAF_DER);
+
+    // CA is self-signed; leaf verifies under the CA key only.
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_verify_signature(ca, ca_key) },
+        GMCRYPTO_OK
+    );
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_verify_signature(leaf, ca_key) },
+        GMCRYPTO_OK
+    );
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_verify_signature(leaf, leaf_key) },
+        GMCRYPTO_ERR
+    );
+    // Explicit default ID == id_len 0 == the no-id symbol.
+    assert_eq!(
+        unsafe {
+            gmcrypto_x509_certificate_verify_signature_with_id(
+                leaf,
+                ca_key,
+                b"1234567812345678".as_ptr(),
+                16,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    // Wrong ID fails; NULL args fail.
+    assert_eq!(
+        unsafe {
+            gmcrypto_x509_certificate_verify_signature_with_id(
+                leaf,
+                ca_key,
+                b"WRONG-ID".as_ptr(),
+                8,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_verify_signature(ptr::null(), ca_key) },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_verify_signature(leaf, ptr::null()) },
+        GMCRYPTO_ERR
+    );
+
+    unsafe {
+        gmcrypto_sm2_pubkey_free(ca_key);
+        gmcrypto_sm2_pubkey_free(leaf_key);
+        gmcrypto_x509_certificate_free(ca);
+        gmcrypto_x509_certificate_free(leaf);
+    }
+}
+
+#[test]
+fn x509_ffi_tampered_tbs_fails_verify() {
+    // Flip one bit inside the tbs span (offset 20 is inside the serial for
+    // these fixtures); parse may fail OR verify must fail — never both
+    // succeed (the signature covers the exact wire bytes).
+    let mut t = X509_LEAF_DER.to_vec();
+    t[20] ^= 0x01;
+    let cert = unsafe { gmcrypto_x509_certificate_from_der(t.as_ptr(), t.len()) };
+    if !cert.is_null() {
+        let ca_key = x509_subject_key_handle(X509_CA_DER);
+        assert_eq!(
+            unsafe { gmcrypto_x509_certificate_verify_signature(cert, ca_key) },
+            GMCRYPTO_ERR
+        );
+        unsafe { gmcrypto_sm2_pubkey_free(ca_key) };
+        unsafe { gmcrypto_x509_certificate_free(cert) };
+    }
+}
+
+#[test]
+fn x509_ffi_times_and_self_issued_match_core() {
+    let cert = x509_parse(X509_LEAF_DER);
+    let core = Certificate::from_der(X509_LEAF_DER).unwrap();
+
+    let mut t = gmcrypto_x509_time_t {
+        year: 0,
+        month: 0,
+        day: 0,
+        hour: 0,
+        minute: 0,
+        second: 0,
+    };
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_not_before(cert, &mut t) },
+        GMCRYPTO_OK
+    );
+    let nb = core.not_before();
+    assert_eq!(
+        (t.year, t.month, t.day, t.hour, t.minute, t.second),
+        (nb.year, nb.month, nb.day, nb.hour, nb.minute, nb.second)
+    );
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_not_after(cert, &mut t) },
+        GMCRYPTO_OK
+    );
+    let na = core.not_after();
+    assert_eq!(
+        (t.year, t.month, t.day, t.hour, t.minute, t.second),
+        (na.year, na.month, na.day, na.hour, na.minute, na.second)
+    );
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_not_before(cert, ptr::null_mut()) },
+        GMCRYPTO_ERR
+    );
+
+    // Self-issued: out-param + status (Q4.9). Leaf no, CA yes; NULL cert
+    // and NULL out-param both ERR with the out-param untouched.
+    let mut flag = -1;
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_is_self_issued(cert, &mut flag) },
+        GMCRYPTO_OK
+    );
+    assert_eq!(flag, 0);
+    let ca = x509_parse(X509_CA_DER);
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_is_self_issued(ca, &mut flag) },
+        GMCRYPTO_OK
+    );
+    assert_eq!(flag, 1);
+    let mut untouched = -1;
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_is_self_issued(ptr::null(), &mut untouched) },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(untouched, -1);
+    assert_eq!(
+        unsafe { gmcrypto_x509_certificate_is_self_issued(ca, ptr::null_mut()) },
+        GMCRYPTO_ERR
+    );
+
+    unsafe { gmcrypto_x509_certificate_free(ca) };
+    unsafe { gmcrypto_x509_certificate_free(cert) };
+}
+
+#[test]
+fn x509_ffi_subject_key_handle_composes() {
+    let cert = x509_parse(X509_LEAF_DER);
+    let key = unsafe { gmcrypto_x509_certificate_subject_public_key(cert) };
+    assert!(!key.is_null());
+    // SEC1 export through the existing pubkey FFI equals the core's.
+    let mut sec1 = [0u8; 65];
+    assert_eq!(
+        unsafe { gmcrypto_sm2_pubkey_to_sec1_uncompressed(key, sec1.as_mut_ptr()) },
+        GMCRYPTO_OK
+    );
+    let core = Certificate::from_der(X509_LEAF_DER).unwrap();
+    assert_eq!(sec1, core.subject_public_key().to_sec1_uncompressed());
+    assert!(unsafe { gmcrypto_x509_certificate_subject_public_key(ptr::null()) }.is_null());
+    unsafe { gmcrypto_sm2_pubkey_free(key) };
+    unsafe { gmcrypto_x509_certificate_free(cert) };
+}

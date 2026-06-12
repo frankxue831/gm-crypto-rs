@@ -1,9 +1,46 @@
 # CLAUDE.md
 
 Pure-Rust SM2/SM3/SM4 SDK.
-**v1.3.0 — X.509-with-SM2 leaf certificate parse + signature verify —
-implemented on `feat/x509-sm2`; publish order simd → core → c, the
-maintainer's per-release call.** The second TLCP prerequisite (SM2-KX was
+**v1.4.0 — C FFI for X.509-with-SM2 — implemented on `feat/x509-ffi`;
+publish order simd → core → c, the maintainer's per-release call.**
+Completes the core-in-vN / FFI-in-vN+1 cadence for the v1.3 `x509` core:
+**13 new `gmcrypto-c` symbols + 1 opaque handle
+(`gmcrypto_x509_certificate_t`, immutable — accessors take `const *`, no
+consume-on-use) + 1 plain repr(C) struct (`gmcrypto_x509_time_t`: u16 year
++ five u8)** = 72 → **85** FFI entry points, ALWAYS-ON per the v0.23
+posture (`x509` enabled unconditionally on the C shim's core dep; committed
+`gmcrypto.h` == default build; core's own `x509` feature stays opt-in).
+Full mirror (scope Q4.2, `docs/v1.4-scope.md` Q4.1–Q4.15): `_from_der`
+(returns handle/NULL — the `gmcrypto_sm2_pubkey_new` convention) + `_free`;
+`_verify_signature(_with_id)` against an issuer `gmcrypto_sm2_pubkey_t`
+HANDLE (`id_len==0` → DEFAULT_SIGNER_ID, the v1.2 KX precedent — empty ID
+unrepresentable; reuses the v1.2 helper, renamed `signer_id_or_default`
+now that two domains share it); 5 copy-out raw accessors
+(tbs/serial/issuer/subject/extensions) riding `write_output` two-call
+discovery — **`extensions_raw` `*out_actual_len==0` ⇔ absent** (a present
+Extensions TLV is never empty); `_not_before`/`_not_after` out-param
+struct, NO clock; **`is_self_issued` = out-param + status** (the Codex
+pick: a bare 1/0 predicate would FALSIFY the header banner's universal
+"every int return is 0 on success" contract, and OK=self-issued would read
+inverted in C `if()`); `_subject_public_key` returns a NEWLY allocated
+`gmcrypto_sm2_pubkey_t` (caller frees; composes with verify/encrypt/KX).
+The no-trust-decisions contract crosses the ABI intact. Gotcha fixed in
+review (Fable-5 GO-WITH-FIXES): the shared `x509_copy_out` closure MUST be
+`move` — by-ref capture of the generic getter fails `ffi_guard`'s
+UnwindSafe bound. Assurance: c_smoke 76 → **84** (accessor equivalence vs
+core on BOTH fixtures incl. the CA serial pad-strip pin; extensions-absent
+via strip-the-`[3]`-block surgery — parse never verifies so the broken sig
+is irrelevant; verify matrix; NULL sweeps); `fuzz_c_abi` op 8 (dispatch
+`% 8` → `% 9` — **every committed seed's op byte audited: `sm3_abc`
+(0x41 = 65: %8=1 but %9=2) rewritten to 0x01**, new `x509_leaf_op` seed;
+census stays 27); NO new dudect target (thin shim over a public-inputs-only
+core — the v1.3 rationale doubled). Doc-only `x509_verify.c` (compiled+run
+locally). Workspace 1.3.0 → 1.4.0, sibling pins `=1.4.0`. TLCP remains the
+headline direction candidate (chain validation / TLCP decomposition were
+the deferred v1.4 alternatives).**
+**Earlier — v1.3.0 — X.509-with-SM2 leaf certificate parse + signature
+verify — implemented on `feat/x509-sm2`; publish order simd → core → c,
+the maintainer's per-release call.** The second TLCP prerequisite (SM2-KX was
 the first). New opt-in **`x509 = []`** feature (pure-core, NO new dep;
 default build byte-identical): `x509::Certificate::from_der` (strict
 in-repo DER — NO x509-cert/der dep; v3-only; GM/T 0015 profile) +
@@ -836,7 +873,7 @@ crates/gmcrypto-core/
     data/                   # v0.3 W2 binary KAT fixtures + regen recipe (Q7.9 decision); v0.8 W3 adds sm4_ccm_oracle.c (OpenSSL EVP harness)
 
 crates/gmcrypto-c/          # v0.4 W4 — C ABI shim (cdylib + staticlib + rlib)
-  src/lib.rs                # 72 FFI entry points (44 base + v0.9 W4's 6 single-shot AEAD + v0.10's 9 streaming AEAD + v0.13's 2 single-shot XTS + v0.16's 2 multi-sector XTS): opaque handles, ffi_guard catch_unwind, GMCRYPTO_ERR on every error. AEAD symbols (gmcrypto_sm4_gcm_* / gmcrypto_sm4_ccm_*) cfg-gated on a forwarding `sm4-aead` feature (= ["gmcrypto-core/sm4-aead"]). v0.10 W1-W2 adds 2 opaque types gmcrypto_sm4_gcm_{encryptor,decryptor}_t + 9 symbols (encryptor new/update/finalize/finalize_with_tag_len/free output-streaming; decryptor new/update/finalize_verify/free commit-on-verify); _finalize* consume+free. v0.13 adds gmcrypto_sm4_xts_encrypt/_decrypt (single-shot, no handles, no opaque struct) + always-on const GMCRYPTO_SM4_XTS_KEY_SIZE=32, cfg-gated on a forwarding `sm4-xts` feature (= ["gmcrypto-core/sm4-xts"]); regen-header need NOT imply sm4-xts (free fns + const emit from source regardless of cfg). v0.16 adds gmcrypto_sm4_xts_encrypt_sectors/_decrypt_sectors (in-place buf: *mut u8 + buf_len, start_sector: u64, tweak = LE-128(start_sector+i); NO out/out_capacity/out_actual_len — deliberate in-place divergence mirroring core's &mut [u8]; key copied into owned [u8;32] before &mut buf is built to avoid &/&mut aliasing UB on a caller key/buf overlap), same forwarding sm4-xts feature. **v0.23 W3: the AEAD (gcm/ccm) + XTS FFI symbols are now ALWAYS-ON** — the forwarding `sm4-aead`/`sm4-xts` cargo features on the C shim were DROPPED, so the default `cargo build -p gmcrypto-c` exports every symbol and the committed gmcrypto.h == the default build (resolves the header⟷build mismatch); the C shim's default build now transitively pulls gmcrypto-simd (gmcrypto-core keeps its own feature gates). The GCM-encrypt FFI already returned an error code, so making core's single-shot GCM encrypt fallible needs no ABI change. **v1.2 adds the 9 SM2-KX symbols + 2 opaque handles (gmcrypto_sm2_kx_{initiator,responder}_t) + GMCRYPTO_SM2_KX_CONFIRM_SIZE=32 (72 entry points total; always-on — sm2-key-exchange enabled unconditionally on the core dep): initiator born-waiting (_new writes R_A), _confirm/_finish consume+free, failed-_respond spends the handle / misuse second-_respond preserves Waiting; SysRng + _with_rng (CallbackRng); id_len==0 -> DEFAULT_SIGNER_ID; caller wipes key_out.**
+  src/lib.rs                # 72 FFI entry points (44 base + v0.9 W4's 6 single-shot AEAD + v0.10's 9 streaming AEAD + v0.13's 2 single-shot XTS + v0.16's 2 multi-sector XTS): opaque handles, ffi_guard catch_unwind, GMCRYPTO_ERR on every error. AEAD symbols (gmcrypto_sm4_gcm_* / gmcrypto_sm4_ccm_*) cfg-gated on a forwarding `sm4-aead` feature (= ["gmcrypto-core/sm4-aead"]). v0.10 W1-W2 adds 2 opaque types gmcrypto_sm4_gcm_{encryptor,decryptor}_t + 9 symbols (encryptor new/update/finalize/finalize_with_tag_len/free output-streaming; decryptor new/update/finalize_verify/free commit-on-verify); _finalize* consume+free. v0.13 adds gmcrypto_sm4_xts_encrypt/_decrypt (single-shot, no handles, no opaque struct) + always-on const GMCRYPTO_SM4_XTS_KEY_SIZE=32, cfg-gated on a forwarding `sm4-xts` feature (= ["gmcrypto-core/sm4-xts"]); regen-header need NOT imply sm4-xts (free fns + const emit from source regardless of cfg). v0.16 adds gmcrypto_sm4_xts_encrypt_sectors/_decrypt_sectors (in-place buf: *mut u8 + buf_len, start_sector: u64, tweak = LE-128(start_sector+i); NO out/out_capacity/out_actual_len — deliberate in-place divergence mirroring core's &mut [u8]; key copied into owned [u8;32] before &mut buf is built to avoid &/&mut aliasing UB on a caller key/buf overlap), same forwarding sm4-xts feature. **v0.23 W3: the AEAD (gcm/ccm) + XTS FFI symbols are now ALWAYS-ON** — the forwarding `sm4-aead`/`sm4-xts` cargo features on the C shim were DROPPED, so the default `cargo build -p gmcrypto-c` exports every symbol and the committed gmcrypto.h == the default build (resolves the header⟷build mismatch); the C shim's default build now transitively pulls gmcrypto-simd (gmcrypto-core keeps its own feature gates). The GCM-encrypt FFI already returned an error code, so making core's single-shot GCM encrypt fallible needs no ABI change. **v1.2 adds the 9 SM2-KX symbols + 2 opaque handles (gmcrypto_sm2_kx_{initiator,responder}_t) + GMCRYPTO_SM2_KX_CONFIRM_SIZE=32 (72 entry points total; always-on — sm2-key-exchange enabled unconditionally on the core dep): initiator born-waiting (_new writes R_A), _confirm/_finish consume+free, failed-_respond spends the handle / misuse second-_respond preserves Waiting; SysRng + _with_rng (CallbackRng); id_len==0 -> DEFAULT_SIGNER_ID; caller wipes key_out.** **v1.4 adds the 13 X.509 symbols + 1 opaque handle (gmcrypto_x509_certificate_t, immutable — accessors take const*, no consume-on-use) + 1 plain repr(C) struct (gmcrypto_x509_time_t) = 85 entry points total (always-on — x509 enabled unconditionally on the core dep): _from_der returns handle/NULL; 5 copy-out raw accessors via the shared x509_copy_out helper (closure MUST be `move` — by-ref capture of the generic getter fails ffi_guard's UnwindSafe bound); extensions_raw *out_actual_len==0 <=> absent; verify(_with_id) takes an issuer pubkey HANDLE and reuses signer_id_or_default (the v1.2 KX helper, renamed at v1.4 when a second domain began sharing it) for the id_len==0 default; is_self_issued = out-param + status (a bare 1/0 return would falsify the header banner's universal 0-on-success contract); _subject_public_key returns a NEWLY allocated gmcrypto_sm2_pubkey_t (caller frees).**
   build.rs                  # cbindgen runs only under `regen-header` feature or GMCRYPTO_C_REGEN_HEADER=1
   cbindgen.toml             # cbindgen config (C language, include_guard = "GMCRYPTO_H_")
   include/gmcrypto.h        # committed header (CI gates drift via `git diff --exit-code`). cbindgen does NOT evaluate #[cfg(feature)] for free functions (single-shot AEAD prototypes appear unconditionally) BUT it DROPS cfg-gated opaque struct types (v0.10's gmcrypto_sm4_gcm_{encryptor,decryptor}_t) when the feature is inactive. So v0.10 makes `regen-header` IMPLY `sm4-aead` — regen is then deterministic + complete and the drift gate stays green with the documented `--features regen-header` command
@@ -845,7 +882,8 @@ crates/gmcrypto-c/          # v0.4 W4 — C ABI shim (cdylib + staticlib + rlib)
   examples/sm4_xts_sector.c # v0.13 — 512-byte SM4-XTS sector encrypt/decrypt round-trip via the C ABI (sector# as tweak; doc-only)
   examples/sm4_xts_multisector.c # v0.16 — in-place 8-sector ("disk region") SM4-XTS round-trip via the C ABI (start_sector: u64, auto-incrementing tweak; doc-only)
   examples/sm2_key_exchange.c # v1.2 — full two-party GM/T 0003.3 handshake via the C ABI (both tags verified, keys agree; doc-only, but compiled+run locally at dev time)
-  tests/c_smoke.rs          # 76 Rust-equivalence tests via extern "C" interop (35 default + 14 cfg-gated on sm4-aead: 6 v0.9 single-shot + 8 v0.10 streaming; + 16 cfg-gated on sm4-xts: 5 v0.13 single-shot whole-block/CTS equivalence + round-trip + short/weak-key/small-buffer errors, + 11 v0.16 multi-sector: equivalence-vs-core + round-trip + byte-boundary/high-LBA starts + bad sector_size/buf-multiple/weak-key/null-key/null-buf/empty + decrypt-side errors + key/buf-overlap regression; + 11 v1.2 SM2-KX: FFI<->FFI handshake, FFI<->Rust cross-handshakes both directions, the GM/T 0003.5 KAT byte-for-byte through the ABI via _with_rng fixed ephemerals, tampered-S_A/S_B, off-curve-R_A + spent-handle, double-respond state preservation, finish-before-respond, null/bad-klen/null-callback rejects)
+  examples/x509_verify.c    # v1.4 — leaf-vs-issuer certificate signature verification via the C ABI (argv DER paths; prints serial + validity, never checks a clock; doc-only, compiled+run locally at dev time)
+  tests/c_smoke.rs          # 84 Rust-equivalence tests via extern "C" interop (35 default + 14 cfg-gated on sm4-aead: 6 v0.9 single-shot + 8 v0.10 streaming; + 16 cfg-gated on sm4-xts: 5 v0.13 single-shot whole-block/CTS equivalence + round-trip + short/weak-key/small-buffer errors, + 11 v0.16 multi-sector: equivalence-vs-core + round-trip + byte-boundary/high-LBA starts + bad sector_size/buf-multiple/weak-key/null-key/null-buf/empty + decrypt-side errors + key/buf-overlap regression; + 11 v1.2 SM2-KX: FFI<->FFI handshake, FFI<->Rust cross-handshakes both directions, the GM/T 0003.5 KAT byte-for-byte through the ABI via _with_rng fixed ephemerals, tampered-S_A/S_B, off-curve-R_A + spent-handle, double-respond state preservation, finish-before-respond, null/bad-klen/null-callback rejects; + 8 v1.4 X.509: accessor byte-equivalence vs core on BOTH gmssl fixtures incl. the CA serial pad-strip pin, extensions-absent via strip-the-[3]-block surgery, verify matrix (CA self-verify/leaf-vs-CA/wrong-key/wrong-ID/tampered-tbs), times+self-issued vs core, subject-key handle composition, copy-out too-small + NULL sweeps)
   README.md                 # C/C++/Python/Go/Zig integration docs
 
 crates/gmcrypto-simd/       # v0.5 W4 phase 2 / v0.6 W6 / v0.8 W1 — SIMD backend crate (rlib-only, opt-in via gmcrypto-core's sm4-bitsliced-simd or sm4-aead feature)

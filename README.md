@@ -94,8 +94,8 @@ the design intent in isolation.
 ## Stability & SemVer
 
 The line graduated to **1.0 (stable)** with the **1.0.0** release; the current release is
-**1.2.0** (the C FFI for SM2 key exchange — see the v1.2 scope above). crates.io history
-goes **0.16.0 → 1.0.0 → 1.0.1 → 1.1.0 → 1.2.0**, skipping 0.17.0–0.23.0 (those were
+**1.4.0** (the C FFI for X.509-with-SM2 — see the v1.4 scope below). crates.io history
+goes **0.16.0 → 1.0.0 → 1.0.1 → 1.1.0 → 1.2.0 → 1.3.0 → 1.4.0**, skipping 0.17.0–0.23.0 (those were
 non-publishing assurance + API-finalization milestones; their changes all shipped together
 in the first stable `1.0.0`). Every post-1.0 release has been additive (SemVer-checked);
 the only migration ever required is 0.16 → 1.0, a single major bump — no published 0.x
@@ -154,6 +154,42 @@ signatures / ciphertexts, SM4 mode bytes) is byte-identical to 0.16.0.
   `crypto-bigint` major bump would be breaking for that feature). The recommended
   always-on path (`Sm2PrivateKey::from_bytes_be`) avoids it entirely. See
   [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) §3.A.
+
+## v1.4 scope — C FFI for X.509-with-SM2
+
+**Completes the core-in-vN / FFI-in-vN+1 cadence for v1.3**: the X.509-with-SM2
+leaf certificate surface is now reachable from C / C++ / Python / Go / Zig
+through `gmcrypto-c` (per `docs/v1.4-scope.md` Q4.1–Q4.15). **13 new symbols,
+1 opaque handle, 1 plain time struct** — 85 FFI entry points total, always-on
+per the v0.23 posture (the committed `gmcrypto.h` == a default build;
+`gmcrypto-core`'s own `x509` feature stays opt-in for Rust callers).
+
+- **The no-trust-decisions contract crosses the ABI intact.**
+  `gmcrypto_x509_certificate_from_der` parses (NULL on any failure);
+  `_verify_signature(_with_id)` answers exactly "did this issuer KEY sign
+  these exact wire `tbsCertificate` bytes" (`GMCRYPTO_OK`/`GMCRYPTO_ERR`);
+  validity times are **exposed, never compared to a clock**
+  (`gmcrypto_x509_time_t`); extensions come back as raw DER
+  (`*out_actual_len == 0` ⇔ the optional block is absent); no chain / EKU /
+  revocation logic exists at any layer.
+- **Composes with the existing key surface**:
+  `gmcrypto_x509_certificate_subject_public_key` returns a normal
+  `gmcrypto_sm2_pubkey_t` handle (caller frees), so manual leaf-vs-CA
+  chaining, `gmcrypto_sm2_verify`, encrypt, and the KX constructors all
+  plug straight in. Raw `serial`/`issuer`/`subject`/`tbs`/`extensions`
+  accessors follow the established copy-out two-call discovery convention;
+  `is_self_issued` is an out-param + status (so the header's universal
+  "0 = success" contract stays true).
+- **Assurance:** accessor byte-equivalence vs the Rust core on the committed
+  gmssl fixtures (including the CA serial pad-strip pin and an
+  extensions-absent surgery test), the verify matrix (CA self-verify,
+  leaf-vs-CA, wrong-key/wrong-ID/tamper rejects), and a NULL sweep
+  (c_smoke 76 → 84); `fuzz_c_abi` grows an X.509 op + a committed leaf seed
+  (census stays 27). **No new dudect target** (thin shim over a
+  public-inputs-only core — the rationale is doubled, see `SECURITY.md`).
+  Doc-only example
+  [`crates/gmcrypto-c/examples/x509_verify.c`](crates/gmcrypto-c/examples/x509_verify.c)
+  (parse leaf + issuer, extract the issuer subject key, verify).
 
 ## v1.3 scope — X.509-with-SM2: leaf certificate parse + verify
 
@@ -749,6 +785,7 @@ Everything v0.2 shipped is unchanged:
 | v1.1.0 | **SM2 key exchange (GM/T 0003.3) with key confirmation.** Per [`docs/v1.1-sm2-key-exchange-design.md`](docs/v1.1-sm2-key-exchange-design.md) + `docs/v1.1-scope.md`. New `sm2::key_exchange` module behind the opt-in `sm2-key-exchange` feature (pure-core, no new dependency): `Sm2KxInitiator`/`Sm2KxResponder` role state-machines with typestate-enforced single-use ephemerals and commit-on-confirm key release; byte-identical to the GM/T 0003.5-2012 recommended-curve worked example (K + S_A/S_B); new dudect target `ct_sm2_key_exchange` + fuzz target `fuzz_sm2_kx`. C FFI deferred to v1.2. **Additive — no public API breakage.** |
 | v1.2.0 | **C FFI for SM2 key exchange.** Per `docs/v1.2-scope.md` Q2.1–Q2.10. 9 new `gmcrypto-c` symbols + 2 opaque handles (`gmcrypto_sm2_kx_{initiator,responder}_t`) project the v1.1 typestate into C: initiator born-waiting (`_new` emits `R_A`), `_confirm`/`_finish` consume + free, failed-respond spends the handle; SysRng defaults + `_with_rng` variants; always-on per the v0.23 posture (72 FFI entry points). The GM/T 0003.5 recommended-curve KAT reproduced **byte-for-byte through the C ABI**; FFI↔Rust cross-handshakes both directions; `fuzz_c_abi` KX op + seed; doc-only `sm2_key_exchange.c` example. No core API change. **Additive — no breakage.** |
 | v1.3.0 | **X.509-with-SM2: leaf certificate parse + signature verify.** Per `docs/v1.3-scope.md` Q3.1–Q3.11 + [`docs/v1.3-x509-sm2-design.md`](docs/v1.3-x509-sm2-design.md). New `x509` module behind the opt-in `x509` feature (pure-core, no new dependency): `Certificate::from_der` (strict in-repo DER, v3-only, GM/T 0015 profile) + `verify_signature(_with_id)` over the exact wire tbs bytes; **NO trust decisions** (no chains/time/extensions/revocation). gmssl KAT fixtures + full tamper/truncation sweeps; `fuzz_x509` (census 27); no dudect target (public inputs only). **Additive — no breakage.** |
+| v1.4.0 | **C FFI for X.509-with-SM2.** Per `docs/v1.4-scope.md` Q4.1–Q4.15. 13 new `gmcrypto-c` symbols + 1 opaque handle (`gmcrypto_x509_certificate_t`) + 1 plain struct (`gmcrypto_x509_time_t`) — 85 FFI entry points, always-on per the v0.23 posture. Full mirror of the v1.3 surface: parse/free, both verifies (issuer key handle; `id_len==0` → default ID), copy-out raw accessors, validity times (exposed, no clock), out-param `is_self_issued`, subject key as a composing `gmcrypto_sm2_pubkey_t`. c_smoke 76 → 84; `fuzz_c_abi` X.509 op + seed-audit under the new dispatch; doc-only `x509_verify.c`. No core API change. **Additive — no breakage.** |
 
 ## Quick-start
 

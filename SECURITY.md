@@ -167,7 +167,9 @@ certificate bytes and the issuer's PUBLIC key) — no private key or other
 secret exists anywhere on that path, so there is no secret-dependent timing
 to gate (the first feature since v0.11 where that holds by construction).
 The underlying `verify_with_id` is the same hardened public verify path the
-SM2 signature API uses.
+SM2 signature API uses. The **v1.4 C FFI projection** of that surface
+(`gmcrypto_x509_certificate_*`) inherits the same rationale doubled: a thin
+shim over a public-inputs-only core.
 
 **Cfg-gated on `sm2-key-exchange` (1):**
 
@@ -495,7 +497,7 @@ also gained a non-gating **`cargo fuzz coverage`** job that renders per-target
 an artifact (the report is the deliverable, not a coverage-% gate). v0.20 is an
 infra-assurance cycle — no published-crate change; workspace stays `0.16.0`.
 
-**Post-1.0 growth (current census: 26 targets).** The post-1.0 hardening cycle
+**Post-1.0 growth (current census: 27 targets).** The post-1.0 hardening cycle
 (PRs #98/#99) added seven more: primitive one-shot-vs-streaming differentials
 `fuzz_sm3` / `fuzz_hmac_sm3`, the raw-pointer C-ABI surface `fuzz_c_abi`
 (happy-path / NULL-rejection / undersized-buffer op families over the
@@ -505,10 +507,15 @@ infra-assurance cycle — no published-crate change; workspace stays `0.16.0`.
 `R_B`/`S_B` wire bytes into the key-exchange initiator's `confirm`); **v1.2**
 extended `fuzz_c_abi` with a key-exchange op driving the new FFI handles
 (attacker peer bytes; the spent-handle-after-failed-respond semantics are
-asserted, not just no-panic). The nightly `FUZZ_TARGETS` sweep list must name
-every `fuzz/Cargo.toml` `[[bin]]` — a target absent from it builds in CI but
-is silently never fuzzed (a drift that existed for #98/#99's targets and was
-fixed in #102; the list now carries an explicit must-match note).
+asserted, not just no-panic); **v1.3** added `fuzz_x509` (certificate decode
++ verify over adversarial bytes, seeded with the gmssl KAT fixtures — census
+26 → 27); **v1.4** extended `fuzz_c_abi` again with an X.509 op (attacker
+bytes through `_from_der`, then the full accessor/verify surface with both
+adequate and undersized output buffers). The nightly `FUZZ_TARGETS` sweep
+list must name every `fuzz/Cargo.toml` `[[bin]]` — a target absent from it
+builds in CI but is silently never fuzzed (a drift that existed for
+#98/#99's targets and was fixed in #102; the list now carries an explicit
+must-match note).
 
 ## Compliance posture
 

@@ -5,6 +5,66 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-12
+
+**C FFI for X.509-with-SM2** — completes the core-in-vN / FFI-in-vN+1
+cadence for the v1.3 `x509` core. Additive minor: **13 new `gmcrypto-c`
+symbols + 1 opaque handle + 1 plain struct** (72 → **85** FFI entry
+points), always-on per the v0.23 posture (`x509` enabled unconditionally
+on the C shim's core dep; the committed `gmcrypto.h` == a default build;
+`gmcrypto-core`'s own `x509` feature stays opt-in). No core API change;
+`gmcrypto-core`/`gmcrypto-simd` bump in lockstep to 1.4.0 (`=1.4.0`
+pins). Per `docs/v1.4-scope.md` Q4.1–Q4.15 (Codex design consult +
+Fable-5 adversarial review GO-WITH-FIXES, all findings applied).
+
+### Added
+- `gmcrypto_x509_certificate_from_der` / `_free` — opaque
+  `gmcrypto_x509_certificate_t` handle (immutable after construction;
+  NULL on ANY parse failure, indistinguishable by design). **The
+  no-trust-decisions contract crosses the ABI intact**: no chains, no
+  time/validity decision, no extension interpretation, no revocation.
+- `gmcrypto_x509_certificate_verify_signature` / `_with_id` — SM2-with-SM3
+  signature verification over the exact wire `tbsCertificate` bytes
+  against an issuer `gmcrypto_sm2_pubkey_t` handle; `id_len == 0` selects
+  the GM / RFC 8998 default ID (the v1.2 KX convention). `GMCRYPTO_OK`
+  only on a verifying signature.
+- Raw copy-out accessors (`(out, out_capacity, out_actual_len)` two-call
+  discovery): `_tbs_raw` (the exact signed span), `_serial_raw`
+  (pad-stripped unsigned value bytes, 1..=20), `_issuer_raw` /
+  `_subject_raw` (raw DER `Name` TLVs — match by byte equality),
+  `_extensions_raw` (`*out_actual_len == 0` ⇔ the optional block is
+  absent; a present block is never empty).
+- `gmcrypto_x509_certificate_not_before` / `_not_after` — validity
+  timestamps via the new plain `gmcrypto_x509_time_t` struct
+  (`uint16_t year` + five `uint8_t` fields). **Exposed, never compared
+  to a clock** — the validity decision is the caller's.
+- `gmcrypto_x509_certificate_is_self_issued` — out-param + status shape
+  ("not self-issued" is not a failure; keeps the header's universal
+  "0 = success" int-return contract true).
+- `gmcrypto_x509_certificate_subject_public_key` — the subject key as a
+  NEWLY allocated `gmcrypto_sm2_pubkey_t` (caller frees), composing with
+  `gmcrypto_sm2_verify`/encrypt/KX and manual leaf-vs-CA chaining.
+- Doc-only example `crates/gmcrypto-c/examples/x509_verify.c` (parse
+  leaf + issuer, extract the issuer subject key, verify; compiled + run
+  locally against the committed fixtures).
+
+### Testing
+- 8 new c_smoke tests (76 → **84**): accessor byte-equivalence vs the
+  Rust core on BOTH gmssl fixtures (incl. the CA serial pad-strip pin),
+  an extensions-absent surgery test (the `[3]` block stripped, lengths
+  patched — parse never verifies, so the broken signature is
+  irrelevant), the verify matrix (CA self-verify, leaf-vs-CA,
+  wrong-key/wrong-ID/tampered-tbs rejects), times/self-issued vs core,
+  subject-key handle composition, copy-out too-small + NULL sweeps.
+- `fuzz_c_abi` op 8 drives the new surface with attacker bytes (every
+  accessor with adequate AND undersized buffers + both verifies);
+  dispatch widened `% 8` → `% 9` with an audit of EVERY committed seed's
+  op byte — `sm3_abc` (first byte `0x41`: 65 % 9 would remap it to the
+  wrong op) rewritten to `0x01`; new committed `x509_leaf_op` seed.
+  Census stays **27** targets. 60 s smoke: 547K runs, zero crashes.
+- **No new dudect target** — thin shim over a public-inputs-only core
+  (the v1.3 rationale, doubled; see `SECURITY.md`).
+
 ## [1.3.0] - 2026-06-11
 
 **X.509-with-SM2: leaf certificate parse + signature verify** — the second
