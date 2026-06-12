@@ -3236,18 +3236,23 @@ fn x509_ffi_copy_out_too_small_reports_required_len() {
     unsafe { gmcrypto_x509_certificate_free(cert) };
 }
 
+/// Build a `gmcrypto_sm2_pubkey_t` handle from a fixture certificate's
+/// subject key (via the core parse + the existing pubkey FFI).
+fn x509_subject_key_handle(der: &[u8]) -> *mut gmcrypto_sm2_pubkey_t {
+    let core = Certificate::from_der(der).unwrap();
+    let sec1 = core.subject_public_key().to_sec1_uncompressed();
+    let key = unsafe { gmcrypto_sm2_pubkey_new(sec1.as_ptr()) };
+    assert!(!key.is_null());
+    key
+}
+
 #[test]
 fn x509_ffi_verify_matrix() {
     let ca = x509_parse(X509_CA_DER);
     let leaf = x509_parse(X509_LEAF_DER);
     // Issuer key handles via the existing pubkey FFI, from the core parse.
-    let ca_core = Certificate::from_der(X509_CA_DER).unwrap();
-    let ca_sec1 = ca_core.subject_public_key().to_sec1_uncompressed();
-    let ca_key = unsafe { gmcrypto_sm2_pubkey_new(ca_sec1.as_ptr()) };
-    let leaf_core = Certificate::from_der(X509_LEAF_DER).unwrap();
-    let leaf_sec1 = leaf_core.subject_public_key().to_sec1_uncompressed();
-    let leaf_key = unsafe { gmcrypto_sm2_pubkey_new(leaf_sec1.as_ptr()) };
-    assert!(!ca_key.is_null() && !leaf_key.is_null());
+    let ca_key = x509_subject_key_handle(X509_CA_DER);
+    let leaf_key = x509_subject_key_handle(X509_LEAF_DER);
 
     // CA is self-signed; leaf verifies under the CA key only.
     assert_eq!(
@@ -3312,9 +3317,7 @@ fn x509_ffi_tampered_tbs_fails_verify() {
     t[20] ^= 0x01;
     let cert = unsafe { gmcrypto_x509_certificate_from_der(t.as_ptr(), t.len()) };
     if !cert.is_null() {
-        let ca_core = Certificate::from_der(X509_CA_DER).unwrap();
-        let sec1 = ca_core.subject_public_key().to_sec1_uncompressed();
-        let ca_key = unsafe { gmcrypto_sm2_pubkey_new(sec1.as_ptr()) };
+        let ca_key = x509_subject_key_handle(X509_CA_DER);
         assert_eq!(
             unsafe { gmcrypto_x509_certificate_verify_signature(cert, ca_key) },
             GMCRYPTO_ERR

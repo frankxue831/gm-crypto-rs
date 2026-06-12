@@ -74,6 +74,14 @@ unsafe extern "C" fn fixed_fill_rng(
     0
 }
 
+/// Number of op families in the dispatch below (ops `0..FUZZ_OP_COUNT`).
+/// Bumping this REMAPS every committed seed's first byte under the new
+/// modulus — audit each file in `fuzz/seeds/fuzz_c_abi/` and rewrite any
+/// op byte that no longer selects the op it was built for (the v1.4
+/// `% 8 → % 9` widening silently moved `sm3_abc` until its byte was
+/// rewritten; see fuzz/README.md).
+const FUZZ_OP_COUNT: u8 = 9;
+
 fuzz_target!(|data: &[u8]| {
     if data.is_empty() {
         return;
@@ -93,7 +101,7 @@ fuzz_target!(|data: &[u8]| {
     // capacity check. No call violates the documented pointer/length
     // contract.
     unsafe {
-        match op % 9 {
+        match op % FUZZ_OP_COUNT {
             // (0) Single-shot SM3 over arbitrary bytes.
             0 => {
                 let mut digest = [0u8; GMCRYPTO_SM3_DIGEST_SIZE];

@@ -2625,16 +2625,17 @@ pub unsafe extern "C" fn gmcrypto_sm2_encrypt_with_rng(
 // KAT byte-for-byte through this ABI).
 // ============================================================
 
-/// KX identity-string convention (mirrors the sign FFI): `len == 0`
-/// selects [`DEFAULT_SIGNER_ID`] (`"1234567812345678"` — also the ID
-/// the GM/T 0003.5 worked example uses for both parties). Over-long
-/// ids collapse to the single failure mode in the core constructors.
+/// Identity-string convention shared by the KX (v1.2) and X.509 (v1.4)
+/// surfaces (mirrors the sign FFI): `len == 0` selects
+/// [`DEFAULT_SIGNER_ID`] (`"1234567812345678"` — also the ID the GM/T
+/// 0003.5 worked example uses for both parties). Over-long ids collapse
+/// to the single failure mode in the core.
 ///
 /// # Safety
 ///
 /// `ptr` must be valid for `len` reads when `len > 0` (the
 /// `try_slice` contract).
-unsafe fn kx_id<'a>(ptr: *const u8, len: usize) -> Option<&'a [u8]> {
+unsafe fn signer_id_or_default<'a>(ptr: *const u8, len: usize) -> Option<&'a [u8]> {
     if len == 0 {
         Some(DEFAULT_SIGNER_ID)
     } else {
@@ -2741,9 +2742,9 @@ pub unsafe extern "C" fn gmcrypto_sm2_kx_initiator_new(
             return None;
         }
         // SAFETY: id pointers valid per the caller contract.
-        let ida = unsafe { kx_id(id_a, id_a_len) }?;
+        let ida = unsafe { signer_id_or_default(id_a, id_a_len) }?;
         // SAFETY: as above.
-        let idb = unsafe { kx_id(id_b, id_b_len) }?;
+        let idb = unsafe { signer_id_or_default(id_b, id_b_len) }?;
         // SAFETY: caller guarantees `out_r_a` valid for 65 writes.
         let out = unsafe { try_slice_mut(out_r_a, GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE) }?;
         // SAFETY: non-null per the check above; valid handles per contract.
@@ -2796,9 +2797,9 @@ pub unsafe extern "C" fn gmcrypto_sm2_kx_initiator_new_with_rng(
         }
         let callback = rng_callback?;
         // SAFETY: id pointers valid per the caller contract.
-        let ida = unsafe { kx_id(id_a, id_a_len) }?;
+        let ida = unsafe { signer_id_or_default(id_a, id_a_len) }?;
         // SAFETY: as above.
-        let idb = unsafe { kx_id(id_b, id_b_len) }?;
+        let idb = unsafe { signer_id_or_default(id_b, id_b_len) }?;
         // SAFETY: caller guarantees `out_r_a` valid for 65 writes.
         let out = unsafe { try_slice_mut(out_r_a, GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE) }?;
         // SAFETY: non-null per the check above; valid handles per contract.
@@ -2934,9 +2935,9 @@ pub unsafe extern "C" fn gmcrypto_sm2_kx_responder_new(
             return None;
         }
         // SAFETY: id pointers valid per the caller contract.
-        let ida = unsafe { kx_id(id_a, id_a_len) }?;
+        let ida = unsafe { signer_id_or_default(id_a, id_a_len) }?;
         // SAFETY: as above.
-        let idb = unsafe { kx_id(id_b, id_b_len) }?;
+        let idb = unsafe { signer_id_or_default(id_b, id_b_len) }?;
         // SAFETY: non-null per the check above; valid handles per contract.
         let d = unsafe { &*local_privkey };
         // SAFETY: as above.
@@ -3406,9 +3407,9 @@ pub unsafe extern "C" fn gmcrypto_x509_certificate_verify_signature_with_id(
         else {
             return GMCRYPTO_ERR;
         };
-        // SAFETY: forwarded caller contract; `kx_id` maps len 0 to the
-        // default signer ID (shared v1.2 helper).
-        let Some(id) = (unsafe { kx_id(id, id_len) }) else {
+        // SAFETY: forwarded caller contract; len 0 maps to the default
+        // signer ID (the helper shared with the v1.2 KX surface).
+        let Some(id) = (unsafe { signer_id_or_default(id, id_len) }) else {
             return GMCRYPTO_ERR;
         };
         if cert.inner.verify_signature_with_id(&issuer.inner, id) {
@@ -3416,6 +3417,29 @@ pub unsafe extern "C" fn gmcrypto_x509_certificate_verify_signature_with_id(
         } else {
             GMCRYPTO_ERR
         }
+    })
+}
+
+/// Shared body of the two validity-time getters (the `x509_copy_out`
+/// pattern; the closure is `move` for the same `UnwindSafe` reason).
+///
+/// # Safety
+///
+/// Forwarded caller contract — `cert` a valid handle or NULL; `out_time`
+/// valid for one write or NULL.
+unsafe fn x509_write_time(
+    cert: *const gmcrypto_x509_certificate_t,
+    get: impl Fn(&Certificate) -> X509Time + std::panic::UnwindSafe,
+    out_time: *mut gmcrypto_x509_time_t,
+) -> c_int {
+    ffi_guard(move || {
+        let (Some(cert), false) = (unsafe { cert.as_ref() }, out_time.is_null()) else {
+            return GMCRYPTO_ERR;
+        };
+        // SAFETY: out_time checked non-null; caller guarantees validity
+        // for one write.
+        unsafe { out_time.write(get(&cert.inner).into()) };
+        GMCRYPTO_OK
     })
 }
 
@@ -3430,15 +3454,8 @@ pub unsafe extern "C" fn gmcrypto_x509_certificate_not_before(
     cert: *const gmcrypto_x509_certificate_t,
     out_time: *mut gmcrypto_x509_time_t,
 ) -> c_int {
-    ffi_guard(|| {
-        let (Some(cert), false) = (unsafe { cert.as_ref() }, out_time.is_null()) else {
-            return GMCRYPTO_ERR;
-        };
-        // SAFETY: out_time checked non-null; caller guarantees validity
-        // for one write.
-        unsafe { out_time.write(cert.inner.not_before().into()) };
-        GMCRYPTO_OK
-    })
+    // SAFETY: forwarded caller contract.
+    unsafe { x509_write_time(cert, Certificate::not_before, out_time) }
 }
 
 /// Write the certificate's `notAfter` into `*out_time`. Exposure only —
@@ -3452,15 +3469,8 @@ pub unsafe extern "C" fn gmcrypto_x509_certificate_not_after(
     cert: *const gmcrypto_x509_certificate_t,
     out_time: *mut gmcrypto_x509_time_t,
 ) -> c_int {
-    ffi_guard(|| {
-        let (Some(cert), false) = (unsafe { cert.as_ref() }, out_time.is_null()) else {
-            return GMCRYPTO_ERR;
-        };
-        // SAFETY: out_time checked non-null; caller guarantees validity
-        // for one write.
-        unsafe { out_time.write(cert.inner.not_after().into()) };
-        GMCRYPTO_OK
-    })
+    // SAFETY: forwarded caller contract.
+    unsafe { x509_write_time(cert, Certificate::not_after, out_time) }
 }
 
 /// Write `1` to `*out_is_self_issued` if the certificate's subject and
