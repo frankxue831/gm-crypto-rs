@@ -94,7 +94,7 @@ null-only.
 - **[D-2]**: which IDs feed the Z-values (default `1234567812345678` vs
   certificate-derived identities) — gotlcp threads caller-supplied IDs;
   must be pinned against the standard + an oracle transcript before the
-  KX cycle.
+  v1.6 KX API freezes.
 
 ### 1.4 Key schedule (§6.5)
 
@@ -227,7 +227,11 @@ rejected.
   explicit roles, transcript bytes in/out, caller-held sequence numbers
   and times, injected RNG, no hidden policy, no global state (the Codex
   W2 discipline). An API an engine could not drive is a design defect
-  at review time even though no engine exists.
+  at review time even though no engine exists. Equally arc-wide: the
+  workspace **failure-mode invariant** governs every toolkit surface —
+  `Option`/`bool`/single-`Failed`, never an error that distinguishes
+  *why* (§4's chain rule and §6's record rule are instances, not
+  exceptions).
 
 ## 6. Assurance strategy for the arc
 
@@ -248,14 +252,15 @@ rejected.
   dudect surface — Lucky13-class. The **API shape is constrained NOW**,
   before v1.7 designs it (Codex W2): ONE `deprotect`-style operation —
   no public decrypt-then-check composition for callers to mis-assemble;
-  no early return on padding failure; the MAC path (or a dummy
-  equivalent doing the same HMAC work) ALWAYS runs; single failure
-  mode; no plaintext escapes on failure. Measurement: a dudect target
-  class-split by padding shape is necessary but NOT sufficient —
-  Lucky13's signal is HMAC compression-function count varying with the
-  *inferred plaintext length*, so the v1.7 design must equalize MAC
-  work across padding interpretations (the canonical countermeasure),
-  not just avoid branches. The PRF/key-schedule (G1) operates on
+  no early return on padding failure; the MAC path ALWAYS runs, with
+  HMAC compression-function count **equalized across padding-length
+  interpretations** (dummy work as needed — the canonical Lucky13
+  countermeasure; a MUST-constraint of the API, not measurement
+  guidance); single failure mode; no plaintext escapes on failure.
+  Measurement: a dudect target class-split by padding shape is
+  necessary but NOT sufficient — Lucky13's signal is exactly the
+  MAC-work variation the equalization constraint exists to remove;
+  dudect guards the residual. The PRF/key-schedule (G1) operates on
   secrets but with public lengths/structure — dudect target decision per
   cycle. G4 is public-inputs-only (the v1.3 no-dudect rationale extends).
 - **Fuzzing**: each new decode/decrypt surface gets a fuzz target
@@ -274,19 +279,20 @@ records the **FFI-shape constraints** its API implies (handle vs plain
 struct, copy-out vs in-place, consume-on-use) so v1.9 inherits decisions
 instead of discovering conflicts — but no C ABI is frozen before v1.9.
 
-- **v1.6 — TLCP key schedule (G1 + G3)**: `tlcp::prf` (P_SM3, master
+- **v1.6 — TLCP key schedule (G1 + G3)**: the P_SM3 PRF (master
   secret, key block, Finished verify_data) + the no-confirmation SM2-KX
-  path. Pure-core, no new dep, opt-in feature (name **[D-6]**: `tlcp`
-  umbrella vs `tlcp-kdf` per-piece). KATs from a gotlcp vector harness.
-  Size ≈ v1.1.
+  path. Pure-core, no new dep, opt-in feature (feature/module naming
+  **[D-6]**: `tlcp` umbrella vs per-piece — the cycle's scope doc
+  decides placement). KATs from a gotlcp vector harness. Size ≈ v1.1.
 - **v1.7 — TLCP record protection (G2)**: TLS-CBC (explicit IV,
   MAC-then-encrypt, TLS padding, CT deprotect) + GCM record shape
   (salt‖explicit nonce, TLS AAD). New dudect target(s) for CBC
   deprotect; fuzz target for record deprotection. The arc's riskiest
   cycle — Lucky13 discipline. Size ≈ v0.8.
-- **v1.8 — certificate-pair / chain verification (G4)**: the §4 profile
-  on the `x509` feature. The first extension interpretation —
-  keyUsage + basicConstraints only. Size ≈ v1.3.
+- **v1.8 — certificate-pair / chain verification (G4)**: the §4
+  profile (placement within or alongside the `x509` feature = the
+  cycle's scope doc). The first extension interpretation — keyUsage +
+  basicConstraints only. Size ≈ v1.3.
 - **v1.9 — TLCP FFI** (cadence cycle): the accumulated toolkit surface
   through `gmcrypto-c`, shape decided then.
 - **v2.x — O2 sans-I/O engine**: separate decision, separate crate, only
