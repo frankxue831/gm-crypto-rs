@@ -980,6 +980,18 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
 ## Don't
 
 - Don't add a `Cargo.toml` `authors` field (privacy — removed at `982a2fc`).
+- **Don't add per-version scope sections or verbose history-table rows to
+  README.md.** The pre-v1.4 accretion pattern (a new "## vX.Y scope" section
+  + a multi-sentence roadmap row every release) grew the README to ~900
+  lines with Quick-start buried at line 790; the v1.4 cycle restructured it
+  reader-first (~330 lines: what-is/isn't → quick-start → crates & features
+  → stability → short history-and-roadmap → build). Per-release narratives
+  go to CHANGELOG.md + `docs/vX.Y-scope.md` ONLY. A release touches the
+  README only where the user-facing surface changed: the intro feature
+  list, the feature table, the "current release is X.Y.Z" line + the
+  crates.io history chain, the quick-start, and (for FFI cycles) the entry-
+  point count. The README is also the crates.io landing page for all three
+  crates — keep it an evaluation/onboarding document, not a changelog.
 - Don't reduce the SM2 retry-loop iteration count or short-circuit on first valid
   candidate. Fixed-K masked-select is the constant-time invariant.
 - Don't reference any external "Java prototype" / `gm-crypto-lite-java` repo.
