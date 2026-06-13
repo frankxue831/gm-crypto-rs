@@ -31,7 +31,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 # v1.4 (Q4.10): `x509` joins them too — the certificate FFI symbols +
 # the opaque handle / time struct are always-on, so the committed
 # gmcrypto.h keeps matching a default build.
-gmcrypto-core = { path = "../gmcrypto-core", version = "=1.4.0", features = ["sm4-aead", "sm4-xts", "sm2-key-exchange", "x509"] }
+gmcrypto-core = { path = "../gmcrypto-core", version = "=1.6.0", features = ["sm4-aead", "sm4-xts", "sm2-key-exchange", "x509"] }
 getrandom.workspace = true
 rand_core.workspace = true
 
