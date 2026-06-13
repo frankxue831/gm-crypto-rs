@@ -239,3 +239,100 @@ fn negative_tampered_s_a_rejected() {
         "tampered S_A accepted by finish"
     );
 }
+
+/// The GM/T 0003.5 worked example's K is derived BEFORE the
+/// confirmation tags, so the same standard vector pins the v1.6
+/// no-confirmation completers byte-for-byte.
+#[test]
+fn unconfirmed_paths_reproduce_standard_k() {
+    let da = Sm2PrivateKey::from_bytes_be(&D_A).unwrap();
+    let db = Sm2PrivateKey::from_bytes_be(&D_B).unwrap();
+    let (pa, pb) = (da.public_key(), db.public_key());
+
+    let init = Sm2KxInitiator::new(&da, &pb, ID_A, ID_B, KLEN).unwrap();
+    let (ra, iw) = init
+        .produce_ephemeral(&mut FixedScalarRng(R_A_EPH))
+        .unwrap();
+    let resp = Sm2KxResponder::new(&db, &pa, ID_A, ID_B, KLEN).unwrap();
+    let (rb, k_resp) = resp
+        .respond_without_key_confirmation(&ra, &mut FixedScalarRng(R_B_EPH))
+        .unwrap();
+    assert_eq!(rb.to_bytes(), R_B_SEC1, "R_B != standard");
+    assert_eq!(k_resp.as_bytes(), EXPECT_K, "responder K != standard");
+
+    let k_init = iw
+        .derive_without_key_confirmation(&Sm2KxEphemeralPoint::from_bytes(&R_B_SEC1))
+        .unwrap();
+    assert_eq!(k_init.as_bytes(), EXPECT_K, "initiator K != standard");
+}
+
+/// Confirmed and unconfirmed flows agree at both the standard klen
+/// (16) and the TLCP pre-master klen (48) — scope Q6.6 / Codex W1
+/// Medium-5.
+#[test]
+fn unconfirmed_matches_confirmed_at_klen_16_and_48() {
+    for klen in [16usize, 48] {
+        let da = Sm2PrivateKey::from_bytes_be(&D_A).unwrap();
+        let db = Sm2PrivateKey::from_bytes_be(&D_B).unwrap();
+        let (pa, pb) = (da.public_key(), db.public_key());
+
+        // Confirmed reference run.
+        let init = Sm2KxInitiator::new(&da, &pb, ID_A, ID_B, klen).unwrap();
+        let (ra, iw) = init
+            .produce_ephemeral(&mut FixedScalarRng(R_A_EPH))
+            .unwrap();
+        let resp = Sm2KxResponder::new(&db, &pa, ID_A, ID_B, klen).unwrap();
+        let (rb, sb, rw) = resp.respond(&ra, &mut FixedScalarRng(R_B_EPH)).unwrap();
+        let (k_conf, sa) = iw.confirm(&rb, &sb).unwrap();
+        let k_conf_resp = rw.finish(&sa).unwrap();
+
+        // Unconfirmed run, same ephemerals.
+        let init = Sm2KxInitiator::new(&da, &pb, ID_A, ID_B, klen).unwrap();
+        let (ra2, iw2) = init
+            .produce_ephemeral(&mut FixedScalarRng(R_A_EPH))
+            .unwrap();
+        assert_eq!(ra2.to_bytes(), ra.to_bytes());
+        let resp = Sm2KxResponder::new(&db, &pa, ID_A, ID_B, klen).unwrap();
+        let (rb2, k_unc_resp) = resp
+            .respond_without_key_confirmation(&ra2, &mut FixedScalarRng(R_B_EPH))
+            .unwrap();
+        assert_eq!(rb2.to_bytes(), rb.to_bytes());
+        let k_unc_init = iw2.derive_without_key_confirmation(&rb2).unwrap();
+
+        assert_eq!(k_unc_init.as_bytes(), k_conf.as_bytes());
+        assert_eq!(k_unc_resp.as_bytes(), k_conf_resp.as_bytes());
+    }
+}
+
+/// The unconfirmed paths keep the v1.1 rejects: off-curve / garbage
+/// peer points fail with the single error on both roles.
+#[test]
+fn unconfirmed_paths_reject_invalid_peer_points() {
+    let da = Sm2PrivateKey::from_bytes_be(&D_A).unwrap();
+    let db = Sm2PrivateKey::from_bytes_be(&D_B).unwrap();
+    let (pa, pb) = (da.public_key(), db.public_key());
+
+    let mut bad = R_B_SEC1;
+    bad[64] ^= 0x01; // off-curve y
+    let garbage = [0x5Au8; 65]; // wrong tag byte
+
+    for evil in [bad, garbage] {
+        let init = Sm2KxInitiator::new(&da, &pb, ID_A, ID_B, KLEN).unwrap();
+        let (_ra, iw) = init
+            .produce_ephemeral(&mut FixedScalarRng(R_A_EPH))
+            .unwrap();
+        assert!(
+            iw.derive_without_key_confirmation(&Sm2KxEphemeralPoint::from_bytes(&evil))
+                .is_err()
+        );
+
+        let resp = Sm2KxResponder::new(&db, &pa, ID_A, ID_B, KLEN).unwrap();
+        assert!(
+            resp.respond_without_key_confirmation(
+                &Sm2KxEphemeralPoint::from_bytes(&evil),
+                &mut FixedScalarRng(R_B_EPH),
+            )
+            .is_err()
+        );
+    }
+}

@@ -5,6 +5,14 @@
 //! `compute_z`, and the SEC1 point validation. Confidentiality of the agreed
 //! key relies on the caller keeping each ephemeral single-use (the typestate
 //! enforces it).
+//!
+//! The standard makes the confirmation step OPTIONAL; v1.6 adds the
+//! no-confirmation completers
+//! [`Sm2KxInitiatorWaiting::derive_without_key_confirmation`] and
+//! [`Sm2KxResponder::respond_without_key_confirmation`] (the shape TLCP's
+//! ECDHE suites need — GB/T 38636 confirms via the Finished exchange
+//! instead). The confirmed flow (`confirm`/`finish`) remains the default
+//! recommendation: without tags, key confirmation is the caller's protocol.
 
 use crate::Error;
 use crate::sm2::curve::Fn;
@@ -433,6 +441,48 @@ impl Sm2KxInitiatorWaiting {
         yu_b.zeroize();
         Ok((key, s_a))
     }
+
+    /// Receive the responder's `R_B` and derive `K` WITHOUT key
+    /// confirmation — no `S_B` is verified and no `S_A` is produced
+    /// (GB/T 32918.3 makes the confirmation step optional; TLCP's
+    /// ECDHE suites omit it and confirm via the Finished exchange).
+    ///
+    /// ⚠ The peer has proven nothing when this returns: a key
+    /// mismatch (or an active attacker) surfaces only when the
+    /// caller's protocol confirms the key. Prefer
+    /// [`Sm2KxInitiatorWaiting::confirm`] unless the surrounding
+    /// protocol supplies confirmation. Consumes `self`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Failed`] on an invalid `R_B`, an identity `U`, or an
+    /// all-zero `K` (indistinguishable by design).
+    pub fn derive_without_key_confirmation(
+        self,
+        r_b: &Sm2KxEphemeralPoint,
+    ) -> Result<Sm2SharedKey> {
+        let Self {
+            inner,
+            r_eph,
+            r_point_bytes,
+        } = self;
+        let mut local_x = [0u8; 32];
+        local_x.copy_from_slice(&r_point_bytes[1..33]);
+        let (key, mut xu_b, mut yu_b) = shared_secret(
+            inner.d.scalar(),
+            &r_eph.0,
+            &local_x,
+            &r_b.0,
+            &inner.p_peer,
+            &inner.z_a,
+            &inner.z_b,
+            inner.klen,
+        )?;
+        // No S-tag hashing consumes x_U/y_U on this path — wipe now.
+        xu_b.zeroize();
+        yu_b.zeroize();
+        Ok(Sm2SharedKey(key))
+    }
 }
 
 /// Responder after `(R_B, S_B)` were sent; holds `K` (zeroize-on-drop)
@@ -489,6 +539,46 @@ impl Sm2KxResponder {
                 expected_s_a,
             },
         ))
+    }
+
+    /// Receive the initiator's `R_A`, sample `r_B`, and derive `K`
+    /// WITHOUT key confirmation — no `S_B` is produced, no `S_A` will
+    /// be verified, and the key releases immediately (there is
+    /// deliberately no waiting state: with no tag to verify, holding
+    /// `K` back would gate it on nothing).
+    ///
+    /// ⚠ Same caveat as
+    /// [`Sm2KxInitiatorWaiting::derive_without_key_confirmation`]:
+    /// confirmation becomes the caller's protocol (TLCP: Finished).
+    /// Consumes `self`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Failed`] on RNG failure, an invalid `R_A`, an identity
+    /// `V`, or an all-zero `K` (indistinguishable by design).
+    pub fn respond_without_key_confirmation<R: TryCryptoRng>(
+        self,
+        r_a: &Sm2KxEphemeralPoint,
+        rng: &mut R,
+    ) -> Result<(Sm2KxEphemeralPoint, Sm2SharedKey)> {
+        let (r, rb_bytes) = sample_ephemeral(rng)?;
+        let r_eph = EphScalar(r);
+        let mut local_x = [0u8; 32];
+        local_x.copy_from_slice(&rb_bytes[1..33]);
+        let (key, mut xu_b, mut yu_b) = shared_secret(
+            self.d.scalar(),
+            &r_eph.0,
+            &local_x,
+            &r_a.0,
+            &self.p_peer,
+            &self.z_a,
+            &self.z_b,
+            self.klen,
+        )?;
+        // No S-tag hashing consumes x_U/y_U on this path — wipe now.
+        xu_b.zeroize();
+        yu_b.zeroize();
+        Ok((Sm2KxEphemeralPoint(rb_bytes), Sm2SharedKey(key)))
     }
 }
 
