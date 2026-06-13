@@ -3,10 +3,11 @@
 Constant-time-designed pure-Rust SM2 / SM3 / SM4 SDK for Chinese national
 cryptography (GB/T 32905 / 32918 / 32907 / GM/T 0009). SM2 sign / verify,
 public-key encrypt / decrypt, key exchange (GM/T 0003.3), X.509-with-SM2
-leaf certificate parse + signature verify; SM4-CBC / CTR / GCM / CCM / XTS
-(single-shot and streaming); HMAC-SM3, PBKDF2-HMAC-SM3; plus a complete C
-ABI (`gmcrypto-c`, 85 entry points) — all secret-touching paths guarded by
-an in-CI `dudect-bencher` detectable-leak regression harness.
+leaf certificate parse + signature verify, the TLCP (GB/T 38636) key
+schedule; SM4-CBC / CTR / GCM / CCM / XTS (single-shot and streaming);
+HMAC-SM3, PBKDF2-HMAC-SM3; plus a complete C ABI (`gmcrypto-c`, 85 entry
+points) — all secret-touching paths guarded by an in-CI `dudect-bencher`
+detectable-leak regression harness.
 
 [![Crates.io](https://img.shields.io/crates/v/gmcrypto-core.svg)](https://crates.io/crates/gmcrypto-core)
 [![Documentation](https://docs.rs/gmcrypto-core/badge.svg)](https://docs.rs/gmcrypto-core)
@@ -84,7 +85,8 @@ the design intent in isolation.
 
 ## What this isn't
 
-- Not a TLS/TLCP implementation.
+- Not a TLS/TLCP protocol implementation (the `tlcp` feature ships crypto
+  building blocks only — no handshake, no records, no I/O).
 - Not SM9, ZUC, post-quantum.
 - Not an HSM/SDF/SKF integration.
 - Not a certified cryptographic module.
@@ -174,8 +176,9 @@ Three crates, released together at one lockstep version:
 |---|---|
 | `sm4-aead` | SM4-GCM + SM4-CCM single-shot AEAD, incremental-input buffered GCM (pulls `gmcrypto-simd` for GHASH). |
 | `sm4-xts` | SM4-XTS (GB/T 17964-2021, **not** IEEE 1619): single-shot + in-place multi-sector disk helpers. Confidentiality only. |
-| `sm2-key-exchange` | GM/T 0003.3 key agreement with key confirmation (typestate role state-machines). |
+| `sm2-key-exchange` | GM/T 0003.3 key agreement (typestate role state-machines): confirmed flow by default + the standard-permitted no-confirmation completers (v1.6). |
 | `x509` | X.509-with-SM2 leaf certificate parse + signature verify. **No trust decisions.** |
+| `tlcp` | TLCP (GB/T 38636-2020) crypto toolkit: key schedule so far (P_SM3 PRF, master secret, key block, Finished). **Not a protocol implementation.** |
 | `sm4-bitsliced` | Table-less, gate-only SM4 S-box (constant-time by construction; byte-identical output). |
 | `sm4-bitsliced-simd` | AVX2 (x86_64) / NEON (aarch64) packed bitsliced SM4 batches; runtime detection, scalar fallback. |
 | `digest-traits` / `cipher-traits` | RustCrypto trait fit (`digest 0.11` / `cipher 0.5`) for `Sm3` / `HmacSm3` / `Sm4Cipher`. |
@@ -184,10 +187,11 @@ Three crates, released together at one lockstep version:
 ## Stability & SemVer
 
 The line graduated to **1.0 (stable)** with the **1.0.0** release; the current release is
-**1.4.0** (the C FFI for X.509-with-SM2). crates.io history
-goes **0.16.0 → 1.0.0 → 1.0.1 → 1.1.0 → 1.2.0 → 1.3.0 → 1.4.0**, skipping 0.17.0–0.23.0 (those were
-non-publishing assurance + API-finalization milestones; their changes all shipped together
-in the first stable `1.0.0`). Every post-1.0 release has been additive (SemVer-checked);
+**1.6.0** (the TLCP key schedule + no-confirmation SM2-KX). crates.io history
+goes **0.16.0 → 1.0.0 → 1.0.1 → 1.1.0 → 1.2.0 → 1.3.0 → 1.4.0 → 1.6.0**, skipping 0.17.0–0.23.0
+and 1.5.0 (those were non-publishing milestones — the 0.x run was the assurance +
+API-finalization arc that shipped together in `1.0.0`; 1.5 was the TLCP-decomposition
+design cycle, [`docs/tlcp-decomposition.md`](docs/tlcp-decomposition.md)). Every post-1.0 release has been additive (SemVer-checked);
 the only migration ever required is 0.16 → 1.0, a single major bump — no published 0.x
 consumer ever saw an intermediate break. The public API had been stable in
 practice since v0.5; the **v1.0 readiness audit** (v0.21) froze and tooling-guarded
@@ -200,7 +204,7 @@ see [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md).
 **From 1.0, SemVer is enforced**: breaking changes to the covered surface require a
 major bump, and `cargo-semver-checks` runs as the forward breaking-change gate in
 CI (the three crates always release together at one lockstep version, with
-intra-workspace deps pinned exactly — `=1.4.0`). The runtime wire output (SM2
+intra-workspace deps pinned exactly — `=1.6.0`). The runtime wire output (SM2
 signatures / ciphertexts, SM4 mode bytes) is byte-identical to 0.16.0.
 
 - **What's covered by SemVer:** the public Rust API of `gmcrypto-core` (the
