@@ -1,7 +1,43 @@
 # CLAUDE.md
 
 Pure-Rust SM2/SM3/SM4 SDK.
-**v1.5 — TLCP decomposition (non-publishing design cycle, 2026-06-12,
+**v1.6.0 — TLCP key schedule + no-confirmation SM2-KX — implemented on
+`feat/tlcp-key-schedule`; publish order simd → core → c, the
+maintainer's per-release call.** The first code cycle of the TLCP arc
+(gaps G1+G3 of `docs/tlcp-decomposition.md`; scope `docs/v1.6-scope.md`
+Q6.1–Q6.10, Q6.2/Q6.3 maintainer-signed). New opt-in **`tlcp = []`**
+umbrella feature (pure-core, NO new dep, no_std; carries the whole
+toolkit arc — v1.7/v1.8 join it): `tlcp::key_schedule` = private
+`p_sm3` (RFC 5246 §5 P_hash over `HmacSm3`, A-chain wiped) +
+`derive_master_secret` (**pre_master TYPED `[u8;48]`** — TLCP pins the
+PMS in both KX variants; Codex High-1) + `derive_key_block` (seed order
+**FLIPS server-first** §6.5.2 — KAT-pinned trap; suite-agnostic
+caller-carved out: CBC 128 B / GCM 40 B) + `finished_verify_data` +
+`TlcpRole` (12 B). Engine-shaped: caller-supplied outs (pbkdf2
+discipline), ZERO failure modes. **No-confirmation KX completers** land
+on `sm2-key-exchange` (NOT tlcp — 32918.3 generality, Q6.3):
+`derive_without_key_confirmation` / `respond_without_key_confirmation`
+(loud names = the misuse defense, Codex Medium-3; responder has NO
+waiting state — nothing to gate on; both reuse `shared_secret`
+verbatim; confirmed flow byte-unchanged). KATs: OpenSSL 3.x **`openssl
+kdf TLS1-PRF -kdfopt digest:SM3`** (verified BEFORE scoping; label
+rides IN the seed, hexsecret/hexseed, default provider —
+`docs/v1.6-kat-sourcing.md`) + the GM/T 0003.5 worked example pins both
+completers (K precedes tags) + klen-16/48 differentials. Assurance: NO
+new dudect target (ct_hmac_sm3 covers P_SM3's keyed primitive;
+initiator-unconfirmed ⊂ ct_sm2_key_exchange's measured path; responder
+structurally covered — SECURITY.md); `fuzz_sm2_kx` drives THREE paths
+per input (no dispatch byte, seed format unchanged, census 27); CI
+gains tlcp legs + the api-stability docs leg now covers
+sm2-key-exchange/x509/tlcp (pre-existing gap). D-2/D-7/D-10 resolved
+(gotlcp): ECDHE uses default IDs + klen 48; handshake sigs =
+message-mode `sign_with_id` w/ default ID; PMS-decrypt abort OK (GM/T
+0009 ct is integrity-protected). Workspace 1.4.0 → **1.6.0** (crates.io
+SKIPS 1.5.0 — the v0.14→v0.15 precedent), sibling pins `=1.6.0`.
+Reviews: Codex scope consult (7 findings folded) + Fable-5 adversarial
+plan review GO-WITH-FIXES (A1–A6; the reviewer EXECUTED the plan code
+in a scratch tree and independently regenerated every KAT vector).
+**Earlier — v1.5 — TLCP decomposition (non-publishing design cycle, 2026-06-12,
 on `main`)** — the arc-opening map for TLCP (GB/T 38636-2020), the
 direction both the v1.1 SM2-KX and v1.3 `x509` cores were built to feed.
 Deliverable: **`docs/tlcp-decomposition.md`** (+ charter
@@ -645,6 +681,8 @@ cargo clippy -p gmcrypto-core --features sm4-xts --all-targets -- -D warnings
 cargo clippy -p gmcrypto-core --features sm2-key-exchange,crypto-bigint-scalar --all-targets -- -D warnings
 # v1.3 — X.509 opt-in clippy pass.
 cargo clippy -p gmcrypto-core --features x509 --all-targets -- -D warnings
+# v1.6 — TLCP opt-in clippy pass.
+cargo clippy -p gmcrypto-core --features tlcp --all-targets -- -D warnings
 
 # Supply chain — note: --exclude-dev (dev-deps are exempt from the ban list).
 cargo deny check --exclude-dev
@@ -652,11 +690,11 @@ cargo deny check --exclude-dev
 # feature flags (digest/cipher/inout/crypto-common allowlisted in deny.toml;
 # sm4-aead pulls gmcrypto-simd::ghash which has no new transitive deps; sm4-xts
 # adds NO new dep — pure-core).
-cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509 check --exclude-dev
+cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509,gmcrypto-core/tlcp check --exclude-dev
 
 # MSRV reproducibility.
 cargo +1.85 build -p gmcrypto-core
-cargo +1.85 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar,sm2-key-exchange,x509
+cargo +1.85 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar,sm2-key-exchange,x509,tlcp
 cargo build -p gmcrypto-core --no-default-features  # confirms no_std posture
 
 # v0.4 W1 — wasm32 build (caller-supplied RNG only).
@@ -667,6 +705,8 @@ cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features sm4-xts 
 cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features sm2-key-exchange --no-default-features
 # v1.3 — x509 is pure-core/no_std too (public-input parse+verify).
 cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features x509 --no-default-features
+# v1.6 — tlcp is pure-core/no_std too (key schedule: byte-in/byte-out).
+cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features tlcp --no-default-features
 
 # v0.4 W4 — C ABI shim build + header drift check.
 cargo build -p gmcrypto-c --release
@@ -886,6 +926,9 @@ crates/gmcrypto-core/
     pem.rs                  # v0.3 W2 — RFC 7468 PEM + embedded base64 (hand-rolled, no_std)
     spki.rs                 # v0.3 W2 — RFC 5280 SubjectPublicKeyInfo for SM2
     x509.rs                 # v1.3 — X.509-with-SM2 LEAF cert parse + sig verify (opt-in `x509` feature; GM/T 0015 profile, v3-only, strict in-repo DER). Certificate::from_der -> Option (exact wire tbs span; sm2-sign-with-sm3 AlgId absent-or-NULL params + FULL-SPAN outer==inner; negative serial REJECT; pad-stripped serial 1..=20; one-level extensions shape-check, ZERO interpretation; BIT STRING unused==0) + verify_signature(_with_id) -> bool via verify_with_id over tbs_raw (default ID 1234567812345678; RFC 8998 §3.2.1). NO TRUST DECISIONS (no chains/time/extension-eval/revocation — X509Time exposed, no clock). Composes asn1::reader + spki::decode + verify_with_id only; public inputs only -> NO dudect target
+    tlcp/
+      mod.rs                # v1.6 — TLCP (GB/T 38636-2020) crypto toolkit umbrella (opt-in `tlcp` feature; pure-core, no new dep). NOT a protocol implementation; grows per docs/tlcp-decomposition.md §7 (v1.7 record protection, v1.8 chain/pair verification join here)
+      key_schedule.rs       # v1.6 — GB/T 38636 §6.5 key schedule: private p_sm3 (RFC 5246 §5 P_hash over HmacSm3; A-chain + blocks wiped; public loop bounds) + derive_master_secret(pre_master: &[u8;48] TYPED — TLCP pins PMS to 48 in both KX variants) + derive_key_block (seed order FLIPS server-first §6.5.2; suite-agnostic caller-carved out: CBC 128 B, GCM 40 B) + finished_verify_data/TlcpRole (12 B) + MASTER_SECRET_LEN/FINISHED_VERIFY_DATA_LEN. Engine-shaped: caller-supplied outs (pbkdf2 discipline), ZERO failure modes. KATs = OpenSSL 3.x TLS1-PRF digest:SM3 (docs/v1.6-kat-sourcing.md). NO dudect target (ct_hmac_sm3 covers the keyed primitive); NO fuzz target (typed fixed-length inputs)
     sec1.rs                 # v0.3 W2 — RFC 5915 ECPrivateKey + SEC1 uncompressed point (04||X||Y)
     pkcs8.rs                # v0.3 W2 — RFC 5958 OneAsymmetricKey + RFC 8018 PBES2 (PBKDF2-HMAC-SM3 + SM4-CBC)
     traits.rs               # v0.3 W5 — in-crate Hash / Mac / BlockCipher traits (v0.4 W2 lands RustCrypto-trait fit alongside)
@@ -899,6 +942,8 @@ crates/gmcrypto-core/
     sm4_gcm_kat.rs          # v0.8 W2 — SM4-GCM byte-identical to gmssl 3.1.1 across 4 KAT scenarios + tamper detection (cfg-gated on `sm4-aead`)
     sm4_ccm_kat.rs          # v0.8 W3 — SM4-CCM byte-identical to OpenSSL 3.x EVP across 8 KAT scenarios (nonce_len ∈ {7,12,13}, tag_len ∈ {4,10,16}, empty PT, empty AAD, long AAD crossing block); cfg-gated on `sm4-aead`
     x509_kat.rs             # v1.3 — gmssl-fixture KAT + adversarial negatives (cfg-gated on `x509`): field exposure vs exported SPKI keys, CA self-verify + leaf-vs-CA + wrong-key/wrong-ID rejects, FULL per-byte tbs tamper sweep, truncation sweep, negative-serial reject, serial pad-strip pin, OID swap (inner/outer/both), unused-bits reject, garbage-sig parses-but-never-verifies
+    sm2_kx_kat.rs           # v1.1 — GM/T 0003.5 recommended-curve worked example, staged assertions (statics/Z -> ephemerals -> K/S_A/S_B); v1.6 adds unconfirmed_paths_reproduce_standard_k (K precedes tags so the same vector pins both completers) + confirmed-vs-unconfirmed differential at klen 16 AND 48 + invalid-peer-point rejects on both roles
+    tlcp_key_schedule_kat.rs # v1.6 — key-schedule KATs vs OpenSSL TLS1-PRF digest:SM3 (cfg-gated on `tlcp`): master secret, key block 128/40/200 B (GCM carve = prefix pin; multi-iteration), Finished both roles + role-separation, zero-length out, seed-order-flip negative
     data/                   # v0.3 W2 binary KAT fixtures + regen recipe (Q7.9 decision); v0.8 W3 adds sm4_ccm_oracle.c (OpenSSL EVP harness)
 
 crates/gmcrypto-c/          # v0.4 W4 — C ABI shim (cdylib + staticlib + rlib)
@@ -936,7 +981,7 @@ crates/gmcrypto-simd/       # v0.5 W4 phase 2 / v0.6 W6 / v0.8 W1 — SIMD backe
 
 fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN WORKSPACE (empty [workspace] table) + parent exclude=["fuzz"] → nightly-only libfuzzer-sys/arbitrary deps never enter the published 3-crate graph; unpublished, NOT MSRV-bound, NOT in cargo deny. fuzz/Cargo.lock IS committed (.gitignore anchors /Cargo.lock to root so it isn't swallowed). 27 targets (v0.14's 16 + v0.20's 2 streaming-decryptor differential + #98/#99's 7 post-1.0 hardening [SM3/HMAC-SM3/C-ABI/SM4-mode-encrypt] + v1.1's fuzz_sm2_kx + v1.3's fuzz_x509); v0.14's prove the failure-mode invariant (no panic/OOM/hang), v0.20's prove streaming==single-shot; initial sweeps zero crashes (+ zero divergences for v0.20). The FUZZ_TARGETS list in fuzz-nightly.yml MUST name every [[bin]] — a target absent there builds (fuzz-build.yml) but is silently never fuzzed (the #98/#99 drift, fixed post-#101).
   Cargo.toml                # gmcrypto-core path dep w/ features=["sm4-aead","sm4-xts","sm2-key-exchange","x509"] always on (no per-target feature juggling); 27 [[bin]] entries; empty [workspace]
-  fuzz_targets/             # fuzz_pem, fuzz_pkcs8_{decode,decrypt}, fuzz_spki, fuzz_sec1, fuzz_sig, fuzz_asn1_reader, fuzz_sm2_{ciphertext_der,raw_ciphertext,pubkey_sec1,decrypt,verify}, fuzz_sm4_{cbc,gcm,ccm,xts}_decrypt + v0.20 fuzz_sm4_{cbc,gcm}_streaming_decrypt (DIFFERENTIAL: streaming Sm4{Cbc,Gcm}Decryptor fed in arbitrary chunks == single-shot mode_{cbc,gcm}::decrypt; layouts add a chunk_len byte) + #98/#99 fuzz_sm3 / fuzz_hmac_sm3 (one-shot==streaming differentials), fuzz_c_abi (raw-pointer extern "C" surface), fuzz_sm4_{cbc,gcm}_encrypt (encrypt differentials + round-trip), fuzz_sm4_{ccm,xts}_encrypt (encrypt→decrypt round-trips) + v1.1 fuzz_sm2_kx ([R_B:65][S_B:32] adversarial peer bytes into the fixed-key initiator's confirm) + v1.3 fuzz_x509 (certificate decode + verify; seeds = the gmssl KAT fixtures). SM4 targets carve key/iv/nonce/aad/tag via FRONT-consuming arbitrary::Unstructured (so seeds are plain concatenations; pinned to arbitrary 1.4.2 order). sm2_decrypt/verify use a fixed test key via OnceLock.
+  fuzz_targets/             # fuzz_pem, fuzz_pkcs8_{decode,decrypt}, fuzz_spki, fuzz_sec1, fuzz_sig, fuzz_asn1_reader, fuzz_sm2_{ciphertext_der,raw_ciphertext,pubkey_sec1,decrypt,verify}, fuzz_sm4_{cbc,gcm,ccm,xts}_decrypt + v0.20 fuzz_sm4_{cbc,gcm}_streaming_decrypt (DIFFERENTIAL: streaming Sm4{Cbc,Gcm}Decryptor fed in arbitrary chunks == single-shot mode_{cbc,gcm}::decrypt; layouts add a chunk_len byte) + #98/#99 fuzz_sm3 / fuzz_hmac_sm3 (one-shot==streaming differentials), fuzz_c_abi (raw-pointer extern "C" surface), fuzz_sm4_{cbc,gcm}_encrypt (encrypt differentials + round-trip), fuzz_sm4_{ccm,xts}_encrypt (encrypt→decrypt round-trips) + v1.1 fuzz_sm2_kx ([R_B:65][S_B:32] adversarial peer bytes; v1.6: THREE paths per input — confirm + derive_without_key_confirmation + respond_without_key_confirmation with the same 65 B as R_A; no dispatch byte, seed format unchanged) + v1.3 fuzz_x509 (certificate decode + verify; seeds = the gmssl KAT fixtures). SM4 targets carve key/iv/nonce/aad/tag via FRONT-consuming arbitrary::Unstructured (so seeds are plain concatenations; pinned to arbitrary 1.4.2 order). sm2_decrypt/verify use a fixed test key via OnceLock.
   seeds/<target>/           # committed curated valid seeds (from a one-time generator using gmcrypto-core's encode/sign/encrypt). corpus/, target/, artifacts/ are gitignored.
   README.md                 # build/run/repro runbook + seed-regen recipe
 
@@ -963,6 +1008,8 @@ docs/
   v1.2-scope.md                 # v1.2 — C FFI for SM2 key exchange scope (Q2.1–Q2.10; maintainer-signed Q2.1–Q2.3); X.509-with-SM2 deferred to v1.3
   v1.5-scope.md                 # v1.5 — TLCP-decomposition cycle charter (Q5.1–Q5.5, maintainer-signed; non-publishing); records the O3-toolkit end-state + v1.6 = key schedule + no-confirm KX
   tlcp-decomposition.md         # v1.5 deliverable — GB/T 38636 TLCP mapped onto cycles: wire anatomy, gap analysis G1–G5, the derived chain/pair profile (§4 — NOT server authentication), record-CT API constraints (§6), cycle map v1.6→v1.9 (§7), D-1…D-12 verification items (§8); codex-reviewed (W2)
+  v1.6-scope.md                 # v1.6 — TLCP key schedule + no-confirm KX scope (Q6.1–Q6.10; Q6.2/Q6.3 maintainer-signed; Codex consult folded — typed PMS, loud completer names, OpenSSL recipe pins)
+  v1.6-kat-sourcing.md          # v1.6 — KAT sourcing: OpenSSL TLS1-PRF digest:SM3 recipe (label-in-seed, hexsecret/hexseed, default provider) + the GM/T 0003.5 reuse rationale (K precedes tags); A5: short vectors inline in test files, nothing under tests/data/
   v0.22-scope.md                # v0.22 W0 — API-tightening scope (Q22.1–Q22.8, codex-reviewed); resolves §3.A via Option 2 (decouple crypto-bigint); three-group map (A doc-hidden / B reshaped to [u8;32] / C kept-public ProjectivePoint); non-publishing
   v1.0-readiness.md             # v0.21 W3 (updated v0.22) — the GO/NO-GO readiness report + the 1.0.0 publish runbook; §3.A = the crypto-bigint-exposure decision, now RESOLVED in v0.22 (status flipped to GO)
   api-baseline/                 # v0.21 — committed cargo-public-api baselines (gmcrypto-core.txt = full surface; gmcrypto-simd.txt = `pub mod gmcrypto_simd` only); the drift-check contract regenerated by api-stability.yml. v0.22 regenerated gmcrypto-core.txt: Group-A curve/scalar items removed, Group-B sig/ciphertext reshaped to [u8;32], only the gated from_scalar(U256) residual remains crypto-bigint-typed

@@ -183,7 +183,20 @@ shim over a public-inputs-only core.
   `mul_var`, the KDF, and both constant-time tag computations/compares all
   execute on every sample. Gate `|tau| < 0.20` on the 4th dudect matrix leg.
   The v1.2 C FFI rides this target (a thin shim adds no new secret-dependent
-  path — the v0.13/v0.16 precedent).
+  path — the v0.13/v0.16 precedent). **The v1.6 no-confirmation completers
+  also ride it**: the initiator's `derive_without_key_confirmation` is a
+  strict work-subset of the measured path (same `t`, same secret-scalar
+  `mul_var`, same KDF; minus the public-input tag operations), and the
+  responder's `respond_without_key_confirmation` is structurally covered by
+  the identical `shared_secret` core (the target is initiator-side, so the
+  responder is covered by construction, not literally measured).
+
+**The `tlcp` feature (v1.6) deliberately has NO dudect target**: the key
+schedule (`tlcp::key_schedule`) is a chain of HMAC-SM3 invocations over
+secret keys with PUBLIC lengths, labels, and iteration structure — the
+keyed-primitive timing is exactly what `ct_hmac_sm3` already gates (the
+v0.3 Q7.6 streaming-HMAC precedent: a composition of a gated keyed
+primitive with public control flow earns no separate target).
 
 **The harness detects leaks; it does not prove constant-time.** Low
 `|tau|` values mean the test could not detect a leak with the budget
@@ -511,7 +524,13 @@ asserted, not just no-panic); **v1.3** added `fuzz_x509` (certificate decode
 + verify over adversarial bytes, seeded with the gmssl KAT fixtures — census
 26 → 27); **v1.4** extended `fuzz_c_abi` again with an X.509 op (attacker
 bytes through `_from_der`, then the full accessor/verify surface with both
-adequate and undersized output buffers). The nightly `FUZZ_TARGETS` sweep
+adequate and undersized output buffers); **v1.6** extended `fuzz_sm2_kx` to
+drive THREE paths on every input (the v1.1 `confirm`, plus both
+no-confirmation completers — the same adversarial 65 bytes feed the
+initiator as `R_B` and the responder as `R_A`; no dispatch byte, no
+seed-format change, census stays 27). The v1.6 `tlcp::key_schedule` gets
+NO fuzz target: typed fixed-length inputs, not an untrusted-input decoder
+(the v0.14 fuzz-surface contract). The nightly `FUZZ_TARGETS` sweep
 list must name every `fuzz/Cargo.toml` `[[bin]]` — a target absent from it
 builds in CI but is silently never fuzzed (a drift that existed for
 #98/#99's targets and was fixed in #102; the list now carries an explicit

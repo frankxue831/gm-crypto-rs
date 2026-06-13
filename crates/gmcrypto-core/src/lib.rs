@@ -74,10 +74,12 @@
 //!   multi-sector helpers. Pure-core, no new dependency.
 //!   Confidentiality only — XTS does not authenticate.
 //! - `sm2-key-exchange` — opt-in (v1.1). GM/T 0003.3 ≡ GB/T
-//!   32918.3-2016 key agreement with mandatory key confirmation
-//!   (`sm2::key_exchange`): consume-on-transition role state-machines,
-//!   single-use ephemerals, commit-on-confirm key release,
-//!   `ZeroizeOnDrop` agreed key. Pure-core, no new dependency;
+//!   32918.3-2016 key agreement (`sm2::key_exchange`):
+//!   consume-on-transition role state-machines, single-use ephemerals,
+//!   commit-on-confirm key release, `ZeroizeOnDrop` agreed key. Key
+//!   confirmation is the default flow; v1.6 adds the standard-permitted
+//!   no-confirmation completers (TLCP's ECDHE shape — confirmation
+//!   becomes the caller's protocol). Pure-core, no new dependency;
 //!   byte-identical to the GM/T 0003.5 recommended-curve worked
 //!   example. The C ABI projection ships in `gmcrypto-c` (v1.2).
 //! - `x509` — opt-in (v1.3). X.509-with-SM2 leaf certificate parse +
@@ -85,6 +87,11 @@
 //!   `sm2-sign-with-sm3` outer==inner, SPKI delegated to [`spki`].
 //!   Pure-core, no new dependency, public inputs only (no constant-time
 //!   obligations arise). NO trust decisions — see the module docs.
+//! - `tlcp` — opt-in (v1.6). TLCP (GB/T 38636-2020) crypto toolkit:
+//!   the key schedule so far (`tlcp::key_schedule` — `P_SM3` PRF,
+//!   master secret, key block, Finished `verify_data`); it grows per
+//!   `docs/tlcp-decomposition.md` §7. Pure-core, no new dependency.
+//!   NOT a protocol implementation — see the module docs.
 //!
 //! # `wasm32-unknown-unknown`
 //!
@@ -114,6 +121,12 @@ pub mod spki;
 // decisions. See docs/v1.3-x509-sm2-design.md.
 #[cfg(feature = "x509")]
 pub mod x509;
+
+// v1.6 — TLCP (GB/T 38636-2020) crypto toolkit. Key schedule only so
+// far; the toolkit grows per docs/tlcp-decomposition.md §7. Default
+// builds are byte-identical.
+#[cfg(feature = "tlcp")]
+pub mod tlcp;
 // Not public API / not SemVer — low-level in-crate trait surface kept pub for internal cross-module + dev-crate use; the public trait fit is the opt-in RustCrypto digest/cipher impls.
 #[doc(hidden)]
 pub mod traits;

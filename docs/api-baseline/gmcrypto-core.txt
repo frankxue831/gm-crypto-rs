@@ -78,11 +78,13 @@ pub fn gmcrypto_core::sm2::key_exchange::Sm2KxInitiator::produce_ephemeral<R: ra
 pub struct gmcrypto_core::sm2::key_exchange::Sm2KxInitiatorWaiting
 impl gmcrypto_core::sm2::key_exchange::Sm2KxInitiatorWaiting
 pub fn gmcrypto_core::sm2::key_exchange::Sm2KxInitiatorWaiting::confirm(self, &gmcrypto_core::sm2::key_exchange::Sm2KxEphemeralPoint, &gmcrypto_core::sm2::key_exchange::Sm2KxConfirm) -> core::result::Result<(gmcrypto_core::sm2::key_exchange::Sm2SharedKey, gmcrypto_core::sm2::key_exchange::Sm2KxConfirm), gmcrypto_core::Error>
+pub fn gmcrypto_core::sm2::key_exchange::Sm2KxInitiatorWaiting::derive_without_key_confirmation(self, &gmcrypto_core::sm2::key_exchange::Sm2KxEphemeralPoint) -> core::result::Result<gmcrypto_core::sm2::key_exchange::Sm2SharedKey, gmcrypto_core::Error>
 pub struct gmcrypto_core::sm2::key_exchange::Sm2KxResponder
 impl gmcrypto_core::sm2::key_exchange::Sm2KxResponder
 pub fn gmcrypto_core::sm2::key_exchange::Sm2KxResponder::new(&gmcrypto_core::sm2::private_key::Sm2PrivateKey, &gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8], &[u8], usize) -> core::result::Result<Self, gmcrypto_core::Error>
 impl gmcrypto_core::sm2::key_exchange::Sm2KxResponder
 pub fn gmcrypto_core::sm2::key_exchange::Sm2KxResponder::respond<R: rand_core::TryCryptoRng>(self, &gmcrypto_core::sm2::key_exchange::Sm2KxEphemeralPoint, &mut R) -> core::result::Result<(gmcrypto_core::sm2::key_exchange::Sm2KxEphemeralPoint, gmcrypto_core::sm2::key_exchange::Sm2KxConfirm, gmcrypto_core::sm2::key_exchange::Sm2KxResponderWaiting), gmcrypto_core::Error>
+pub fn gmcrypto_core::sm2::key_exchange::Sm2KxResponder::respond_without_key_confirmation<R: rand_core::TryCryptoRng>(self, &gmcrypto_core::sm2::key_exchange::Sm2KxEphemeralPoint, &mut R) -> core::result::Result<(gmcrypto_core::sm2::key_exchange::Sm2KxEphemeralPoint, gmcrypto_core::sm2::key_exchange::Sm2SharedKey), gmcrypto_core::Error>
 pub struct gmcrypto_core::sm2::key_exchange::Sm2KxResponderWaiting
 impl gmcrypto_core::sm2::key_exchange::Sm2KxResponderWaiting
 pub fn gmcrypto_core::sm2::key_exchange::Sm2KxResponderWaiting::finish(self, &gmcrypto_core::sm2::key_exchange::Sm2KxConfirm) -> core::result::Result<gmcrypto_core::sm2::key_exchange::Sm2SharedKey, gmcrypto_core::Error>
@@ -306,6 +308,16 @@ pub mod gmcrypto_core::spki
 pub fn gmcrypto_core::spki::decode(&[u8]) -> core::option::Option<gmcrypto_core::sm2::public_key::Sm2PublicKey>
 pub fn gmcrypto_core::spki::encode(&gmcrypto_core::sm2::public_key::Sm2PublicKey) -> alloc::vec::Vec<u8>
 pub fn gmcrypto_core::spki::encode_uncompressed(&[u8; 65]) -> alloc::vec::Vec<u8>
+pub mod gmcrypto_core::tlcp
+pub mod gmcrypto_core::tlcp::key_schedule
+pub enum gmcrypto_core::tlcp::key_schedule::TlcpRole
+pub gmcrypto_core::tlcp::key_schedule::TlcpRole::Client
+pub gmcrypto_core::tlcp::key_schedule::TlcpRole::Server
+pub const gmcrypto_core::tlcp::key_schedule::FINISHED_VERIFY_DATA_LEN: usize
+pub const gmcrypto_core::tlcp::key_schedule::MASTER_SECRET_LEN: usize
+pub fn gmcrypto_core::tlcp::key_schedule::derive_key_block(&[u8; 48], &[u8; 32], &[u8; 32], &mut [u8])
+pub fn gmcrypto_core::tlcp::key_schedule::derive_master_secret(&[u8; 48], &[u8; 32], &[u8; 32], &mut [u8; 48])
+pub fn gmcrypto_core::tlcp::key_schedule::finished_verify_data(&[u8; 48], gmcrypto_core::tlcp::key_schedule::TlcpRole, &[u8; 32], &mut [u8; 12])
 pub mod gmcrypto_core::x509
 pub struct gmcrypto_core::x509::Certificate
 impl gmcrypto_core::x509::Certificate
