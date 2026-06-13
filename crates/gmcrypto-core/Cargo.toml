@@ -137,6 +137,15 @@ sm2-key-exchange = []
 # decisions (no chains/time/extensions/revocation). Default-off; default
 # build byte-identical. See docs/v1.3-x509-sm2-design.md.
 x509 = []
+# v1.6 — TLCP (GB/T 38636-2020) crypto toolkit umbrella. Carries the
+# whole toolkit arc (v1.6 key schedule; v1.7 record protection and v1.8
+# chain/pair verification join under the same flag — Q6.2 of
+# docs/v1.6-scope.md). Pure-core (no dep — composes hmac::HmacSm3),
+# no_std-compatible. Does NOT imply sm2-key-exchange: the v1.6
+# no-confirmation KX completers are 32918.3 generality and live on that
+# feature (Q6.3); a TLCP consumer enables both. Default-off; default
+# build byte-identical.
+tlcp = []
 
 [lints.rust]
 unsafe_code = "forbid"
