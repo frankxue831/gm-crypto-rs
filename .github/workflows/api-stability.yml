@@ -108,7 +108,7 @@ jobs:
         with:
           shared-key: api-stability-docs
       - name: doc gmcrypto-core (all opt-in features)
-        run: cargo doc --no-deps -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar
+        run: cargo doc --no-deps -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar,sm2-key-exchange,x509,tlcp
       - name: doc gmcrypto-simd
         run: cargo doc --no-deps -p gmcrypto-simd
       # v0.23 W3 — the AEAD/XTS FFI surface is now always-on in gmcrypto-c
