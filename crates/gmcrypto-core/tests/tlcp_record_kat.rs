@@ -17,14 +17,8 @@
 #![allow(clippy::cast_possible_truncation, clippy::doc_markdown)]
 
 use gmcrypto_core::tlcp::record::{RecordKeysCbc, TLCP_RECORD_VERSION, deprotect_cbc, protect_cbc};
+use hex_literal::hex;
 use rand_core::{TryCryptoRng, TryRng};
-
-fn unhex(s: &str) -> Vec<u8> {
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("hex"))
-        .collect()
-}
 
 /// Fills bytes incrementing from `start` — reproduces the deterministic
 /// explicit IV the CBC oracle used (`0x20..0x2f`).
@@ -63,10 +57,10 @@ fn cbc_record_kat_openssl_gmssl() {
     }
     let keys = RecordKeysCbc::client_half(&kb);
     let pt = b"TLCP record protection KAT";
-    let expected = unhex(
+    let expected = hex!(
         "202122232425262728292a2b2c2d2e2fa13de8c228d309130a0e36f6ade1ac41\
          b0f89193fd8b6d5c50a127ab7ad542f290206631b7b7de67bbc270edc5a8379e\
-         35de6642033cbafb70a42ac1653825f7",
+         35de6642033cbafb70a42ac1653825f7"
     );
     // protect with the IV (0x20..0x2f) the oracle fixed.
     let rec = protect_cbc(
@@ -88,7 +82,7 @@ fn cbc_record_kat_openssl_gmssl() {
         Some(&pt[..])
     );
     // last-byte tamper (the pad-length byte) → single None.
-    let mut t = expected.clone();
+    let mut t = expected;
     let n = t.len() - 1;
     t[n] ^= 0x01;
     assert!(deprotect_cbc(&keys, SEQ, TYPE, TLCP_RECORD_VERSION, &t).is_none());
@@ -109,9 +103,9 @@ fn gcm_record_kat_gmssl() {
     kb[32..36].copy_from_slice(&[0xa0, 0xa1, 0xa2, 0xa3]);
     let keys = RecordKeysGcm::client_half(&kb);
     let pt = b"TLCP GCM record KAT";
-    let expected = unhex(
+    let expected = hex!(
         "000102030405060744879f3adc0a1b61378e3fe0abd2ab0b087abf06983f93f0\
-         56281522eaada9fda7e2a1",
+         56281522eaada9fda7e2a1"
     );
     let rec = protect_gcm(&keys, SEQ, TYPE, TLCP_RECORD_VERSION, pt).expect("protect");
     assert_eq!(
@@ -123,7 +117,7 @@ fn gcm_record_kat_gmssl() {
         Some(&pt[..])
     );
     // tag tamper → None.
-    let mut t = expected.clone();
+    let mut t = expected;
     let n = t.len() - 1;
     t[n] ^= 0x01;
     assert!(deprotect_gcm(&keys, SEQ, TYPE, TLCP_RECORD_VERSION, &t).is_none());

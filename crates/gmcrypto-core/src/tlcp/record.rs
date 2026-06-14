@@ -48,6 +48,7 @@
 //! per record. A future stateful wrapper would enforce wrap → reject; the
 //! stateless layer here cannot. Never reuse a `(direction_key, seq)`.
 
+use crate::sm3::BLOCK_SIZE as SM3_BLOCK;
 use crate::sm4::cipher::Sm4Cipher;
 use crate::tlcp::key_schedule::TlcpRole;
 use alloc::vec::Vec;
@@ -64,6 +65,8 @@ pub const TLCP_RECORD_VERSION: [u8; 2] = [0x01, 0x01];
 
 /// HMAC-SM3 record MAC length.
 const MAC_LEN: usize = 32;
+/// TLS MAC/AAD header length: `seq(8) ‖ type(1) ‖ version(2) ‖ length(2)`.
+const HEADER_LEN: usize = 13;
 /// TLCP record plaintext ceiling (`2^14`).
 const MAX_PLAINTEXT: usize = 1 << 14;
 
@@ -163,8 +166,8 @@ impl RecordKeysGcm {
 
 /// The 13-byte TLS MAC/AAD header `seq(8) ‖ type(1) ‖ version(2) ‖ len(2)`.
 /// `len` is the PLAINTEXT length.
-fn record_header(seq: u64, content_type: u8, version: [u8; 2], len: u16) -> [u8; 13] {
-    let mut h = [0u8; 13];
+fn record_header(seq: u64, content_type: u8, version: [u8; 2], len: u16) -> [u8; HEADER_LEN] {
+    let mut h = [0u8; HEADER_LEN];
     h[0..8].copy_from_slice(&seq.to_be_bytes());
     h[8] = content_type;
     h[9..11].copy_from_slice(&version);
@@ -261,8 +264,8 @@ pub fn deprotect_gcm(
 /// fill is `≥ 56`, matching `sm3::finalize`'s `buffer_len > 56` rule).
 #[inline]
 fn inner_blocks(plaintext_len: usize) -> usize {
-    let n = 64 + 13 + plaintext_len;
-    n / 64 + 1 + usize::from(n % 64 >= 56)
+    let n = SM3_BLOCK + HEADER_LEN + plaintext_len;
+    n / SM3_BLOCK + 1 + usize::from(n % SM3_BLOCK >= SM3_BLOCK - 8)
 }
 
 /// HMAC-SM3 over `header ‖ plaintext` (Lucky13 surface #1).
@@ -383,23 +386,28 @@ pub fn protect_cbc<R: TryCryptoRng>(
     h.update(plaintext);
     let mac = h.finalize();
 
-    let mut buf = Vec::with_capacity(plaintext.len() + MAC_LEN + 16);
-    buf.extend_from_slice(plaintext);
-    buf.extend_from_slice(&mac);
-    // TLS padding: padlen+1 bytes each == padlen, filling to a 16-multiple.
-    let padlen = 15 - (buf.len() % 16);
-    #[allow(clippy::cast_possible_truncation)]
-    let padbyte = padlen as u8;
-    for _ in 0..=padlen {
-        buf.push(padbyte);
-    }
-
+    // Build the wire record in one buffer — explicit IV (RNG, in the clear) ‖
+    // plaintext ‖ MAC ‖ TLS padding — then CBC-encrypt in place over the body
+    // (everything after the IV). Single allocation, no second copy.
     let mut iv = [0u8; 16];
     rng.try_fill_bytes(&mut iv).ok()?;
 
+    let mut out = Vec::with_capacity(16 + plaintext.len() + MAC_LEN + 16);
+    out.extend_from_slice(&iv);
+    out.extend_from_slice(plaintext);
+    out.extend_from_slice(&mac);
+    // TLS padding: padlen+1 bytes each == padlen, filling the body (after the
+    // 16-byte IV) to a 16-multiple.
+    let padlen = 15 - ((out.len() - 16) % 16);
+    #[allow(clippy::cast_possible_truncation)]
+    let padbyte = padlen as u8;
+    for _ in 0..=padlen {
+        out.push(padbyte);
+    }
+
     let cipher = Sm4Cipher::new(&keys.enc_key);
     let mut prev = iv;
-    for chunk in buf.chunks_exact_mut(16) {
+    for chunk in out[16..].chunks_exact_mut(16) {
         let block: &mut [u8; 16] = chunk.try_into().expect("16-byte chunk");
         for j in 0..16 {
             block[j] ^= prev[j];
@@ -407,10 +415,6 @@ pub fn protect_cbc<R: TryCryptoRng>(
         cipher.encrypt_block(block);
         prev = *block;
     }
-
-    let mut out = Vec::with_capacity(16 + buf.len());
-    out.extend_from_slice(&iv);
-    out.extend_from_slice(&buf);
     Some(out)
 }
 
