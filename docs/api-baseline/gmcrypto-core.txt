@@ -318,6 +318,26 @@ pub const gmcrypto_core::tlcp::key_schedule::MASTER_SECRET_LEN: usize
 pub fn gmcrypto_core::tlcp::key_schedule::derive_key_block(&[u8; 48], &[u8; 32], &[u8; 32], &mut [u8])
 pub fn gmcrypto_core::tlcp::key_schedule::derive_master_secret(&[u8; 48], &[u8; 32], &[u8; 32], &mut [u8; 48])
 pub fn gmcrypto_core::tlcp::key_schedule::finished_verify_data(&[u8; 48], gmcrypto_core::tlcp::key_schedule::TlcpRole, &[u8; 32], &mut [u8; 12])
+pub mod gmcrypto_core::tlcp::record
+pub struct gmcrypto_core::tlcp::record::RecordKeysCbc
+impl gmcrypto_core::tlcp::record::RecordKeysCbc
+pub fn gmcrypto_core::tlcp::record::RecordKeysCbc::client_half(&[u8; 128]) -> Self
+pub fn gmcrypto_core::tlcp::record::RecordKeysCbc::from_key_block(gmcrypto_core::tlcp::key_schedule::TlcpRole, &[u8; 128]) -> Self
+pub fn gmcrypto_core::tlcp::record::RecordKeysCbc::server_half(&[u8; 128]) -> Self
+impl core::ops::drop::Drop for gmcrypto_core::tlcp::record::RecordKeysCbc
+pub fn gmcrypto_core::tlcp::record::RecordKeysCbc::drop(&mut self)
+pub struct gmcrypto_core::tlcp::record::RecordKeysGcm
+impl gmcrypto_core::tlcp::record::RecordKeysGcm
+pub fn gmcrypto_core::tlcp::record::RecordKeysGcm::client_half(&[u8; 40]) -> Self
+pub fn gmcrypto_core::tlcp::record::RecordKeysGcm::from_key_block(gmcrypto_core::tlcp::key_schedule::TlcpRole, &[u8; 40]) -> Self
+pub fn gmcrypto_core::tlcp::record::RecordKeysGcm::server_half(&[u8; 40]) -> Self
+impl core::ops::drop::Drop for gmcrypto_core::tlcp::record::RecordKeysGcm
+pub fn gmcrypto_core::tlcp::record::RecordKeysGcm::drop(&mut self)
+pub const gmcrypto_core::tlcp::record::TLCP_RECORD_VERSION: [u8; 2]
+pub fn gmcrypto_core::tlcp::record::deprotect_cbc(&gmcrypto_core::tlcp::record::RecordKeysCbc, u64, u8, [u8; 2], &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn gmcrypto_core::tlcp::record::deprotect_gcm(&gmcrypto_core::tlcp::record::RecordKeysGcm, u64, u8, [u8; 2], &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn gmcrypto_core::tlcp::record::protect_cbc<R: rand_core::TryCryptoRng>(&gmcrypto_core::tlcp::record::RecordKeysCbc, u64, u8, [u8; 2], &[u8], &mut R) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn gmcrypto_core::tlcp::record::protect_gcm(&gmcrypto_core::tlcp::record::RecordKeysGcm, u64, u8, [u8; 2], &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
 pub mod gmcrypto_core::x509
 pub struct gmcrypto_core::x509::Certificate
 impl gmcrypto_core::x509::Certificate
