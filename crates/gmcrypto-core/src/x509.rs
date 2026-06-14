@@ -154,12 +154,48 @@ fn read_sm2_sig_algid(input: &[u8]) -> Option<(&[u8], &[u8])> {
     }
 }
 
+/// One parsed `Extension` plus the unconsumed `rest` of the
+/// SEQUENCE-OF-`Extension` body after it.
+struct ParsedExt<'a> {
+    oid: &'a [u8],
+    critical: bool,
+    value: &'a [u8],
+    rest: &'a [u8],
+}
+
+/// Parse ONE `Extension` from the front of a SEQUENCE-OF-`Extension` body.
+/// `None` on a malformed element. The framing — `SEQUENCE { extnID OID,
+/// [critical BOOLEAN (one content byte)], extnValue OCTET STRING }`, exactly
+/// consumed — is the single source of truth shared by
+/// [`check_extensions_shape`], [`find_extension`], and
+/// [`has_unknown_critical`].
+fn next_extension(exts: &[u8]) -> Option<ParsedExt<'_>> {
+    let (ext, rest) = reader::read_sequence(exts)?;
+    let (oid, after_oid) = reader::read_oid(ext)?;
+    let (critical, after_bool) = match reader::read_tlv(after_oid, TAG_BOOLEAN) {
+        Some((b, rb)) => {
+            if b.len() != 1 {
+                return None;
+            }
+            (b[0] != 0, rb)
+        }
+        None => (false, after_oid),
+    };
+    let (value, after_value) = reader::read_octet_string(after_bool)?;
+    if !after_value.is_empty() {
+        return None;
+    }
+    Some(ParsedExt {
+        oid,
+        critical,
+        value,
+        rest,
+    })
+}
+
 /// Shape-check the `[3]` extensions content ONE level deep, with ZERO
 /// interpretation (design §5.9): `Extensions ::= SEQUENCE SIZE(1..) OF
-/// Extension`, each Extension framing as `SEQUENCE { extnID OID,
-/// [critical BOOLEAN (one content byte)], extnValue OCTET STRING }`,
-/// exactly consumed at every level. extnID values and `critical` flags are
-/// never evaluated.
+/// Extension`. extnID values and `critical` flags are never evaluated.
 fn check_extensions_shape(content: &[u8]) -> Option<()> {
     let (seq, rest) = reader::read_sequence(content)?;
     if !rest.is_empty() || seq.is_empty() {
@@ -167,22 +203,7 @@ fn check_extensions_shape(content: &[u8]) -> Option<()> {
     }
     let mut exts = seq;
     while !exts.is_empty() {
-        let (ext, r) = reader::read_sequence(exts)?;
-        let (_extn_id, after_oid) = reader::read_oid(ext)?;
-        let after_bool = match reader::read_tlv(after_oid, TAG_BOOLEAN) {
-            Some((b, rb)) => {
-                if b.len() != 1 {
-                    return None;
-                }
-                rb
-            }
-            None => after_oid,
-        };
-        let (_extn_value, after_value) = reader::read_octet_string(after_bool)?;
-        if !after_value.is_empty() {
-            return None;
-        }
-        exts = r;
+        exts = next_extension(exts)?.rest;
     }
     Some(())
 }
@@ -322,22 +343,11 @@ fn find_extension<'a>(ext_tlv: &'a [u8], extn_id: &[u8]) -> Option<&'a [u8]> {
     let (seq, _) = reader::read_sequence(ext_tlv)?;
     let mut exts = seq;
     while !exts.is_empty() {
-        let (ext, r) = reader::read_sequence(exts)?;
-        let (oid_bytes, after_oid) = reader::read_oid(ext)?;
-        let after_bool = match reader::read_tlv(after_oid, TAG_BOOLEAN) {
-            Some((b, rb)) => {
-                if b.len() != 1 {
-                    return None;
-                }
-                rb
-            }
-            None => after_oid,
-        };
-        let (value, _) = reader::read_octet_string(after_bool)?;
-        if oid_bytes == extn_id {
-            return Some(value);
+        let ext = next_extension(exts)?;
+        if ext.oid == extn_id {
+            return Some(ext.value);
         }
-        exts = r;
+        exts = ext.rest;
     }
     None
 }
@@ -352,23 +362,13 @@ fn has_unknown_critical(ext_tlv: &[u8], known: &[&[u8]]) -> bool {
     };
     let mut exts = seq;
     while !exts.is_empty() {
-        let Some((ext, r)) = reader::read_sequence(exts) else {
+        let Some(ext) = next_extension(exts) else {
             return false;
         };
-        let Some((oid_bytes, after_oid)) = reader::read_oid(ext) else {
-            return false;
-        };
-        let (critical, after_bool) = match reader::read_tlv(after_oid, TAG_BOOLEAN) {
-            Some((b, rb)) => (b.len() == 1 && b[0] != 0, rb),
-            None => (false, after_oid),
-        };
-        if reader::read_octet_string(after_bool).is_none() {
-            return false;
-        }
-        if critical && !known.contains(&oid_bytes) {
+        if ext.critical && !known.contains(&ext.oid) {
             return true;
         }
-        exts = r;
+        exts = ext.rest;
     }
     false
 }
@@ -618,6 +618,17 @@ impl Certificate {
             self.extensions.as_deref()?,
             oid::BASIC_CONSTRAINTS,
         )?)
+    }
+
+    /// Whether the `subject` Name is empty (a `SEQUENCE` with no content).
+    ///
+    /// `pub(crate)` for `tlcp::chain`'s pair-binding check (gated on its sole
+    /// consumer, the `tlcp` feature), so that layer need not re-parse
+    /// certificate DER. The `subject` TLV was validated as a SEQUENCE at
+    /// parse; a decode failure here counts as empty (fail-closed).
+    #[cfg(feature = "tlcp")]
+    pub(crate) fn subject_is_empty(&self) -> bool {
+        reader::read_sequence(&self.subject).is_none_or(|(content, _)| content.is_empty())
     }
 }
 

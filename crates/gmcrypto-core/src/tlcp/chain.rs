@@ -16,18 +16,10 @@
 //! enables both — the `sm2-key-exchange` / GCM-record "enable both"
 //! precedent).
 
-use crate::asn1::reader;
 use crate::x509::{Certificate, KeyUsage, X509Time, verify_chain};
 
 fn leaf_is_ca(c: &Certificate) -> bool {
     c.basic_constraints().is_some_and(|bc| bc.is_ca)
-}
-
-/// `true` if the subject `Name` is empty (`SEQUENCE` with no content). The
-/// `subject_raw` TLV was validated as a SEQUENCE at parse, so a decode
-/// failure here also counts as "empty" (fail-closed).
-fn empty_subject(c: &Certificate) -> bool {
-    reader::read_sequence(c.subject_raw()).is_none_or(|(content, _)| content.is_empty())
 }
 
 /// Verify a TLCP server's [signature, encryption] certificate pair.
@@ -71,7 +63,10 @@ pub fn verify_pair(
         return false;
     }
     // Pair binding: non-empty + equal subject + equal issuer Name.
-    if empty_subject(s) || s.subject_raw() != e.subject_raw() || s.issuer_raw() != e.issuer_raw() {
+    if s.subject_is_empty()
+        || s.subject_raw() != e.subject_raw()
+        || s.issuer_raw() != e.issuer_raw()
+    {
         return false;
     }
     // S1 (W2 review): equal issuer Name does not pin the issuer KEY — require
@@ -92,162 +87,119 @@ pub fn verify_pair(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sm2::Sm2PrivateKey;
     use crate::x509::test_support::{bc_ext, cert, key, ku_ext, name};
-    use alloc::vec;
     use alloc::vec::Vec;
 
-    /// The standard valid pair: root → int → {sign(digitalSignature),
-    /// enc(keyEncipherment)} leaves sharing subject `server` + issuer `ca`.
-    /// `int_a` / `int_b` are minted identically so their `tbs` is byte-equal
-    /// (the S1 same-issuing-chain check passes).
-    fn happy() -> (Vec<Certificate>, Vec<Certificate>, Vec<Certificate>) {
+    /// Shared CA scaffold: a root anchor + two intermediates minted
+    /// identically (so `int_a`/`int_b` have byte-equal `tbs` — the S1
+    /// same-issuing-chain check passes for the normal one-CA case). Each test
+    /// builds its own sign/enc leaves from `ik` to vary one property.
+    struct Setup {
+        ik: Sm2PrivateKey,
+        cn: Vec<u8>,
+        sn: Vec<u8>,
+        root: Certificate,
+        int_a: Certificate,
+        int_b: Certificate,
+    }
+
+    fn setup() -> Setup {
         let (rk, ik) = (key(1), key(2));
         let (rn, cn, sn) = (name(b"root"), name(b"ca"), name(b"server"));
         let ca_exts = [ku_ext(&[5], true), bc_ext(true, None, true)].concat();
-        let root = cert(&rk, &rn, &rn, &rk.public_key(), &ca_exts);
-        let int_a = cert(&rk, &rn, &cn, &ik.public_key(), &ca_exts);
-        let int_b = cert(&rk, &rn, &cn, &ik.public_key(), &ca_exts);
-        let sign_leaf = cert(&ik, &cn, &sn, &key(3).public_key(), &ku_ext(&[0], true));
-        let enc_leaf = cert(&ik, &cn, &sn, &key(4).public_key(), &ku_ext(&[2], true));
-        (vec![sign_leaf, int_a], vec![enc_leaf, int_b], vec![root])
+        Setup {
+            root: cert(&rk, &rn, &rn, &rk.public_key(), &ca_exts),
+            int_a: cert(&rk, &rn, &cn, &ik.public_key(), &ca_exts),
+            int_b: cert(&rk, &rn, &cn, &ik.public_key(), &ca_exts),
+            ik,
+            cn,
+            sn,
+        }
+    }
+
+    /// Mint a `server`-subject sign/enc pair varying only their keyUsage,
+    /// then assert `verify_pair`'s verdict. Consumes the `Setup`.
+    fn assert_pair(s: Setup, sign_exts: &[u8], enc_exts: &[u8], expect: bool) {
+        let sign = cert(&s.ik, &s.cn, &s.sn, &key(3).public_key(), sign_exts);
+        let enc = cert(&s.ik, &s.cn, &s.sn, &key(4).public_key(), enc_exts);
+        assert_eq!(
+            verify_pair(&[sign, s.int_a], &[enc, s.int_b], &[s.root], None),
+            expect
+        );
     }
 
     #[test]
     fn valid_pair_verifies() {
-        let (s, e, a) = happy();
-        assert!(verify_pair(&s, &e, &a, None));
+        assert_pair(setup(), &ku_ext(&[0], true), &ku_ext(&[2], true), true);
     }
 
     #[test]
     fn enc_key_agreement_only_accepted() {
-        // ECDHE-suite enc cert: keyAgreement only (no keyEncipherment).
-        let (rk, ik) = (key(1), key(2));
-        let (rn, cn, sn) = (name(b"root"), name(b"ca"), name(b"server"));
-        let ca_exts = [ku_ext(&[5], true), bc_ext(true, None, true)].concat();
-        let root = cert(&rk, &rn, &rn, &rk.public_key(), &ca_exts);
-        let int_a = cert(&rk, &rn, &cn, &ik.public_key(), &ca_exts);
-        let int_b = cert(&rk, &rn, &cn, &ik.public_key(), &ca_exts);
-        let sign_leaf = cert(&ik, &cn, &sn, &key(3).public_key(), &ku_ext(&[0], true));
-        let enc_leaf = cert(&ik, &cn, &sn, &key(4).public_key(), &ku_ext(&[4], true));
-        assert!(verify_pair(
-            &[sign_leaf, int_a],
-            &[enc_leaf, int_b],
-            &[root],
-            None
-        ));
+        // ECDHE-suite enc cert: keyAgreement (bit 4) only, no keyEncipherment.
+        assert_pair(setup(), &ku_ext(&[0], true), &ku_ext(&[4], true), true);
     }
 
     #[test]
     fn sign_leaf_without_digital_signature_rejected() {
-        let (rk, ik) = (key(1), key(2));
-        let (rn, cn, sn) = (name(b"root"), name(b"ca"), name(b"server"));
-        let ca_exts = [ku_ext(&[5], true), bc_ext(true, None, true)].concat();
-        let root = cert(&rk, &rn, &rn, &rk.public_key(), &ca_exts);
-        let int_a = cert(&rk, &rn, &cn, &ik.public_key(), &ca_exts);
-        let int_b = cert(&rk, &rn, &cn, &ik.public_key(), &ca_exts);
         // sign leaf asserts keyEncipherment, NOT digitalSignature.
-        let sign_leaf = cert(&ik, &cn, &sn, &key(3).public_key(), &ku_ext(&[2], true));
-        let enc_leaf = cert(&ik, &cn, &sn, &key(4).public_key(), &ku_ext(&[2], true));
-        assert!(!verify_pair(
-            &[sign_leaf, int_a],
-            &[enc_leaf, int_b],
-            &[root],
-            None
-        ));
+        assert_pair(setup(), &ku_ext(&[2], true), &ku_ext(&[2], true), false);
     }
 
     #[test]
     fn enc_leaf_without_enc_bits_rejected() {
-        let (rk, ik) = (key(1), key(2));
-        let (rn, cn, sn) = (name(b"root"), name(b"ca"), name(b"server"));
-        let ca_exts = [ku_ext(&[5], true), bc_ext(true, None, true)].concat();
-        let root = cert(&rk, &rn, &rn, &rk.public_key(), &ca_exts);
-        let int_a = cert(&rk, &rn, &cn, &ik.public_key(), &ca_exts);
-        let int_b = cert(&rk, &rn, &cn, &ik.public_key(), &ca_exts);
-        let sign_leaf = cert(&ik, &cn, &sn, &key(3).public_key(), &ku_ext(&[0], true));
-        // enc leaf asserts digitalSignature only — no keyEncipherment/keyAgreement.
-        let enc_leaf = cert(&ik, &cn, &sn, &key(4).public_key(), &ku_ext(&[0], true));
-        assert!(!verify_pair(
-            &[sign_leaf, int_a],
-            &[enc_leaf, int_b],
-            &[root],
-            None
-        ));
+        // enc leaf asserts digitalSignature only — no encipherment/agreement.
+        assert_pair(setup(), &ku_ext(&[0], true), &ku_ext(&[0], true), false);
     }
 
     #[test]
     fn leaf_is_ca_rejected() {
-        let (rk, ik) = (key(1), key(2));
-        let (rn, cn, sn) = (name(b"root"), name(b"ca"), name(b"server"));
-        let ca_exts = [ku_ext(&[5], true), bc_ext(true, None, true)].concat();
-        let root = cert(&rk, &rn, &rn, &rk.public_key(), &ca_exts);
-        let int_a = cert(&rk, &rn, &cn, &ik.public_key(), &ca_exts);
-        let int_b = cert(&rk, &rn, &cn, &ik.public_key(), &ca_exts);
         // sign leaf carries basicConstraints CA=TRUE.
         let sign_exts = [ku_ext(&[0], true), bc_ext(true, None, true)].concat();
-        let sign_leaf = cert(&ik, &cn, &sn, &key(3).public_key(), &sign_exts);
-        let enc_leaf = cert(&ik, &cn, &sn, &key(4).public_key(), &ku_ext(&[2], true));
+        assert_pair(setup(), &sign_exts, &ku_ext(&[2], true), false);
+    }
+
+    /// Build a pair with explicit per-leaf subjects (for the binding tests),
+    /// then assert it is rejected.
+    fn assert_subject_pair_rejected(s: Setup, sign_subj: &[u8], enc_subj: &[u8]) {
+        let sign = cert(
+            &s.ik,
+            &s.cn,
+            sign_subj,
+            &key(3).public_key(),
+            &ku_ext(&[0], true),
+        );
+        let enc = cert(
+            &s.ik,
+            &s.cn,
+            enc_subj,
+            &key(4).public_key(),
+            &ku_ext(&[2], true),
+        );
         assert!(!verify_pair(
-            &[sign_leaf, int_a],
-            &[enc_leaf, int_b],
-            &[root],
+            &[sign, s.int_a],
+            &[enc, s.int_b],
+            &[s.root],
             None
         ));
     }
 
     #[test]
     fn empty_subject_rejected() {
-        let (rk, ik) = (key(1), key(2));
-        let (rn, cn, empty) = (name(b"root"), name(b"ca"), name(b""));
-        let ca_exts = [ku_ext(&[5], true), bc_ext(true, None, true)].concat();
-        let root = cert(&rk, &rn, &rn, &rk.public_key(), &ca_exts);
-        let int_a = cert(&rk, &rn, &cn, &ik.public_key(), &ca_exts);
-        let int_b = cert(&rk, &rn, &cn, &ik.public_key(), &ca_exts);
-        let sign_leaf = cert(&ik, &cn, &empty, &key(3).public_key(), &ku_ext(&[0], true));
-        let enc_leaf = cert(&ik, &cn, &empty, &key(4).public_key(), &ku_ext(&[2], true));
-        assert!(!verify_pair(
-            &[sign_leaf, int_a],
-            &[enc_leaf, int_b],
-            &[root],
-            None
-        ));
+        assert_subject_pair_rejected(setup(), &name(b""), &name(b""));
     }
 
     #[test]
     fn different_subject_rejected() {
-        let (rk, ik) = (key(1), key(2));
-        let (rn, cn) = (name(b"root"), name(b"ca"));
-        let ca_exts = [ku_ext(&[5], true), bc_ext(true, None, true)].concat();
-        let root = cert(&rk, &rn, &rn, &rk.public_key(), &ca_exts);
-        let int_a = cert(&rk, &rn, &cn, &ik.public_key(), &ca_exts);
-        let int_b = cert(&rk, &rn, &cn, &ik.public_key(), &ca_exts);
-        let sign_leaf = cert(
-            &ik,
-            &cn,
-            &name(b"alice"),
-            &key(3).public_key(),
-            &ku_ext(&[0], true),
-        );
-        let enc_leaf = cert(
-            &ik,
-            &cn,
-            &name(b"bob"),
-            &key(4).public_key(),
-            &ku_ext(&[2], true),
-        );
-        assert!(!verify_pair(
-            &[sign_leaf, int_a],
-            &[enc_leaf, int_b],
-            &[root],
-            None
-        ));
+        assert_subject_pair_rejected(setup(), &name(b"alice"), &name(b"bob"));
     }
 
     #[test]
     fn s1_cross_ca_same_name_rejected() {
         // Two CAs share the Name "ca" but have DIFFERENT keys; both chain to
         // root. Leaves share subject + issuer-Name, but the issuing certs
-        // (int_a vs int_b) have different tbs → S1 check rejects.
+        // (int_a vs int_b) have different tbs → S1 check rejects. (Can't use
+        // `setup()` — it mints both intermediates from one key.)
         let rk = key(1);
         let (ca_a, ca_b) = (key(2), key(8));
         let (rn, cn, sn) = (name(b"root"), name(b"ca"), name(b"server"));
