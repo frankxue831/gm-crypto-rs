@@ -1,7 +1,54 @@
 # CLAUDE.md
 
 Pure-Rust SM2/SM3/SM4 SDK.
-**v1.6.0 — TLCP key schedule + no-confirmation SM2-KX — implemented on
+**v1.7.0 — TLCP record protection — implemented on
+`feat/tlcp-record-protection`; publish order simd → core → c, the
+maintainer's per-release call.** The second code cycle of the TLCP arc
+(gap G2 of `docs/tlcp-decomposition.md`; scope `docs/v1.7-scope.md`
+Q7.1–Q7.11, the four forks maintainer-delegated to a Codex consult +
+4-agent adversarial-panel-verified). New module **`tlcp::record`** under the
+existing opt-in `tlcp` umbrella (pure-core, NO new dep, no_std): per-direction
+`ZeroizeOnDrop` key carriers (`RecordKeysCbc`/`RecordKeysGcm`, carved
+`client_half`/`server_half`/`from_key_block` — public role data, not a secret
+branch) + `protect_cbc`/`deprotect_cbc` + `protect_gcm`/`deprotect_gcm` +
+`TLCP_RECORD_VERSION`. Engine-shaped (caller-held `seq: u64`, injected IV RNG,
+`type: u8` + `version: [u8;2]` explicit; **`length` computed internally on
+both sides — NEVER a deprotect param: it's the secret post-strip length**).
+**SM4-CBC** (pure `tlcp`): explicit per-record IV, MAC-then-encrypt, TLS
+padding, HMAC-SM3. **`deprotect_cbc` is the arc's Lucky13 item** — ONE op, CT
+over THREE surfaces: (1) inner-hash SM3 compression count equalized via dummy
+compressions on a throwaway state to a PUBLIC upper bound `max_plaintext_len =
+body−33` (NEVER reduced; `black_box`'d vs LTO; `inner_blocks(P)=(64+13+P+9)`
+ceil-div-64), **`sm3::compress` widened to `pub(crate)`** so the single
+audited loop is reused not duplicated; (2) fixed `min(256,body)`-byte CT
+pad-validity scan (the `strip_pkcs7_ct` mask idiom widened 16→256, no early
+return); (3) data-independent MAC extraction at the secret offset; **bad-pad
+STILL runs the full MAC**, single `pad_ok & mac_ok` merge, single `None`, no
+plaintext on fail (`body.zeroize()`). Public-length guards (`<48` /
+non-16-multiple / `>2^14+48`) run BEFORE any secret arithmetic so the u16
+casts are lossless and no fallible `?` rides a secret. **SM4-GCM** (needs
+`tlcp,sm4-aead` — `mode_gcm` is gated there; **NOT** `tlcp=["sm4-aead"]`,
+which would pull the simd GHASH dep + break wasm32): RFC 5288 TLS-1.2 thin
+wrapper over `mode_gcm` (salt(4)‖seq-derived-nonce(8); AAD seq‖type‖version‖
+length; wire `explicit_nonce(8)‖ct‖tag(16)`; deprotect reads the nonce off the
+wire, AAD.seq from the caller). KATs cross-validated byte-for-byte by **OpenSSL
+EVP SM4-CBC + GmSSL `sm3hmac`** (CBC) and **GmSSL `sm4 -gcm -aad_hex`** (GCM) —
+the "OpenSSL+GmSSL cross-check" the maintainer chose W3 (gotlcp full-transcript
+replay deferred; generator `tests/data/tlcp_record_kat_gen.py`). Assurance: new
+dudect **`ct_tlcp_cbc_deprotect`** (class-split by recovered-fragment length /
+fixed key; the 4th dudect matrix leg gains `tlcp`; 20K smoke |tau|≈0.08) + a
+constant-blocks==`HmacSm3` equivalence test (the equalization is a hard MUST;
+dudect is the **residual guard**); NO new GCM dudect (rides
+`ct_sm4_gcm_decrypt`); two fuzz targets `fuzz_tlcp_{cbc,gcm}_deprotect`
+(census 27→29). **`(key,seq)` uniqueness is the caller's contract — the
+stateless layer can't detect reuse/wrap; the hard-reject is a future stateful
+wrapper's job (scope Q7.5 reconciled W3).** OUT: 5-byte header framing,
+fragmentation, ClientKeyExchange (D-3), chain/pair (G4, v1.8), C FFI (v1.9).
+Pipeline: scope (Codex + 4-agent panel, all must-fixes folded) → plan (Fable-5
+EXECUTED review — ran the Lucky13 core in a worktree; caught 2 compile bugs +
+the missing-ceiling Lucky13 chain-break + a false-assurance dudect axis, all
+folded) → TDD. Workspace 1.6.0 → **1.7.0**, sibling pins `=1.7.0`.
+**Earlier — v1.6.0 — TLCP key schedule + no-confirmation SM2-KX — implemented on
 `feat/tlcp-key-schedule`; publish order simd → core → c, the
 maintainer's per-release call.** The first code cycle of the TLCP arc
 (gaps G1+G3 of `docs/tlcp-decomposition.md`; scope `docs/v1.6-scope.md`
@@ -747,7 +794,7 @@ GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
 # Run from the REPO ROOT (the dir containing fuzz/). The fuzz crate is its
 # OWN workspace + parent exclude=["fuzz"], so it does NOT affect any
 # `cargo ... --workspace` / `cargo deny` / publish of the 3 crates.
-cargo +nightly fuzz build                          # build all 27 targets
+cargo +nightly fuzz build                          # build all 29 targets
 cargo +nightly fuzz run fuzz_pem fuzz/corpus/fuzz_pem fuzz/seeds/fuzz_pem -- \
     -max_len=16384 -rss_limit_mb=2048 -timeout=25 -max_total_time=60
 # Dir order: corpus FIRST (gitignored, libFuzzer writes new units here),
@@ -762,7 +809,9 @@ Located at `crates/gmcrypto-core/benches/timing_leaks.rs`. **Fifteen
 targets at the default / `sm4-bitsliced` budget; seventeen under
 `sm4-bitsliced-simd`; twenty under `sm4-bitsliced-simd,sm4-aead`;
 twenty-one under `sm4-bitsliced-simd,sm4-aead,sm4-xts`; twenty-two under
-`sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange` — v1.1 W3 added
+`sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange`; twenty-three under
+`…,sm2-key-exchange,tlcp` — v1.7 W3 added `ct_tlcp_cbc_deprotect` cfg-gated
+on `tlcp` (the Lucky13 CBC-deprotect residual guard); v1.1 W3 added
 `ct_sm2_key_exchange` cfg-gated on `sm2-key-exchange`** (v0.3 added
 `ct_pkcs8_decrypt`; v0.5 W4 phase 1 added
 `ct_sm4_encrypt_block_bitsliced_simd` cfg-gated on `sm4-bitsliced-simd`;
@@ -927,7 +976,8 @@ crates/gmcrypto-core/
     spki.rs                 # v0.3 W2 — RFC 5280 SubjectPublicKeyInfo for SM2
     x509.rs                 # v1.3 — X.509-with-SM2 LEAF cert parse + sig verify (opt-in `x509` feature; GM/T 0015 profile, v3-only, strict in-repo DER). Certificate::from_der -> Option (exact wire tbs span; sm2-sign-with-sm3 AlgId absent-or-NULL params + FULL-SPAN outer==inner; negative serial REJECT; pad-stripped serial 1..=20; one-level extensions shape-check, ZERO interpretation; BIT STRING unused==0) + verify_signature(_with_id) -> bool via verify_with_id over tbs_raw (default ID 1234567812345678; RFC 8998 §3.2.1). NO TRUST DECISIONS (no chains/time/extension-eval/revocation — X509Time exposed, no clock). Composes asn1::reader + spki::decode + verify_with_id only; public inputs only -> NO dudect target
     tlcp/
-      mod.rs                # v1.6 — TLCP (GB/T 38636-2020) crypto toolkit umbrella (opt-in `tlcp` feature; pure-core, no new dep). NOT a protocol implementation; grows per docs/tlcp-decomposition.md §7 (v1.7 record protection, v1.8 chain/pair verification join here)
+      mod.rs                # v1.6 — TLCP (GB/T 38636-2020) crypto toolkit umbrella (opt-in `tlcp` feature; pure-core, no new dep). NOT a protocol implementation (no 5-byte header framing); grows per docs/tlcp-decomposition.md §7 (v1.7 record protection added; v1.8 chain/pair verification joins here)
+      record.rs             # v1.7 — GB/T 38636 §6.3 record protection (opt-in `tlcp`; GCM parts cfg-gated on `sm4-aead`). RecordKeysCbc/RecordKeysGcm (ZeroizeOnDrop; client_half/server_half/from_key_block carve) + protect_cbc/deprotect_cbc + protect_gcm/deprotect_gcm + TLCP_RECORD_VERSION. Engine-shaped: caller-held seq:u64, injected IV RNG, type:u8/version:[u8;2] explicit, length computed internally (NEVER a deprotect param — secret post-strip length). CBC: explicit IV, MAC-then-encrypt, TLS padding; deprotect_cbc = the Lucky13 ONE-op CT path over 3 equalized surfaces (inner-hash compress count via dummy compressions on a throwaway state to public max=body−33, black_box'd; min(256,body) CT pad scan; CT MAC extraction at secret offset), bad-pad-still-MACs, single None, body.zeroize on fail; public-length guards (<48/non-16-mult/>2^14+48) before secret arithmetic. mac_equalized + inner_blocks + check_tls_padding_ct + extract_mac_ct pub(crate)/private. GCM: RFC 5288 thin wrapper over mode_gcm (salt(4)‖seq-nonce(8); AAD seq‖type‖version‖length; wire explicit_nonce(8)‖ct‖tag(16)). Widens sm3::compress to pub(crate) (reuse the audited loop). KATs = OpenSSL EVP SM4-CBC + GmSSL sm3hmac (CBC) / GmSSL sm4 -gcm (GCM); dudect ct_tlcp_cbc_deprotect + constant-blocks==HmacSm3 equivalence test; fuzz_tlcp_{cbc,gcm}_deprotect
       key_schedule.rs       # v1.6 — GB/T 38636 §6.5 key schedule: private p_sm3 (RFC 5246 §5 P_hash over HmacSm3; A-chain + blocks wiped; public loop bounds) + derive_master_secret(pre_master: &[u8;48] TYPED — TLCP pins PMS to 48 in both KX variants) + derive_key_block (seed order FLIPS server-first §6.5.2; suite-agnostic caller-carved out: CBC 128 B, GCM 40 B) + finished_verify_data/TlcpRole (12 B) + MASTER_SECRET_LEN/FINISHED_VERIFY_DATA_LEN. Engine-shaped: caller-supplied outs (pbkdf2 discipline), ZERO failure modes. KATs = OpenSSL 3.x TLS1-PRF digest:SM3 (docs/v1.6-kat-sourcing.md). NO dudect target (ct_hmac_sm3 covers the keyed primitive); NO fuzz target (typed fixed-length inputs)
     sec1.rs                 # v0.3 W2 — RFC 5915 ECPrivateKey + SEC1 uncompressed point (04||X||Y)
     pkcs8.rs                # v0.3 W2 — RFC 5958 OneAsymmetricKey + RFC 8018 PBES2 (PBKDF2-HMAC-SM3 + SM4-CBC)
@@ -979,9 +1029,9 @@ crates/gmcrypto-simd/       # v0.5 W4 phase 2 / v0.6 W6 / v0.8 W1 — SIMD backe
   tests/ghash_kat.rs        # v0.8 W1 — NIST-derived GHASH triple (H, X, Y) regression KAT across all three dispatch paths
   tests/ghash_lane_equivalence.rs # v0.8 W1 — software vs CLMUL vs PMULL byte-equivalence sweep over 75 inputs (random + structural edges)
 
-fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN WORKSPACE (empty [workspace] table) + parent exclude=["fuzz"] → nightly-only libfuzzer-sys/arbitrary deps never enter the published 3-crate graph; unpublished, NOT MSRV-bound, NOT in cargo deny. fuzz/Cargo.lock IS committed (.gitignore anchors /Cargo.lock to root so it isn't swallowed). 27 targets (v0.14's 16 + v0.20's 2 streaming-decryptor differential + #98/#99's 7 post-1.0 hardening [SM3/HMAC-SM3/C-ABI/SM4-mode-encrypt] + v1.1's fuzz_sm2_kx + v1.3's fuzz_x509); v0.14's prove the failure-mode invariant (no panic/OOM/hang), v0.20's prove streaming==single-shot; initial sweeps zero crashes (+ zero divergences for v0.20). The FUZZ_TARGETS list in fuzz-nightly.yml MUST name every [[bin]] — a target absent there builds (fuzz-build.yml) but is silently never fuzzed (the #98/#99 drift, fixed post-#101).
+fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN WORKSPACE (empty [workspace] table) + parent exclude=["fuzz"] → nightly-only libfuzzer-sys/arbitrary deps never enter the published 3-crate graph; unpublished, NOT MSRV-bound, NOT in cargo deny. fuzz/Cargo.lock IS committed (.gitignore anchors /Cargo.lock to root so it isn't swallowed). 29 targets (v0.14's 16 + v0.20's 2 streaming-decryptor differential + #98/#99's 7 post-1.0 hardening [SM3/HMAC-SM3/C-ABI/SM4-mode-encrypt] + v1.1's fuzz_sm2_kx + v1.3's fuzz_x509 + v1.7's fuzz_tlcp_{cbc,gcm}_deprotect); v0.14's prove the failure-mode invariant (no panic/OOM/hang), v0.20's prove streaming==single-shot; initial sweeps zero crashes (+ zero divergences for v0.20). The FUZZ_TARGETS list in fuzz-nightly.yml MUST name every [[bin]] — a target absent there builds (fuzz-build.yml) but is silently never fuzzed (the #98/#99 drift, fixed post-#101).
   Cargo.toml                # gmcrypto-core path dep w/ features=["sm4-aead","sm4-xts","sm2-key-exchange","x509"] always on (no per-target feature juggling); 27 [[bin]] entries; empty [workspace]
-  fuzz_targets/             # fuzz_pem, fuzz_pkcs8_{decode,decrypt}, fuzz_spki, fuzz_sec1, fuzz_sig, fuzz_asn1_reader, fuzz_sm2_{ciphertext_der,raw_ciphertext,pubkey_sec1,decrypt,verify}, fuzz_sm4_{cbc,gcm,ccm,xts}_decrypt + v0.20 fuzz_sm4_{cbc,gcm}_streaming_decrypt (DIFFERENTIAL: streaming Sm4{Cbc,Gcm}Decryptor fed in arbitrary chunks == single-shot mode_{cbc,gcm}::decrypt; layouts add a chunk_len byte) + #98/#99 fuzz_sm3 / fuzz_hmac_sm3 (one-shot==streaming differentials), fuzz_c_abi (raw-pointer extern "C" surface), fuzz_sm4_{cbc,gcm}_encrypt (encrypt differentials + round-trip), fuzz_sm4_{ccm,xts}_encrypt (encrypt→decrypt round-trips) + v1.1 fuzz_sm2_kx ([R_B:65][S_B:32] adversarial peer bytes; v1.6: THREE paths per input — confirm + derive_without_key_confirmation + respond_without_key_confirmation with the same 65 B as R_A; no dispatch byte, seed format unchanged) + v1.3 fuzz_x509 (certificate decode + verify; seeds = the gmssl KAT fixtures). SM4 targets carve key/iv/nonce/aad/tag via FRONT-consuming arbitrary::Unstructured (so seeds are plain concatenations; pinned to arbitrary 1.4.2 order). sm2_decrypt/verify use a fixed test key via OnceLock.
+  fuzz_targets/             # fuzz_pem, fuzz_pkcs8_{decode,decrypt}, fuzz_spki, fuzz_sec1, fuzz_sig, fuzz_asn1_reader, fuzz_sm2_{ciphertext_der,raw_ciphertext,pubkey_sec1,decrypt,verify}, fuzz_sm4_{cbc,gcm,ccm,xts}_decrypt + v0.20 fuzz_sm4_{cbc,gcm}_streaming_decrypt (DIFFERENTIAL: streaming Sm4{Cbc,Gcm}Decryptor fed in arbitrary chunks == single-shot mode_{cbc,gcm}::decrypt; layouts add a chunk_len byte) + #98/#99 fuzz_sm3 / fuzz_hmac_sm3 (one-shot==streaming differentials), fuzz_c_abi (raw-pointer extern "C" surface), fuzz_sm4_{cbc,gcm}_encrypt (encrypt differentials + round-trip), fuzz_sm4_{ccm,xts}_encrypt (encrypt→decrypt round-trips) + v1.1 fuzz_sm2_kx ([R_B:65][S_B:32] adversarial peer bytes; v1.6: THREE paths per input — confirm + derive_without_key_confirmation + respond_without_key_confirmation with the same 65 B as R_A; no dispatch byte, seed format unchanged) + v1.3 fuzz_x509 (certificate decode + verify; seeds = the gmssl KAT fixtures) + v1.7 fuzz_tlcp_{cbc,gcm}_deprotect (adversarial record bodies, layout [kb][seq:8][record]; the CBC one drives the Lucky13 deprotect; no committed seeds). SM4 targets carve key/iv/nonce/aad/tag via FRONT-consuming arbitrary::Unstructured (so seeds are plain concatenations; pinned to arbitrary 1.4.2 order). sm2_decrypt/verify use a fixed test key via OnceLock.
   seeds/<target>/           # committed curated valid seeds (from a one-time generator using gmcrypto-core's encode/sign/encrypt). corpus/, target/, artifacts/ are gitignored.
   README.md                 # build/run/repro runbook + seed-regen recipe
 

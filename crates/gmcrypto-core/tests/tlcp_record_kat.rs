@@ -1,17 +1,17 @@
 //! v1.7 — TLCP record-protection KAT (cfg-gated on `tlcp`).
 //!
 //! Each record's bytes are cross-validated by an INDEPENDENT oracle, the
-//! "OpenSSL + GmSSL cross-check" sourcing posture (maintainer-chosen W3;
+//! `OpenSSL` + `GmSSL` cross-check sourcing posture (maintainer-chosen W3;
 //! `docs/v1.7-kat-sourcing.md`):
 //!
-//! - **CBC**: OpenSSL 3.x EVP `SM4-CBC` (`-nopad`) for the cipher layer +
-//!   GmSSL `sm3hmac` for the record MAC, hand-composed per the RFC 4346/5246
+//! - **CBC**: `OpenSSL` 3.x EVP `SM4-CBC` (`-nopad`) for the cipher layer +
+//!   `GmSSL` `sm3hmac` for the record MAC, hand-composed per the RFC 4346/5246
 //!   framing (MAC-then-encrypt over `seq‖type‖version‖length‖plaintext`,
 //!   TLS padding, front explicit IV).
-//! - **GCM**: GmSSL `sm4 -gcm -aad_hex` (a full AEAD oracle) over the RFC
+//! - **GCM**: `GmSSL` `sm4 -gcm -aad_hex` (a full AEAD oracle) over the RFC
 //!   5288 nonce (`salt‖seq`) + AAD (`seq‖type‖version‖length`).
 //!
-//! Generator: `tests/data/tlcp_record_kat_gen.py` (provenance). The gotlcp
+//! Generator: `tests/data/tlcp_record_kat_gen.py` (provenance). The `gotlcp`
 //! full-handshake transcript replay remains a documented follow-up.
 #![cfg(feature = "tlcp")]
 #![allow(clippy::cast_possible_truncation, clippy::doc_markdown)]
