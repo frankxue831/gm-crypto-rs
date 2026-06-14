@@ -1043,6 +1043,91 @@ fn ct_sm2_key_exchange(runner: &mut CtRunner, rng: &mut BenchRng) {
     }
 }
 
+/// v1.7 W3 — TLCP SM4-CBC Lucky13 deprotect (Q7.8). Class-split by the
+/// recovered-fragment (post-strip plaintext) LENGTH with a FIXED secret key:
+/// both classes are valid records of the SAME wire length (body 80) but
+/// fragment lengths 42 vs 43, which straddle an SM3 inner-hash compression
+/// boundary (2 vs 3 inner blocks). The constant-compression-count equalization
+/// in `mac_equalized` must erase that timing difference; both classes reach
+/// the equalized MAC + constant-time tag compare via identical control flow.
+/// A broken equalization (the dummy-compress top-up removed) would surface
+/// here as `|tau|` ≫ gate. Gate `|tau| < 0.20`.
+#[cfg(feature = "tlcp")]
+fn ct_tlcp_cbc_deprotect(runner: &mut CtRunner, rng: &mut BenchRng) {
+    use gmcrypto_core::tlcp::record::{
+        RecordKeysCbc, TLCP_RECORD_VERSION, deprotect_cbc, protect_cbc,
+    };
+
+    // Fixed-byte RNG for the explicit IV (the IV is public; baked into each
+    // record once, outside the timed loop).
+    struct FixedIv(u8);
+    impl TryRng for FixedIv {
+        type Error = Infallible;
+        fn try_next_u32(&mut self) -> Result<u32, Infallible> {
+            Ok(0)
+        }
+        fn try_next_u64(&mut self) -> Result<u64, Infallible> {
+            Ok(0)
+        }
+        fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Infallible> {
+            for b in dst.iter_mut() {
+                *b = self.0;
+                self.0 = self.0.wrapping_add(1);
+            }
+            Ok(())
+        }
+    }
+    impl TryCryptoRng for FixedIv {}
+
+    // Fixed secret key — the secret under test is the fragment LENGTH, not the
+    // key (scope Q7.8). No `as u8` casts (clippy `-D warnings`).
+    let mut kb = [0u8; 128];
+    let mut v = 3u8;
+    for b in &mut kb {
+        *b = v;
+        v = v.wrapping_mul(7).wrapping_add(1);
+    }
+    let keys = RecordKeysCbc::client_half(&kb);
+    let seq = 0x0102_0304_0506_0708u64;
+
+    let pt_left = [0xAAu8; 42]; // → 2 inner SM3 blocks (large pad)
+    let pt_right = [0xBBu8; 43]; // → 3 inner SM3 blocks (minimal pad)
+    let rec_left = protect_cbc(
+        &keys,
+        seq,
+        0x17,
+        TLCP_RECORD_VERSION,
+        &pt_left,
+        &mut FixedIv(0x5A),
+    )
+    .expect("protect left");
+    let rec_right = protect_cbc(
+        &keys,
+        seq,
+        0x17,
+        TLCP_RECORD_VERSION,
+        &pt_right,
+        &mut FixedIv(0x5A),
+    )
+    .expect("protect right");
+    assert_eq!(
+        rec_left.len(),
+        rec_right.len(),
+        "dudect classes must share wire length"
+    );
+
+    for _ in 0..sample_count() {
+        let (class, rec) = if rng.random::<bool>() {
+            (Class::Left, &rec_left)
+        } else {
+            (Class::Right, &rec_right)
+        };
+        runner.run_one(class, || {
+            deprotect_cbc(&keys, seq, 0x17, TLCP_RECORD_VERSION, rec).expect("valid record")
+        });
+    }
+}
+
 /// Custom `main` (instead of `ctbench_main!`) so we can pre-filter `--bench`
 /// from argv. `cargo bench` injects `--bench` as the first arg by libtest
 /// convention; dudect-bencher's clap parser doesn't recognize it and would
@@ -1238,6 +1323,16 @@ fn main() {
         name: BenchName("ct_sm2_key_exchange"),
         seed: None,
         benchfn: ct_sm2_key_exchange,
+    });
+
+    // v1.7 W3 — TLCP SM4-CBC Lucky13 deprotect (Q7.8). Cfg-gated on `tlcp`;
+    // class-split by recovered-fragment length (fixed key) so the equalized
+    // inner-hash compression count is what is measured. `|tau| < 0.20`.
+    #[cfg(feature = "tlcp")]
+    benches.push(BenchMetadata {
+        name: BenchName("ct_tlcp_cbc_deprotect"),
+        seed: None,
+        benchfn: ct_tlcp_cbc_deprotect,
     });
 
     let opts = BenchOpts {

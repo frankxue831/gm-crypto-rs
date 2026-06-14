@@ -83,9 +83,10 @@ jobs:
           - "sm4-bitsliced"
           - "sm4-bitsliced-simd"
         # v1.1 W3 — the fourth pass also carries `sm2-key-exchange`, gating
-        # the `ct_sm2_key_exchange` target (cfg-gated on `sm2-key-exchange`);
-        # same `|tau| < 0.20` gate.
-          - "sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange"
+        # the `ct_sm2_key_exchange` target. v1.7 W3 adds `tlcp`, gating
+        # `ct_tlcp_cbc_deprotect` (the Lucky13 residual guard). Same
+        # `|tau| < 0.20` gate.
+          - "sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp"
     steps:
       - uses: actions/checkout@v4
       # v0.18 W1 — PINNED (was @stable). The toolchain is the load-bearing
@@ -324,6 +325,12 @@ jobs:
               # transcript so both classes succeed via identical control
               # flow. Same 0.20 gate.
               required_low["ct_sm2_key_exchange"] = 0.20
+          if "tlcp" in matrix_features:
+              # v1.7 W3 — TLCP SM4-CBC Lucky13 deprotect target (Q7.8).
+              # Class-split by recovered-fragment length with a FIXED key,
+              # so the equalized inner-hash compression count is what is
+              # measured. Same 0.20 gate.
+              required_low["ct_tlcp_cbc_deprotect"] = 0.20
 
           # v0.5 W4 phase 2 prep — telemetry-only targets. The data
           # lands in the CI log for trend tracking but doesn't gate

@@ -5,6 +5,42 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-06-14
+
+**TLCP record protection** — the second code cycle of the TLCP
+(GB/T 38636-2020) arc (gap G2 of `docs/tlcp-decomposition.md`, per
+`docs/v1.7-scope.md` Q7.1–Q7.11). Byte-in/byte-out record protect/deprotect
+primitives for the four SM2-family suites, under the existing `tlcp` umbrella
+feature. Additive minor; default build byte-identical; **no new dependency**.
+
+### Added
+
+- **`tlcp::record`** — per-direction `ZeroizeOnDrop` key carriers
+  (`RecordKeysCbc` / `RecordKeysGcm`, carved via `client_half` /
+  `server_half` / `from_key_block`) + `protect_cbc` / `deprotect_cbc` +
+  `protect_gcm` / `deprotect_gcm` + `TLCP_RECORD_VERSION`. Engine-shaped:
+  caller-held `seq`, injected RNG for the CBC explicit IV, no hidden state.
+- **SM4-CBC record** (pure `tlcp`): TLS-1.1-style explicit per-record IV,
+  MAC-then-encrypt, TLS padding, HMAC-SM3 MAC. The **`deprotect_cbc` path is
+  Lucky13-hardened** — constant-time over padding validity AND the MAC, with
+  the inner-hash SM3 compression count equalized (dummy compressions on a
+  throwaway state to a public upper bound), a fixed-window pad-validity scan,
+  and a data-independent MAC extraction; bad padding still runs the full MAC;
+  single `None`, no plaintext on failure.
+- **SM4-GCM record** (requires `tlcp` + `sm4-aead`): RFC 5288 TLS-1.2 AEAD
+  shape (4-byte salt ‖ 8-byte seq-derived nonce; AAD = seq‖type‖version‖
+  length; 16-byte tag), a thin wrapper over `mode_gcm` (commit-on-verify).
+
+### Notes
+
+- Record bytes cross-validated byte-for-byte against **OpenSSL EVP SM4-CBC +
+  GmSSL `sm3hmac`** (CBC) and **GmSSL `sm4 -gcm`** (GCM). New dudect target
+  `ct_tlcp_cbc_deprotect` (|tau| ≈ 0.08) guards the Lucky13 equalization; two
+  new fuzz targets (census 27 → 29). `sm3::compress` widened to `pub(crate)`
+  (not public API / not SemVer) for the constant-compression-count MAC.
+- **`(key, seq)` uniqueness is the caller's contract** — the stateless
+  primitives cannot detect reuse/wrap. **crates.io: 1.6.0 → 1.7.0.**
+
 ## [1.6.0] - 2026-06-13
 
 **TLCP key schedule + no-confirmation SM2 key exchange** — the first code

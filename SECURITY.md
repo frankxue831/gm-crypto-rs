@@ -190,13 +190,36 @@ shim over a public-inputs-only core.
   responder's `respond_without_key_confirmation` is structurally covered by
   the identical `shared_secret` core (the target is initiator-side, so the
   responder is covered by construction, not literally measured).
+- `ct_tlcp_cbc_deprotect` — the TLCP SM4-CBC **Lucky13-hardened** record
+  deprotect (`tlcp::record::deprotect_cbc`, v1.7 W3), class-split by the
+  **recovered-fragment (post-strip plaintext) length** with a FIXED key:
+  both classes are valid records of the same wire length but fragment
+  lengths that straddle an SM3 inner-hash compression boundary, so the
+  equalized inner-hash compression count is what is measured. Gate
+  `|tau| < 0.20` on the 4th dudect matrix leg (cfg `tlcp`); 20K-sample
+  smoke `|tau| ≈ 0.08`. The deprotect equalizes **three** constant-time
+  surfaces — (1) the inner-hash SM3 compression count (dummy compressions
+  on a throwaway state to a public upper bound, `core::hint::black_box`
+  against elision), (2) a fixed `min(256, body)`-byte pad-validity scan
+  (no early return, no padlen-bounded loop), (3) a data-independent MAC
+  extraction at the secret offset — and a bad-padding record still runs
+  the full MAC, with a single final `pad_ok & mac_ok` merge, single `None`,
+  no plaintext on failure. The dudect target is the **residual guard**; it
+  does NOT certify the equalization (a hard impl MUST), so a `pub(crate)`
+  equivalence test pins that the constant-blocks MAC equals an ordinary
+  `HmacSm3` on a public-length input. `sm3::compress` is widened to
+  `pub(crate)` (not public API / not SemVer) so the single audited
+  compression loop is reused rather than duplicated.
 
-**The `tlcp` feature (v1.6) deliberately has NO dudect target**: the key
-schedule (`tlcp::key_schedule`) is a chain of HMAC-SM3 invocations over
-secret keys with PUBLIC lengths, labels, and iteration structure — the
-keyed-primitive timing is exactly what `ct_hmac_sm3` already gates (the
-v0.3 Q7.6 streaming-HMAC precedent: a composition of a gated keyed
-primitive with public control flow earns no separate target).
+**The `tlcp` key schedule (v1.6) has NO dudect target, and the v1.7 SM4-GCM
+record rides `ct_sm4_gcm_decrypt`**: the key schedule
+(`tlcp::key_schedule`) is a chain of HMAC-SM3 invocations over secret keys
+with PUBLIC lengths, labels, and iteration structure — exactly what
+`ct_hmac_sm3` already gates (the v0.3 Q7.6 streaming-HMAC precedent). The
+SM4-GCM record deprotect adds no secret-dependent branch over `mode_gcm`'s
+already-gated constant-time tag compare (salt/AAD shaping is on public
+data). Only the SM4-CBC Lucky13 path earns the new `ct_tlcp_cbc_deprotect`
+target above.
 
 **The harness detects leaks; it does not prove constant-time.** Low
 `|tau|` values mean the test could not detect a leak with the budget
