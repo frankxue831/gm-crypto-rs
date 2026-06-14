@@ -5,6 +5,54 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-06-14
+
+**TLCP certificate-pair / chain verification** — the third (and last *core*)
+code cycle of the TLCP (GB/T 38636-2020) arc (gap G4 of
+`docs/tlcp-decomposition.md`, the §4 derived chain/role profile, per
+`docs/v1.8-scope.md` Q8.1–Q8.16). A deliberately narrow, single-`bool`
+verifier: a generic linear chain walk in `x509`, the TLCP [sign, enc]
+double-cert profile in a new `tlcp::chain`. Additive minor; default build
+byte-identical; **no new dependency**; pure-core / `no_std`.
+
+This is **certificate-pair / chain *signature* verification, NOT validation
+and NOT server authentication**. A `true` means each chain links to a
+caller-trusted anchor and each cert is usable for its TLCP role; **endpoint
+identity binding (the TLCP equivalent of hostname verification) stays the
+caller's, permanently**.
+
+### Added
+
+- **`x509::verify_chain(chain, anchors, Option<X509Time>) -> bool`** — a
+  single linear, caller-ordered chain walk: per-edge SM2 signature +
+  raw-Name (`issuer`↔`subject`) linking, intermediate CA-ness
+  (`keyCertSign` + `basicConstraints CA=TRUE`), termination at a
+  caller-trusted anchor (**every** same-Name anchor tried; the signature is
+  authoritative), refusal of any **unknown critical extension** (RFC 5280
+  §4.2), an optional validity window, and a `MAX_CHAIN_DEPTH` cap. The anchor
+  is trusted by fiat (checked only by Name + signature + window).
+- **`x509::KeyUsage` / `x509::BasicConstraints`** readers +
+  `Certificate::{key_usage, basic_constraints}` accessors — the two
+  interpreted extensions (the first extension *interpretation* this SDK does;
+  `pathLenConstraint` is parsed but not enforced — depth-cap only).
+- **`tlcp::chain::verify_pair(sign_chain, enc_chain, anchors, Option<time>)`**
+  (needs `tlcp` + `x509`) — the TLCP double-cert profile: role keyUsage (sign
+  `digitalSignature`; enc `keyEncipherment` | `keyAgreement`), leaf-not-CA,
+  and pair binding (non-empty + byte-equal `subject` + byte-equal `issuer`
+  Name + the **same issuing chain**, pinning both leaves to one actual CA).
+- **`x509::MAX_CHAIN_DEPTH`** constant.
+
+### Assurance
+
+- **No new dudect target** — public-inputs-only (the v1.3 `x509` rationale;
+  see `SECURITY.md`). New fuzz target `fuzz_x509_chain` (census 29 → 30).
+- KATs over GmSSL 3-level fixtures (root → intermediate → [sign, enc] pair) +
+  hand-built minted-cert negatives; a real TLCP pair verifies end-to-end.
+- Resolves D-1/D-4/D-8/D-9/D-11 of the decomposition (gotlcp +
+  GM/T 0015-sourced; three primary-text residuals tagged). Reviews: Codex
+  scope consult + an Opus executed adversarial review (GO-WITH-FIXES; the
+  cross-CA-same-Name pair-binding gap closed, 9 clippy fixes).
+
 ## [1.7.0] - 2026-06-14
 
 **TLCP record protection** — the second code cycle of the TLCP

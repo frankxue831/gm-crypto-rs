@@ -1,7 +1,63 @@
 # CLAUDE.md
 
 Pure-Rust SM2/SM3/SM4 SDK.
-**v1.7.0 — TLCP record protection — implemented on
+**v1.8.0 — TLCP certificate-pair / chain verification — implemented on
+`feat/x509-chain-verify`; publish order simd → core → c, the maintainer's
+per-release call.** The third and **last *core* cycle** of the TLCP arc
+(gap G4 of `docs/tlcp-decomposition.md` §4 derived chain/role profile;
+scope `docs/v1.8-scope.md` Q8.1–Q8.16, the four cycle-shaping forks
+maintainer-locked to the recommended shape). The decomposition's flagged
+**trap** ("path validation is where small auditable cycles go to die");
+the defense is the **derived profile** — verify only what the TLCP handshake
+needs, name the permanent holes loudly, single `bool`. **Placement = SPLIT
+(Q8.1):** the generic chain walk + keyUsage/basicConstraints **readers** in
+the existing **`x509`** feature; the TLCP [sign, enc] pair profile in a new
+**`tlcp::chain`** (cfg-gated `all(tlcp, x509)` — a TLCP cert-verifying
+consumer enables BOTH, the GCM-record/sm2-kx "enable both" precedent).
+Pure-core, NO new dep, no_std. **`x509::verify_chain(chain, anchors,
+Option<X509Time>) -> bool`**: single linear caller-ordered walk (chain
+leaf-first), per-edge SM2 `verify_signature` + raw issuer↔subject Name
+byte-equality link, intermediate CA-ness (`keyCertSign` + basicConstraints
+`CA=TRUE`), **try-all-anchors** at the top (Name necessary-NOT-sufficient —
+the signature is authoritative, so CA key-rollover/duplicate-Name anchors
+resolve by which key actually signed), **unknown-CRITICAL-extension reject**
+(RFC 5280 §4.2; known set = exactly {keyUsage 2.5.29.15, basicConstraints
+2.5.29.19}; Q8.7b maintainer-signed — the one widening of "minimal"),
+optional validity window (`at.is_none_or`), `MAX_CHAIN_DEPTH = 8` cap. The
+**anchor is trusted by fiat** — checked ONLY by Name + signature + window,
+NEVER keyUsage/CA/leaf-role (Codex #4; imposing keyCertSign would reject
+legit bare roots). **`x509::{KeyUsage, BasicConstraints}` readers** (BIT
+STRING bit-0 = MSB of value[0]; basicConstraints `path_len` PARSED but NOT
+enforced — D-4 depth-cap only) + `Certificate::{key_usage,
+basic_constraints}` accessors. **`tlcp::chain::verify_pair(sign_chain,
+enc_chain, anchors, Option<time>) -> bool`**: role keyUsage (sign MUST assert
+`digitalSignature`; enc MUST assert `keyEncipherment` OR `keyAgreement` —
+keyUsage MUST be present, absent ⇒ reject, stricter than gotlcp which IGNORES
+keyUsage + assigns roles positionally), **leaf-NOT-CA** (Codex #5), pair
+binding = non-empty + byte-equal `subject` + byte-equal `issuer` Name + the
+**same issuing chain** (equal length, `tbs_raw`-equal certs from index 1 up —
+the **W2 review S1 closure**: equal issuer *Name* alone doesn't pin the
+issuer *key*; residual = both legs length-1 under same-DN anchors). **Single
+`bool` throughout** (chain-rejection-oracle defense); **endpoint identity
+binding stays the caller's, PERMANENTLY** — `verify_pair == true` is never
+"the peer I dialed". D-1/D-4/D-8/D-9/D-11 resolved (gotlcp `main` /
+`emmansun/gmsm v0.41.1` + GM/T 0015 Tongsuo `subca.cnf`; **three
+primary-text residuals tagged** — D-1 exact MUST/SHOULD bits, D-9
+serverAuth-EKU mandate, D-11 normative ordering). EKU IGNORED (D-9);
+pathLenConstraint NOT read (D-4). KATs: **GmSSL 3-level chain** (root →
+intermediate → [sign, enc] pair, shared subject DN, gmssl-self-verified;
+`tests/data/x509_chain_*.der`, recipe in `x509_regen.md`) + hand-built minted
+SM2-cert negatives; a real TLCP pair verifies end-to-end. **NO new dudect
+target** — public-inputs-only (the v1.3 `x509` rationale extends; certs +
+anchors + time are public, edges are the public `verify_with_id`). New fuzz
+**`fuzz_x509_chain`** (census 29 → 30; BE-u16-prefixed DER blobs, chain/anchor
+splittings, no-panic; 1.06M local runs clean). Pipeline: scope (4 forks
+maintainer-locked + Codex consult, 5 findings folded incl. Q8.7b) → plan →
+**Opus executed adversarial review** (implemented Tasks 1-5 in a worktree, 26
+tests vs real minted certs, GO-WITH-FIXES — caught 9 clippy lints incl. a
+hard `E0433`, the S1 pair-binding gap, all folded) → TDD. Workspace 1.7.0 →
+**1.8.0**, sibling pins `=1.8.0`. v1.9 = the toolkit FFI cadence cycle.
+**Earlier — v1.7.0 — TLCP record protection — implemented on
 `feat/tlcp-record-protection`; publish order simd → core → c, the
 maintainer's per-release call.** The second code cycle of the TLCP arc
 (gap G2 of `docs/tlcp-decomposition.md`; scope `docs/v1.7-scope.md`
@@ -730,6 +786,8 @@ cargo clippy -p gmcrypto-core --features sm2-key-exchange,crypto-bigint-scalar -
 cargo clippy -p gmcrypto-core --features x509 --all-targets -- -D warnings
 # v1.6 — TLCP opt-in clippy pass.
 cargo clippy -p gmcrypto-core --features tlcp --all-targets -- -D warnings
+# v1.8 — tlcp::chain needs BOTH tlcp+x509; its own clippy pass.
+cargo clippy -p gmcrypto-core --features tlcp,x509 --all-targets -- -D warnings
 
 # Supply chain — note: --exclude-dev (dev-deps are exempt from the ban list).
 cargo deny check --exclude-dev
@@ -754,6 +812,8 @@ cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features sm2-key-
 cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features x509 --no-default-features
 # v1.6 — tlcp is pure-core/no_std too (key schedule: byte-in/byte-out).
 cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features tlcp --no-default-features
+# v1.8 — tlcp::chain (cert-pair verify) is pure-core/no_std; needs tlcp+x509.
+cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features tlcp,x509 --no-default-features
 
 # v0.4 W4 — C ABI shim build + header drift check.
 cargo build -p gmcrypto-c --release
@@ -812,7 +872,10 @@ twenty-one under `sm4-bitsliced-simd,sm4-aead,sm4-xts`; twenty-two under
 `sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange`; twenty-three under
 `…,sm2-key-exchange,tlcp` — v1.7 W3 added `ct_tlcp_cbc_deprotect` cfg-gated
 on `tlcp` (the Lucky13 CBC-deprotect residual guard); v1.1 W3 added
-`ct_sm2_key_exchange` cfg-gated on `sm2-key-exchange`** (v0.3 added
+`ct_sm2_key_exchange` cfg-gated on `sm2-key-exchange`. **v1.8 (G4
+chain/pair verification) adds NO dudect target — public-inputs-only (certs +
+anchors + comparison time are public; the v1.3 `x509` rationale extends), so
+the count stays twenty-three.** (v0.3 added
 `ct_pkcs8_decrypt`; v0.5 W4 phase 1 added
 `ct_sm4_encrypt_block_bitsliced_simd` cfg-gated on `sm4-bitsliced-simd`;
 v0.6 W6 added `ct_sm4_cbc_decrypt_fanout` cfg-gated on the same feature
@@ -974,7 +1037,8 @@ crates/gmcrypto-core/
       ciphertext.rs         # GM/T 0009 SM2 ciphertext SEQUENCE — ports over W1 in v0.3
     pem.rs                  # v0.3 W2 — RFC 7468 PEM + embedded base64 (hand-rolled, no_std)
     spki.rs                 # v0.3 W2 — RFC 5280 SubjectPublicKeyInfo for SM2
-    x509.rs                 # v1.3 — X.509-with-SM2 LEAF cert parse + sig verify (opt-in `x509` feature; GM/T 0015 profile, v3-only, strict in-repo DER). Certificate::from_der -> Option (exact wire tbs span; sm2-sign-with-sm3 AlgId absent-or-NULL params + FULL-SPAN outer==inner; negative serial REJECT; pad-stripped serial 1..=20; one-level extensions shape-check, ZERO interpretation; BIT STRING unused==0) + verify_signature(_with_id) -> bool via verify_with_id over tbs_raw (default ID 1234567812345678; RFC 8998 §3.2.1). NO TRUST DECISIONS (no chains/time/extension-eval/revocation — X509Time exposed, no clock). Composes asn1::reader + spki::decode + verify_with_id only; public inputs only -> NO dudect target
+    x509.rs                 # v1.3 — X.509-with-SM2 LEAF cert parse + sig verify (opt-in `x509` feature; GM/T 0015 profile, v3-only, strict in-repo DER). Certificate::from_der -> Option (exact wire tbs span; sm2-sign-with-sm3 AlgId absent-or-NULL params + FULL-SPAN outer==inner; negative serial REJECT; pad-stripped serial 1..=20; one-level extensions shape-check, ZERO interpretation at parse time; BIT STRING unused==0) + verify_signature(_with_id) -> bool via verify_with_id over tbs_raw (default ID 1234567812345678; RFC 8998 §3.2.1). Parse/single-verify make NO TRUST DECISIONS (X509Time exposed, no clock). Composes asn1::reader + spki::decode + verify_with_id; public inputs only -> NO dudect target. **v1.8 (G4): KeyUsage + BasicConstraints readers (BIT STRING bit-0=MSB; path_len parsed-not-enforced) + Certificate::{key_usage,basic_constraints} accessors + MAX_CHAIN_DEPTH=8 + verify_chain(chain leaf-first, anchors, Option<X509Time>) -> bool** = single linear caller-ordered walk (per-edge verify_signature + raw-Name link + intermediate keyCertSign+CA=TRUE + try-all-anchors[sig authoritative] + unknown-CRITICAL reject {keyUsage,basicConstraints} + optional window + depth cap; anchor trusted by fiat = Name+sig+window only). private KeyUsage::parse/BasicConstraints::parse/find_extension/has_unknown_critical; #[cfg(test)] pub(crate) test_support mints SM2 certs (shared with tlcp::chain tests). Structural trust only — NOT endpoint auth; still NO dudect (public inputs)
+      chain.rs (tlcp/)        # v1.8 — GB/T 38636 §4 certificate-PAIR verification (cfg-gated all(tlcp,x509)). verify_pair(sign_chain, enc_chain, anchors, Option<X509Time>) -> bool over x509::verify_chain: role keyUsage (sign digitalSignature; enc keyEncipherment|keyAgreement; keyUsage MUST be present) + leaf-NOT-CA + pair binding (non-empty + byte-equal subject + byte-equal issuer Name + SAME issuing chain = equal len + tbs_raw-equal from idx 1, the S1 closure). Single bool; endpoint identity binding stays the caller's PERMANENTLY. KATs vs GmSSL 3-level fixtures; NO dudect; fuzz_x509_chain
     tlcp/
       mod.rs                # v1.6 — TLCP (GB/T 38636-2020) crypto toolkit umbrella (opt-in `tlcp` feature; pure-core, no new dep). NOT a protocol implementation (no 5-byte header framing); grows per docs/tlcp-decomposition.md §7 (v1.7 record protection added; v1.8 chain/pair verification joins here)
       record.rs             # v1.7 — GB/T 38636 §6.3 record protection (opt-in `tlcp`; GCM parts cfg-gated on `sm4-aead`). RecordKeysCbc/RecordKeysGcm (ZeroizeOnDrop; client_half/server_half/from_key_block carve) + protect_cbc/deprotect_cbc + protect_gcm/deprotect_gcm + TLCP_RECORD_VERSION. Engine-shaped: caller-held seq:u64, injected IV RNG, type:u8/version:[u8;2] explicit, length computed internally (NEVER a deprotect param — secret post-strip length). CBC: explicit IV, MAC-then-encrypt, TLS padding; deprotect_cbc = the Lucky13 ONE-op CT path over 3 equalized surfaces (inner-hash compress count via dummy compressions on a throwaway state to public max=body−33, black_box'd; min(256,body) CT pad scan; CT MAC extraction at secret offset), bad-pad-still-MACs, single None, body.zeroize on fail; public-length guards (<48/non-16-mult/>2^14+48) before secret arithmetic. mac_equalized + inner_blocks + check_tls_padding_ct + extract_mac_ct pub(crate)/private. GCM: RFC 5288 thin wrapper over mode_gcm (salt(4)‖seq-nonce(8); AAD seq‖type‖version‖length; wire explicit_nonce(8)‖ct‖tag(16)). Widens sm3::compress to pub(crate) (reuse the audited loop). KATs = OpenSSL EVP SM4-CBC + GmSSL sm3hmac (CBC) / GmSSL sm4 -gcm (GCM); dudect ct_tlcp_cbc_deprotect + constant-blocks==HmacSm3 equivalence test; fuzz_tlcp_{cbc,gcm}_deprotect
@@ -1029,9 +1093,9 @@ crates/gmcrypto-simd/       # v0.5 W4 phase 2 / v0.6 W6 / v0.8 W1 — SIMD backe
   tests/ghash_kat.rs        # v0.8 W1 — NIST-derived GHASH triple (H, X, Y) regression KAT across all three dispatch paths
   tests/ghash_lane_equivalence.rs # v0.8 W1 — software vs CLMUL vs PMULL byte-equivalence sweep over 75 inputs (random + structural edges)
 
-fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN WORKSPACE (empty [workspace] table) + parent exclude=["fuzz"] → nightly-only libfuzzer-sys/arbitrary deps never enter the published 3-crate graph; unpublished, NOT MSRV-bound, NOT in cargo deny. fuzz/Cargo.lock IS committed (.gitignore anchors /Cargo.lock to root so it isn't swallowed). 29 targets (v0.14's 16 + v0.20's 2 streaming-decryptor differential + #98/#99's 7 post-1.0 hardening [SM3/HMAC-SM3/C-ABI/SM4-mode-encrypt] + v1.1's fuzz_sm2_kx + v1.3's fuzz_x509 + v1.7's fuzz_tlcp_{cbc,gcm}_deprotect); v0.14's prove the failure-mode invariant (no panic/OOM/hang), v0.20's prove streaming==single-shot; initial sweeps zero crashes (+ zero divergences for v0.20). The FUZZ_TARGETS list in fuzz-nightly.yml MUST name every [[bin]] — a target absent there builds (fuzz-build.yml) but is silently never fuzzed (the #98/#99 drift, fixed post-#101).
+fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN WORKSPACE (empty [workspace] table) + parent exclude=["fuzz"] → nightly-only libfuzzer-sys/arbitrary deps never enter the published 3-crate graph; unpublished, NOT MSRV-bound, NOT in cargo deny. fuzz/Cargo.lock IS committed (.gitignore anchors /Cargo.lock to root so it isn't swallowed). 30 targets (v0.14's 16 + v0.20's 2 streaming-decryptor differential + #98/#99's 7 post-1.0 hardening [SM3/HMAC-SM3/C-ABI/SM4-mode-encrypt] + v1.1's fuzz_sm2_kx + v1.3's fuzz_x509 + v1.7's fuzz_tlcp_{cbc,gcm}_deprotect + v1.8's fuzz_x509_chain); v0.14's prove the failure-mode invariant (no panic/OOM/hang), v0.20's prove streaming==single-shot; initial sweeps zero crashes (+ zero divergences for v0.20). The FUZZ_TARGETS list in fuzz-nightly.yml MUST name every [[bin]] — a target absent there builds (fuzz-build.yml) but is silently never fuzzed (the #98/#99 drift, fixed post-#101).
   Cargo.toml                # gmcrypto-core path dep w/ features=["sm4-aead","sm4-xts","sm2-key-exchange","x509"] always on (no per-target feature juggling); 27 [[bin]] entries; empty [workspace]
-  fuzz_targets/             # fuzz_pem, fuzz_pkcs8_{decode,decrypt}, fuzz_spki, fuzz_sec1, fuzz_sig, fuzz_asn1_reader, fuzz_sm2_{ciphertext_der,raw_ciphertext,pubkey_sec1,decrypt,verify}, fuzz_sm4_{cbc,gcm,ccm,xts}_decrypt + v0.20 fuzz_sm4_{cbc,gcm}_streaming_decrypt (DIFFERENTIAL: streaming Sm4{Cbc,Gcm}Decryptor fed in arbitrary chunks == single-shot mode_{cbc,gcm}::decrypt; layouts add a chunk_len byte) + #98/#99 fuzz_sm3 / fuzz_hmac_sm3 (one-shot==streaming differentials), fuzz_c_abi (raw-pointer extern "C" surface), fuzz_sm4_{cbc,gcm}_encrypt (encrypt differentials + round-trip), fuzz_sm4_{ccm,xts}_encrypt (encrypt→decrypt round-trips) + v1.1 fuzz_sm2_kx ([R_B:65][S_B:32] adversarial peer bytes; v1.6: THREE paths per input — confirm + derive_without_key_confirmation + respond_without_key_confirmation with the same 65 B as R_A; no dispatch byte, seed format unchanged) + v1.3 fuzz_x509 (certificate decode + verify; seeds = the gmssl KAT fixtures) + v1.7 fuzz_tlcp_{cbc,gcm}_deprotect (adversarial record bodies, layout [kb][seq:8][record]; the CBC one drives the Lucky13 deprotect; no committed seeds). SM4 targets carve key/iv/nonce/aad/tag via FRONT-consuming arbitrary::Unstructured (so seeds are plain concatenations; pinned to arbitrary 1.4.2 order). sm2_decrypt/verify use a fixed test key via OnceLock.
+  fuzz_targets/             # fuzz_pem, fuzz_pkcs8_{decode,decrypt}, fuzz_spki, fuzz_sec1, fuzz_sig, fuzz_asn1_reader, fuzz_sm2_{ciphertext_der,raw_ciphertext,pubkey_sec1,decrypt,verify}, fuzz_sm4_{cbc,gcm,ccm,xts}_decrypt + v0.20 fuzz_sm4_{cbc,gcm}_streaming_decrypt (DIFFERENTIAL: streaming Sm4{Cbc,Gcm}Decryptor fed in arbitrary chunks == single-shot mode_{cbc,gcm}::decrypt; layouts add a chunk_len byte) + #98/#99 fuzz_sm3 / fuzz_hmac_sm3 (one-shot==streaming differentials), fuzz_c_abi (raw-pointer extern "C" surface), fuzz_sm4_{cbc,gcm}_encrypt (encrypt differentials + round-trip), fuzz_sm4_{ccm,xts}_encrypt (encrypt→decrypt round-trips) + v1.1 fuzz_sm2_kx ([R_B:65][S_B:32] adversarial peer bytes; v1.6: THREE paths per input — confirm + derive_without_key_confirmation + respond_without_key_confirmation with the same 65 B as R_A; no dispatch byte, seed format unchanged) + v1.3 fuzz_x509 (certificate decode + verify; seeds = the gmssl KAT fixtures) + v1.7 fuzz_tlcp_{cbc,gcm}_deprotect (adversarial record bodies, layout [kb][seq:8][record]; the CBC one drives the Lucky13 deprotect; no committed seeds) + v1.8 fuzz_x509_chain (BE-u16-length-prefixed DER blobs -> from_der each -> verify_chain + verify_pair over chain/anchor splittings; no-panic; seed = the 4 gmssl chain fixtures length-prefixed). SM4 targets carve key/iv/nonce/aad/tag via FRONT-consuming arbitrary::Unstructured (so seeds are plain concatenations; pinned to arbitrary 1.4.2 order). sm2_decrypt/verify use a fixed test key via OnceLock.
   seeds/<target>/           # committed curated valid seeds (from a one-time generator using gmcrypto-core's encode/sign/encrypt). corpus/, target/, artifacts/ are gitignored.
   README.md                 # build/run/repro runbook + seed-regen recipe
 

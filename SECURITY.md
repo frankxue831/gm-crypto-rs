@@ -171,6 +171,20 @@ SM2 signature API uses. The **v1.4 C FFI projection** of that surface
 (`gmcrypto_x509_certificate_*`) inherits the same rationale doubled: a thin
 shim over a public-inputs-only core.
 
+**The v1.8 chain / certificate-pair verification (`x509::verify_chain`,
+`tlcp::chain::verify_pair`) also has NO dudect target** — the v1.3 rationale
+extends verbatim. Certificates, trust anchors, and the comparison time are
+all public; each chain edge is the same public `verify_with_id`; the
+keyUsage / basicConstraints reads and the Name byte-equality comparisons are
+over public certificate bytes. No secret flows on the path, so there is
+nothing secret-dependent to gate. The single `bool` return (never a reason)
+is the **chain-rejection-oracle** defense, the same failure-mode-invariant
+discipline the rest of the SDK follows — a caller / TLS stack must not learn
+*why* a chain was rejected. Endpoint identity binding (the TLCP equivalent of
+hostname verification) is **out of scope and permanently the caller's**:
+`verify_pair == true` means the pair is CA-issued and role-correct, never
+"this is the peer I dialed".
+
 **Cfg-gated on `sm2-key-exchange` (1):**
 
 - `ct_sm2_key_exchange` — the full SM2 key-exchange initiator side

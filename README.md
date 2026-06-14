@@ -153,6 +153,14 @@ assert!(cert.verify_signature(&issuer_public_key));
 let _validity = (cert.not_before(), cert.not_after()); // exposed; no clock
 ```
 
+v1.8 adds a deliberately narrow chain layer: `x509::verify_chain` walks a
+caller-ordered chain to a trusted anchor (per-edge signature, keyUsage /
+basicConstraints, optional comparison time), and `tlcp::chain::verify_pair`
+(with `tlcp` + `x509`) verifies a TLCP [sign, enc] double-cert pair. Both
+return a single `bool` and make **structural** trust decisions only —
+**endpoint identity binding stays the caller's, permanently** (a `true` is
+never "this is the peer I dialed").
+
 The same surfaces are reachable from C / C++ / Python / Go / Zig through
 `gmcrypto-c` — see [`crates/gmcrypto-c/README.md`](crates/gmcrypto-c/README.md)
 and the doc-only examples under
@@ -177,8 +185,8 @@ Three crates, released together at one lockstep version:
 | `sm4-aead` | SM4-GCM + SM4-CCM single-shot AEAD, incremental-input buffered GCM (pulls `gmcrypto-simd` for GHASH). |
 | `sm4-xts` | SM4-XTS (GB/T 17964-2021, **not** IEEE 1619): single-shot + in-place multi-sector disk helpers. Confidentiality only. |
 | `sm2-key-exchange` | GM/T 0003.3 key agreement (typestate role state-machines): confirmed flow by default + the standard-permitted no-confirmation completers (v1.6). |
-| `x509` | X.509-with-SM2 leaf certificate parse + signature verify. **No trust decisions.** |
-| `tlcp` | TLCP (GB/T 38636-2020) crypto toolkit: key schedule (P_SM3 PRF, master secret, key block, Finished) + **record protection** (SM4-CBC Lucky13-hardened deprotect; SM4-GCM record with `sm4-aead`). **Not a protocol implementation.** |
+| `x509` | X.509-with-SM2 leaf parse + signature verify; v1.8 adds linear `verify_chain` + keyUsage/basicConstraints readers. **Structural trust only — NOT endpoint authentication.** |
+| `tlcp` | TLCP (GB/T 38636-2020) crypto toolkit: key schedule (P_SM3 PRF, master secret, key block, Finished) + **record protection** (SM4-CBC Lucky13-hardened deprotect; SM4-GCM record with `sm4-aead`) + **certificate-pair verification** (`tlcp::chain::verify_pair`, with `x509`). **Not a protocol implementation.** |
 | `sm4-bitsliced` | Table-less, gate-only SM4 S-box (constant-time by construction; byte-identical output). |
 | `sm4-bitsliced-simd` | AVX2 (x86_64) / NEON (aarch64) packed bitsliced SM4 batches; runtime detection, scalar fallback. |
 | `digest-traits` / `cipher-traits` | RustCrypto trait fit (`digest 0.11` / `cipher 0.5`) for `Sm3` / `HmacSm3` / `Sm4Cipher`. |
@@ -187,8 +195,8 @@ Three crates, released together at one lockstep version:
 ## Stability & SemVer
 
 The line graduated to **1.0 (stable)** with the **1.0.0** release; the current release is
-**1.7.0** (TLCP record protection). crates.io history
-goes **0.16.0 → 1.0.0 → 1.0.1 → 1.1.0 → 1.2.0 → 1.3.0 → 1.4.0 → 1.6.0 → 1.7.0**, skipping 0.17.0–0.23.0
+**1.8.0** (TLCP certificate-pair / chain verification). crates.io history
+goes **0.16.0 → 1.0.0 → 1.0.1 → 1.1.0 → 1.2.0 → 1.3.0 → 1.4.0 → 1.6.0 → 1.7.0 → 1.8.0**, skipping 0.17.0–0.23.0
 and 1.5.0 (those were non-publishing milestones — the 0.x run was the assurance +
 API-finalization arc that shipped together in `1.0.0`; 1.5 was the TLCP-decomposition
 design cycle, [`docs/tlcp-decomposition.md`](docs/tlcp-decomposition.md)). Every post-1.0 release has been additive (SemVer-checked);
@@ -204,7 +212,7 @@ see [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md).
 **From 1.0, SemVer is enforced**: breaking changes to the covered surface require a
 major bump, and `cargo-semver-checks` runs as the forward breaking-change gate in
 CI (the three crates always release together at one lockstep version, with
-intra-workspace deps pinned exactly — `=1.7.0`). The runtime wire output (SM2
+intra-workspace deps pinned exactly — `=1.8.0`). The runtime wire output (SM2
 signatures / ciphertexts, SM4 mode bytes) is byte-identical to 0.16.0.
 
 - **What's covered by SemVer:** the public Rust API of `gmcrypto-core` (the

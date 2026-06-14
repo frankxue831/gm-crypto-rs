@@ -1,17 +1,19 @@
 //! X.509-with-SM2: leaf certificate parse + SM2-with-SM3 signature verify
 //! (v1.3; GM/T 0015 profile over the RFC 5280 structure).
 //!
-//! **This module makes NO trust decisions.** [`Certificate::from_der`]
-//! tells you what a certificate *says*; `verify_signature` tells you whether
-//! its SM2-with-SM3 signature over those exact wire bytes verifies against a
-//! caller-supplied issuer public key — and nothing more. There is:
+//! **Parsing and single-certificate verify make NO trust decisions.**
+//! [`Certificate::from_der`] tells you what a certificate *says*;
+//! `verify_signature` tells you whether its SM2-with-SM3 signature over those
+//! exact wire bytes verifies against a caller-supplied issuer public key — and
+//! nothing more. At the parse / single-verify layer there is:
 //!
 //! - **no chain building** and no trust-anchor concept;
 //! - **no time/validity decision** ([`X509Time`] values are exposed; this
 //!   library has no clock — comparing them to "now" is the caller's call);
-//! - **no extension interpretation** — extensions (including their
-//!   `critical` flags, `keyUsage`, `basicConstraints`) are shape-checked
-//!   and exposed raw, never evaluated;
+//! - **no extension interpretation at parse time** — `from_der` shape-checks
+//!   extensions and exposes them raw; *interpretation* of `keyUsage` /
+//!   `basicConstraints` happens only in [`verify_chain`] (below), never in
+//!   `from_der`;
 //! - **no hostname matching, no revocation (CRL/OCSP), no policy logic.**
 //!
 //! A `true` from `verify_signature` means exactly "this issuer key signed
