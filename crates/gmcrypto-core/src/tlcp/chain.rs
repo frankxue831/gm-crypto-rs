@@ -3,7 +3,7 @@
 //! The [signature, encryption] double-cert profile over the generic
 //! [`crate::x509::verify_chain`].
 //!
-//! **NOT endpoint authentication.** [`verify_pair`] returning `true` means
+//! **NOT endpoint authentication.** `verify_pair` returning `true` means
 //! the sign and enc chains each link to a caller-trusted anchor, each leaf is
 //! usable for its TLCP role (keyUsage), neither leaf is a CA, and the two
 //! leaves share one identity (non-empty byte-equal subject + the same issuing
