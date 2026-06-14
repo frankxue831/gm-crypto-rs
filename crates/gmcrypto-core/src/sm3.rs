@@ -176,8 +176,16 @@ const fn gg_high(x: u32, y: u32, z: u32) -> u32 {
     (x & y) | (!x & z)
 }
 
+/// SM3 compression function (one 64-byte block into the 8-word state).
+///
+/// **Not public API / not SemVer-covered.** Widened to `pub(crate)` in v1.7
+/// for the TLCP record-layer constant-compression-count deprotect MAC
+/// (`tlcp::record`), which equalizes the inner-hash compression count by
+/// running dummy compressions on a throwaway state — reusing this single
+/// audited loop rather than hand-writing a second one. Stays `pub(crate)` —
+/// unreachable from the public API surface.
 #[allow(clippy::many_single_char_names)]
-fn compress(state: &mut [u32; 8], block: &[u8; BLOCK_SIZE]) {
+pub(crate) fn compress(state: &mut [u32; 8], block: &[u8; BLOCK_SIZE]) {
     // Message expansion: W[0..16] from block, W[16..68] derived, W'[0..64] = W[j] XOR W[j+4].
     let mut w = [0u32; 68];
     for j in 0..16 {
