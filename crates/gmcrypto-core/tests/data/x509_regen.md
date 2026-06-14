@@ -47,3 +47,22 @@ Notes:
 - `x509_*_pub.der` are the SPKI (RFC 5280 SubjectPublicKeyInfo) DER of each
   party's public key — decoded in tests via `spki::decode` to obtain the
   expected `Sm2PublicKey` values.
+
+## v1.8 chain fixtures — `x509_chain_{root,int,sign,enc}.der`
+
+A 3-level chain (root CA → intermediate CA → [signature, encryption] leaf
+pair) for the v1.8 chain/pair KATs (`tests/x509_chain_kat.rs`,
+`tests/tlcp_chain_kat.rs`). The two leaves share **one subject DN**
+(`CN=gmtest.example`) — a real TLCP double-cert pair. Generated 2026-06-14
+with **GmSSL 3.1.1**; each edge `certverify`-checked before commit; the
+`reqsign` `-ca -path_len_constraint`, repeated `-key_usage`, and the
+identical leaf DN are the pieces the v1.3 self-signed-CA recipe lacked. All
+parties use the default SM2 ID. Full recipe + the `certparse`-confirmed
+keyUsage strings live in `docs/v1.8-kat-sourcing.md` §1. Throwaway keys are
+NOT committed; regeneration produces fresh keys, so the KAT asserts
+structural / verification / role / pair-binding properties, never key bytes.
+
+keyUsage (gmssl `certparse`, critical): sign leaf =
+`digitalSignature,nonRepudiation`; enc leaf =
+`keyEncipherment,dataEncipherment,keyAgreement`; root + intermediate =
+`keyCertSign,cRLSign` + `basicConstraints cA:true`.

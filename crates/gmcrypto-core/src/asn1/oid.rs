@@ -157,6 +157,23 @@ const ENCODED_SM4_CBC: [u8; LEN_SM4_CBC] = encode::<LEN_SM4_CBC>(ARCS_SM4_CBC);
 /// `sm4-cbc` sub-identifier bytes.
 pub const SM4_CBC: &[u8] = &ENCODED_SM4_CBC;
 
+/// `id-ce-keyUsage`: 2.5.29.15 (RFC 5280 §4.2.1.3). Used by the v1.8 X.509
+/// chain-verification keyUsage reader.
+const ARCS_KEY_USAGE: &[u32] = &[2, 5, 29, 15];
+const LEN_KEY_USAGE: usize = encoded_len(ARCS_KEY_USAGE);
+const ENCODED_KEY_USAGE: [u8; LEN_KEY_USAGE] = encode::<LEN_KEY_USAGE>(ARCS_KEY_USAGE);
+/// `keyUsage` sub-identifier bytes.
+pub const KEY_USAGE: &[u8] = &ENCODED_KEY_USAGE;
+
+/// `id-ce-basicConstraints`: 2.5.29.19 (RFC 5280 §4.2.1.9). Used by the v1.8
+/// X.509 chain-verification basicConstraints reader.
+const ARCS_BASIC_CONSTRAINTS: &[u32] = &[2, 5, 29, 19];
+const LEN_BASIC_CONSTRAINTS: usize = encoded_len(ARCS_BASIC_CONSTRAINTS);
+const ENCODED_BASIC_CONSTRAINTS: [u8; LEN_BASIC_CONSTRAINTS] =
+    encode::<LEN_BASIC_CONSTRAINTS>(ARCS_BASIC_CONSTRAINTS);
+/// `basicConstraints` sub-identifier bytes.
+pub const BASIC_CONSTRAINTS: &[u8] = &ENCODED_BASIC_CONSTRAINTS;
+
 #[cfg(test)]
 mod tests {
     use super::*;

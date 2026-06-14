@@ -263,5 +263,14 @@ test = false
 doc = false
 bench = false
 
+# v1.8 — X.509 chain + TLCP certificate-pair verification (no-panic on an
+# adversarial certificate set; chain/anchor splittings + time variants).
+[[bin]]
+name = "fuzz_x509_chain"
+path = "fuzz_targets/fuzz_x509_chain.rs"
+test = false
+doc = false
+bench = false
+
 # v0.14 — its own workspace so it is excluded from the parent.
 [workspace]

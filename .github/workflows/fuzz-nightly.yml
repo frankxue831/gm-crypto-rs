@@ -46,13 +46,14 @@ env:
   CARGO_FUZZ_VERSION: '0.13.1'
   # v0.20 — single source of truth for the target list, shared by the fuzz
   # sweep and the coverage job (`>-` folds the newlines into one space-
-  # separated string). 29 targets: 16 from v0.14 + the 2 v0.20 streaming-
+  # separated string). 30 targets: 16 from v0.14 + the 2 v0.20 streaming-
   # decryptor differentials + the 7 post-1.0 hardening targets (#98: SM3 /
   # HMAC-SM3 / C-ABI / CBC+GCM-encrypt; #99: CCM+XTS encrypt round-trips)
   # + v1.1's fuzz_sm2_kx (adversarial peer R_B/S_B bytes into the
   # key-exchange initiator's confirm) + v1.3's fuzz_x509 (certificate
   # decode + verify) + v1.7's fuzz_tlcp_{cbc,gcm}_deprotect (adversarial
-  # record bodies; the CBC one drives the Lucky13 deprotect).
+  # record bodies; the CBC one drives the Lucky13 deprotect) + v1.8's
+  # fuzz_x509_chain (chain + certificate-pair verification).
   # MUST list every [[bin]] in fuzz/Cargo.toml — a target missing here
   # still compiles (fuzz-build.yml builds all) but is silently never
   # fuzzed nor coverage-measured (the #98/#99 drift this note guards).
@@ -64,7 +65,7 @@ env:
     fuzz_sm4_cbc_streaming_decrypt fuzz_sm4_gcm_streaming_decrypt fuzz_sm2_kx
     fuzz_sm3 fuzz_hmac_sm3 fuzz_c_abi fuzz_sm4_cbc_encrypt
     fuzz_sm4_gcm_encrypt fuzz_sm4_ccm_encrypt fuzz_sm4_xts_encrypt fuzz_x509
-    fuzz_tlcp_cbc_deprotect fuzz_tlcp_gcm_deprotect
+    fuzz_tlcp_cbc_deprotect fuzz_tlcp_gcm_deprotect fuzz_x509_chain
 
 permissions:
   contents: read
