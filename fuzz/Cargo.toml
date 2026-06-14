@@ -27,7 +27,7 @@ rand_core = "0.10"
 # Q14.2/§2; v1.1 adds sm2-key-exchange for fuzz_sm2_kx).
 [dependencies.gmcrypto-core]
 path = "../crates/gmcrypto-core"
-features = ["sm4-aead", "sm4-xts", "sm2-key-exchange", "x509"]
+features = ["sm4-aead", "sm4-xts", "sm2-key-exchange", "x509", "tlcp"]
 
 # The C ABI shim, pulled in via its `rlib` crate-type so the `fuzz_c_abi`
 # target can drive the `extern "C"` entry points directly (raw pointers +
@@ -242,6 +242,23 @@ bench = false
 [[bin]]
 name = "fuzz_x509"
 path = "fuzz_targets/fuzz_x509.rs"
+test = false
+doc = false
+bench = false
+
+# v1.7 — TLCP record deprotect (no-panic / no-plaintext-on-failure invariant
+# on adversarial record bodies). CBC = the Lucky13-hardened path; GCM =
+# commit-on-verify.
+[[bin]]
+name = "fuzz_tlcp_cbc_deprotect"
+path = "fuzz_targets/fuzz_tlcp_cbc_deprotect.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_tlcp_gcm_deprotect"
+path = "fuzz_targets/fuzz_tlcp_gcm_deprotect.rs"
 test = false
 doc = false
 bench = false
