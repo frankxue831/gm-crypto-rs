@@ -3409,3 +3409,785 @@ fn x509_ffi_subject_key_handle_composes() {
     unsafe { gmcrypto_sm2_pubkey_free(key) };
     unsafe { gmcrypto_x509_certificate_free(cert) };
 }
+
+// ============================================================
+// TLCP toolkit (v1.9) — key schedule, no-confirm KX, record, chain/pair.
+// ============================================================
+
+mod tlcp_v1_9 {
+    use super::*;
+    use gmcrypto_c::{
+        gmcrypto_sm2_kx_initiator_derive_unconfirmed, gmcrypto_sm2_kx_initiator_new,
+        gmcrypto_sm2_kx_responder_new, gmcrypto_sm2_kx_responder_respond,
+        gmcrypto_sm2_kx_responder_respond_unconfirmed,
+        gmcrypto_sm2_kx_responder_respond_unconfirmed_with_rng, gmcrypto_tlcp_derive_key_block,
+        gmcrypto_tlcp_derive_master_secret, gmcrypto_tlcp_deprotect_cbc,
+        gmcrypto_tlcp_deprotect_gcm, gmcrypto_tlcp_finished_verify_data,
+        gmcrypto_tlcp_protect_cbc, gmcrypto_tlcp_protect_cbc_with_rng, gmcrypto_tlcp_protect_gcm,
+        gmcrypto_tlcp_record_keys_cbc_free, gmcrypto_tlcp_record_keys_cbc_new,
+        gmcrypto_tlcp_record_keys_gcm_free, gmcrypto_tlcp_record_keys_gcm_new,
+        gmcrypto_tlcp_verify_pair, gmcrypto_x509_certificate_basic_constraints,
+        gmcrypto_x509_certificate_key_usage, gmcrypto_x509_certificate_t, gmcrypto_x509_verify_chain,
+    };
+    use gmcrypto_core::tlcp::key_schedule::{self, TlcpRole};
+    use gmcrypto_core::tlcp::record::{self, RecordKeysCbc};
+
+    const ROOT: &[u8] = include_bytes!("../../gmcrypto-core/tests/data/x509_chain_root.der");
+    const INT: &[u8] = include_bytes!("../../gmcrypto-core/tests/data/x509_chain_int.der");
+    const SIGN: &[u8] = include_bytes!("../../gmcrypto-core/tests/data/x509_chain_sign.der");
+    const ENC: &[u8] = include_bytes!("../../gmcrypto-core/tests/data/x509_chain_enc.der");
+
+    // ----- key schedule -----
+
+    #[test]
+    fn key_schedule_matches_core() {
+        let pm = [0x11u8; 48];
+        let cr = [0x22u8; 32];
+        let sr = [0x33u8; 32];
+
+        // master secret
+        let mut ms = [0u8; 48];
+        assert_eq!(
+            unsafe {
+                gmcrypto_tlcp_derive_master_secret(
+                    pm.as_ptr(),
+                    cr.as_ptr(),
+                    sr.as_ptr(),
+                    ms.as_mut_ptr(),
+                )
+            },
+            GMCRYPTO_OK
+        );
+        let mut core_ms = [0u8; 48];
+        key_schedule::derive_master_secret(&pm, &cr, &sr, &mut core_ms);
+        assert_eq!(ms, core_ms);
+
+        // key block (128 for CBC, then 40 for GCM)
+        for len in [128usize, 40] {
+            let mut kb = vec![0u8; len];
+            assert_eq!(
+                unsafe {
+                    gmcrypto_tlcp_derive_key_block(
+                        ms.as_ptr(),
+                        cr.as_ptr(),
+                        sr.as_ptr(),
+                        kb.as_mut_ptr(),
+                        kb.len(),
+                    )
+                },
+                GMCRYPTO_OK
+            );
+            let mut core_kb = vec![0u8; len];
+            key_schedule::derive_key_block(&ms, &cr, &sr, &mut core_kb);
+            assert_eq!(kb, core_kb, "key block len {len}");
+        }
+
+        // Finished, both roles — and role-separation.
+        let th = [0x44u8; 32];
+        let mut client_vd = [0u8; 12];
+        let mut server_vd = [0u8; 12];
+        assert_eq!(
+            unsafe {
+                gmcrypto_tlcp_finished_verify_data(ms.as_ptr(), 0, th.as_ptr(), client_vd.as_mut_ptr())
+            },
+            GMCRYPTO_OK
+        );
+        assert_eq!(
+            unsafe {
+                gmcrypto_tlcp_finished_verify_data(ms.as_ptr(), 1, th.as_ptr(), server_vd.as_mut_ptr())
+            },
+            GMCRYPTO_OK
+        );
+        let mut core_client = [0u8; 12];
+        let mut core_server = [0u8; 12];
+        key_schedule::finished_verify_data(&ms, TlcpRole::Client, &th, &mut core_client);
+        key_schedule::finished_verify_data(&ms, TlcpRole::Server, &th, &mut core_server);
+        assert_eq!(client_vd, core_client);
+        assert_eq!(server_vd, core_server);
+        assert_ne!(client_vd, server_vd, "role separation");
+    }
+
+    #[test]
+    fn key_schedule_bad_role_and_null_rejected() {
+        let ms = [0u8; 48];
+        let th = [0u8; 32];
+        let mut vd = [0u8; 12];
+        // role = 2 is invalid.
+        assert_eq!(
+            unsafe { gmcrypto_tlcp_finished_verify_data(ms.as_ptr(), 2, th.as_ptr(), vd.as_mut_ptr()) },
+            GMCRYPTO_ERR
+        );
+        // NULL pre_master.
+        let mut out = [0u8; 48];
+        assert_eq!(
+            unsafe {
+                gmcrypto_tlcp_derive_master_secret(
+                    ptr::null(),
+                    th.as_ptr(),
+                    th.as_ptr(),
+                    out.as_mut_ptr(),
+                )
+            },
+            GMCRYPTO_ERR
+        );
+    }
+
+    // ----- no-confirmation SM2-KX -----
+
+    fn free_keys(
+        a_priv: *mut gmcrypto_sm2_privkey_t,
+        a_pub: *mut gmcrypto_sm2_pubkey_t,
+        b_priv: *mut gmcrypto_sm2_privkey_t,
+        b_pub: *mut gmcrypto_sm2_pubkey_t,
+    ) {
+        unsafe {
+            gmcrypto_sm2_privkey_free(a_priv);
+            gmcrypto_sm2_pubkey_free(a_pub);
+            gmcrypto_sm2_privkey_free(b_priv);
+            gmcrypto_sm2_pubkey_free(b_pub);
+        }
+    }
+
+    #[test]
+    fn kx_unconfirmed_ffi_handshake_agrees() {
+        let (a_priv, a_pub) = fresh_sm2_keys();
+        let (b_priv, b_pub) = fresh_sm2_keys();
+        let klen = 48usize;
+        let mut r_a = [0u8; 65];
+        let init = unsafe {
+            gmcrypto_sm2_kx_initiator_new(
+                a_priv,
+                b_pub,
+                ptr::null(),
+                0,
+                ptr::null(),
+                0,
+                klen,
+                r_a.as_mut_ptr(),
+            )
+        };
+        assert!(!init.is_null());
+        let resp = unsafe {
+            gmcrypto_sm2_kx_responder_new(b_priv, a_pub, ptr::null(), 0, ptr::null(), 0, klen)
+        };
+        assert!(!resp.is_null());
+
+        let mut r_b = [0u8; 65];
+        let mut key_b = vec![0u8; klen];
+        assert_eq!(
+            unsafe {
+                gmcrypto_sm2_kx_responder_respond_unconfirmed(
+                    resp,
+                    r_a.as_ptr(),
+                    r_b.as_mut_ptr(),
+                    key_b.as_mut_ptr(),
+                )
+            },
+            GMCRYPTO_OK
+        );
+        let mut key_a = vec![0u8; klen];
+        assert_eq!(
+            unsafe {
+                gmcrypto_sm2_kx_initiator_derive_unconfirmed(init, r_b.as_ptr(), key_a.as_mut_ptr())
+            },
+            GMCRYPTO_OK
+        );
+        assert_eq!(key_a, key_b, "unconfirmed completers agree through the ABI");
+        assert_ne!(key_a, vec![0u8; klen]);
+        // init + resp were consumed + freed by the completers.
+        free_keys(a_priv, a_pub, b_priv, b_pub);
+    }
+
+    #[test]
+    fn kx_unconfirmed_with_rng_path_agrees() {
+        let (a_priv, a_pub) = fresh_sm2_keys();
+        let (b_priv, b_pub) = fresh_sm2_keys();
+        let klen = 32usize;
+        let mut r_a = [0u8; 65];
+        let init = unsafe {
+            gmcrypto_sm2_kx_initiator_new(
+                a_priv,
+                b_pub,
+                ptr::null(),
+                0,
+                ptr::null(),
+                0,
+                klen,
+                r_a.as_mut_ptr(),
+            )
+        };
+        let resp = unsafe {
+            gmcrypto_sm2_kx_responder_new(b_priv, a_pub, ptr::null(), 0, ptr::null(), 0, klen)
+        };
+        // _with_rng draws the responder ephemeral from a byte pool.
+        let mut rng = ByteRng {
+            pool: vec![0x5cu8; 4096],
+            cursor: 0,
+        };
+        let mut r_b = [0u8; 65];
+        let mut key_b = vec![0u8; klen];
+        assert_eq!(
+            unsafe {
+                gmcrypto_sm2_kx_responder_respond_unconfirmed_with_rng(
+                    resp,
+                    r_a.as_ptr(),
+                    Some(byte_rng_callback),
+                    (&raw mut rng).cast::<core::ffi::c_void>(),
+                    r_b.as_mut_ptr(),
+                    key_b.as_mut_ptr(),
+                )
+            },
+            GMCRYPTO_OK
+        );
+        assert!(rng.cursor > 0, "callback used");
+        let mut key_a = vec![0u8; klen];
+        assert_eq!(
+            unsafe {
+                gmcrypto_sm2_kx_initiator_derive_unconfirmed(init, r_b.as_ptr(), key_a.as_mut_ptr())
+            },
+            GMCRYPTO_OK
+        );
+        assert_eq!(key_a, key_b);
+        free_keys(a_priv, a_pub, b_priv, b_pub);
+    }
+
+    #[test]
+    fn kx_unconfirmed_negatives() {
+        // NULL handles.
+        let mut out65 = [0u8; 65];
+        let mut key = [0u8; 48];
+        assert_eq!(
+            unsafe {
+                gmcrypto_sm2_kx_initiator_derive_unconfirmed(
+                    ptr::null_mut(),
+                    out65.as_ptr(),
+                    key.as_mut_ptr(),
+                )
+            },
+            GMCRYPTO_ERR
+        );
+        assert_eq!(
+            unsafe {
+                gmcrypto_sm2_kx_responder_respond_unconfirmed(
+                    ptr::null_mut(),
+                    out65.as_ptr(),
+                    out65.as_mut_ptr(),
+                    key.as_mut_ptr(),
+                )
+            },
+            GMCRYPTO_ERR
+        );
+
+        // A responder that already ran the CONFIRMED _respond is in Waiting,
+        // not Fresh — respond_unconfirmed must single-ERR (and free it).
+        let (a_priv, a_pub) = fresh_sm2_keys();
+        let (b_priv, b_pub) = fresh_sm2_keys();
+        let klen = 48usize;
+        let mut r_a = [0u8; 65];
+        let init = unsafe {
+            gmcrypto_sm2_kx_initiator_new(
+                a_priv,
+                b_pub,
+                ptr::null(),
+                0,
+                ptr::null(),
+                0,
+                klen,
+                r_a.as_mut_ptr(),
+            )
+        };
+        let resp = unsafe {
+            gmcrypto_sm2_kx_responder_new(b_priv, a_pub, ptr::null(), 0, ptr::null(), 0, klen)
+        };
+        let mut r_b = [0u8; 65];
+        let mut s_b = [0u8; 32];
+        assert_eq!(
+            unsafe {
+                gmcrypto_sm2_kx_responder_respond(
+                    resp,
+                    r_a.as_ptr(),
+                    r_b.as_mut_ptr(),
+                    s_b.as_mut_ptr(),
+                )
+            },
+            GMCRYPTO_OK
+        );
+        // Now Waiting → respond_unconfirmed rejects + frees.
+        let mut key_b = vec![0u8; klen];
+        assert_eq!(
+            unsafe {
+                gmcrypto_sm2_kx_responder_respond_unconfirmed(
+                    resp,
+                    r_a.as_ptr(),
+                    r_b.as_mut_ptr(),
+                    key_b.as_mut_ptr(),
+                )
+            },
+            GMCRYPTO_ERR
+        );
+        // init still live → abandon it.
+        unsafe { gmcrypto_c::gmcrypto_sm2_kx_initiator_free(init) };
+        free_keys(a_priv, a_pub, b_priv, b_pub);
+    }
+
+    // ----- record protection -----
+
+    fn cbc_carrier(
+        block: &[u8; 128],
+        role: core::ffi::c_int,
+    ) -> *mut gmcrypto_c::gmcrypto_tlcp_record_keys_cbc_t {
+        let k = unsafe { gmcrypto_tlcp_record_keys_cbc_new(role, block.as_ptr()) };
+        assert!(!k.is_null());
+        k
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn record_cbc_protect_round_trips_and_cross_checks_core() {
+        let block = [0x11u8; 128];
+        let keys = cbc_carrier(&block, 0);
+        let core_keys = RecordKeysCbc::from_key_block(TlcpRole::Client, &block);
+        let seq = 7u64;
+        let ctype = 23u8;
+        let version = [0x01u8, 0x01];
+        let pt = b"tlcp record over the C ABI";
+
+        // FFI protect (fixed IV via callback) → record core can deprotect.
+        let iv = [0xABu8; 16];
+        let mut rng = ByteRng {
+            pool: iv.to_vec(),
+            cursor: 0,
+        };
+        let mut out = vec![0u8; pt.len() + 16 + 32 + 32];
+        let mut out_len = 0usize;
+        assert_eq!(
+            unsafe {
+                gmcrypto_tlcp_protect_cbc_with_rng(
+                    keys,
+                    seq,
+                    ctype,
+                    version.as_ptr(),
+                    pt.as_ptr(),
+                    pt.len(),
+                    Some(byte_rng_callback),
+                    (&raw mut rng).cast::<core::ffi::c_void>(),
+                    out.as_mut_ptr(),
+                    out.len(),
+                    &mut out_len,
+                )
+            },
+            GMCRYPTO_OK
+        );
+        out.truncate(out_len);
+        assert_eq!(&out[..16], &iv, "explicit IV is the callback's bytes");
+        let core_pt = record::deprotect_cbc(&core_keys, seq, ctype, version, &out)
+            .expect("core deprotects the FFI record");
+        assert_eq!(core_pt, pt);
+
+        // FFI deprotect of the FFI record.
+        let mut back = vec![0u8; out.len()];
+        let mut back_len = 0usize;
+        assert_eq!(
+            unsafe {
+                gmcrypto_tlcp_deprotect_cbc(
+                    keys,
+                    seq,
+                    ctype,
+                    version.as_ptr(),
+                    out.as_ptr(),
+                    out.len(),
+                    back.as_mut_ptr(),
+                    back.len(),
+                    &mut back_len,
+                )
+            },
+            GMCRYPTO_OK
+        );
+        back.truncate(back_len);
+        assert_eq!(back, pt);
+
+        // A core-built record (SysRng IV) deprotects through the FFI too.
+        let core_rec = record::protect_cbc(&core_keys, seq, ctype, version, pt, &mut getrandom::SysRng)
+            .expect("core protect");
+        let mut back2 = vec![0u8; core_rec.len()];
+        let mut back2_len = 0usize;
+        assert_eq!(
+            unsafe {
+                gmcrypto_tlcp_deprotect_cbc(
+                    keys,
+                    seq,
+                    ctype,
+                    version.as_ptr(),
+                    core_rec.as_ptr(),
+                    core_rec.len(),
+                    back2.as_mut_ptr(),
+                    back2.len(),
+                    &mut back2_len,
+                )
+            },
+            GMCRYPTO_OK
+        );
+        back2.truncate(back2_len);
+        assert_eq!(back2, pt);
+
+        // The SysRng protect variant also round-trips through FFI deprotect.
+        let mut sys_rec = vec![0u8; pt.len() + 16 + 32 + 32];
+        let mut sys_len = 0usize;
+        assert_eq!(
+            unsafe {
+                gmcrypto_tlcp_protect_cbc(
+                    keys,
+                    seq,
+                    ctype,
+                    version.as_ptr(),
+                    pt.as_ptr(),
+                    pt.len(),
+                    sys_rec.as_mut_ptr(),
+                    sys_rec.len(),
+                    &mut sys_len,
+                )
+            },
+            GMCRYPTO_OK
+        );
+        sys_rec.truncate(sys_len);
+        let core_back = record::deprotect_cbc(&core_keys, seq, ctype, version, &sys_rec)
+            .expect("core deprotects the SysRng FFI record");
+        assert_eq!(core_back, pt);
+
+        unsafe { gmcrypto_tlcp_record_keys_cbc_free(keys) };
+    }
+
+    #[test]
+    fn record_cbc_deprotect_bad_pad_and_bad_mac_both_single_err() {
+        let block = [0x22u8; 128];
+        let keys = cbc_carrier(&block, 0);
+        let core_keys = RecordKeysCbc::from_key_block(TlcpRole::Client, &block);
+        let seq = 5u64;
+        let ctype = 23u8;
+        let version = [0x01u8, 0x01];
+        let pt = b"oracle indistinguishability";
+        let record = record::protect_cbc(&core_keys, seq, ctype, version, pt, &mut getrandom::SysRng)
+            .expect("protect");
+
+        // (a) bad-pad leg: flip the LAST ciphertext byte → corrupt final block.
+        let mut bad_pad = record.clone();
+        *bad_pad.last_mut().unwrap() ^= 0x01;
+
+        // (b) valid-pad-bad-MAC leg: deprotect with a DIFFERENT seq. The body
+        // decrypts to the identical valid padding; only the MAC-over-header
+        // (which includes seq) mismatches — the robust valid-pad construction.
+        let bad_mac = record; // deprotected below with seq + 1.
+
+        let mut out = vec![0xCCu8; 4096];
+        for (rec, dseq, label) in [
+            (&bad_pad, seq, "bad-pad"),
+            (&bad_mac, seq + 1, "valid-pad-bad-MAC"),
+        ] {
+            let sentinel = 0xDEAD_BEEFusize;
+            let mut out_len = sentinel;
+            let before = out.clone();
+            let rc = unsafe {
+                gmcrypto_tlcp_deprotect_cbc(
+                    keys,
+                    dseq,
+                    ctype,
+                    version.as_ptr(),
+                    rec.as_ptr(),
+                    rec.len(),
+                    out.as_mut_ptr(),
+                    out.len(),
+                    &mut out_len,
+                )
+            };
+            assert_eq!(rc, GMCRYPTO_ERR, "{label} → single ERR");
+            assert_eq!(out_len, sentinel, "{label}: out_actual_len untouched (not zeroed)");
+            assert_eq!(out, before, "{label}: output buffer untouched (no plaintext leaked)");
+        }
+        unsafe { gmcrypto_tlcp_record_keys_cbc_free(keys) };
+    }
+
+    #[test]
+    fn record_gcm_round_trip_and_tamper() {
+        let block = [0x33u8; 40];
+        let keys = unsafe { gmcrypto_tlcp_record_keys_gcm_new(0, block.as_ptr()) };
+        assert!(!keys.is_null());
+        let seq = 9u64;
+        let ctype = 23u8;
+        let version = [0x01u8, 0x01];
+        let pt = b"gcm record via the C ABI";
+        let mut rec = vec![0u8; pt.len() + 8 + 16];
+        let mut rec_len = 0usize;
+        assert_eq!(
+            unsafe {
+                gmcrypto_tlcp_protect_gcm(
+                    keys,
+                    seq,
+                    ctype,
+                    version.as_ptr(),
+                    pt.as_ptr(),
+                    pt.len(),
+                    rec.as_mut_ptr(),
+                    rec.len(),
+                    &mut rec_len,
+                )
+            },
+            GMCRYPTO_OK
+        );
+        rec.truncate(rec_len);
+
+        let mut back = vec![0u8; rec.len()];
+        let mut back_len = 0usize;
+        assert_eq!(
+            unsafe {
+                gmcrypto_tlcp_deprotect_gcm(
+                    keys,
+                    seq,
+                    ctype,
+                    version.as_ptr(),
+                    rec.as_ptr(),
+                    rec.len(),
+                    back.as_mut_ptr(),
+                    back.len(),
+                    &mut back_len,
+                )
+            },
+            GMCRYPTO_OK
+        );
+        back.truncate(back_len);
+        assert_eq!(back, pt);
+
+        // Tamper the tag → single ERR.
+        let mut tampered = rec.clone();
+        *tampered.last_mut().unwrap() ^= 0x01;
+        let mut out = vec![0u8; rec.len()];
+        let mut out_len = 0usize;
+        assert_eq!(
+            unsafe {
+                gmcrypto_tlcp_deprotect_gcm(
+                    keys,
+                    seq,
+                    ctype,
+                    version.as_ptr(),
+                    tampered.as_ptr(),
+                    tampered.len(),
+                    out.as_mut_ptr(),
+                    out.len(),
+                    &mut out_len,
+                )
+            },
+            GMCRYPTO_ERR
+        );
+        unsafe { gmcrypto_tlcp_record_keys_gcm_free(keys) };
+    }
+
+    #[test]
+    fn record_keys_new_rejects_bad_role_and_null() {
+        let block = [0u8; 128];
+        assert!(unsafe { gmcrypto_tlcp_record_keys_cbc_new(2, block.as_ptr()) }.is_null());
+        assert!(unsafe { gmcrypto_tlcp_record_keys_cbc_new(0, ptr::null()) }.is_null());
+        // free(NULL) is safe.
+        unsafe { gmcrypto_tlcp_record_keys_cbc_free(ptr::null_mut()) };
+        unsafe { gmcrypto_tlcp_record_keys_gcm_free(ptr::null_mut()) };
+    }
+
+    // ----- chain / pair verification -----
+
+    fn handle(der: &[u8]) -> *mut gmcrypto_x509_certificate_t {
+        x509_parse(der)
+    }
+
+    #[test]
+    fn verify_chain_through_abi_matches_core() {
+        let sign = handle(SIGN);
+        let int = handle(INT);
+        let root = handle(ROOT);
+        let chain = [sign.cast_const(), int.cast_const()];
+        let anchors = [root.cast_const()];
+
+        let mut verified = -1;
+        assert_eq!(
+            unsafe {
+                gmcrypto_x509_verify_chain(
+                    chain.as_ptr(),
+                    chain.len(),
+                    anchors.as_ptr(),
+                    anchors.len(),
+                    ptr::null(),
+                    &mut verified,
+                )
+            },
+            GMCRYPTO_OK
+        );
+        assert_eq!(verified, 1);
+        // == core
+        assert!(gmcrypto_core::x509::verify_chain(
+            &[
+                Certificate::from_der(SIGN).unwrap(),
+                Certificate::from_der(INT).unwrap(),
+            ],
+            &[Certificate::from_der(ROOT).unwrap()],
+            None,
+        ));
+
+        // Wrong anchor (the intermediate is not its own anchor) → verdict 0.
+        let mut v2 = -1;
+        let bad_anchor = [int.cast_const()];
+        assert_eq!(
+            unsafe {
+                gmcrypto_x509_verify_chain(
+                    chain.as_ptr(),
+                    chain.len(),
+                    bad_anchor.as_ptr(),
+                    bad_anchor.len(),
+                    ptr::null(),
+                    &mut v2,
+                )
+            },
+            GMCRYPTO_OK
+        );
+        assert_eq!(v2, 0, "over-depth/bad-chain is a verdict, not an error");
+
+        for h in [sign, int, root] {
+            unsafe { gmcrypto_x509_certificate_free(h) };
+        }
+    }
+
+    #[test]
+    fn verify_chain_null_semantics() {
+        let sign = handle(SIGN);
+        let chain = [sign.cast_const()];
+        // NULL out_verified → ERR.
+        assert_eq!(
+            unsafe {
+                gmcrypto_x509_verify_chain(chain.as_ptr(), 1, chain.as_ptr(), 1, ptr::null(), ptr::null_mut())
+            },
+            GMCRYPTO_ERR
+        );
+        // (NULL, 2) → ERR, out_verified untouched.
+        let mut verified = 7;
+        assert_eq!(
+            unsafe {
+                gmcrypto_x509_verify_chain(ptr::null(), 2, chain.as_ptr(), 1, ptr::null(), &mut verified)
+            },
+            GMCRYPTO_ERR
+        );
+        assert_eq!(verified, 7, "untouched on ERR");
+        // A NULL element in an n>0 array → ERR.
+        let with_null = [sign.cast_const(), ptr::null()];
+        assert_eq!(
+            unsafe {
+                gmcrypto_x509_verify_chain(
+                    with_null.as_ptr(),
+                    2,
+                    chain.as_ptr(),
+                    1,
+                    ptr::null(),
+                    &mut verified,
+                )
+            },
+            GMCRYPTO_ERR
+        );
+        // (NULL, 0) chain → OK + verdict 0 (empty chain does not verify).
+        verified = 7;
+        assert_eq!(
+            unsafe {
+                gmcrypto_x509_verify_chain(ptr::null(), 0, chain.as_ptr(), 1, ptr::null(), &mut verified)
+            },
+            GMCRYPTO_OK
+        );
+        assert_eq!(verified, 0);
+        unsafe { gmcrypto_x509_certificate_free(sign) };
+    }
+
+    #[test]
+    fn verify_pair_through_abi() {
+        let sign = handle(SIGN);
+        let enc = handle(ENC);
+        let int = handle(INT);
+        let root = handle(ROOT);
+        let sign_chain = [sign.cast_const(), int.cast_const()];
+        let enc_chain = [enc.cast_const(), int.cast_const()];
+        let anchors = [root.cast_const()];
+
+        let mut verified = -1;
+        assert_eq!(
+            unsafe {
+                gmcrypto_tlcp_verify_pair(
+                    sign_chain.as_ptr(),
+                    sign_chain.len(),
+                    enc_chain.as_ptr(),
+                    enc_chain.len(),
+                    anchors.as_ptr(),
+                    anchors.len(),
+                    ptr::null(),
+                    &mut verified,
+                )
+            },
+            GMCRYPTO_OK
+        );
+        assert_eq!(verified, 1, "real TLCP pair verifies end-to-end");
+
+        // Swapping the roles (enc cert as the sign leaf) breaks role keyUsage.
+        let mut v2 = -1;
+        let swapped_sign = [enc.cast_const(), int.cast_const()];
+        assert_eq!(
+            unsafe {
+                gmcrypto_tlcp_verify_pair(
+                    swapped_sign.as_ptr(),
+                    swapped_sign.len(),
+                    enc_chain.as_ptr(),
+                    enc_chain.len(),
+                    anchors.as_ptr(),
+                    anchors.len(),
+                    ptr::null(),
+                    &mut v2,
+                )
+            },
+            GMCRYPTO_OK
+        );
+        assert_eq!(v2, 0, "enc cert lacks digitalSignature → not a valid sign leaf");
+
+        for h in [sign, enc, int, root] {
+            unsafe { gmcrypto_x509_certificate_free(h) };
+        }
+    }
+
+    #[test]
+    fn readers_match_core() {
+        let sign = handle(SIGN);
+        let int = handle(INT);
+
+        let mut present = -1;
+        let mut bits = 0u16;
+        assert_eq!(
+            unsafe { gmcrypto_x509_certificate_key_usage(sign, &mut present, &mut bits) },
+            GMCRYPTO_OK
+        );
+        assert_eq!(present, 1);
+        let core_ku = Certificate::from_der(SIGN).unwrap().key_usage().unwrap();
+        assert_eq!(bits, core_ku.bits());
+        assert!(bits & 1 == 1, "digitalSignature bit set");
+
+        let mut p2 = -1;
+        let mut is_ca = -1;
+        let mut has_pl = -1;
+        let mut pl = 0u32;
+        assert_eq!(
+            unsafe {
+                gmcrypto_x509_certificate_basic_constraints(int, &mut p2, &mut is_ca, &mut has_pl, &mut pl)
+            },
+            GMCRYPTO_OK
+        );
+        assert_eq!(p2, 1);
+        assert_eq!(is_ca, 1, "intermediate is a CA");
+
+        // NULL → ERR.
+        assert_eq!(
+            unsafe { gmcrypto_x509_certificate_key_usage(ptr::null(), &mut present, &mut bits) },
+            GMCRYPTO_ERR
+        );
+
+        unsafe { gmcrypto_x509_certificate_free(sign) };
+        unsafe { gmcrypto_x509_certificate_free(int) };
+    }
+}
