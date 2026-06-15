@@ -100,7 +100,8 @@ pub fn verify_pair_refs(
     {
         return false;
     }
-    verify_chain_refs(sign_chain, anchors, at_time) && verify_chain_refs(enc_chain, anchors, at_time)
+    verify_chain_refs(sign_chain, anchors, at_time)
+        && verify_chain_refs(enc_chain, anchors, at_time)
 }
 
 #[cfg(test)]

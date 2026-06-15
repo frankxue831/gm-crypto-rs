@@ -3568,8 +3568,9 @@ pub const GMCRYPTO_TLCP_RECORD_VERSION_MAJOR: u8 = 0x01;
 pub const GMCRYPTO_TLCP_RECORD_VERSION_MINOR: u8 = 0x01;
 
 // Drift guard: the ABI constants must equal the core anchors.
-const _: () =
-    assert!(GMCRYPTO_TLCP_MASTER_SECRET_LEN == gmcrypto_core::tlcp::key_schedule::MASTER_SECRET_LEN);
+const _: () = assert!(
+    GMCRYPTO_TLCP_MASTER_SECRET_LEN == gmcrypto_core::tlcp::key_schedule::MASTER_SECRET_LEN
+);
 const _: () = assert!(
     GMCRYPTO_TLCP_FINISHED_VERIFY_DATA_LEN
         == gmcrypto_core::tlcp::key_schedule::FINISHED_VERIFY_DATA_LEN
@@ -3700,7 +3701,12 @@ pub unsafe extern "C" fn gmcrypto_tlcp_finished_verify_data(
         let Ok(out_arr): Result<&mut [u8; 12], _> = out_dst.try_into() else {
             return GMCRYPTO_ERR;
         };
-        finished_verify_data(&kx_to_array::<48>(ms), role, &kx_to_array::<32>(th), out_arr);
+        finished_verify_data(
+            &kx_to_array::<48>(ms),
+            role,
+            &kx_to_array::<32>(th),
+            out_arr,
+        );
         GMCRYPTO_OK
     })
 }
@@ -4289,9 +4295,11 @@ pub unsafe extern "C" fn gmcrypto_x509_certificate_key_usage(
     out_bits: *mut u16,
 ) -> c_int {
     ffi_guard(|| {
-        let (Some(cert), false, false) =
-            (unsafe { cert.as_ref() }, out_present.is_null(), out_bits.is_null())
-        else {
+        let (Some(cert), false, false) = (
+            unsafe { cert.as_ref() },
+            out_present.is_null(),
+            out_bits.is_null(),
+        ) else {
             return GMCRYPTO_ERR;
         };
         let (present, bits) = match cert.inner.key_usage() {

@@ -3420,14 +3420,15 @@ mod tlcp_v1_9 {
         gmcrypto_sm2_kx_initiator_derive_unconfirmed, gmcrypto_sm2_kx_initiator_new,
         gmcrypto_sm2_kx_responder_new, gmcrypto_sm2_kx_responder_respond,
         gmcrypto_sm2_kx_responder_respond_unconfirmed,
-        gmcrypto_sm2_kx_responder_respond_unconfirmed_with_rng, gmcrypto_tlcp_derive_key_block,
-        gmcrypto_tlcp_derive_master_secret, gmcrypto_tlcp_deprotect_cbc,
-        gmcrypto_tlcp_deprotect_gcm, gmcrypto_tlcp_finished_verify_data,
+        gmcrypto_sm2_kx_responder_respond_unconfirmed_with_rng, gmcrypto_tlcp_deprotect_cbc,
+        gmcrypto_tlcp_deprotect_gcm, gmcrypto_tlcp_derive_key_block,
+        gmcrypto_tlcp_derive_master_secret, gmcrypto_tlcp_finished_verify_data,
         gmcrypto_tlcp_protect_cbc, gmcrypto_tlcp_protect_cbc_with_rng, gmcrypto_tlcp_protect_gcm,
         gmcrypto_tlcp_record_keys_cbc_free, gmcrypto_tlcp_record_keys_cbc_new,
         gmcrypto_tlcp_record_keys_gcm_free, gmcrypto_tlcp_record_keys_gcm_new,
         gmcrypto_tlcp_verify_pair, gmcrypto_x509_certificate_basic_constraints,
-        gmcrypto_x509_certificate_key_usage, gmcrypto_x509_certificate_t, gmcrypto_x509_verify_chain,
+        gmcrypto_x509_certificate_key_usage, gmcrypto_x509_certificate_t,
+        gmcrypto_x509_verify_chain,
     };
     use gmcrypto_core::tlcp::key_schedule::{self, TlcpRole};
     use gmcrypto_core::tlcp::record::{self, RecordKeysCbc};
@@ -3488,13 +3489,23 @@ mod tlcp_v1_9 {
         let mut server_vd = [0u8; 12];
         assert_eq!(
             unsafe {
-                gmcrypto_tlcp_finished_verify_data(ms.as_ptr(), 0, th.as_ptr(), client_vd.as_mut_ptr())
+                gmcrypto_tlcp_finished_verify_data(
+                    ms.as_ptr(),
+                    0,
+                    th.as_ptr(),
+                    client_vd.as_mut_ptr(),
+                )
             },
             GMCRYPTO_OK
         );
         assert_eq!(
             unsafe {
-                gmcrypto_tlcp_finished_verify_data(ms.as_ptr(), 1, th.as_ptr(), server_vd.as_mut_ptr())
+                gmcrypto_tlcp_finished_verify_data(
+                    ms.as_ptr(),
+                    1,
+                    th.as_ptr(),
+                    server_vd.as_mut_ptr(),
+                )
             },
             GMCRYPTO_OK
         );
@@ -3514,7 +3525,9 @@ mod tlcp_v1_9 {
         let mut vd = [0u8; 12];
         // role = 2 is invalid.
         assert_eq!(
-            unsafe { gmcrypto_tlcp_finished_verify_data(ms.as_ptr(), 2, th.as_ptr(), vd.as_mut_ptr()) },
+            unsafe {
+                gmcrypto_tlcp_finished_verify_data(ms.as_ptr(), 2, th.as_ptr(), vd.as_mut_ptr())
+            },
             GMCRYPTO_ERR
         );
         // NULL pre_master.
@@ -3807,8 +3820,9 @@ mod tlcp_v1_9 {
         assert_eq!(back, pt);
 
         // A core-built record (SysRng IV) deprotects through the FFI too.
-        let core_rec = record::protect_cbc(&core_keys, seq, ctype, version, pt, &mut getrandom::SysRng)
-            .expect("core protect");
+        let core_rec =
+            record::protect_cbc(&core_keys, seq, ctype, version, pt, &mut getrandom::SysRng)
+                .expect("core protect");
         let mut back2 = vec![0u8; core_rec.len()];
         let mut back2_len = 0usize;
         assert_eq!(
@@ -3866,8 +3880,9 @@ mod tlcp_v1_9 {
         let ctype = 23u8;
         let version = [0x01u8, 0x01];
         let pt = b"oracle indistinguishability";
-        let record = record::protect_cbc(&core_keys, seq, ctype, version, pt, &mut getrandom::SysRng)
-            .expect("protect");
+        let record =
+            record::protect_cbc(&core_keys, seq, ctype, version, pt, &mut getrandom::SysRng)
+                .expect("protect");
 
         // (a) bad-pad leg: flip the LAST ciphertext byte → corrupt final block.
         let mut bad_pad = record.clone();
@@ -3900,8 +3915,14 @@ mod tlcp_v1_9 {
                 )
             };
             assert_eq!(rc, GMCRYPTO_ERR, "{label} → single ERR");
-            assert_eq!(out_len, sentinel, "{label}: out_actual_len untouched (not zeroed)");
-            assert_eq!(out, before, "{label}: output buffer untouched (no plaintext leaked)");
+            assert_eq!(
+                out_len, sentinel,
+                "{label}: out_actual_len untouched (not zeroed)"
+            );
+            assert_eq!(
+                out, before,
+                "{label}: output buffer untouched (no plaintext leaked)"
+            );
         }
         unsafe { gmcrypto_tlcp_record_keys_cbc_free(keys) };
     }
@@ -4059,7 +4080,14 @@ mod tlcp_v1_9 {
         // NULL out_verified → ERR.
         assert_eq!(
             unsafe {
-                gmcrypto_x509_verify_chain(chain.as_ptr(), 1, chain.as_ptr(), 1, ptr::null(), ptr::null_mut())
+                gmcrypto_x509_verify_chain(
+                    chain.as_ptr(),
+                    1,
+                    chain.as_ptr(),
+                    1,
+                    ptr::null(),
+                    ptr::null_mut(),
+                )
             },
             GMCRYPTO_ERR
         );
@@ -4067,7 +4095,14 @@ mod tlcp_v1_9 {
         let mut verified = 7;
         assert_eq!(
             unsafe {
-                gmcrypto_x509_verify_chain(ptr::null(), 2, chain.as_ptr(), 1, ptr::null(), &mut verified)
+                gmcrypto_x509_verify_chain(
+                    ptr::null(),
+                    2,
+                    chain.as_ptr(),
+                    1,
+                    ptr::null(),
+                    &mut verified,
+                )
             },
             GMCRYPTO_ERR
         );
@@ -4091,7 +4126,14 @@ mod tlcp_v1_9 {
         verified = 7;
         assert_eq!(
             unsafe {
-                gmcrypto_x509_verify_chain(ptr::null(), 0, chain.as_ptr(), 1, ptr::null(), &mut verified)
+                gmcrypto_x509_verify_chain(
+                    ptr::null(),
+                    0,
+                    chain.as_ptr(),
+                    1,
+                    ptr::null(),
+                    &mut verified,
+                )
             },
             GMCRYPTO_OK
         );
@@ -4145,7 +4187,10 @@ mod tlcp_v1_9 {
             },
             GMCRYPTO_OK
         );
-        assert_eq!(v2, 0, "enc cert lacks digitalSignature → not a valid sign leaf");
+        assert_eq!(
+            v2, 0,
+            "enc cert lacks digitalSignature → not a valid sign leaf"
+        );
 
         for h in [sign, enc, int, root] {
             unsafe { gmcrypto_x509_certificate_free(h) };
@@ -4174,7 +4219,13 @@ mod tlcp_v1_9 {
         let mut pl = 0u32;
         assert_eq!(
             unsafe {
-                gmcrypto_x509_certificate_basic_constraints(int, &mut p2, &mut is_ca, &mut has_pl, &mut pl)
+                gmcrypto_x509_certificate_basic_constraints(
+                    int,
+                    &mut p2,
+                    &mut is_ca,
+                    &mut has_pl,
+                    &mut pl,
+                )
             },
             GMCRYPTO_OK
         );
