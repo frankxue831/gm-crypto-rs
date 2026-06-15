@@ -5,7 +5,7 @@ cryptography (GB/T 32905 / 32918 / 32907 / GM/T 0009). SM2 sign / verify,
 public-key encrypt / decrypt, key exchange (GM/T 0003.3), X.509-with-SM2
 leaf certificate parse + signature verify, the TLCP (GB/T 38636) key
 schedule; SM4-CBC / CTR / GCM / CCM / XTS (single-shot and streaming);
-HMAC-SM3, PBKDF2-HMAC-SM3; plus a complete C ABI (`gmcrypto-c`, 85 entry
+HMAC-SM3, PBKDF2-HMAC-SM3; plus a complete C ABI (`gmcrypto-c`, 104 entry
 points) — all secret-touching paths guarded by an in-CI `dudect-bencher`
 detectable-leak regression harness.
 
@@ -175,7 +175,7 @@ Three crates, released together at one lockstep version:
 | Crate | Role |
 |---|---|
 | [`gmcrypto-core`](https://crates.io/crates/gmcrypto-core) | The `no_std + alloc` crypto core (`unsafe_code = "forbid"`). The Rust API. |
-| [`gmcrypto-c`](https://crates.io/crates/gmcrypto-c) | C ABI shim (cdylib + staticlib): 85 entry points, committed [`gmcrypto.h`](crates/gmcrypto-c/include/gmcrypto.h) drift-checked in CI. **Always-on**: a default build exports the full surface. |
+| [`gmcrypto-c`](https://crates.io/crates/gmcrypto-c) | C ABI shim (cdylib + staticlib): 104 entry points, committed [`gmcrypto.h`](crates/gmcrypto-c/include/gmcrypto.h) drift-checked in CI. **Always-on**: a default build exports the full surface. |
 | [`gmcrypto-simd`](https://crates.io/crates/gmcrypto-simd) | Internal AVX2/NEON/CLMUL/PMULL acceleration backend. **No stable Rust API** — use `gmcrypto-core`. |
 
 `gmcrypto-core` features (`default = []`; all additive, all opt-in):
@@ -195,8 +195,8 @@ Three crates, released together at one lockstep version:
 ## Stability & SemVer
 
 The line graduated to **1.0 (stable)** with the **1.0.0** release; the current release is
-**1.8.0** (TLCP certificate-pair / chain verification). crates.io history
-goes **0.16.0 → 1.0.0 → 1.0.1 → 1.1.0 → 1.2.0 → 1.3.0 → 1.4.0 → 1.6.0 → 1.7.0 → 1.8.0**, skipping 0.17.0–0.23.0
+**1.9.0** (TLCP toolkit C FFI — the cadence cycle closing the TLCP arc). crates.io history
+goes **0.16.0 → 1.0.0 → 1.0.1 → 1.1.0 → 1.2.0 → 1.3.0 → 1.4.0 → 1.6.0 → 1.7.0 → 1.8.0 → 1.9.0**, skipping 0.17.0–0.23.0
 and 1.5.0 (those were non-publishing milestones — the 0.x run was the assurance +
 API-finalization arc that shipped together in `1.0.0`; 1.5 was the TLCP-decomposition
 design cycle, [`docs/tlcp-decomposition.md`](docs/tlcp-decomposition.md)). Every post-1.0 release has been additive (SemVer-checked);
@@ -212,7 +212,7 @@ see [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md).
 **From 1.0, SemVer is enforced**: breaking changes to the covered surface require a
 major bump, and `cargo-semver-checks` runs as the forward breaking-change gate in
 CI (the three crates always release together at one lockstep version, with
-intra-workspace deps pinned exactly — `=1.8.0`). The runtime wire output (SM2
+intra-workspace deps pinned exactly — `=1.9.0`). The runtime wire output (SM2
 signatures / ciphertexts, SM4 mode bytes) is byte-identical to 0.16.0.
 
 - **What's covered by SemVer:** the public Rust API of `gmcrypto-core` (the

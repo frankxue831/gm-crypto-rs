@@ -5,6 +5,64 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-06-16
+
+**TLCP toolkit C FFI** — the cadence FFI cycle that closes the TLCP
+(GB/T 38636-2020) arc (per `docs/tlcp-decomposition.md` §7 + `docs/v1.9-scope.md`
+Q9.1–Q9.8). Exposes the accumulated in-core toolkit — v1.6 key schedule +
+no-confirmation SM2-KX, v1.7 record protection, v1.8 chain/pair verification —
+through the `gmcrypto-c` C ABI, so a C client can run a full TLCP handshake
+end-to-end. Additive; **no new dependency**; the committed `gmcrypto.h` still
+matches a default build (the TLCP symbols are always-on).
+
+A **thin shim**: every failure is one `GMCRYPTO_ERR`; record `deprotect` adds
+no logic (the Lucky13 constant-time work stays in core); and `verify_chain` /
+`verify_pair` are **structural trust only — NOT endpoint authentication**
+(identity binding stays the caller's, permanently).
+
+### Added
+
+- **19 new C symbols + 2 opaque handles + 7 consts (85 → 104 entry points):**
+  - **Key schedule:** `gmcrypto_tlcp_derive_master_secret` /
+    `_derive_key_block` / `_finished_verify_data` (+ the `MASTER_SECRET_LEN` /
+    `FINISHED_VERIFY_DATA_LEN` consts).
+  - **No-confirmation SM2-KX completers:**
+    `gmcrypto_sm2_kx_initiator_derive_unconfirmed` and
+    `gmcrypto_sm2_kx_responder_respond_unconfirmed[_with_rng]` — the TLCP ECDHE
+    path the v1.2 confirmed-flow FFI omitted (they consume + free the existing
+    v1.2 handles).
+  - **Record protection:** `gmcrypto_tlcp_record_keys_{cbc,gcm}_{new,free}`
+    (opaque `ZeroizeOnDrop` key carriers) + `gmcrypto_tlcp_protect_cbc[_with_rng]`
+    / `_deprotect_cbc` / `_protect_gcm` / `_deprotect_gcm` (copy-out; `deprotect`
+    takes no length-in param; single `GMCRYPTO_ERR`).
+  - **Chain/pair verification:** `gmcrypto_x509_verify_chain` +
+    `gmcrypto_tlcp_verify_pair` (arrays of the v1.4 immutable cert handles + an
+    out-param verdict + status) and the
+    `gmcrypto_x509_certificate_{key_usage,basic_constraints}` readers.
+- **`gmcrypto-core`** gains thin **additive** `#[doc(hidden)] pub`
+  `x509::verify_chain_refs` / `tlcp::chain::verify_pair_refs` (`&[&Certificate]`,
+  so the shim verifies an array of cert handles without a contiguous slice),
+  `x509::KeyUsage::bits`, and `tlcp::record::{CBC,GCM}_KEY_BLOCK_LEN`. No new
+  cryptographic code; runtime wire output byte-identical.
+
+### Assurance
+
+- `c_smoke` 84 → 97 (key-schedule equivalence vs core; no-confirm KX handshake
+  agreement + `_with_rng`; record protect/deprotect round-trip + the
+  bad-pad ≡ bad-MAC single-`ERR` oracle test; GCM round-trip + tamper;
+  `verify_chain`/`verify_pair` == core + NULL semantics + role-swap reject;
+  readers vs core). `fuzz_c_abi` gains ops 9 (chain/pair) + 10 (record
+  deprotect), modulus 9 → 11, all seeds audited (census stays 30). **No new
+  dudect target** (thin shim — record rides `ct_tlcp_cbc_deprotect`, chain/pair
+  is public-inputs). Doc-only C examples `tlcp_handshake.c` +
+  `tlcp_verify_pair.c` (compiled + run locally; a real GmSSL TLCP pair verifies
+  end-to-end). Reviews: Codex scope consult + an Opus executed adversarial
+  review (GO-WITH-FIXES; 6 must-fixes folded, two caught live at compile time).
+
+Workspace 1.8.0 → 1.9.0 (sibling pins `=1.9.0`). The TLCP toolkit is now
+complete in-core **and** from C — key schedule + record protection +
+chain/pair verification.
+
 ## [1.8.0] - 2026-06-14
 
 **TLCP certificate-pair / chain verification** — the third (and last *core*)
