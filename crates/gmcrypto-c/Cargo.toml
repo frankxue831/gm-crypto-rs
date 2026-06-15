@@ -31,7 +31,11 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 # v1.4 (Q4.10): `x509` joins them too — the certificate FFI symbols +
 # the opaque handle / time struct are always-on, so the committed
 # gmcrypto.h keeps matching a default build.
-gmcrypto-core = { path = "../gmcrypto-core", version = "=1.8.0", features = ["sm4-aead", "sm4-xts", "sm2-key-exchange", "x509"] }
+# v1.9 (Q9.5): `tlcp` joins them — the TLCP toolkit FFI (key schedule,
+# no-confirm KX, record protect/deprotect, chain/pair verify) is always-on;
+# tlcp::chain needs all(tlcp,x509) and the GCM record carrier needs sm4-aead,
+# both already present, so no regen-header IMPLY hack and gmcrypto.h == default.
+gmcrypto-core = { path = "../gmcrypto-core", version = "=1.8.0", features = ["sm4-aead", "sm4-xts", "sm2-key-exchange", "x509", "tlcp"] }
 getrandom.workspace = true
 rand_core.workspace = true
 

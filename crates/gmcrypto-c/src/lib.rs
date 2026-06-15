@@ -3528,3 +3528,823 @@ pub unsafe extern "C" fn gmcrypto_x509_certificate_subject_public_key(
         _ => ptr::null_mut(),
     }
 }
+
+// ============================================================
+// TLCP toolkit (v1.9) — the accumulated GB/T 38636 surface through the C
+// ABI: key schedule, no-confirmation SM2-KX completers, record protection,
+// and certificate chain/pair verification. Always-on (`tlcp` enabled
+// unconditionally on the core dep — see Cargo.toml).
+//
+// A THIN shim over the in-core toolkit: every failure is a single
+// GMCRYPTO_ERR (never a reason); the record `deprotect` adds NO logic (the
+// Lucky13 constant-time work lives entirely in core's `deprotect_cbc`); and
+// `verify_chain` / `verify_pair` are STRUCTURAL trust only — NOT endpoint
+// authentication (identity binding stays the caller's, permanently).
+// ============================================================
+
+use gmcrypto_core::tlcp::chain::verify_pair_refs;
+use gmcrypto_core::tlcp::key_schedule::{
+    TlcpRole, derive_key_block, derive_master_secret, finished_verify_data,
+};
+use gmcrypto_core::tlcp::record::{
+    RecordKeysCbc, RecordKeysGcm, deprotect_cbc, deprotect_gcm, protect_cbc, protect_gcm,
+};
+use gmcrypto_core::x509::verify_chain_refs;
+
+/// TLCP master-secret length (bytes).
+pub const GMCRYPTO_TLCP_MASTER_SECRET_LEN: usize = 48;
+/// TLCP Finished `verify_data` length (bytes).
+pub const GMCRYPTO_TLCP_FINISHED_VERIFY_DATA_LEN: usize = 12;
+/// SM4-CBC record key-block length (bytes) for `gmcrypto_tlcp_record_keys_cbc_new`.
+pub const GMCRYPTO_TLCP_CBC_KEY_BLOCK_LEN: usize = 128;
+/// SM4-GCM record key-block length (bytes) for `gmcrypto_tlcp_record_keys_gcm_new`.
+pub const GMCRYPTO_TLCP_GCM_KEY_BLOCK_LEN: usize = 40;
+/// Maximum chain length `gmcrypto_x509_verify_chain` accepts.
+pub const GMCRYPTO_X509_MAX_CHAIN_DEPTH: usize = 8;
+/// TLCP record version major byte (`0x01`). `version` is a caller parameter on
+/// every protect/deprotect call; these constants are a convenience.
+pub const GMCRYPTO_TLCP_RECORD_VERSION_MAJOR: u8 = 0x01;
+/// TLCP record version minor byte (`0x01`).
+pub const GMCRYPTO_TLCP_RECORD_VERSION_MINOR: u8 = 0x01;
+
+// Drift guard: the ABI constants must equal the core anchors.
+const _: () =
+    assert!(GMCRYPTO_TLCP_MASTER_SECRET_LEN == gmcrypto_core::tlcp::key_schedule::MASTER_SECRET_LEN);
+const _: () = assert!(
+    GMCRYPTO_TLCP_FINISHED_VERIFY_DATA_LEN
+        == gmcrypto_core::tlcp::key_schedule::FINISHED_VERIFY_DATA_LEN
+);
+const _: () =
+    assert!(GMCRYPTO_TLCP_CBC_KEY_BLOCK_LEN == gmcrypto_core::tlcp::record::CBC_KEY_BLOCK_LEN);
+const _: () =
+    assert!(GMCRYPTO_TLCP_GCM_KEY_BLOCK_LEN == gmcrypto_core::tlcp::record::GCM_KEY_BLOCK_LEN);
+const _: () = assert!(GMCRYPTO_X509_MAX_CHAIN_DEPTH == gmcrypto_core::x509::MAX_CHAIN_DEPTH);
+
+/// Map a C `role` (`0` = Client, `1` = Server) to a [`TlcpRole`].
+fn tlcp_role(role: c_int) -> Option<TlcpRole> {
+    match role {
+        0 => Some(TlcpRole::Client),
+        1 => Some(TlcpRole::Server),
+        _ => None,
+    }
+}
+
+// ----- key schedule (GB/T 38636 §6.5) -----
+
+/// Derive the 48-byte TLCP master secret from a 48-byte `pre_master` and the
+/// two 32-byte randoms. Infallible in core — returns [`GMCRYPTO_ERR`] only on a
+/// NULL pointer. **The caller owns wiping `pre_master` and `out`.**
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_tlcp_derive_master_secret(
+    pre_master: *const u8,
+    client_random: *const u8,
+    server_random: *const u8,
+    out: *mut u8,
+) -> c_int {
+    ffi_guard(|| {
+        let pm = match unsafe { try_slice(pre_master, 48) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let cr = match unsafe { try_slice(client_random, 32) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let sr = match unsafe { try_slice(server_random, 32) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let out_dst = match unsafe { try_slice_mut(out, 48) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let Ok(out_arr): Result<&mut [u8; 48], _> = out_dst.try_into() else {
+            return GMCRYPTO_ERR;
+        };
+        derive_master_secret(
+            &kx_to_array::<48>(pm),
+            &kx_to_array::<32>(cr),
+            &kx_to_array::<32>(sr),
+            out_arr,
+        );
+        GMCRYPTO_OK
+    })
+}
+
+/// Expand the key block: `PRF(master_secret, "key expansion",
+/// server_random ‖ client_random)`. Writes exactly `out_len` bytes (the caller
+/// carves per suite — CBC 128, GCM 40). `out_len == 0` is vacuously OK. **The
+/// caller owns wiping `out`.**
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_tlcp_derive_key_block(
+    master_secret: *const u8,
+    client_random: *const u8,
+    server_random: *const u8,
+    out: *mut u8,
+    out_len: usize,
+) -> c_int {
+    ffi_guard(|| {
+        let ms = match unsafe { try_slice(master_secret, 48) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let cr = match unsafe { try_slice(client_random, 32) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let sr = match unsafe { try_slice(server_random, 32) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let out_dst = match unsafe { try_slice_mut(out, out_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        derive_key_block(
+            &kx_to_array::<48>(ms),
+            &kx_to_array::<32>(cr),
+            &kx_to_array::<32>(sr),
+            out_dst,
+        );
+        GMCRYPTO_OK
+    })
+}
+
+/// Compute the 12-byte Finished `verify_data` for `role` (`0` = Client,
+/// `1` = Server). `transcript_hash` is the caller's SM3 over the handshake
+/// messages (stateless). **The caller owns wiping `out`.**
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_tlcp_finished_verify_data(
+    master_secret: *const u8,
+    role: c_int,
+    transcript_hash: *const u8,
+    out: *mut u8,
+) -> c_int {
+    ffi_guard(|| {
+        let role = match tlcp_role(role) {
+            Some(r) => r,
+            None => return GMCRYPTO_ERR,
+        };
+        let ms = match unsafe { try_slice(master_secret, 48) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let th = match unsafe { try_slice(transcript_hash, 32) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let out_dst = match unsafe { try_slice_mut(out, 12) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let Ok(out_arr): Result<&mut [u8; 12], _> = out_dst.try_into() else {
+            return GMCRYPTO_ERR;
+        };
+        finished_verify_data(&kx_to_array::<48>(ms), role, &kx_to_array::<32>(th), out_arr);
+        GMCRYPTO_OK
+    })
+}
+
+// ----- no-confirmation SM2-KX completers (GB/T 32918.3; TLCP ECDHE) -----
+
+/// Complete the SM2 key exchange on the INITIATOR side WITHOUT key confirmation
+/// (the TLCP Finished message plays the S_A/S_B role). CONSUMES + FREES the
+/// `gmcrypto_sm2_kx_initiator_t` handle on every path; takes only the peer
+/// `R_B` (65 bytes, SEC1 `04 ‖ X ‖ Y`) and writes the agreed key (the `klen`
+/// given at `_new`) to `key_out`. An invalid `R_B` is the single
+/// [`GMCRYPTO_ERR`]. **The caller owns wiping `key_out`.** Do NOT `_free`
+/// afterwards.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_kx_initiator_derive_unconfirmed(
+    initiator: *mut gmcrypto_sm2_kx_initiator_t,
+    r_b: *const u8,
+    key_out: *mut u8,
+) -> c_int {
+    ffi_guard(|| {
+        if initiator.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        // SAFETY: from Box::into_raw; owns + frees on every path (the
+        // _confirm/_finish precedent — the drop wipes the ephemeral state).
+        let boxed = unsafe { Box::from_raw(initiator) };
+        let gmcrypto_sm2_kx_initiator_t { inner, klen } = *boxed;
+        let rb = match unsafe { try_slice(r_b, GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let key_dst = match unsafe { try_slice_mut(key_out, klen) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let r_b_point = Sm2KxEphemeralPoint::from_bytes(&kx_to_array(rb));
+        // Stage: write the key only after the core call succeeds.
+        match inner.derive_without_key_confirmation(&r_b_point) {
+            Ok(key) => {
+                key_dst.copy_from_slice(key.as_bytes());
+                GMCRYPTO_OK
+            }
+            Err(_) => GMCRYPTO_ERR,
+        }
+    })
+}
+
+/// Shared body of the two no-confirmation responder entry points. CONSUMES +
+/// FREES the responder handle on every path (`Box::from_raw` + a `Fresh`-variant
+/// match — the `_finish` precedent, NOT the confirmed-flow take-and-replace that
+/// keeps the handle alive), runs the core respond-without-confirmation, and
+/// STAGES the outputs (writes nothing until the core call returns `Ok`).
+fn kx_respond_unconfirmed<R: rand_core::TryCryptoRng>(
+    responder: *mut gmcrypto_sm2_kx_responder_t,
+    r_a: *const u8,
+    out_r_b: *mut u8,
+    key_out: *mut u8,
+    rng: &mut R,
+) -> c_int {
+    if responder.is_null() {
+        return GMCRYPTO_ERR;
+    }
+    // SAFETY: from Box::into_raw; owns + frees on every path.
+    let boxed = unsafe { Box::from_raw(responder) };
+    let gmcrypto_sm2_kx_responder_t { state, klen } = *boxed;
+    let InnerKxResponderState::Fresh(inner) = state else {
+        // A Waiting/Spent (or already-used confirmed) handle — single ERR,
+        // freed.
+        return GMCRYPTO_ERR;
+    };
+    let ra = match unsafe { try_slice(r_a, GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE) } {
+        Some(s) => s,
+        None => return GMCRYPTO_ERR,
+    };
+    let rb_dst = match unsafe { try_slice_mut(out_r_b, GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE) } {
+        Some(s) => s,
+        None => return GMCRYPTO_ERR,
+    };
+    let key_dst = match unsafe { try_slice_mut(key_out, klen) } {
+        Some(s) => s,
+        None => return GMCRYPTO_ERR,
+    };
+    let ra_point = Sm2KxEphemeralPoint::from_bytes(&kx_to_array(ra));
+    match (*inner).respond_without_key_confirmation(&ra_point, rng) {
+        Ok((r_b, key)) => {
+            rb_dst.copy_from_slice(&r_b.to_bytes());
+            key_dst.copy_from_slice(key.as_bytes());
+            GMCRYPTO_OK
+        }
+        Err(_) => GMCRYPTO_ERR,
+    }
+}
+
+/// Complete the SM2 key exchange on the RESPONDER side WITHOUT key confirmation
+/// (single call — no S_A to verify). CONSUMES + FREES the handle; takes the
+/// initiator's `R_A` (65 bytes), writes `R_B` (65 bytes) to `out_r_b` and the
+/// agreed key (`klen` bytes) to `key_out`. Ephemeral randomness comes from the
+/// OS. **The caller owns wiping `key_out`.** Do NOT `_free` afterwards.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_kx_responder_respond_unconfirmed(
+    responder: *mut gmcrypto_sm2_kx_responder_t,
+    r_a: *const u8,
+    out_r_b: *mut u8,
+    key_out: *mut u8,
+) -> c_int {
+    ffi_guard(|| kx_respond_unconfirmed(responder, r_a, out_r_b, key_out, &mut getrandom::SysRng))
+}
+
+/// `_with_rng` variant of [`gmcrypto_sm2_kx_responder_respond_unconfirmed`]:
+/// the ephemeral randomness comes from `rng_callback` rather than the OS. A
+/// NULL callback returns [`GMCRYPTO_ERR`] WITHOUT consuming the handle (free it
+/// yourself), matching the confirmed `_with_rng` flow.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_kx_responder_respond_unconfirmed_with_rng(
+    responder: *mut gmcrypto_sm2_kx_responder_t,
+    r_a: *const u8,
+    rng_callback: gmcrypto_rng_callback,
+    rng_context: *mut c_void,
+    out_r_b: *mut u8,
+    key_out: *mut u8,
+) -> c_int {
+    ffi_guard(|| {
+        let callback = match rng_callback {
+            Some(cb) => cb,
+            None => return GMCRYPTO_ERR,
+        };
+        let mut rng = CallbackRng {
+            callback,
+            context: rng_context,
+        };
+        kx_respond_unconfirmed(responder, r_a, out_r_b, key_out, &mut rng)
+    })
+}
+
+// ----- record protection (GB/T 38636 §6.3) -----
+
+/// Opaque per-direction SM4-CBC record key carrier (`ZeroizeOnDrop`). Build with
+/// [`gmcrypto_tlcp_record_keys_cbc_new`]; free + wipe with
+/// [`gmcrypto_tlcp_record_keys_cbc_free`]. Immutable — protect/deprotect borrow
+/// it.
+pub struct gmcrypto_tlcp_record_keys_cbc_t {
+    inner: RecordKeysCbc,
+}
+
+/// Opaque per-direction SM4-GCM record key carrier (`ZeroizeOnDrop`).
+pub struct gmcrypto_tlcp_record_keys_gcm_t {
+    inner: RecordKeysGcm,
+}
+
+/// Carve the SM4-CBC record keys for `role` (`0` = Client, `1` = Server) from a
+/// 128-byte (`GMCRYPTO_TLCP_CBC_KEY_BLOCK_LEN`) key block. Returns NULL on a bad
+/// role / NULL block. Free with [`gmcrypto_tlcp_record_keys_cbc_free`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_tlcp_record_keys_cbc_new(
+    role: c_int,
+    key_block: *const u8,
+) -> *mut gmcrypto_tlcp_record_keys_cbc_t {
+    let result = std::panic::catch_unwind(|| {
+        let role = tlcp_role(role)?;
+        // SAFETY: forwarded caller contract — `key_block` valid for 128 reads.
+        let block = unsafe { try_slice(key_block, GMCRYPTO_TLCP_CBC_KEY_BLOCK_LEN) }?;
+        let inner = RecordKeysCbc::from_key_block(role, &kx_to_array::<128>(block));
+        Some(Box::into_raw(Box::new(gmcrypto_tlcp_record_keys_cbc_t {
+            inner,
+        })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// Free (and wipe) an SM4-CBC record key carrier. Safe on NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_tlcp_record_keys_cbc_free(
+    keys: *mut gmcrypto_tlcp_record_keys_cbc_t,
+) {
+    if !keys.is_null() {
+        // SAFETY: from Box::into_raw; reclaim + drop (ZeroizeOnDrop wipes).
+        drop(unsafe { Box::from_raw(keys) });
+    }
+}
+
+/// Carve the SM4-GCM record keys for `role` from a 40-byte
+/// (`GMCRYPTO_TLCP_GCM_KEY_BLOCK_LEN`) key block. Returns NULL on a bad role /
+/// NULL block. Free with [`gmcrypto_tlcp_record_keys_gcm_free`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_tlcp_record_keys_gcm_new(
+    role: c_int,
+    key_block: *const u8,
+) -> *mut gmcrypto_tlcp_record_keys_gcm_t {
+    let result = std::panic::catch_unwind(|| {
+        let role = tlcp_role(role)?;
+        // SAFETY: forwarded caller contract — `key_block` valid for 40 reads.
+        let block = unsafe { try_slice(key_block, GMCRYPTO_TLCP_GCM_KEY_BLOCK_LEN) }?;
+        let inner = RecordKeysGcm::from_key_block(role, &kx_to_array::<40>(block));
+        Some(Box::into_raw(Box::new(gmcrypto_tlcp_record_keys_gcm_t {
+            inner,
+        })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// Free (and wipe) an SM4-GCM record key carrier. Safe on NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_tlcp_record_keys_gcm_free(
+    keys: *mut gmcrypto_tlcp_record_keys_gcm_t,
+) {
+    if !keys.is_null() {
+        // SAFETY: from Box::into_raw; reclaim + drop (ZeroizeOnDrop wipes).
+        drop(unsafe { Box::from_raw(keys) });
+    }
+}
+
+/// Shared body of the two SM4-CBC protect entry points (copy-out via
+/// `write_output`; the IV comes from `rng`).
+#[allow(clippy::too_many_arguments)]
+fn tlcp_protect_cbc_impl<R: rand_core::TryCryptoRng>(
+    keys: *const gmcrypto_tlcp_record_keys_cbc_t,
+    seq: u64,
+    content_type: u8,
+    version: *const u8,
+    plaintext: *const u8,
+    pt_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+    rng: &mut R,
+) -> c_int {
+    if keys.is_null() {
+        return GMCRYPTO_ERR;
+    }
+    let ver = match unsafe { try_slice(version, 2) } {
+        Some(s) => s,
+        None => return GMCRYPTO_ERR,
+    };
+    let pt = match unsafe { try_slice(plaintext, pt_len) } {
+        Some(s) => s,
+        None => return GMCRYPTO_ERR,
+    };
+    // SAFETY: non-null per the check; valid handle per contract.
+    let k = unsafe { &(*keys).inner };
+    match protect_cbc(k, seq, content_type, [ver[0], ver[1]], pt, rng) {
+        // SAFETY: write_output validates the caller buffer.
+        Some(rec) => unsafe { write_output(&rec, out, out_capacity, out_actual_len) },
+        None => GMCRYPTO_ERR,
+    }
+}
+
+/// Protect (MAC-then-encrypt) a plaintext record under SM4-CBC with HMAC-SM3,
+/// a fresh OS-sampled explicit IV. `version` is 2 bytes; output to the
+/// `(out, out_capacity, out_actual_len)` copy-out buffer. Single
+/// [`GMCRYPTO_ERR`]. **`(key, seq)` uniqueness is the caller's contract.**
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_tlcp_protect_cbc(
+    keys: *const gmcrypto_tlcp_record_keys_cbc_t,
+    seq: u64,
+    content_type: u8,
+    version: *const u8,
+    plaintext: *const u8,
+    pt_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        tlcp_protect_cbc_impl(
+            keys,
+            seq,
+            content_type,
+            version,
+            plaintext,
+            pt_len,
+            out,
+            out_capacity,
+            out_actual_len,
+            &mut getrandom::SysRng,
+        )
+    })
+}
+
+/// `_with_rng` variant of [`gmcrypto_tlcp_protect_cbc`]: the explicit IV comes
+/// from `rng_callback` (REQUIRED for record-KAT reproduction) rather than the
+/// OS. A NULL callback returns [`GMCRYPTO_ERR`].
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_tlcp_protect_cbc_with_rng(
+    keys: *const gmcrypto_tlcp_record_keys_cbc_t,
+    seq: u64,
+    content_type: u8,
+    version: *const u8,
+    plaintext: *const u8,
+    pt_len: usize,
+    rng_callback: gmcrypto_rng_callback,
+    rng_context: *mut c_void,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        let callback = match rng_callback {
+            Some(cb) => cb,
+            None => return GMCRYPTO_ERR,
+        };
+        let mut rng = CallbackRng {
+            callback,
+            context: rng_context,
+        };
+        tlcp_protect_cbc_impl(
+            keys,
+            seq,
+            content_type,
+            version,
+            plaintext,
+            pt_len,
+            out,
+            out_capacity,
+            out_actual_len,
+            &mut rng,
+        )
+    })
+}
+
+/// Deprotect an SM4-CBC record (`explicit_IV(16) ‖ CBC_ct`) — the Lucky13
+/// constant-time operation lives in core; this shim adds NO logic. The
+/// recovered plaintext goes to the copy-out buffer ONLY on success; on ANY
+/// failure (bad pad, bad MAC, bad length — indistinguishable) it returns a
+/// single [`GMCRYPTO_ERR`] and touches NO output pointer. There is deliberately
+/// **no** length-in parameter (the post-strip length is secret).
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_tlcp_deprotect_cbc(
+    keys: *const gmcrypto_tlcp_record_keys_cbc_t,
+    seq: u64,
+    content_type: u8,
+    version: *const u8,
+    record: *const u8,
+    record_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if keys.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let ver = match unsafe { try_slice(version, 2) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let rec = match unsafe { try_slice(record, record_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: non-null per the check; valid handle per contract.
+        let k = unsafe { &(*keys).inner };
+        match deprotect_cbc(k, seq, content_type, [ver[0], ver[1]], rec) {
+            // SAFETY: write_output validates the caller buffer.
+            Some(pt) => unsafe { write_output(&pt, out, out_capacity, out_actual_len) },
+            // Failure path: NO output touched (write_output is Some-only).
+            None => GMCRYPTO_ERR,
+        }
+    })
+}
+
+/// Protect a plaintext record under SM4-GCM (RFC 5288: seq-derived nonce, TLS
+/// AAD). Output to the copy-out buffer; single [`GMCRYPTO_ERR`].
+/// **`(key, seq)` uniqueness is the caller's contract.**
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_tlcp_protect_gcm(
+    keys: *const gmcrypto_tlcp_record_keys_gcm_t,
+    seq: u64,
+    content_type: u8,
+    version: *const u8,
+    plaintext: *const u8,
+    pt_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if keys.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let ver = match unsafe { try_slice(version, 2) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let pt = match unsafe { try_slice(plaintext, pt_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: non-null per the check; valid handle per contract.
+        let k = unsafe { &(*keys).inner };
+        match protect_gcm(k, seq, content_type, [ver[0], ver[1]], pt) {
+            // SAFETY: write_output validates the caller buffer.
+            Some(rec) => unsafe { write_output(&rec, out, out_capacity, out_actual_len) },
+            None => GMCRYPTO_ERR,
+        }
+    })
+}
+
+/// Deprotect an SM4-GCM record (`explicit_nonce(8) ‖ ct ‖ tag(16)`,
+/// commit-on-verify). Plaintext to the copy-out buffer ONLY if the tag
+/// verifies; otherwise a single [`GMCRYPTO_ERR`] (short record / over-ceiling /
+/// bad tag are indistinguishable). No length-in parameter.
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_tlcp_deprotect_gcm(
+    keys: *const gmcrypto_tlcp_record_keys_gcm_t,
+    seq: u64,
+    content_type: u8,
+    version: *const u8,
+    record: *const u8,
+    record_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if keys.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let ver = match unsafe { try_slice(version, 2) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let rec = match unsafe { try_slice(record, record_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: non-null per the check; valid handle per contract.
+        let k = unsafe { &(*keys).inner };
+        match deprotect_gcm(k, seq, content_type, [ver[0], ver[1]], rec) {
+            // SAFETY: write_output validates the caller buffer.
+            Some(pt) => unsafe { write_output(&pt, out, out_capacity, out_actual_len) },
+            None => GMCRYPTO_ERR,
+        }
+    })
+}
+
+// ----- certificate chain / pair verification (GB/T 38636 §4) -----
+
+/// Build a `Vec<&Certificate>` from a C array of cert-handle pointers.
+/// `(NULL, 0)` → an empty slice; `(NULL, n>0)` or any NULL element → `None`
+/// (ABI misuse).
+///
+/// # Safety
+/// `arr` must be NULL or valid for `n` pointer reads; each non-NULL element
+/// must be a live `gmcrypto_x509_certificate_t` handle from this library.
+unsafe fn collect_cert_refs<'a>(
+    arr: *const *const gmcrypto_x509_certificate_t,
+    n: usize,
+) -> Option<Vec<&'a Certificate>> {
+    if n == 0 {
+        return Some(Vec::new());
+    }
+    if arr.is_null() {
+        return None;
+    }
+    // SAFETY: caller guarantees `arr` valid for `n` pointer reads.
+    let ptrs = unsafe { slice::from_raw_parts(arr, n) };
+    let mut v = Vec::with_capacity(n);
+    for &p in ptrs {
+        if p.is_null() {
+            return None;
+        }
+        // SAFETY: caller guarantees each non-NULL element is a live handle.
+        v.push(&unsafe { &*p }.inner);
+    }
+    Some(v)
+}
+
+/// Map the C time struct to the core `X509Time` (field copy; there is no
+/// `From<&gmcrypto_x509_time_t>` — only the reverse, used by the v1.4
+/// accessors).
+fn x509_time_from_c(t: &gmcrypto_x509_time_t) -> X509Time {
+    X509Time {
+        year: t.year,
+        month: t.month,
+        day: t.day,
+        hour: t.hour,
+        minute: t.minute,
+        second: t.second,
+    }
+}
+
+/// Verify a single linear, leaf-first certificate chain links to a
+/// caller-trusted anchor. `chain` / `anchors` are arrays of cert handles;
+/// `at_time` (NULL = skip the validity window) is the comparison time; the
+/// `bool` verdict is written to `*out_verified` (1 = verifies, 0 = does not,
+/// e.g. over-depth). Returns [`GMCRYPTO_OK`] for a successful evaluation,
+/// [`GMCRYPTO_ERR`] only on NULL `out_verified` or a malformed handle array.
+///
+/// **⚠ This is structural-trust verification, NOT endpoint authentication.** A
+/// `1` means the chain links to a trusted CA — never "this is the peer I
+/// dialed" (identity binding is the caller's, permanently).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_x509_verify_chain(
+    chain: *const *const gmcrypto_x509_certificate_t,
+    chain_len: usize,
+    anchors: *const *const gmcrypto_x509_certificate_t,
+    anchors_len: usize,
+    at_time: *const gmcrypto_x509_time_t,
+    out_verified: *mut c_int,
+) -> c_int {
+    ffi_guard(|| {
+        if out_verified.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let chain = match unsafe { collect_cert_refs(chain, chain_len) } {
+            Some(v) => v,
+            None => return GMCRYPTO_ERR,
+        };
+        let anchors = match unsafe { collect_cert_refs(anchors, anchors_len) } {
+            Some(v) => v,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: NULL → None; otherwise a valid struct per contract.
+        let t = unsafe { at_time.as_ref() }.map(x509_time_from_c);
+        let verified = verify_chain_refs(&chain, &anchors, t);
+        // SAFETY: out_verified checked non-null.
+        unsafe { out_verified.write(c_int::from(verified)) };
+        GMCRYPTO_OK
+    })
+}
+
+/// Verify a TLCP [signature, encryption] certificate pair (each a leaf-first
+/// chain) against the caller's `anchors`. Verdict to `*out_verified`. Returns
+/// [`GMCRYPTO_ERR`] only on NULL `out_verified` or a malformed handle array.
+///
+/// **⚠ NOT endpoint authentication.** A `1` means each chain links to a trusted
+/// anchor, each leaf is usable for its TLCP role, neither leaf is a CA, and the
+/// two leaves share one identity (subject + the same issuing chain). It does
+/// **NOT** mean "this is the server I dialed" — *whose* identity the pair
+/// carries is the caller's decision, permanently.
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_tlcp_verify_pair(
+    sign_chain: *const *const gmcrypto_x509_certificate_t,
+    sign_chain_len: usize,
+    enc_chain: *const *const gmcrypto_x509_certificate_t,
+    enc_chain_len: usize,
+    anchors: *const *const gmcrypto_x509_certificate_t,
+    anchors_len: usize,
+    at_time: *const gmcrypto_x509_time_t,
+    out_verified: *mut c_int,
+) -> c_int {
+    ffi_guard(|| {
+        if out_verified.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let sign = match unsafe { collect_cert_refs(sign_chain, sign_chain_len) } {
+            Some(v) => v,
+            None => return GMCRYPTO_ERR,
+        };
+        let enc = match unsafe { collect_cert_refs(enc_chain, enc_chain_len) } {
+            Some(v) => v,
+            None => return GMCRYPTO_ERR,
+        };
+        let anchors = match unsafe { collect_cert_refs(anchors, anchors_len) } {
+            Some(v) => v,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: NULL → None; otherwise a valid struct per contract.
+        let t = unsafe { at_time.as_ref() }.map(x509_time_from_c);
+        let verified = verify_pair_refs(&sign, &enc, &anchors, t);
+        // SAFETY: out_verified checked non-null.
+        unsafe { out_verified.write(c_int::from(verified)) };
+        GMCRYPTO_OK
+    })
+}
+
+/// Read the `keyUsage` extension. Writes `1`/`0` to `*out_present` (absent OR
+/// malformed → `0`) and the raw bitmask to `*out_bits` (bit 0 =
+/// `digitalSignature`). Returns [`GMCRYPTO_ERR`] only on NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_x509_certificate_key_usage(
+    cert: *const gmcrypto_x509_certificate_t,
+    out_present: *mut c_int,
+    out_bits: *mut u16,
+) -> c_int {
+    ffi_guard(|| {
+        let (Some(cert), false, false) =
+            (unsafe { cert.as_ref() }, out_present.is_null(), out_bits.is_null())
+        else {
+            return GMCRYPTO_ERR;
+        };
+        let (present, bits) = match cert.inner.key_usage() {
+            Some(ku) => (1, ku.bits()),
+            None => (0, 0),
+        };
+        // SAFETY: both out pointers checked non-null.
+        unsafe {
+            out_present.write(present);
+            out_bits.write(bits);
+        }
+        GMCRYPTO_OK
+    })
+}
+
+/// Read the `basicConstraints` extension. Writes `1`/`0` to `*out_present`
+/// (absent/malformed → `0`), the `cA` flag to `*out_is_ca`, and the
+/// `pathLenConstraint` to `*out_path_len` guarded by `*out_has_path_len`
+/// (parsed, **not** enforced — informational). Returns [`GMCRYPTO_ERR`] only on
+/// NULL.
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_x509_certificate_basic_constraints(
+    cert: *const gmcrypto_x509_certificate_t,
+    out_present: *mut c_int,
+    out_is_ca: *mut c_int,
+    out_has_path_len: *mut c_int,
+    out_path_len: *mut u32,
+) -> c_int {
+    ffi_guard(|| {
+        let (Some(cert), false, false, false, false) = (
+            unsafe { cert.as_ref() },
+            out_present.is_null(),
+            out_is_ca.is_null(),
+            out_has_path_len.is_null(),
+            out_path_len.is_null(),
+        ) else {
+            return GMCRYPTO_ERR;
+        };
+        let (present, is_ca, has_pl, pl) = match cert.inner.basic_constraints() {
+            Some(bc) => match bc.path_len {
+                Some(pl) => (1, c_int::from(bc.is_ca), 1, pl),
+                None => (1, c_int::from(bc.is_ca), 0, 0),
+            },
+            None => (0, 0, 0, 0),
+        };
+        // SAFETY: all four out pointers checked non-null.
+        unsafe {
+            out_present.write(present);
+            out_is_ca.write(is_ca);
+            out_has_path_len.write(has_pl);
+            out_path_len.write(pl);
+        }
+        GMCRYPTO_OK
+    })
+}
