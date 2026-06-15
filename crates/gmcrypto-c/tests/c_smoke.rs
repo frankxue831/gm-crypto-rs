@@ -3427,8 +3427,7 @@ mod tlcp_v1_9 {
         gmcrypto_tlcp_record_keys_cbc_free, gmcrypto_tlcp_record_keys_cbc_new,
         gmcrypto_tlcp_record_keys_gcm_free, gmcrypto_tlcp_record_keys_gcm_new,
         gmcrypto_tlcp_verify_pair, gmcrypto_x509_certificate_basic_constraints,
-        gmcrypto_x509_certificate_key_usage, gmcrypto_x509_certificate_t,
-        gmcrypto_x509_verify_chain,
+        gmcrypto_x509_certificate_key_usage, gmcrypto_x509_verify_chain,
     };
     use gmcrypto_core::tlcp::key_schedule::{self, TlcpRole};
     use gmcrypto_core::tlcp::record::{self, RecordKeysCbc};
@@ -4013,15 +4012,11 @@ mod tlcp_v1_9 {
 
     // ----- chain / pair verification -----
 
-    fn handle(der: &[u8]) -> *mut gmcrypto_x509_certificate_t {
-        x509_parse(der)
-    }
-
     #[test]
     fn verify_chain_through_abi_matches_core() {
-        let sign = handle(SIGN);
-        let int = handle(INT);
-        let root = handle(ROOT);
+        let sign = x509_parse(SIGN);
+        let int = x509_parse(INT);
+        let root = x509_parse(ROOT);
         let chain = [sign.cast_const(), int.cast_const()];
         let anchors = [root.cast_const()];
 
@@ -4075,7 +4070,7 @@ mod tlcp_v1_9 {
 
     #[test]
     fn verify_chain_null_semantics() {
-        let sign = handle(SIGN);
+        let sign = x509_parse(SIGN);
         let chain = [sign.cast_const()];
         // NULL out_verified → ERR.
         assert_eq!(
@@ -4143,10 +4138,10 @@ mod tlcp_v1_9 {
 
     #[test]
     fn verify_pair_through_abi() {
-        let sign = handle(SIGN);
-        let enc = handle(ENC);
-        let int = handle(INT);
-        let root = handle(ROOT);
+        let sign = x509_parse(SIGN);
+        let enc = x509_parse(ENC);
+        let int = x509_parse(INT);
+        let root = x509_parse(ROOT);
         let sign_chain = [sign.cast_const(), int.cast_const()];
         let enc_chain = [enc.cast_const(), int.cast_const()];
         let anchors = [root.cast_const()];
@@ -4199,8 +4194,8 @@ mod tlcp_v1_9 {
 
     #[test]
     fn readers_match_core() {
-        let sign = handle(SIGN);
-        let int = handle(INT);
+        let sign = x509_parse(SIGN);
+        let int = x509_parse(INT);
 
         let mut present = -1;
         let mut bits = 0u16;
