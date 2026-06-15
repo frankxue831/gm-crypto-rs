@@ -29,7 +29,7 @@ fn leaf_is_ca(c: &Certificate) -> bool {
 /// the optional validity-window comparison. Single `bool` — never a reason
 /// (the failure-mode invariant).
 ///
-/// Returns `true` iff BOTH chains verify ([`verify_chain`]), the sign leaf
+/// Returns `true` iff BOTH chains verify ([`crate::x509::verify_chain`]), the sign leaf
 /// asserts `digitalSignature`, the enc leaf asserts `keyEncipherment` or
 /// `keyAgreement`, neither leaf is a CA, and the two leaves share one
 /// identity: a non-empty byte-equal `subject`, a byte-equal `issuer` Name,
