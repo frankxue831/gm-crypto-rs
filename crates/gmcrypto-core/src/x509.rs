@@ -284,6 +284,16 @@ impl KeyUsage {
     pub const fn decipher_only(self) -> bool {
         self.has(8)
     }
+    /// The raw `keyUsage` bitmask (bit 0 = `digitalSignature` in the low bit;
+    /// matches the named accessors above).
+    ///
+    /// **Not public API and not SemVer-covered** — exists so the C FFI reader
+    /// can return the bitmask as a single `u16`.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn bits(&self) -> u16 {
+        self.bits
+    }
 }
 
 /// The X.509 `basicConstraints` extension (RFC 5280 §4.2.1.9): the CA flag
@@ -684,10 +694,28 @@ pub fn verify_chain(
     anchors: &[Certificate],
     at_time: Option<X509Time>,
 ) -> bool {
+    let chain: alloc::vec::Vec<&Certificate> = chain.iter().collect();
+    let anchors: alloc::vec::Vec<&Certificate> = anchors.iter().collect();
+    verify_chain_refs(&chain, &anchors, at_time)
+}
+
+/// Reference-slice form of [`verify_chain`] — the canonical implementation.
+///
+/// **Not public API and not SemVer-covered.** It exists so the C FFI shim
+/// (`gmcrypto-c`) can verify an array of certificate *handles* without
+/// fabricating a contiguous `&[Certificate]` (`Certificate` is not `Clone`).
+/// Behaviour is byte-for-byte identical to [`verify_chain`].
+#[doc(hidden)]
+#[must_use]
+pub fn verify_chain_refs(
+    chain: &[&Certificate],
+    anchors: &[&Certificate],
+    at_time: Option<X509Time>,
+) -> bool {
     if chain.is_empty() || chain.len() > MAX_CHAIN_DEPTH {
         return false;
     }
-    for cert in chain {
+    for &cert in chain {
         if cert
             .extensions
             .as_deref()
@@ -701,7 +729,7 @@ pub fn verify_chain(
     }
     // Intermediate edges: chain[i] is issued by chain[i+1], which must be a CA.
     for i in 0..chain.len() - 1 {
-        let (subj, iss) = (&chain[i], &chain[i + 1]);
+        let (subj, iss) = (chain[i], chain[i + 1]);
         if subj.issuer_raw() != iss.subject_raw() {
             return false;
         }
@@ -715,7 +743,7 @@ pub fn verify_chain(
     // Top edge: chain.last() must be issued by a trusted anchor. Name match is
     // necessary, NOT sufficient — try every same-Name anchor, the signature
     // (and window) decides.
-    let top = &chain[chain.len() - 1];
+    let top = chain[chain.len() - 1];
     anchors.iter().any(|a| {
         a.subject_raw() == top.issuer_raw()
             && within_window(a, at_time)

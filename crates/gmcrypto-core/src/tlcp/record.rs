@@ -63,6 +63,14 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 /// constant inside the primitives.
 pub const TLCP_RECORD_VERSION: [u8; 2] = [0x01, 0x01];
 
+/// The SM4-CBC key-block length (carved per-direction into [`RecordKeysCbc`]
+/// via [`RecordKeysCbc::from_key_block`]).
+pub const CBC_KEY_BLOCK_LEN: usize = 128;
+
+/// The SM4-GCM key-block length (carved per-direction into [`RecordKeysGcm`]).
+#[cfg(feature = "sm4-aead")]
+pub const GCM_KEY_BLOCK_LEN: usize = 40;
+
 /// HMAC-SM3 record MAC length.
 const MAC_LEN: usize = 32;
 /// TLS MAC/AAD header length: `seq(8) ‖ type(1) ‖ version(2) ‖ length(2)`.

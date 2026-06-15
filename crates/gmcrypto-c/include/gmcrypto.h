@@ -104,6 +104,42 @@
 #define GMCRYPTO_SM2_KX_CONFIRM_SIZE 32
 
 /*
+ TLCP master-secret length (bytes).
+ */
+#define GMCRYPTO_TLCP_MASTER_SECRET_LEN 48
+
+/*
+ TLCP Finished `verify_data` length (bytes).
+ */
+#define GMCRYPTO_TLCP_FINISHED_VERIFY_DATA_LEN 12
+
+/*
+ SM4-CBC record key-block length (bytes) for `gmcrypto_tlcp_record_keys_cbc_new`.
+ */
+#define GMCRYPTO_TLCP_CBC_KEY_BLOCK_LEN 128
+
+/*
+ SM4-GCM record key-block length (bytes) for `gmcrypto_tlcp_record_keys_gcm_new`.
+ */
+#define GMCRYPTO_TLCP_GCM_KEY_BLOCK_LEN 40
+
+/*
+ Maximum chain length `gmcrypto_x509_verify_chain` accepts.
+ */
+#define GMCRYPTO_X509_MAX_CHAIN_DEPTH 8
+
+/*
+ TLCP record version major byte (`0x01`). `version` is a caller parameter on
+ every protect/deprotect call; these constants are a convenience.
+ */
+#define GMCRYPTO_TLCP_RECORD_VERSION_MAJOR 1
+
+/*
+ TLCP record version minor byte (`0x01`).
+ */
+#define GMCRYPTO_TLCP_RECORD_VERSION_MINOR 1
+
+/*
  Opaque handle for a streaming HMAC-SM3 keyed MAC.
  */
 typedef struct gmcrypto_hmac_sm3_t gmcrypto_hmac_sm3_t;
@@ -186,6 +222,19 @@ typedef struct gmcrypto_sm4_gcm_encryptor_t gmcrypto_sm4_gcm_encryptor_t;
  Opaque handle for an SM4 cipher (key-scheduled).
  */
 typedef struct gmcrypto_sm4_t gmcrypto_sm4_t;
+
+/*
+ Opaque per-direction SM4-CBC record key carrier (`ZeroizeOnDrop`). Build with
+ [`gmcrypto_tlcp_record_keys_cbc_new`]; free + wipe with
+ [`gmcrypto_tlcp_record_keys_cbc_free`]. Immutable — protect/deprotect borrow
+ it.
+ */
+typedef struct gmcrypto_tlcp_record_keys_cbc_t gmcrypto_tlcp_record_keys_cbc_t;
+
+/*
+ Opaque per-direction SM4-GCM record key carrier (`ZeroizeOnDrop`).
+ */
+typedef struct gmcrypto_tlcp_record_keys_gcm_t gmcrypto_tlcp_record_keys_gcm_t;
 
 /*
  Opaque X.509 certificate handle (v1.4). Immutable after construction —
@@ -1505,6 +1554,279 @@ int gmcrypto_x509_certificate_is_self_issued(const gmcrypto_x509_certificate_t *
  */
 
 gmcrypto_sm2_pubkey_t *gmcrypto_x509_certificate_subject_public_key(const gmcrypto_x509_certificate_t *cert)
+;
+
+/*
+ Derive the 48-byte TLCP master secret from a 48-byte `pre_master` and the
+ two 32-byte randoms. Infallible in core — returns [`GMCRYPTO_ERR`] only on a
+ NULL pointer. **The caller owns wiping `pre_master` and `out`.**
+ */
+
+int gmcrypto_tlcp_derive_master_secret(const uint8_t *pre_master,
+                                       const uint8_t *client_random,
+                                       const uint8_t *server_random,
+                                       uint8_t *out)
+;
+
+/*
+ Expand the key block: `PRF(master_secret, "key expansion",
+ server_random ‖ client_random)`. Writes exactly `out_len` bytes (the caller
+ carves per suite — CBC 128, GCM 40). `out_len == 0` is vacuously OK. **The
+ caller owns wiping `out`.**
+ */
+
+int gmcrypto_tlcp_derive_key_block(const uint8_t *master_secret,
+                                   const uint8_t *client_random,
+                                   const uint8_t *server_random,
+                                   uint8_t *out,
+                                   uintptr_t out_len)
+;
+
+/*
+ Compute the 12-byte Finished `verify_data` for `role` (`0` = Client,
+ `1` = Server). `transcript_hash` is the caller's SM3 over the handshake
+ messages (stateless). **The caller owns wiping `out`.**
+ */
+
+int gmcrypto_tlcp_finished_verify_data(const uint8_t *master_secret,
+                                       int role,
+                                       const uint8_t *transcript_hash,
+                                       uint8_t *out)
+;
+
+/*
+ Complete the SM2 key exchange on the INITIATOR side WITHOUT key confirmation
+ (the TLCP Finished message plays the S_A/S_B role). CONSUMES + FREES the
+ `gmcrypto_sm2_kx_initiator_t` handle on every path; takes only the peer
+ `R_B` (65 bytes, SEC1 `04 ‖ X ‖ Y`) and writes the agreed key (the `klen`
+ given at `_new`) to `key_out`. An invalid `R_B` is the single
+ [`GMCRYPTO_ERR`]. **The caller owns wiping `key_out`.** Do NOT `_free`
+ afterwards.
+ */
+
+int gmcrypto_sm2_kx_initiator_derive_unconfirmed(gmcrypto_sm2_kx_initiator_t *initiator,
+                                                 const uint8_t *r_b,
+                                                 uint8_t *key_out)
+;
+
+/*
+ Complete the SM2 key exchange on the RESPONDER side WITHOUT key confirmation
+ (single call — no S_A to verify). CONSUMES + FREES the handle; takes the
+ initiator's `R_A` (65 bytes), writes `R_B` (65 bytes) to `out_r_b` and the
+ agreed key (`klen` bytes) to `key_out`. Ephemeral randomness comes from the
+ OS. **The caller owns wiping `key_out`.** Do NOT `_free` afterwards.
+ */
+
+int gmcrypto_sm2_kx_responder_respond_unconfirmed(gmcrypto_sm2_kx_responder_t *responder,
+                                                  const uint8_t *r_a,
+                                                  uint8_t *out_r_b,
+                                                  uint8_t *key_out)
+;
+
+/*
+ `_with_rng` variant of [`gmcrypto_sm2_kx_responder_respond_unconfirmed`]:
+ the ephemeral randomness comes from `rng_callback` rather than the OS. A
+ NULL callback returns [`GMCRYPTO_ERR`] WITHOUT consuming the handle (free it
+ yourself), matching the confirmed `_with_rng` flow.
+ */
+
+int gmcrypto_sm2_kx_responder_respond_unconfirmed_with_rng(gmcrypto_sm2_kx_responder_t *responder,
+                                                           const uint8_t *r_a,
+                                                           gmcrypto_rng_callback rng_callback,
+                                                           void *rng_context,
+                                                           uint8_t *out_r_b,
+                                                           uint8_t *key_out)
+;
+
+/*
+ Carve the SM4-CBC record keys for `role` (`0` = Client, `1` = Server) from a
+ 128-byte (`GMCRYPTO_TLCP_CBC_KEY_BLOCK_LEN`) key block. Returns NULL on a bad
+ role / NULL block. Free with [`gmcrypto_tlcp_record_keys_cbc_free`].
+ */
+
+gmcrypto_tlcp_record_keys_cbc_t *gmcrypto_tlcp_record_keys_cbc_new(int role,
+                                                                   const uint8_t *key_block)
+;
+
+/*
+ Free (and wipe) an SM4-CBC record key carrier. Safe on NULL.
+ */
+ void gmcrypto_tlcp_record_keys_cbc_free(gmcrypto_tlcp_record_keys_cbc_t *keys) ;
+
+/*
+ Carve the SM4-GCM record keys for `role` from a 40-byte
+ (`GMCRYPTO_TLCP_GCM_KEY_BLOCK_LEN`) key block. Returns NULL on a bad role /
+ NULL block. Free with [`gmcrypto_tlcp_record_keys_gcm_free`].
+ */
+
+gmcrypto_tlcp_record_keys_gcm_t *gmcrypto_tlcp_record_keys_gcm_new(int role,
+                                                                   const uint8_t *key_block)
+;
+
+/*
+ Free (and wipe) an SM4-GCM record key carrier. Safe on NULL.
+ */
+ void gmcrypto_tlcp_record_keys_gcm_free(gmcrypto_tlcp_record_keys_gcm_t *keys) ;
+
+/*
+ Protect (MAC-then-encrypt) a plaintext record under SM4-CBC with HMAC-SM3,
+ a fresh OS-sampled explicit IV. `version` is 2 bytes; output to the
+ `(out, out_capacity, out_actual_len)` copy-out buffer. Single
+ [`GMCRYPTO_ERR`]. **`(key, seq)` uniqueness is the caller's contract.**
+ */
+
+int gmcrypto_tlcp_protect_cbc(const gmcrypto_tlcp_record_keys_cbc_t *keys,
+                              uint64_t seq,
+                              uint8_t content_type,
+                              const uint8_t *version,
+                              const uint8_t *plaintext,
+                              uintptr_t pt_len,
+                              uint8_t *out,
+                              uintptr_t out_capacity,
+                              uintptr_t *out_actual_len)
+;
+
+/*
+ `_with_rng` variant of [`gmcrypto_tlcp_protect_cbc`]: the explicit IV comes
+ from `rng_callback` (REQUIRED for record-KAT reproduction) rather than the
+ OS. A NULL callback returns [`GMCRYPTO_ERR`].
+ */
+
+int gmcrypto_tlcp_protect_cbc_with_rng(const gmcrypto_tlcp_record_keys_cbc_t *keys,
+                                       uint64_t seq,
+                                       uint8_t content_type,
+                                       const uint8_t *version,
+                                       const uint8_t *plaintext,
+                                       uintptr_t pt_len,
+                                       gmcrypto_rng_callback rng_callback,
+                                       void *rng_context,
+                                       uint8_t *out,
+                                       uintptr_t out_capacity,
+                                       uintptr_t *out_actual_len)
+;
+
+/*
+ Deprotect an SM4-CBC record (`explicit_IV(16) ‖ CBC_ct`) — the Lucky13
+ constant-time operation lives in core; this shim adds NO logic. The
+ recovered plaintext goes to the copy-out buffer ONLY on success; on ANY
+ failure (bad pad, bad MAC, bad length — indistinguishable) it returns a
+ single [`GMCRYPTO_ERR`] and touches NO output pointer. There is deliberately
+ **no** length-in parameter (the post-strip length is secret).
+ */
+
+int gmcrypto_tlcp_deprotect_cbc(const gmcrypto_tlcp_record_keys_cbc_t *keys,
+                                uint64_t seq,
+                                uint8_t content_type,
+                                const uint8_t *version,
+                                const uint8_t *record,
+                                uintptr_t record_len,
+                                uint8_t *out,
+                                uintptr_t out_capacity,
+                                uintptr_t *out_actual_len)
+;
+
+/*
+ Protect a plaintext record under SM4-GCM (RFC 5288: seq-derived nonce, TLS
+ AAD). Output to the copy-out buffer; single [`GMCRYPTO_ERR`].
+ **`(key, seq)` uniqueness is the caller's contract.**
+ */
+
+int gmcrypto_tlcp_protect_gcm(const gmcrypto_tlcp_record_keys_gcm_t *keys,
+                              uint64_t seq,
+                              uint8_t content_type,
+                              const uint8_t *version,
+                              const uint8_t *plaintext,
+                              uintptr_t pt_len,
+                              uint8_t *out,
+                              uintptr_t out_capacity,
+                              uintptr_t *out_actual_len)
+;
+
+/*
+ Deprotect an SM4-GCM record (`explicit_nonce(8) ‖ ct ‖ tag(16)`,
+ commit-on-verify). Plaintext to the copy-out buffer ONLY if the tag
+ verifies; otherwise a single [`GMCRYPTO_ERR`] (short record / over-ceiling /
+ bad tag are indistinguishable). No length-in parameter.
+ */
+
+int gmcrypto_tlcp_deprotect_gcm(const gmcrypto_tlcp_record_keys_gcm_t *keys,
+                                uint64_t seq,
+                                uint8_t content_type,
+                                const uint8_t *version,
+                                const uint8_t *record,
+                                uintptr_t record_len,
+                                uint8_t *out,
+                                uintptr_t out_capacity,
+                                uintptr_t *out_actual_len)
+;
+
+/*
+ Verify a single linear, leaf-first certificate chain links to a
+ caller-trusted anchor. `chain` / `anchors` are arrays of cert handles;
+ `at_time` (NULL = skip the validity window) is the comparison time; the
+ `bool` verdict is written to `*out_verified` (1 = verifies, 0 = does not,
+ e.g. over-depth). Returns [`GMCRYPTO_OK`] for a successful evaluation,
+ [`GMCRYPTO_ERR`] only on NULL `out_verified` or a malformed handle array.
+
+ **⚠ This is structural-trust verification, NOT endpoint authentication.** A
+ `1` means the chain links to a trusted CA — never "this is the peer I
+ dialed" (identity binding is the caller's, permanently).
+ */
+
+int gmcrypto_x509_verify_chain(const gmcrypto_x509_certificate_t *const *chain,
+                               uintptr_t chain_len,
+                               const gmcrypto_x509_certificate_t *const *anchors,
+                               uintptr_t anchors_len,
+                               const gmcrypto_x509_time_t *at_time,
+                               int *out_verified)
+;
+
+/*
+ Verify a TLCP [signature, encryption] certificate pair (each a leaf-first
+ chain) against the caller's `anchors`. Verdict to `*out_verified`. Returns
+ [`GMCRYPTO_ERR`] only on NULL `out_verified` or a malformed handle array.
+
+ **⚠ NOT endpoint authentication.** A `1` means each chain links to a trusted
+ anchor, each leaf is usable for its TLCP role, neither leaf is a CA, and the
+ two leaves share one identity (subject + the same issuing chain). It does
+ **NOT** mean "this is the server I dialed" — *whose* identity the pair
+ carries is the caller's decision, permanently.
+ */
+
+int gmcrypto_tlcp_verify_pair(const gmcrypto_x509_certificate_t *const *sign_chain,
+                              uintptr_t sign_chain_len,
+                              const gmcrypto_x509_certificate_t *const *enc_chain,
+                              uintptr_t enc_chain_len,
+                              const gmcrypto_x509_certificate_t *const *anchors,
+                              uintptr_t anchors_len,
+                              const gmcrypto_x509_time_t *at_time,
+                              int *out_verified)
+;
+
+/*
+ Read the `keyUsage` extension. Writes `1`/`0` to `*out_present` (absent OR
+ malformed → `0`) and the raw bitmask to `*out_bits` (bit 0 =
+ `digitalSignature`). Returns [`GMCRYPTO_ERR`] only on NULL.
+ */
+
+int gmcrypto_x509_certificate_key_usage(const gmcrypto_x509_certificate_t *cert,
+                                        int *out_present,
+                                        uint16_t *out_bits)
+;
+
+/*
+ Read the `basicConstraints` extension. Writes `1`/`0` to `*out_present`
+ (absent/malformed → `0`), the `cA` flag to `*out_is_ca`, and the
+ `pathLenConstraint` to `*out_path_len` guarded by `*out_has_path_len`
+ (parsed, **not** enforced — informational). Returns [`GMCRYPTO_ERR`] only on
+ NULL.
+ */
+
+int gmcrypto_x509_certificate_basic_constraints(const gmcrypto_x509_certificate_t *cert,
+                                                int *out_present,
+                                                int *out_is_ca,
+                                                int *out_has_path_len,
+                                                uint32_t *out_path_len)
 ;
 
 #endif  /* GMCRYPTO_H_ */

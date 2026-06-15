@@ -185,6 +185,17 @@ hostname verification) is **out of scope and permanently the caller's**:
 `verify_pair == true` means the pair is CA-issued and role-correct, never
 "this is the peer I dialed".
 
+**The v1.9 TLCP toolkit C FFI adds NO dudect target** — a thin shim over
+already-guarded core paths. The record `deprotect_cbc` FFI rides the existing
+`ct_tlcp_cbc_deprotect` (the Lucky13 constant-time work lives entirely in core;
+the shim is a pure `Option<Vec<u8>>` → copy-out-or-single-`GMCRYPTO_ERR`
+translation that touches no output on failure); the no-confirmation KX
+completers ride `ct_sm2_key_exchange`; the key-schedule FFI rides `ct_hmac_sm3`
+(the keyed PRF primitive); and `verify_chain` / `verify_pair` are
+public-inputs-only (the v1.8 rationale, doubled). The single `GMCRYPTO_ERR` on
+every failure carries the chain-rejection-oracle / Lucky13 failure-mode
+invariant across the ABI unchanged.
+
 **Cfg-gated on `sm2-key-exchange` (1):**
 
 - `ct_sm2_key_exchange` — the full SM2 key-exchange initiator side
@@ -547,7 +558,7 @@ also gained a non-gating **`cargo fuzz coverage`** job that renders per-target
 an artifact (the report is the deliverable, not a coverage-% gate). v0.20 is an
 infra-assurance cycle — no published-crate change; workspace stays `0.16.0`.
 
-**Post-1.0 growth (current census: 27 targets).** The post-1.0 hardening cycle
+**Post-1.0 growth (current census: 30 targets).** The post-1.0 hardening cycle
 (PRs #98/#99) added seven more: primitive one-shot-vs-streaming differentials
 `fuzz_sm3` / `fuzz_hmac_sm3`, the raw-pointer C-ABI surface `fuzz_c_abi`
 (happy-path / NULL-rejection / undersized-buffer op families over the
@@ -567,7 +578,13 @@ no-confirmation completers — the same adversarial 65 bytes feed the
 initiator as `R_B` and the responder as `R_A`; no dispatch byte, no
 seed-format change, census stays 27). The v1.6 `tlcp::key_schedule` gets
 NO fuzz target: typed fixed-length inputs, not an untrusted-input decoder
-(the v0.14 fuzz-surface contract). The nightly `FUZZ_TARGETS` sweep
+(the v0.14 fuzz-surface contract). **v1.7** added
+`fuzz_tlcp_cbc_deprotect` + `fuzz_tlcp_gcm_deprotect` (adversarial record
+bodies; census 27 → 29); **v1.8** added `fuzz_x509_chain` (chain/pair over
+length-prefixed DER blobs; 29 → 30); **v1.9** extended `fuzz_c_abi` with ops
+9 (chain/pair verify) + 10 (record deprotect) over attacker handle / record
+bytes (no new target — census stays 30 — op modulus 9 → 11, all seeds
+audited). The nightly `FUZZ_TARGETS` sweep
 list must name every `fuzz/Cargo.toml` `[[bin]]` — a target absent from it
 builds in CI but is silently never fuzzed (a drift that existed for
 #98/#99's targets and was fixed in #102; the list now carries an explicit

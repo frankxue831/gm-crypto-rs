@@ -80,7 +80,7 @@ unsafe extern "C" fn fixed_fill_rng(
 /// op byte that no longer selects the op it was built for (the v1.4
 /// `% 8 → % 9` widening silently moved `sm3_abc` until its byte was
 /// rewritten; see fuzz/README.md).
-const FUZZ_OP_COUNT: u8 = 9;
+const FUZZ_OP_COUNT: u8 = 11;
 
 fuzz_target!(|data: &[u8]| {
     if data.is_empty() {
@@ -90,12 +90,15 @@ fuzz_target!(|data: &[u8]| {
     let op = data[0];
     let body = &data[1..];
 
-    // SAFETY: ops 0–4, 7 and 8 pass valid (ptr, len) for the documented
-    // fixed sizes, output buffers large enough for the worst-case write
-    // (op 8's accessor spans are all subslices of the input, so an
-    // input-sized buffer is always adequate), and free each opaque handle
-    // exactly once (handles consumed by finalize/confirm/finish are never
-    // also freed). Op 5 passes NULL pointers to guarded entry points
+    // SAFETY: ops 0–4, 7, 8, 9 and 10 pass valid (ptr, len) for the
+    // documented fixed sizes, output buffers large enough for the worst-case
+    // write (op 8's accessor spans + ops 9/10's verify-verdict and
+    // deprotect-output are all bounded by the input, so an input-sized buffer
+    // is always adequate), and free each opaque handle exactly once (handles
+    // consumed by finalize/confirm/finish are never also freed; op 9's cert
+    // handles and op 10's record-key carriers are each freed once, and
+    // verify_chain/verify_pair do NOT consume their handle-array arguments).
+    // Op 5 passes NULL pointers to guarded entry points
     // (which must report GMCRYPTO_ERR). Ops 6 and 8 also pass a real but
     // small buffer with a matching (small) out_capacity, exercising the
     // capacity check. No call violates the documented pointer/length
@@ -372,6 +375,101 @@ fuzz_target!(|data: &[u8]| {
                         gmcrypto_sm2_pubkey_free(pk);
                     }
                     gmcrypto_x509_certificate_free(cert);
+                }
+            }
+
+            // (9) TLCP/X.509 chain + pair verification over attacker handle
+            //     arrays. Carve BE-u16-length-prefixed DER blobs, _from_der
+            //     each, collect the non-null handles, run verify_chain +
+            //     verify_pair (which do NOT consume the handles) + the
+            //     readers, then free every handle exactly once.
+            9 => {
+                let mut handles: Vec<*mut gmcrypto_x509_certificate_t> = Vec::new();
+                let mut rest = body;
+                while rest.len() >= 2 && handles.len() < 8 {
+                    let n = ((rest[0] as usize) << 8) | rest[1] as usize;
+                    rest = &rest[2..];
+                    let take = n.min(rest.len());
+                    let (der, tail) = rest.split_at(take);
+                    rest = tail;
+                    let h = gmcrypto_x509_certificate_from_der(der.as_ptr(), der.len());
+                    if !h.is_null() {
+                        handles.push(h);
+                    }
+                }
+                let ptrs: Vec<*const gmcrypto_x509_certificate_t> =
+                    handles.iter().map(|&h| h.cast_const()).collect();
+                let mut verified = 0;
+                let _ = gmcrypto_x509_verify_chain(
+                    ptrs.as_ptr(),
+                    ptrs.len(),
+                    ptrs.as_ptr(),
+                    ptrs.len(),
+                    ptr::null(),
+                    &mut verified,
+                );
+                let _ = gmcrypto_tlcp_verify_pair(
+                    ptrs.as_ptr(),
+                    ptrs.len(),
+                    ptrs.as_ptr(),
+                    ptrs.len(),
+                    ptrs.as_ptr(),
+                    ptrs.len(),
+                    ptr::null(),
+                    &mut verified,
+                );
+                if let Some(&h) = handles.first() {
+                    let (mut present, mut bits) = (0, 0u16);
+                    let _ = gmcrypto_x509_certificate_key_usage(h, &mut present, &mut bits);
+                    let (mut p2, mut is_ca, mut hpl, mut pl) = (0, 0, 0, 0u32);
+                    let _ = gmcrypto_x509_certificate_basic_constraints(
+                        h, &mut p2, &mut is_ca, &mut hpl, &mut pl,
+                    );
+                }
+                for h in handles {
+                    gmcrypto_x509_certificate_free(h);
+                }
+            }
+
+            // (10) TLCP record deprotect over attacker record bytes against
+            //      fixed key carriers — no panic, no plaintext on failure.
+            //      Deprotect output is never longer than the record, so a
+            //      body-sized buffer is always adequate.
+            10 => {
+                let cbc_block = [0x11u8; 128];
+                let gcm_block = [0x22u8; 40];
+                let version = [0x01u8, 0x01];
+                let mut out = vec![0u8; body.len().max(1)];
+                let mut out_len = 0usize;
+                let cbc = gmcrypto_tlcp_record_keys_cbc_new(0, cbc_block.as_ptr());
+                if !cbc.is_null() {
+                    let _ = gmcrypto_tlcp_deprotect_cbc(
+                        cbc,
+                        0,
+                        23,
+                        version.as_ptr(),
+                        body.as_ptr(),
+                        body.len(),
+                        out.as_mut_ptr(),
+                        out.len(),
+                        &mut out_len,
+                    );
+                    gmcrypto_tlcp_record_keys_cbc_free(cbc);
+                }
+                let gcm = gmcrypto_tlcp_record_keys_gcm_new(0, gcm_block.as_ptr());
+                if !gcm.is_null() {
+                    let _ = gmcrypto_tlcp_deprotect_gcm(
+                        gcm,
+                        0,
+                        23,
+                        version.as_ptr(),
+                        body.as_ptr(),
+                        body.len(),
+                        out.as_mut_ptr(),
+                        out.len(),
+                        &mut out_len,
+                    );
+                    gmcrypto_tlcp_record_keys_gcm_free(gcm);
                 }
             }
 

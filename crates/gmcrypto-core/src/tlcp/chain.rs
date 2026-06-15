@@ -16,7 +16,7 @@
 //! enables both — the `sm2-key-exchange` / GCM-record "enable both"
 //! precedent).
 
-use crate::x509::{Certificate, KeyUsage, X509Time, verify_chain};
+use crate::x509::{Certificate, KeyUsage, X509Time, verify_chain_refs};
 
 fn leaf_is_ca(c: &Certificate) -> bool {
     c.basic_constraints().is_some_and(|bc| bc.is_ca)
@@ -29,7 +29,7 @@ fn leaf_is_ca(c: &Certificate) -> bool {
 /// the optional validity-window comparison. Single `bool` — never a reason
 /// (the failure-mode invariant).
 ///
-/// Returns `true` iff BOTH chains verify ([`verify_chain`]), the sign leaf
+/// Returns `true` iff BOTH chains verify ([`crate::x509::verify_chain`]), the sign leaf
 /// asserts `digitalSignature`, the enc leaf asserts `keyEncipherment` or
 /// `keyAgreement`, neither leaf is a CA, and the two leaves share one
 /// identity: a non-empty byte-equal `subject`, a byte-equal `issuer` Name,
@@ -45,7 +45,26 @@ pub fn verify_pair(
     anchors: &[Certificate],
     at_time: Option<X509Time>,
 ) -> bool {
-    let (Some(s), Some(e)) = (sign_chain.first(), enc_chain.first()) else {
+    let sign_chain: alloc::vec::Vec<&Certificate> = sign_chain.iter().collect();
+    let enc_chain: alloc::vec::Vec<&Certificate> = enc_chain.iter().collect();
+    let anchors: alloc::vec::Vec<&Certificate> = anchors.iter().collect();
+    verify_pair_refs(&sign_chain, &enc_chain, &anchors, at_time)
+}
+
+/// Reference-slice form of [`verify_pair`] — the canonical implementation.
+///
+/// **Not public API and not SemVer-covered.** The C FFI shim verifies arrays
+/// of certificate handles with it (`Certificate` is not `Clone`). Behaviour is
+/// identical to [`verify_pair`].
+#[doc(hidden)]
+#[must_use]
+pub fn verify_pair_refs(
+    sign_chain: &[&Certificate],
+    enc_chain: &[&Certificate],
+    anchors: &[&Certificate],
+    at_time: Option<X509Time>,
+) -> bool {
+    let (Some(&s), Some(&e)) = (sign_chain.first(), enc_chain.first()) else {
         return false;
     };
     // Role keyUsage — keyUsage MUST be present (`None` ⇒ reject for the role).
@@ -81,7 +100,8 @@ pub fn verify_pair(
     {
         return false;
     }
-    verify_chain(sign_chain, anchors, at_time) && verify_chain(enc_chain, anchors, at_time)
+    verify_chain_refs(sign_chain, anchors, at_time)
+        && verify_chain_refs(enc_chain, anchors, at_time)
 }
 
 #[cfg(test)]
