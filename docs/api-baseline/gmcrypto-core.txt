@@ -335,6 +335,8 @@ pub fn gmcrypto_core::tlcp::record::RecordKeysGcm::from_key_block(gmcrypto_core:
 pub fn gmcrypto_core::tlcp::record::RecordKeysGcm::server_half(&[u8; 40]) -> Self
 impl core::ops::drop::Drop for gmcrypto_core::tlcp::record::RecordKeysGcm
 pub fn gmcrypto_core::tlcp::record::RecordKeysGcm::drop(&mut self)
+pub const gmcrypto_core::tlcp::record::CBC_KEY_BLOCK_LEN: usize
+pub const gmcrypto_core::tlcp::record::GCM_KEY_BLOCK_LEN: usize
 pub const gmcrypto_core::tlcp::record::TLCP_RECORD_VERSION: [u8; 2]
 pub fn gmcrypto_core::tlcp::record::deprotect_cbc(&gmcrypto_core::tlcp::record::RecordKeysCbc, u64, u8, [u8; 2], &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
 pub fn gmcrypto_core::tlcp::record::deprotect_gcm(&gmcrypto_core::tlcp::record::RecordKeysGcm, u64, u8, [u8; 2], &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>

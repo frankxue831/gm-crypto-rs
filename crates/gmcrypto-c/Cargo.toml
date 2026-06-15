@@ -35,7 +35,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 # no-confirm KX, record protect/deprotect, chain/pair verify) is always-on;
 # tlcp::chain needs all(tlcp,x509) and the GCM record carrier needs sm4-aead,
 # both already present, so no regen-header IMPLY hack and gmcrypto.h == default.
-gmcrypto-core = { path = "../gmcrypto-core", version = "=1.8.0", features = ["sm4-aead", "sm4-xts", "sm2-key-exchange", "x509", "tlcp"] }
+gmcrypto-core = { path = "../gmcrypto-core", version = "=1.9.0", features = ["sm4-aead", "sm4-xts", "sm2-key-exchange", "x509", "tlcp"] }
 getrandom.workspace = true
 rand_core.workspace = true
 
