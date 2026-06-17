@@ -2,6 +2,15 @@
 
 These are the receipts behind the method described in [CASE-STUDY.md](../CASE-STUDY.md): the AI agent was the construction engine — it wrote the code and the tests — while the human owned scope, invariants, evidence standards, review pressure, and release authority. Crypto was the stress test, not a safety proof: cheap, strong oracles (KAT vectors, dudect, fuzzers) plus independent adversarial review make a covered failure hard to hide, which is exactly why every claim below resolves to a committed artifact. This index groups the public process/audit docs so a reader can walk the trail from "what was promised" to "what was checked."
 
+## Top-level evidence
+
+The receipts the case study leans on most live at the repo root and in the crate tree, not under `docs/`:
+
+- [SECURITY.md](../SECURITY.md) — threat model, constant-time posture, the dudect gate policy, and the v0.1 leak narrative.
+- [CLAUDE.md](../CLAUDE.md) — the project's living memory: hard constraints, per-version history, the dudect gate table, the *Don't* list.
+- [crates/gmcrypto-core/benches/timing_leaks.rs](../crates/gmcrypto-core/benches/timing_leaks.rs) — the dudect timing harness (the 23 bench functions).
+- [fuzz/](../fuzz/) — the 30 fuzz targets plus the run/seed runbook.
+
 ## Scope docs (pre-registration)
 
 Per-cycle charters — scope, forks, and sign-offs recorded for each cycle. The TLCP arc was pre-registered as a standalone v1.5 cycle before any TLCP code; the per-cycle scope docs record what's in/out and what "done" means (squash history doesn't independently prove scope-before-code for every cycle).
@@ -46,7 +55,7 @@ The "what is this and how does it break down" layer — the TLCP arc map plus pe
 
 ## Implementation plans & executed reviews
 
-TDD task plans, each carrying the outcome of an Opus/Fable adversarial review that EXECUTED the riskiest slices in a worktree (GO-WITH-FIXES, must-fixes folded). The agent constructs; the review pressure is recorded here.
+TDD task plans. The later TLCP plans (v1.6–v1.9) carry executed-review outcomes — an Opus/Fable reviewer that compiled the riskiest slices in a worktree (GO-WITH-FIXES, must-fixes folded); the earlier plans (v1.1/v1.3/v1.4) carry reviewed-plan amendments. The agent constructs; the review pressure is recorded here.
 
 - [v1.1-sm2-key-exchange-plan.md](v1.1-sm2-key-exchange-plan.md) — v1.1 SM2-KX TDD plan + Fable-5 reviewed-plan outcome (reviewer re-ran the plan code and regenerated every KAT vector).
 - [v1.3-x509-sm2-plan.md](v1.3-x509-sm2-plan.md) — v1.3 X.509 parse+verify plan + Fable-5 GO-WITH-FIXES (the inverted negative-serial-tolerance catch).
