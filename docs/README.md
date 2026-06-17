@@ -1,6 +1,6 @@
 # The method, by the receipts
 
-These are the receipts behind the method described in [CASE-STUDY.md](../CASE-STUDY.md): the AI agent was the construction engine — it wrote the code and the tests — while the human owned scope, invariants, evidence standards, review pressure, and release authority. Crypto was the stress test, not a safety proof: cheap, strong oracles (KAT vectors, dudect, fuzzers, multi-model audits) make a failure impossible to hide, which is exactly why every claim below resolves to a committed artifact. This index groups the public process/audit docs so a reader can walk the trail from "what was promised" to "what was checked."
+These are the receipts behind the method described in [CASE-STUDY.md](../CASE-STUDY.md): the AI agent was the construction engine — it wrote the code and the tests — while the human owned scope, invariants, evidence standards, review pressure, and release authority. Crypto was the stress test, not a safety proof: cheap, strong oracles (KAT vectors, dudect, fuzzers) plus independent adversarial review make a covered failure hard to hide, which is exactly why every claim below resolves to a committed artifact. This index groups the public process/audit docs so a reader can walk the trail from "what was promised" to "what was checked."
 
 ## Scope docs (pre-registration)
 
