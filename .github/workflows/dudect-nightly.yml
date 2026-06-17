@@ -267,9 +267,13 @@ jobs:
               # sm4-bitsliced-simd). Not cfg-gated — runs under all three
               # matrix entries.
               "ct_sm4_ctr_encrypt": 0.20,
-              # v0.2 W3 — HMAC-SM3 keyed MAC. Covers the inner PRF for
-              # PBKDF2-HMAC-SM3 (W4); no separate W4 target.
-              "ct_hmac_sm3": 0.20,
+              # v0.2 W3 — HMAC-SM3 keyed MAC. DEMOTED 2026-06-17 to the
+              # gross-regression sentinel @0.55 (below) — the 4th two-input
+              # class-split target image-noise-dominated on ubuntu-24.04. The
+              # 06-14 nightly MEDIAN itself crossed 0.20 (runs 0.014, 0.2375,
+              # 0.016, 0.2196, 0.2135; 3/5 spiked), co-spiking with the invert
+              # pair, so a partial fix (keep nightly @0.20) is falsified. See
+              # docs/v0.5-dudect-recalibration.md (2026-06-17 resolution).
               # v0.2 W2 — SM2 decrypt, class-split by recipient d_B.
               # Ciphertext is encrypted to a third party so both classes
               # fail at the MAC check via identical control flow; only
@@ -338,6 +342,19 @@ jobs:
               # → false alarm, no real leak). Sentinel @0.55 still fires on a
               # gross nonce-path regression (a real leak measures ~0.70).
               "ct_sign_k_class": 0.55,
+              # 2026-06-17 — demoted from required_low (was 0.20), the 4th
+              # two-input class-split target. ct_hmac_sm3 is constant-time by
+              # construction (two fixed keys, fixed message → identical
+              # compression work), so it can only measure two-input noise; the
+              # 06-14 nightly median crossed 0.20 (3/5 spikes) co-spiking with
+              # the invert pair while 06-16 was quiet. Sentinel @0.55 still
+              # fires on a gross HMAC-key leak. HONEST RESIDUAL: unlike the
+              # invert pair (backstopped by ct_sign), the HMAC primitive has
+              # NO direct non-composite backstop after this — only the diluted
+              # ct_pkcs8_decrypt (iterated PBKDF2) covers key-byte HMAC timing;
+              # ct_tlcp_cbc_deprotect does NOT (fixed key, equalized Lucky13
+              # path). Codex+Grok-reviewed. docs/v0.5-dudect-recalibration.md.
+              "ct_hmac_sm3": 0.55,
           }
 
           fail = False
