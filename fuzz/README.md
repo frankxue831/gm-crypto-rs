@@ -112,10 +112,13 @@ encrypt→decrypt round-trips `fuzz_sm4_ccm_encrypt` / `fuzz_sm4_xts_encrypt`.
 key-exchange initiator's `confirm`); **v1.3** added `fuzz_x509`
 (X.509-with-SM2 certificate decode + verify, seeded with the committed
 gmssl KAT fixtures); **v1.2/v1.4** extended `fuzz_c_abi` with a
-key-exchange op and an X.509 op (the dispatch is `op % 9`; every
-committed seed's first byte is audited whenever the modulus changes —
-the v1.4 widening silently remapped `sm3_abc` until its op byte was
-rewritten). **27 targets total** — the census must
+key-exchange op and an X.509 op (the dispatch is `op % 11` since v1.9;
+every committed seed's first byte is audited whenever the modulus
+changes — the v1.4 widening silently remapped `sm3_abc` until its op
+byte was rewritten). **v1.7** added `fuzz_tlcp_{cbc,gcm}_deprotect`,
+**v1.8** added `fuzz_x509_chain`, and **v1.9** extended `fuzz_c_abi`
+with a chain/pair op and a record-deprotect op. **30 targets total** —
+the census must
 equal both `fuzz/Cargo.toml`'s `[[bin]]` entries and the `FUZZ_TARGETS`
 list in `.github/workflows/fuzz-nightly.yml`; a target absent from that
 list still compiles in CI but is never fuzzed nor coverage-measured.)

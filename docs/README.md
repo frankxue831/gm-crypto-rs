@@ -4,7 +4,7 @@ These are the receipts behind the method described in [CASE-STUDY.md](../CASE-ST
 
 ## Scope docs (pre-registration)
 
-Per-cycle charters written BEFORE code — scope locked, forks resolved, sign-offs recorded. The human pre-registers what's in/out and what "done" means.
+Per-cycle charters — scope, forks, and sign-offs recorded for each cycle. The TLCP arc was pre-registered as a standalone v1.5 cycle before any TLCP code; the per-cycle scope docs record what's in/out and what "done" means (squash history doesn't independently prove scope-before-code for every cycle).
 
 - [v0.3-scope.md](v0.3-scope.md) — v0.3 ASN.1/DER + PEM/PKCS#8/SPKI/SEC1 scope; Q7.1–Q7.10 sign-off decisions.
 - [v0.4-scope.md](v0.4-scope.md) — v0.4 RustCrypto trait fit + bitsliced S-box + C FFI shim; Q4.1–Q4.19.
