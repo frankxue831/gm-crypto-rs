@@ -1,6 +1,6 @@
-# The Harness, Not the Agent — Building National-Standard Cryptography with an AI Construction Engine
+# The Harness, Not the Builder — A Verification-First Method for Hard, Unforgiving Software
 
-This is an honest account of using an AI agent to construct a pure-Rust SM2/SM3/SM4 and TLCP cryptography library. The narrow claim: the agent was the construction engine — it wrote the implementation, the tests, the harnesses, and ran the build loop — while a human owned scope, invariants, evidence standards, review pressure, and release authority. Crypto is a stress test here, not proof the method is generally safe; the piece is deliberate about what it does and does not show.
+This is an honest account of building a pure-Rust SM2/SM3/SM4 and TLCP cryptography library under a verification system designed on the assumption that the builder couldn't be trusted to get it right. The builder happened to be an AI coding agent — which is why the discipline mattered more, not less: the agent did the construction (the implementation, the tests, the harnesses, the build loop) while a human owned scope, invariants, evidence standards, review pressure, and release authority. The method is the subject; the agent is one detail of how it was built. Crypto is a stress test here, not proof the method is generally safe; the piece is deliberate about what it does and does not show.
 
 ## The hook: a shipped leak, and the harness we widened to see it
 
@@ -44,7 +44,7 @@ One caveat, stated plainly: **this is a stress test, not proof the method is gen
 
 ## The operating loop
 
-The agent is a fast, tireless construction engine. Left unsupervised, that's exactly the problem: it will happily build the wrong thing well, or "improve" a guardrail into a vulnerability. Seven disciplines kept it pointed at the right target. All are human-owned. None are about prompting better — they're about deciding *before* the agent runs, then refusing to let it relitigate.
+Treat the builder as a capable but unsupervised contractor: left alone it will build the wrong thing well, or "improve" a guardrail into a vulnerability. Seven disciplines kept it pointed at the right target. All are human-owned. None are about prompting better — they're about deciding *up front*, then refusing to relitigate.
 
 ### Step 1 — Scope narrowly, and pre-register the cuts
 
