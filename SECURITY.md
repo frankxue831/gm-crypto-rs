@@ -77,8 +77,8 @@ The in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
 plus a deliberately-leaky `negative_control`. Most real targets gate on
 `|tau| < 0.20`;
 `negative_control` gates the opposite direction (`|tau| > 1.0` **must**
-fire to prove harness wiring); `ct_sign_k_class` and the direct
-`ct_fn_invert` / `ct_fp_invert` invert diagnostics have target-specific
+fire to prove harness wiring); `ct_sign_k_class`, `ct_hmac_sm3`, and the
+direct `ct_fn_invert` / `ct_fp_invert` invert diagnostics have target-specific
 gate policy after the 2026-05-12 GH Actions runner-image shift — see
 the recalibration note below and `docs/v0.5-dudect-recalibration.md`.
 CLAUDE.md carries the canonical per-target gate table.
@@ -113,9 +113,17 @@ CLAUDE.md carries the canonical per-target gate table.
   `Sm4Cipher::encrypt_blocks` so the gate covers every cipher path: linear-scan
   default, gate-only `sm4-bitsliced`, SIMD-packed batches under
   `sm4-bitsliced-simd`.
-- `ct_hmac_sm3` — HMAC-SM3 keyed MAC, class-split by master key (v0.2 W3).
-  Structurally covers PBKDF2-HMAC-SM3's (v0.2 W4) inner PRF and the v0.3 W2
-  PBKDF2 sub-path of encrypted-PKCS#8 decrypt.
+- `ct_hmac_sm3` — HMAC-SM3 keyed MAC, class-split by two fixed keys over a
+  fixed-length message (v0.2 W3). **DEMOTED 2026-06-17** to PR-smoke telemetry +
+  a nightly gross-regression sentinel `@0.55` — the 4th two-input class-split
+  target hit by the `ubuntu-24.04` image-noise (constant-time *by construction*,
+  so it can only measure two-input noise; the 06-14 nightly median crossed 0.20
+  co-spiking with the invert pair). **HONEST RESIDUAL:** unlike the invert pair
+  (backstopped by `ct_sign`), the HMAC primitive has **NO direct non-composite
+  backstop** after this — only the *diluted* `ct_pkcs8_decrypt` (iterated PBKDF2)
+  covers key-byte HMAC timing; `ct_tlcp_cbc_deprotect` does **not** (fixed key,
+  equalized Lucky13 path). Codex+Grok-reviewed. See
+  `docs/v0.5-dudect-recalibration.md` (2026-06-17 resolution).
 - `ct_sm2_decrypt` — SM2 decrypt, class-split by recipient `d_B`,
   fixed ciphertext encrypted to a third party so both classes fail
   at the MAC check via identical control flow (v0.2 Phase 3).
@@ -239,8 +247,13 @@ invariant across the ABI unchanged.
 **The `tlcp` key schedule (v1.6) has NO dudect target, and the v1.7 SM4-GCM
 record rides `ct_sm4_gcm_decrypt`**: the key schedule
 (`tlcp::key_schedule`) is a chain of HMAC-SM3 invocations over secret keys
-with PUBLIC lengths, labels, and iteration structure — exactly what
-`ct_hmac_sm3` already gates (the v0.3 Q7.6 streaming-HMAC precedent). The
+with PUBLIC lengths, labels, and iteration structure — the same keyed
+primitive `ct_hmac_sm3` measures (the v0.3 Q7.6 streaming-HMAC precedent).
+**Note (2026-06-17):** `ct_hmac_sm3` was demoted to a non-authoritative
+telemetry/sentinel `@0.55` posture (`ubuntu-24.04` two-input image-noise; see
+its target entry above), so the key schedule's HMAC primitive no longer has a
+*direct* gate — its residual coverage is the diluted `ct_pkcs8_decrypt` PBKDF2
+path, and a future class-split-aware noise-twin is the re-promotion path. The
 SM4-GCM record deprotect adds no secret-dependent branch over `mode_gcm`'s
 already-gated constant-time tag compare (salt/AAD shaping is on public
 data). Only the SM4-CBC Lucky13 path earns the new `ct_tlcp_cbc_deprotect`
@@ -328,14 +341,18 @@ hardening gap"):
 
 - **Composite dudect targets remain release-gated at `|tau| < 0.20`.** These are
   the full-operation targets (sign, scalar-mult, SM4 key-schedule / encrypt /
-  CTR / CBC-fanout / GCM / CCM / XTS decrypt, HMAC, SM2 decrypt, PKCS#8 decrypt);
+  CTR / CBC-fanout / GCM / CCM / XTS decrypt, SM2 decrypt, PKCS#8 decrypt);
   they measure quietly and gate authoritatively.
-- **The two single-field-inversion micro-diagnostics (`ct_fn_invert`,
-  `ct_fp_invert`) are retained as telemetry (PR) + a nightly gross-regression
-  sentinel at `|tau| ≥ 0.55`** — *not* the 0.20 gate. Shared GitHub-runner
-  measurements show an empirically unstable **two-input class-split** floor for
-  these short targets after the 2026-05-12 image refresh (intermittent
-  [0.26–0.40]), while every composite target stays < 0.01.
+- **The two-input class-split targets are retained as telemetry (PR) + a nightly
+  gross-regression sentinel at `|tau| ≥ 0.55`** — *not* the 0.20 gate. This set
+  grew as the `ubuntu-24.04` image-noise reached each: the two single-field-
+  inversion micro-diagnostics (`ct_fn_invert`, `ct_fp_invert`; v0.5),
+  `ct_sign_k_class` (2026-06-07), and `ct_hmac_sm3` (2026-06-17 — the only one
+  with **no direct non-composite backstop**; see its entry above). Shared
+  GitHub-runner measurements show an empirically unstable **two-input
+  class-split** floor for these targets (intermittent [0.21–0.47]; the 5-run
+  *median* itself can cross 0.20), while every composite full-operation target
+  stays < 0.01.
 - **Why not a tighter gate.** v0.18 pinned the toolchain/image + added a CI-level
   multi-run median; v0.19 then built two **fix-vs-fix noise probes**
   (`noise_floor_f{n,p}_invert`) and a self-calibrating relative gate to re-promote

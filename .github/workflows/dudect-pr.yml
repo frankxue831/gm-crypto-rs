@@ -279,9 +279,16 @@ jobs:
               # sm4-bitsliced-simd). Not cfg-gated — runs under all three
               # matrix entries.
               "ct_sm4_ctr_encrypt": 0.20,
-              # v0.2 W3 — HMAC-SM3 keyed MAC. Covers the inner PRF for
-              # PBKDF2-HMAC-SM3 (W4); no separate W4 target.
-              "ct_hmac_sm3": 0.20,
+              # v0.2 W3 — HMAC-SM3 keyed MAC. DEMOTED 2026-06-17 to
+              # telemetry (below) — the 4th two-input class-split target hit
+              # by the ubuntu-24.04 image-noise. ct_hmac_sm3 is class-split by
+              # two FIXED keys over a FIXED-length message, so HMAC does
+              # identical compression work for both classes (constant-time by
+              # construction; it can only measure two-input noise). The
+              # 2026-06-14 nightly median crossed 0.20 (3/5 runs spiked to
+              # ~0.22-0.24), co-spiking with the invert pair (ct_fp_invert
+              # 0.47/0.33 the same run); 06-16 was quiet. Codex+Grok-reviewed.
+              # See docs/v0.5-dudect-recalibration.md (2026-06-17 resolution).
               # v0.2 W2 — SM2 decrypt, class-split by recipient d_B.
               # Ciphertext is encrypted to a third party so both classes
               # fail at the MAC check via identical control flow; only
@@ -336,7 +343,11 @@ jobs:
           # lands in the CI log for trend tracking but doesn't gate
           # on the PR-smoke budget. See `required_low`'s big comment
           # above for the runner-image-drift rationale.
-          telemetry_only = ["ct_fn_invert", "ct_fp_invert", "ct_sign_k_class"]
+          # ct_hmac_sm3 joined this set 2026-06-17 (the 4th two-input
+          # class-split target image-noise-demoted; see the required_low
+          # comment above + docs/v0.5-dudect-recalibration.md).
+          telemetry_only = ["ct_fn_invert", "ct_fp_invert", "ct_sign_k_class",
+                            "ct_hmac_sm3"]
 
           fail = False
           # Completeness: every REQUIRED target must be measured in EVERY run.
