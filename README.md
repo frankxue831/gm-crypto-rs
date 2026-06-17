@@ -279,6 +279,11 @@ non-feature so far ("no trust decisions"). Smaller parked items (RustCrypto
 `aead` trait fit, AVX-512, CCM buffered input, a class-split-aware dudect
 noise-twin) are tracked in the scope docs.
 
+**How it was built:** for the verification-first development method behind
+this library — pre-registered scope, multi-model adversarial review,
+executable-evidence gates, and the failures kept as receipts — see
+[`CASE-STUDY.md`](CASE-STUDY.md).
+
 ## Threat model
 
 See [`SECURITY.md`](SECURITY.md). Briefly: server-side use, dedicated host,
