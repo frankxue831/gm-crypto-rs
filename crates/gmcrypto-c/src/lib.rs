@@ -67,10 +67,15 @@
 // convention warning is suppressed crate-wide for these.
 #![allow(non_camel_case_types)]
 // v0.4 W4 / Q4.7 — this is the FFI shim crate; raw-pointer
-// dereferencing and `Box::from_raw` are inherent. Every `unsafe`
-// block carries a `// SAFETY:` comment naming the caller-side
-// preconditions; the Cargo.toml lint `unsafe_code = "warn"` flags
-// any new `unsafe` for reviewer attention rather than blocking
+// dereferencing and `Box::from_raw` are inherent. The raw-pointer
+// primitives (slice reconstruction and `ptr::write`) are localized
+// to documented helpers (`try_slice`, `try_slice_mut`,
+// `write_output`, `collect_cert_refs`); the `Box::from_raw`,
+// `&*`/`&mut *`, and `as_ref` deref blocks each carry an inline
+// `// SAFETY:` comment naming the caller-side preconditions, and
+// helper call-sites rely on the helper's documented contract rather
+// than repeating it. The Cargo.toml lint `unsafe_code = "warn"`
+// flags any new `unsafe` for reviewer attention rather than blocking
 // compile. `gmcrypto-core` itself stays `unsafe_code = "forbid"`.
 #![allow(unsafe_code)]
 
@@ -536,6 +541,8 @@ pub unsafe extern "C" fn gmcrypto_hmac_sm3_update(
             Some(s) => s,
             None => return GMCRYPTO_ERR,
         };
+        // SAFETY: `mac` is non-null per the check above; the caller
+        // guarantees exclusive access for the duration of the call.
         let m = unsafe { &mut *mac };
         m.inner.update(input);
         GMCRYPTO_OK
@@ -557,6 +564,8 @@ pub unsafe extern "C" fn gmcrypto_hmac_sm3_finalize(
             Some(s) => s,
             None => return GMCRYPTO_ERR,
         };
+        // SAFETY: `mac` is non-null and came from `Box::into_raw`;
+        // take ownership and drop after finalize.
         let boxed = unsafe { Box::from_raw(mac) };
         let tag = boxed.inner.finalize();
         out.copy_from_slice(&tag);
@@ -582,6 +591,8 @@ pub unsafe extern "C" fn gmcrypto_hmac_sm3_verify(
         };
         let mut expected_arr = [0u8; GMCRYPTO_SM3_DIGEST_SIZE];
         expected_arr.copy_from_slice(expected);
+        // SAFETY: `mac` is non-null and came from `Box::into_raw`;
+        // take ownership and drop after verify.
         let boxed = unsafe { Box::from_raw(mac) };
         if boxed.inner.verify(&expected_arr) {
             GMCRYPTO_OK
@@ -597,6 +608,8 @@ pub unsafe extern "C" fn gmcrypto_hmac_sm3_free(mac: *mut gmcrypto_hmac_sm3_t) {
     if mac.is_null() {
         return;
     }
+    // SAFETY: `mac` came from `Box::into_raw` and has not been
+    // freed (NULL handled above).
     drop(unsafe { Box::from_raw(mac) });
 }
 
@@ -681,6 +694,8 @@ pub unsafe extern "C" fn gmcrypto_sm4_encrypt_block(
             Ok(a) => a,
             Err(_) => return GMCRYPTO_ERR,
         };
+        // SAFETY: `cipher` is non-null per the check above; shared
+        // borrow for the duration of the call.
         let c = unsafe { &*cipher };
         c.inner.encrypt_block(b_arr);
         GMCRYPTO_OK
@@ -710,6 +725,8 @@ pub unsafe extern "C" fn gmcrypto_sm4_decrypt_block(
             Ok(a) => a,
             Err(_) => return GMCRYPTO_ERR,
         };
+        // SAFETY: `cipher` is non-null per the check above; shared
+        // borrow for the duration of the call.
         let c = unsafe { &*cipher };
         c.inner.decrypt_block(b_arr);
         GMCRYPTO_OK
@@ -722,6 +739,8 @@ pub unsafe extern "C" fn gmcrypto_sm4_free(cipher: *mut gmcrypto_sm4_t) {
     if cipher.is_null() {
         return;
     }
+    // SAFETY: `cipher` came from `Box::into_raw` and has not
+    // been freed (NULL handled above).
     drop(unsafe { Box::from_raw(cipher) });
 }
 
@@ -799,6 +818,7 @@ pub unsafe extern "C" fn gmcrypto_sm4_cbc_decrypt(
             Err(_) => return GMCRYPTO_ERR,
         };
         match mode_cbc::decrypt(k_arr, iv_arr, c) {
+            // SAFETY: write_output validates the caller buffer.
             Some(plaintext) => unsafe {
                 write_output(&plaintext, out, out_capacity, out_actual_len)
             },
@@ -1929,6 +1949,8 @@ pub unsafe extern "C" fn gmcrypto_sm2_privkey_to_sec1_be(
             Some(s) => s,
             None => return GMCRYPTO_ERR,
         };
+        // SAFETY: `key` is non-null per the check above; shared
+        // borrow for the duration of the call.
         let k = unsafe { &*key };
         // `to_bytes_be` is the v0.5 W5 rename of v0.3's
         // `#[doc(hidden)] pub fn to_sec1_be(&self)` (now SemVer-
@@ -1958,6 +1980,8 @@ pub unsafe extern "C" fn gmcrypto_sm2_pubkey_to_sec1_uncompressed(
             Some(s) => s,
             None => return GMCRYPTO_ERR,
         };
+        // SAFETY: `key` is non-null per the check above; shared
+        // borrow for the duration of the call.
         let k = unsafe { &*key };
         let bytes = k.inner.to_sec1_uncompressed();
         o.copy_from_slice(&bytes);
@@ -1972,6 +1996,8 @@ pub unsafe extern "C" fn gmcrypto_sm2_privkey_free(key: *mut gmcrypto_sm2_privke
     if key.is_null() {
         return;
     }
+    // SAFETY: `key` came from `Box::into_raw` and has not been
+    // freed (NULL handled above).
     drop(unsafe { Box::from_raw(key) });
 }
 
@@ -1981,6 +2007,8 @@ pub unsafe extern "C" fn gmcrypto_sm2_pubkey_free(key: *mut gmcrypto_sm2_pubkey_
     if key.is_null() {
         return;
     }
+    // SAFETY: `key` came from `Box::into_raw` and has not been
+    // freed (NULL handled above).
     drop(unsafe { Box::from_raw(key) });
 }
 
@@ -2004,6 +2032,8 @@ pub unsafe extern "C" fn gmcrypto_sm2_privkey_to_pkcs8(
             Some(s) => s,
             None => return GMCRYPTO_ERR,
         };
+        // SAFETY: `key` is non-null per the check above; shared
+        // borrow for the duration of the call.
         let k = unsafe { &*key };
         // Generate a fresh 16-byte salt and IV from SysRng. PBKDF2's
         // salt is public; SM4-CBC's IV must be unpredictable (NIST
@@ -2106,6 +2136,8 @@ pub unsafe extern "C" fn gmcrypto_sm2_sign(
             Some(s) => s,
             None => return GMCRYPTO_ERR,
         };
+        // SAFETY: `key` is non-null per the check above; shared
+        // borrow for the duration of the call.
         let k = unsafe { &*key };
         let mut rng = getrandom::SysRng;
         let sig = match sign_with_id(&k.inner, id, m, &mut rng) {
@@ -2149,6 +2181,8 @@ pub unsafe extern "C" fn gmcrypto_sm2_verify(
             Some(s) => s,
             None => return GMCRYPTO_ERR,
         };
+        // SAFETY: `key` is non-null per the check above; shared
+        // borrow for the duration of the call.
         let k = unsafe { &*key };
         if verify_with_id(&k.inner, id, m, sig) {
             GMCRYPTO_OK
@@ -2180,6 +2214,8 @@ pub unsafe extern "C" fn gmcrypto_sm2_encrypt(
             Some(s) => s,
             None => return GMCRYPTO_ERR,
         };
+        // SAFETY: `key` is non-null per the check above; shared
+        // borrow for the duration of the call.
         let k = unsafe { &*key };
         let mut rng = getrandom::SysRng;
         let ct = match sm2_encrypt(&k.inner, p, &mut rng) {
@@ -2297,6 +2333,8 @@ pub unsafe extern "C" fn gmcrypto_sm2_decrypt(
             Some(s) => s,
             None => return GMCRYPTO_ERR,
         };
+        // SAFETY: `key` is non-null per the check above; shared
+        // borrow for the duration of the call.
         let k = unsafe { &*key };
         match sm2_decrypt(&k.inner, c) {
             Ok(pt) => unsafe { write_output(&pt, out_pt, out_capacity, out_actual_len) },
@@ -3248,6 +3286,7 @@ unsafe fn x509_copy_out(
     out_actual_len: *mut usize,
 ) -> c_int {
     ffi_guard(move || {
+        // SAFETY: `cert` is a valid handle or NULL per the caller contract.
         let Some(cert) = (unsafe { cert.as_ref() }) else {
             return GMCRYPTO_ERR;
         };
@@ -3402,6 +3441,7 @@ pub unsafe extern "C" fn gmcrypto_x509_certificate_verify_signature_with_id(
     id_len: usize,
 ) -> c_int {
     ffi_guard(|| {
+        // SAFETY: `cert`/`issuer_pubkey` are valid handles or NULL per contract.
         let (Some(cert), Some(issuer)) =
             (unsafe { cert.as_ref() }, unsafe { issuer_pubkey.as_ref() })
         else {
@@ -3433,6 +3473,7 @@ unsafe fn x509_write_time(
     out_time: *mut gmcrypto_x509_time_t,
 ) -> c_int {
     ffi_guard(move || {
+        // SAFETY: `cert` is a valid handle or NULL per the caller contract.
         let (Some(cert), false) = (unsafe { cert.as_ref() }, out_time.is_null()) else {
             return GMCRYPTO_ERR;
         };
@@ -3491,6 +3532,7 @@ pub unsafe extern "C" fn gmcrypto_x509_certificate_is_self_issued(
     out_is_self_issued: *mut c_int,
 ) -> c_int {
     ffi_guard(|| {
+        // SAFETY: `cert` is a valid handle or NULL per the caller contract.
         let (Some(cert), false) = (unsafe { cert.as_ref() }, out_is_self_issued.is_null()) else {
             return GMCRYPTO_ERR;
         };
@@ -4296,6 +4338,7 @@ pub unsafe extern "C" fn gmcrypto_x509_certificate_key_usage(
 ) -> c_int {
     ffi_guard(|| {
         let (Some(cert), false, false) = (
+            // SAFETY: `cert` is a valid handle or NULL per the caller contract.
             unsafe { cert.as_ref() },
             out_present.is_null(),
             out_bits.is_null(),
@@ -4331,6 +4374,7 @@ pub unsafe extern "C" fn gmcrypto_x509_certificate_basic_constraints(
 ) -> c_int {
     ffi_guard(|| {
         let (Some(cert), false, false, false, false) = (
+            // SAFETY: `cert` is a valid handle or NULL per the caller contract.
             unsafe { cert.as_ref() },
             out_present.is_null(),
             out_is_ca.is_null(),

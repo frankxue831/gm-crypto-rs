@@ -71,9 +71,10 @@ branches, and the SM2 sign retry loop runs a fixed number of iterations
 regardless of which (if any) candidate is valid.
 
 The in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
-(`benches/timing_leaks.rs`) ships **19 real `ct_*` targets** (12 always-on
+(`benches/timing_leaks.rs`) ships **20 real `ct_*` targets** (12 always-on
 + 2 cfg-gated under `sm4-bitsliced-simd` + 3 cfg-gated under `sm4-aead`
-+ 1 cfg-gated under `sm4-xts` + 1 cfg-gated under `sm2-key-exchange`)
++ 1 cfg-gated under `sm4-xts` + 1 cfg-gated under `sm2-key-exchange`
++ 1 cfg-gated under `tlcp`)
 plus a deliberately-leaky `negative_control`. Most real targets gate on
 `|tau| < 0.20`;
 `negative_control` gates the opposite direction (`|tau| > 1.0` **must**
@@ -223,6 +224,9 @@ invariant across the ABI unchanged.
   responder's `respond_without_key_confirmation` is structurally covered by
   the identical `shared_secret` core (the target is initiator-side, so the
   responder is covered by construction, not literally measured).
+
+**Cfg-gated on `tlcp` (1):**
+
 - `ct_tlcp_cbc_deprotect` — the TLCP SM4-CBC **Lucky13-hardened** record
   deprotect (`tlcp::record::deprotect_cbc`, v1.7 W3), class-split by the
   **recovered-fragment (post-strip plaintext) length** with a FIXED key:
