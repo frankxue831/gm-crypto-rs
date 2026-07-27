@@ -157,3 +157,31 @@ committed `seeds/fuzz_sm2_kx/basic` is the responder's real `(R_B ‖ S_B)`
 reply (responder ephemeral `0x3C`-fill) to that exact deterministic
 initiator, so the seed exercises the full success path including both
 confirmation-tag computations.
+
+**v1.7 — `fuzz_tlcp_{cbc,gcm}_deprotect` layouts:** `[key_block:128][seq:8][record:rest]`
+(CBC) and `[key_block:40][seq:8][record:rest]` (GCM). Both leading fields are
+FRONT-consuming `arbitrary` reads, so a seed is a plain concatenation; `seq` is
+read **little-endian**, i.e. seq bytes `01 02 03 04 05 06 07 08` carve to
+`0x0807060504030201`. The per-direction keys come from `client_half`, and
+`record` is the adversarial wire body (`explicit_IV(16) ‖ CBC_ct` /
+`explicit_nonce(8) ‖ ct ‖ tag(16)`).
+
+Each target commits two seeds — `valid_record` (25-byte plaintext) and
+`valid_empty` (empty plaintext, the minimum-length boundary) — built by
+`protect_{cbc,gcm}` against the key block and seq **recovered through the
+target's own carving**, with the CBC explicit IV pinned by a deterministic
+`0x20`-incrementing `TryCryptoRng` so the bytes are reproducible. Each was
+verified by re-parsing the emitted seed and asserting `deprotect_*` returns the
+original plaintext, so both seeds land on the success path rather than bouncing
+off a public-length guard.
+
+> **Why these seeds are load-bearing.** These two targets originally shipped
+> with no `seeds/` dir. libFuzzer treats a nonexistent corpus dir as fatal
+> (`No such file or directory: <dir>; exiting`) and exits non-zero *before
+> running a single input*, which `fuzz-nightly.yml` reported as `CRASH` — 44
+> consecutive red nightlies (2026-06-14 → 2026-07-27) that were not crashes,
+> while the Lucky13-hardened `deprotect_cbc` path was never actually fuzzed.
+> The workflow now **preflights** a seeds dir for every target in
+> `FUZZ_TARGETS` and fails with a distinct "config drift, NOT a crash"
+> message, and passes only corpus dirs that exist. If you add a target,
+> add its seeds dir in the same commit.
