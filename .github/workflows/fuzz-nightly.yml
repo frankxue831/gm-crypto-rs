@@ -97,6 +97,27 @@ jobs:
       - name: Build all fuzz targets
         run: cargo +nightly fuzz build
 
+      # Preflight census check. libFuzzer treats a NONEXISTENT corpus dir as a
+      # fatal error ("No such file or directory: <dir>; exiting") and exits
+      # non-zero WITHOUT running a single input — which the sweep below would
+      # otherwise report as `CRASH`. That is exactly what happened when v1.7
+      # added fuzz_tlcp_{cbc,gcm}_deprotect with no seeds dir: 44 consecutive
+      # red nightlies that were not crashes, while those two targets were in
+      # truth never fuzzed at all. Failing HERE, with a distinct message,
+      # keeps a config drift from ever again masquerading as a crash.
+      - name: Preflight — every target has a seeds dir
+        run: |
+          missing=""
+          for t in $FUZZ_TARGETS; do
+            [ -d "fuzz/seeds/$t" ] || missing="$missing $t"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::config drift, NOT a crash — missing fuzz/seeds/<target>/ for:$missing"
+            echo "Add a curated seed dir per fuzz/README.md, or drop the target from FUZZ_TARGETS."
+            exit 1
+          fi
+          echo "seeds dir present for all $(echo $FUZZ_TARGETS | wc -w) targets"
+
       - name: Fuzz each target (capped)
         run: |
           BUDGET="${{ github.event.inputs.max_total_time || '120' }}"
@@ -104,7 +125,12 @@ jobs:
           for t in $FUZZ_TARGETS; do
             echo "::group::$t"
             mkdir -p "fuzz/corpus/$t"
-            if cargo +nightly fuzz run "$t" "fuzz/corpus/$t" "fuzz/seeds/$t" -- \
+            # Pass only dirs that exist — belt-and-braces behind the preflight,
+            # so a nonexistent path can never reach libFuzzer as a fake crash.
+            dirs="fuzz/corpus/$t"
+            [ -d "fuzz/seeds/$t" ] && dirs="$dirs fuzz/seeds/$t"
+            # shellcheck disable=SC2086
+            if cargo +nightly fuzz run "$t" $dirs -- \
                  -max_len=16384 -rss_limit_mb=2048 -timeout=25 \
                  -max_total_time="$BUDGET"; then
               echo "PASS $t"
@@ -166,8 +192,14 @@ jobs:
           for t in $FUZZ_TARGETS; do
             echo "::group::coverage $t"
             mkdir -p "fuzz/corpus/$t"
+            # Same nonexistent-dir hazard as the sweep job: a missing seeds dir
+            # makes libFuzzer exit before instrumenting anything, which used to
+            # surface here as a misleading `coverage-build-failed`.
+            dirs="fuzz/corpus/$t"
+            [ -d "fuzz/seeds/$t" ] && dirs="$dirs fuzz/seeds/$t"
             # Replay corpus+seeds through an instrumented build → coverage.profdata.
-            if cargo +nightly fuzz coverage "$t" "fuzz/corpus/$t" "fuzz/seeds/$t"; then
+            # shellcheck disable=SC2086
+            if cargo +nightly fuzz coverage "$t" $dirs; then
               prof="fuzz/coverage/$t/coverage.profdata"
               # Locate the coverage-instrumented binary anywhere under the repo or
               # cargo target tree (its subpath varies by cargo-fuzz/host), excluding
