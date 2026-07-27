@@ -87,8 +87,7 @@ the design intent in isolation.
 
 ## What this isn't
 
-- Not a TLS/TLCP protocol implementation (the `tlcp` feature ships crypto
-  building blocks only — no handshake, no records, no I/O).
+- Not a TLS/TLCP protocol implementation (the `tlcp` feature ships cryptographic building blocks, including record protection, but no handshake state machine, record framing, connection/session orchestration, or transport I/O).
 - Not SM9, ZUC, post-quantum.
 - Not an HSM/SDF/SKF integration.
 - Not a certified cryptographic module.

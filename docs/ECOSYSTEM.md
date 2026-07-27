@@ -40,7 +40,7 @@ Partner-specific mappings, identities, fixtures, denylist entries, and exact-wir
 
 ## 6. Per-repository security baseline
 
-Every repository containing an official crate must provide a security policy, RustSec advisory monitoring through `cargo-deny` or an equivalent CI gate, and fuzz coverage wherever it parses untrusted structured input. One repository-level baseline covers all official crates in a workspace; member crates do not duplicate it. Every official crate must say that no independent audit has occurred until one has, and must not claim audit status, universal constant-time behavior, or protection from a compromised process.
+Every repository containing an official crate must provide a security policy, RustSec advisory monitoring through `cargo-deny` or an equivalent CI gate, and fuzz coverage wherever it parses untrusted structured input. One repository-level baseline covers all official crates in a workspace; member crates do not duplicate it. Repository-level living security documentation must state the audit status and scope of every official crate it covers. Until an independent audit has occurred, it must say so explicitly. Documentation must not overstate an audit's scope, universal constant-time behavior, or protection from a compromised process.
 
 **Verification:** check the repository-level `SECURITY.md`, advisory workflow or deny configuration, parser fuzz targets, and explicit non-claims in living security documentation. Whether new parsing code needs additional fuzz targets is policy-only security review until a coverage contract is added.
 
@@ -65,7 +65,7 @@ sh tests/open_source_boundary.sh
 ./ci/check-open-source-boundary.sh --worktree .
 ```
 
-Before every `gmcrypto-core` release, run this gate in a temporary envelope export with the core release candidate injected through a temporary path dependency or Cargo `[patch]` override. If the candidate version no longer satisfies the downstream exact pin, change that pin only in the temporary gate copy. A breaking result requires a documented migration note before the core release ships.
+Before every `gmcrypto-core` release, run this gate in a temporary envelope export with the core release candidate injected through a temporary path dependency or Cargo `[patch]` override. The temporary patched export runs the same Cargo operations without `--locked` so Cargo may rewrite only the disposable lockfile; the committed downstream lockfile remains untouched. Keep the formatting and boundary commands unchanged. If the candidate version no longer satisfies the downstream exact pin, change that pin only in the temporary gate copy. A breaking result requires a documented migration note before the core release ships.
 
 On the downstream side, the same gate runs for every exact core-pin bump while the crate is unpublished. After first publication with a caret requirement, downstream CI must cover both the minimum supported and newest compatible core versions.
 
