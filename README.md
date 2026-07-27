@@ -17,6 +17,8 @@ detectable-leak regression harness.
 certified by any upstream cryptography project, payment gateway, standards body,
 or vendor.
 
+Official ecosystem membership, layering, versioning, and compatibility gates are defined in the [gmcrypto Rust ecosystem charter](docs/ECOSYSTEM.md).
+
 > ⚠️ **Not independently audited.** No third-party / external security audit has
 > been performed. Assurance is internal: a multi-model adversarial pre-publish
 > re-audit (see [`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md)), in-CI KAT vectors,
