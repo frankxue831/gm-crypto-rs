@@ -95,6 +95,23 @@ the signal is the per-target trend, not an absolute number.
 | `fuzz_sm2_decrypt` | `sm2::decrypt` (fixed key; parse + KDF + MAC) |
 | `fuzz_sm2_verify` | `verify_with_id` (fixed key; sig DER parse) |
 | `fuzz_sm2_kx` | key-exchange initiator `confirm` (fixed keys; adversarial peer `R_B`+`S_B`) |
+| `fuzz_sm4_cbc_decrypt` | `sm4::mode_cbc::decrypt` (+ PKCS#7 unpad) |
+| `fuzz_sm4_gcm_decrypt` | `sm4::mode_gcm::decrypt` + `decrypt_with_tag_len` |
+| `fuzz_sm4_ccm_decrypt` | `sm4::mode_ccm::decrypt` (CBC-MAC + CTR) |
+| `fuzz_sm4_xts_decrypt` | `sm4::mode_xts::decrypt` (GB/T 17964; CTS tail) |
+| `fuzz_sm4_cbc_streaming_decrypt` | `Sm4CbcDecryptor` — DIFFERENTIAL vs single-shot `mode_cbc::decrypt` |
+| `fuzz_sm4_gcm_streaming_decrypt` | `Sm4GcmDecryptor` — DIFFERENTIAL vs single-shot `mode_gcm::decrypt` |
+| `fuzz_sm3` | `sm3::hash` — DIFFERENTIAL vs streaming `Sm3` |
+| `fuzz_hmac_sm3` | `hmac_sm3` — DIFFERENTIAL vs streaming `HmacSm3`, + constant-time `verify` |
+| `fuzz_c_abi` | `gmcrypto-c` `extern "C"` surface (raw pointers; opaque-handle lifecycle) |
+| `fuzz_sm4_cbc_encrypt` | `mode_cbc::encrypt` — DIFFERENTIAL vs streaming, + round-trip |
+| `fuzz_sm4_gcm_encrypt` | `mode_gcm::encrypt` — DIFFERENTIAL vs streaming, + round-trip with AAD |
+| `fuzz_sm4_ccm_encrypt` | `mode_ccm::encrypt` — encrypt→decrypt round-trip + tag tamper |
+| `fuzz_sm4_xts_encrypt` | `mode_xts::encrypt` — encrypt→decrypt round-trip (CTS tail) |
+| `fuzz_x509` | `x509::Certificate::from_der` + `verify_signature(_with_id)` + accessors |
+| `fuzz_tlcp_cbc_deprotect` | `tlcp::record::deprotect_cbc` (Lucky13-hardened) |
+| `fuzz_tlcp_gcm_deprotect` | `tlcp::record::deprotect_gcm` (RFC 5288 shape) |
+| `fuzz_x509_chain` | `x509::verify_chain` + `tlcp::chain::verify_pair` |
 
 (v0.14 W3 added the SM4 single-shot decrypts: `fuzz_sm4_cbc_decrypt` /
 `_gcm_decrypt` / `_ccm_decrypt` / `_xts_decrypt` — negative-input, see
