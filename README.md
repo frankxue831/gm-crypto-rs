@@ -23,24 +23,48 @@ Official ecosystem membership, layering, versioning, and compatibility gates are
 > been performed. Assurance is internal: a multi-model adversarial pre-publish
 > re-audit (see [`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md)), in-CI KAT vectors,
 > maintainer-run gmssl 3.1.1 interop (11/11, gated on `GMCRYPTO_GMSSL` — not run in
-> CI), an in-CI `dudect` timing-leak harness, and a 27-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
+> CI), an in-CI `dudect` timing-leak harness, and a 30-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
 > project with no support SLA. Review the code and **use at your own risk.** See
 > [`SECURITY.md`](SECURITY.md) for the threat model and disclosure process.
+
+**Status:** actively maintained as of July 2026. The 1.x line is feature-complete
+for its stated scope — v1.9.0 closed the TLCP arc — so commit volume is low by
+design rather than by neglect. Issues and PRs get a response.
+
+## Why this rather than the alternatives
+
+| | gm-crypto-rs | `libsm` | RustCrypto `sm2`/`sm4` |
+|---|---|---|---|
+| SM2 + SM3 + SM4 in one crate | ✅ | ✅ | separate crates |
+| Timing-leak harness in CI | ✅ 20 `dudect` targets, gated | ✗ | ✗ |
+| Fuzzing | ✅ 30 targets, nightly | ✗ | partial |
+| C ABI | ✅ 104 entry points | ✗ | ✗ |
+| TLCP (GB/T 38636) toolkit | ✅ | ✗ | ✗ |
+| `no_std` | ✅ | ✗ | ✅ |
+| Enforced SemVer (`cargo-semver-checks`) | ✅ | ✗ | ✗ |
+| Stable 1.x release | ✅ | ✅ | `sm2` still at `0.14.0-rc` |
+| **External security audit** | **✗** | ✗ | ✗ |
+| **Production track record** | **thin — published 2026** | years | years |
+
+The last two rows are the honest counterweight. If your priority is the
+longest field exposure, `libsm` has it. If your priority is verifiable
+constant-time discipline, a C ABI, or TLCP building blocks, none of the
+alternatives offer them.
 
 ## What this is
 
 A small, auditable, pure-Rust SM2 / SM3 / SM4 SDK whose central
 differentiating commitment is that secret-touching code paths are
 **constant-time-designed and guarded by an in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/)
-detectable-leak regression harness**: 19 real `ct_*` targets (12
+detectable-leak regression harness**: 20 real `ct_*` targets (12
 always-on + 2 cfg-gated under `sm4-bitsliced-simd` + 3 cfg-gated under
 `sm4-aead` + 1 cfg-gated under `sm4-xts` + 1 cfg-gated under
-`sm2-key-exchange`) plus a deliberately-leaky
+`sm2-key-exchange` + 1 cfg-gated under `tlcp`) plus a deliberately-leaky
 `negative_control` that proves
-the harness can detect leaks. Most real targets gate at `|tau| < 0.20`;
-`ct_sign_k_class` and the direct `ct_fn_invert` / `ct_fp_invert` invert
-diagnostics carry target-specific gate policy after the 2026-05-12
-recalibration — see [`SECURITY.md`](SECURITY.md) and
+the harness can detect leaks. Most real targets gate at `|tau| < 0.20`; four
+(`ct_fn_invert`, `ct_fp_invert`, `ct_sign_k_class`, `ct_hmac_sm3`) carry
+target-specific gate policy after the 2026-05-12 / 06-07 / 06-17
+recalibrations — see [`SECURITY.md`](SECURITY.md) and
 [`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md).
 
 The harness reports timing-leak detection events. **It does not prove
@@ -59,14 +83,21 @@ cfg-gated), v0.6's batched CBC-decrypt fanout
 cipher matrix entry), v0.8's SM4-GCM + SM4-CCM decrypt
 (`ct_sm4_gcm_decrypt` and `ct_sm4_ccm_decrypt`, cfg-gated on
 `sm4-aead`), v0.9's incremental-input buffered SM4-GCM decrypt
-(`ct_sm4_gcm_decrypt_buffered`, cfg-gated on `sm4-aead`), v1.1's full
+(`ct_sm4_gcm_decrypt_buffered`, cfg-gated on `sm4-aead`), v0.12's SM4-XTS
+decrypt over a ciphertext-stealing data unit (`ct_sm4_xts_decrypt`,
+cfg-gated on `sm4-xts` — the CTS tail is the riskiest tweak arithmetic, so
+that is what gates), v1.1's full
 SM2 key-exchange initiator flow (`ct_sm2_key_exchange`, cfg-gated on
 `sm2-key-exchange` — split by static `d_A` with per-class valid
-responder transcripts), HMAC-SM3
+responder transcripts), v1.7's Lucky13-hardened TLCP record deprotect
+(`ct_tlcp_cbc_deprotect`, cfg-gated on `tlcp` — the residual guard behind an
+equalisation that is enforced separately by an equivalence test), HMAC-SM3
 (split by key), encrypted-PKCS#8
 decrypt (split by password bytes — both classes' blobs valid for their
 class's password so both succeed via identical control flow), plus
-direct `Fn::invert` and `Fp::invert` diagnostics. The `ct_sign_k_class`
+direct `Fn::invert` and `Fp::invert` diagnostics and two always-on
+`noise_floor_*` probes that cannot leak by construction and exist to
+characterise runner noise. The `ct_sign_k_class`
 target closes v0.1's structural blind spot to nonce-only leaks.
 
 The `crypto-bigint 0.6 → 0.7.3` upgrade resolved the v0.1-era
@@ -104,17 +135,16 @@ use gmcrypto_core::sm2::{
 use getrandom::SysRng;
 use hex_literal::hex;
 
-// v0.5 W5 — `from_bytes_be` is the recommended public constructor
-// (always-on, doesn't expose `crypto_bigint::U256` to callers).
+// `from_bytes_be` is the recommended constructor: always available, and it
+// keeps `crypto_bigint::U256` out of your code.
 let d_be: [u8; 32] = hex!(
     "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8"
 );
 let key = Sm2PrivateKey::from_bytes_be(&d_be).expect("d in [1, n-2]");
-// `public_key()` returns an `Sm2PublicKey` directly (v0.23).
 let public = key.public_key();
 
-// SM2 sign/encrypt take a fallible `rand_core::TryCryptoRng` (v0.23), so
-// `getrandom::SysRng` is passed directly — no `UnwrapErr` wrapper.
+// Signing takes a fallible `rand_core::TryCryptoRng`, so an RNG failure
+// surfaces as an error rather than a panic. `SysRng` satisfies it directly.
 let mut rng = SysRng;
 let sig = sign_with_id(&key, DEFAULT_SIGNER_ID, b"hello", &mut rng).unwrap();
 assert!(verify_with_id(&public, DEFAULT_SIGNER_ID, b"hello", &sig));
@@ -167,7 +197,8 @@ The same surfaces are reachable from C / C++ / Python / Go / Zig through
 and the doc-only examples under
 [`crates/gmcrypto-c/examples/`](crates/gmcrypto-c/examples/)
 (`sm2_sign.c`, `sm4_gcm_streaming.c`, `sm4_xts_sector.c`,
-`sm4_xts_multisector.c`, `sm2_key_exchange.c`, `x509_verify.c`).
+`sm4_xts_multisector.c`, `sm2_key_exchange.c`, `x509_verify.c`,
+`tlcp_handshake.c`, `tlcp_verify_pair.c`).
 
 ## Crates & features
 
@@ -244,7 +275,7 @@ signatures / ciphertexts, SM4 mode bytes) is byte-identical to 0.16.0.
   `mode_gcm::{encrypt, encrypt_with_tag_len}` return `Option<…>`, rejecting plaintext
   past the `2^36 − 32`-byte GCM counter ceiling (matching the streaming path and
   `decrypt`).
-- **Features are additive** (`default = []`; all 9 are opt-in) and the build is
+- **Features are additive** (`default = []`; all 10 are opt-in) and the build is
   `no_std` + `alloc`-only with `unsafe_code = "forbid"` on the core.
 - **MSRV is 1.85** (edition 2024); an MSRV bump is treated as a minor, not a patch.
 - **`crypto-bigint` decoupling (v0.22):** the **always-on** (default-features) public
@@ -270,15 +301,21 @@ remediation).
 The arc so far: v0.1–v0.16 built the primitive surface (SM2/SM3/SM4, all
 SM4 cipher modes incl. AEAD + XTS, the C ABI, SIMD acceleration); v0.17–v0.23
 were the assurance + API-finalization run-up to **1.0.0**; the 1.x line has
-been strictly additive — SM2 key exchange (1.1) + its C FFI (1.2),
-X.509-with-SM2 leaf parse/verify (1.3) + its C FFI (1.4).
+been strictly additive throughout — SM2 key exchange (1.1) + its C FFI (1.2),
+X.509-with-SM2 leaf parse/verify (1.3) + its C FFI (1.4), then the TLCP arc:
+the key schedule and no-confirmation SM2-KX completers (1.6), record
+protection with the Lucky13-hardened CBC deprotect (1.7), certificate-chain
+and `[sign, enc]` pair verification (1.8), and the C FFI that exposes the
+whole toolkit — 85 → 104 entry points (1.9).
 
-**Direction:** TLCP (GB/T 38636) is the headline candidate — its
-cryptographic prerequisites (SM2-KX, X.509-with-SM2) are now shipped; X.509
-chain validation is the remaining building block and a deliberate
-non-feature so far ("no trust decisions"). Smaller parked items (RustCrypto
-`aead` trait fit, AVX-512, CCM buffered input, a class-split-aware dudect
-noise-twin) are tracked in the scope docs.
+**Direction: the TLCP (GB/T 38636) toolkit is complete**, in-core and from C.
+A C client can run a full handshake end-to-end — key exchange, key schedule,
+record protection, certificate verification. What it is *not* is a protocol
+implementation: there is no handshake state machine, no record framing, and
+no transport I/O, and adding them is a separate decision (a sans-I/O engine in
+its own crate) that has **not** been committed to. Smaller parked items —
+RustCrypto `aead` trait fit, AVX-512 `sbox_x64`, CCM buffered input, and a
+class-split-aware dudect noise-twin — are tracked in the scope docs.
 
 **How it was built:** for the verification-first development method behind
 this library — pre-registered scope, multi-model adversarial review,
@@ -323,7 +360,7 @@ by enabling `getrandom`'s `wasm_js` feature in *their* `Cargo.toml`:
 
 ```toml
 [dependencies]
-gmcrypto-core = "1.4"
+gmcrypto-core = "1.9"
 rand_core = { version = "0.10", default-features = false }
 getrandom = { version = "0.4", default-features = false, features = ["wasm_js"] }
 ```
