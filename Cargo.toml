@@ -23,8 +23,15 @@ exclude = ["fuzz"]
 [workspace.package]
 version = "1.9.0"
 edition = "2024"
-license = "Apache-2.0"
+# Dual-licensed, the Rust ecosystem convention: a consumer may take either.
+# Apache-2.0 carries the express patent grant; MIT is the permissive path for
+# downstreams whose legal review fast-tracks it. Both texts ship inside every
+# published crate (a copy sits in each crate directory) — the root pair alone
+# does NOT reach the `.crate` archives, since cargo only collects files under
+# the package directory.
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/frankxue831/gm-crypto-rs"
+homepage = "https://github.com/frankxue831/gm-crypto-rs"
 rust-version = "1.85"
 
 [workspace.dependencies]

@@ -34,7 +34,8 @@ on:
     # ci.yml's broader build/test surface.
     paths-ignore:
       - '**/*.md'
-      - 'LICENSE'
+      - 'LICENSE-*'                        # LICENSE-APACHE / LICENSE-MIT (root + per-crate)
+      - '**/LICENSE-*'
       - '.gitignore'
       - 'docs/**'                          # scope docs, runbooks, release reviews
       - '.github/ISSUE_TEMPLATE/**'

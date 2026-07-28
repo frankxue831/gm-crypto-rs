@@ -4,10 +4,12 @@ description = "SIMD backends for gmcrypto-core — AVX2 (x86_64) and NEON (aarch
 keywords = ["sm4", "simd", "avx2", "bitsliced"]
 categories = ["cryptography", "no-std"]
 readme = "../../README.md"
+documentation = "https://docs.rs/gmcrypto-simd"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 rust-version.workspace = true
 
 [lib]

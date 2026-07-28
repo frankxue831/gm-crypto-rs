@@ -22,7 +22,9 @@ The `gmcrypto-*` crate-name prefix is reserved by project policy for officially 
 
 The unpublished `gm-crypto-rs-demo` project is a supporting example and published-version smoke test, not an official published crate. Historical Java projects are independent and are not members of this Rust ecosystem.
 
-**Verification:** compare the authoritative list above with workspace and downstream manifests plus verified source-repository and maintainer identity; for each published crate, also compare its crates.io publisher record and linked source repository. Prefix reservation and third-party naming remain policy-only because crates.io cannot enforce this charter.
+**Licensing.** Every official crate is published under the Rust-conventional dual `MIT OR Apache-2.0`, and every published crate must ship both licence texts inside its `.crate` archive — a licence file at a repository root does not reach the archive, because `cargo package` collects only files under the package directory. `gmcrypto-core`, `gmcrypto-c`, and `gmcrypto-simd` satisfy this as of the licence cycle following 1.9.0; `gmcrypto-envelope-lite` remains Apache-2.0-only pending its own alignment, which is a known and tolerated divergence until its next release.
+
+**Verification:** compare the authoritative list above with workspace and downstream manifests plus verified source-repository and maintainer identity; for each published crate, also compare its crates.io publisher record and linked source repository. For licensing, check `license` in each manifest and confirm `cargo package --list` shows `LICENSE-APACHE` and `LICENSE-MIT` for every published crate. Prefix reservation and third-party naming remain policy-only because crates.io cannot enforce this charter.
 
 ## 4. Version coupling and MSRV
 

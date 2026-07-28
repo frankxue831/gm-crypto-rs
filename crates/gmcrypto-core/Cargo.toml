@@ -4,10 +4,12 @@ description = "Constant-time-designed pure-Rust SM2/SM3/SM4 primitives (no_std +
 keywords = ["sm2", "sm3", "gm-crypto", "no-std", "constant-time"]
 categories = ["cryptography", "no-std"]
 readme = "../../README.md"
+documentation = "https://docs.rs/gmcrypto-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 rust-version.workspace = true
 
 # v0.4 — docs.rs builds with default features only by default. The
