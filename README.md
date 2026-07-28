@@ -33,23 +33,28 @@ design rather than by neglect. Issues and PRs get a response.
 
 ## Why this rather than the alternatives
 
-| | gm-crypto-rs | `libsm` | RustCrypto `sm2`/`sm4` |
+| | gm-crypto-rs | `libsm` | RustCrypto `sm2` / `sm4` |
 |---|---|---|---|
 | SM2 + SM3 + SM4 in one crate | ✅ | ✅ | separate crates |
-| Timing-leak harness in CI | ✅ 20 `dudect` targets, gated | ✗ | ✗ |
-| Fuzzing | ✅ 30 targets, nightly | ✗ | partial |
-| C ABI | ✅ 104 entry points | ✗ | ✗ |
-| TLCP (GB/T 38636) toolkit | ✅ | ✗ | ✗ |
-| `no_std` | ✅ | ✗ | ✅ |
-| Enforced SemVer (`cargo-semver-checks`) | ✅ | ✗ | ✗ |
-| Stable 1.x release | ✅ | ✅ | `sm2` still at `0.14.0-rc` |
-| **External security audit** | **✗** | ✗ | ✗ |
-| **Production track record** | **thin — published 2026** | years | years |
+| Timing-leak harness in CI | ✅ 20 `dudect` targets, gated | — | — |
+| Fuzzing | ✅ 30 targets, nightly | — | — |
+| C ABI | ✅ 104 entry points | — | — |
+| TLCP (GB/T 38636) toolkit | ✅ | — | — |
+| `no_std` | ✅ | not advertised | ✅ |
+| Enforced SemVer (`cargo-semver-checks`) | ✅ | — | — |
+| Latest release | **1.9.0** | 0.6.1 | `sm4` 0.6.0, `sm2` 0.14.0-rc |
+| **External security audit** | **none** | none | none |
+| **Production track record** | **thin — first published 2026** | years | years |
 
-The last two rows are the honest counterweight. If your priority is the
-longest field exposure, `libsm` has it. If your priority is verifiable
-constant-time discipline, a C ABI, or TLCP building blocks, none of the
-alternatives offer them.
+A dash means "not offered as a documented feature", checked against each
+project's crates.io metadata and repository in July 2026 — not a claim that
+the work is absent from someone's tree, and worth re-checking before you rely
+on it.
+
+The last two rows are the honest counterweight and are meant to stay. If your
+priority is the longest field exposure, `libsm` has years of it and this does
+not. If your priority is verifiable constant-time discipline, a C ABI, or TLCP
+building blocks, none of the alternatives offer them.
 
 ## What this is
 
