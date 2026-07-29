@@ -42,7 +42,7 @@ design rather than by neglect. Issues and PRs get a response.
 | TLCP (GB/T 38636) toolkit | ✅ | — | — |
 | `no_std` | ✅ | not advertised | ✅ |
 | Enforced SemVer (`cargo-semver-checks`) | ✅ | — | — |
-| Latest release | **1.9.0** | 0.6.1 | `sm4` 0.6.0, `sm2` 0.14.0-rc |
+| Latest release | **1.9.1** | 0.6.1 | `sm4` 0.6.0, `sm2` 0.14.0-rc |
 | **External security audit** | **none** | none | none |
 | **Production track record** | **thin — first published 2026** | years | years |
 
@@ -232,8 +232,9 @@ Three crates, released together at one lockstep version:
 ## Stability & SemVer
 
 The line graduated to **1.0 (stable)** with the **1.0.0** release; the current release is
-**1.9.0** (TLCP toolkit C FFI — the cadence cycle closing the TLCP arc). crates.io history
-goes **0.16.0 → 1.0.0 → 1.0.1 → 1.1.0 → 1.2.0 → 1.3.0 → 1.4.0 → 1.6.0 → 1.7.0 → 1.8.0 → 1.9.0**, skipping 0.17.0–0.23.0
+**1.9.1** (a patch carrying the licence-text packaging fix; **1.9.0** was the TLCP toolkit
+C FFI, the cadence cycle closing the TLCP arc). crates.io history
+goes **0.16.0 → 1.0.0 → 1.0.1 → 1.1.0 → 1.2.0 → 1.3.0 → 1.4.0 → 1.6.0 → 1.7.0 → 1.8.0 → 1.9.0 → 1.9.1**, skipping 0.17.0–0.23.0
 and 1.5.0 (those were non-publishing milestones — the 0.x run was the assurance +
 API-finalization arc that shipped together in `1.0.0`; 1.5 was the TLCP-decomposition
 design cycle, [`docs/tlcp-decomposition.md`](docs/tlcp-decomposition.md)). Every post-1.0 release has been additive (SemVer-checked);
@@ -249,7 +250,7 @@ see [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md).
 **From 1.0, SemVer is enforced**: breaking changes to the covered surface require a
 major bump, and `cargo-semver-checks` runs as the forward breaking-change gate in
 CI (the three crates always release together at one lockstep version, with
-intra-workspace deps pinned exactly — `=1.9.0`). The runtime wire output (SM2
+intra-workspace deps pinned exactly — `=1.9.1`). The runtime wire output (SM2
 signatures / ciphertexts, SM4 mode bytes) is byte-identical to 0.16.0.
 
 - **What's covered by SemVer:** the public Rust API of `gmcrypto-core` (the
@@ -395,11 +396,11 @@ at your option. This is the Rust ecosystem convention: Apache-2.0 carries the
 express patent grant, MIT is the permissive path for downstreams whose legal
 review fast-tracks it.
 
-**Starting with the next release, both texts ship inside every published
-crate.** Every release up to and including 1.9.0 shipped none — the licence
-existed only at the repository root and nothing pointed cargo at it — so the
-archives currently on crates.io do not contain it. The licence that governs
-those releases is unchanged; only the packaging was wrong.
+**Starting with 1.9.1, both texts ship inside every published crate.** Every
+release up to and including 1.9.0 shipped none — the licence existed only at the
+repository root and nothing pointed cargo at it — so those archives on crates.io
+do not contain it. The licence that governs those releases is unchanged; only
+the packaging was wrong.
 
 Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in this project by you, as defined in the Apache-2.0

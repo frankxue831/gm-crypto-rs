@@ -83,6 +83,8 @@ Multi-model adversarial audits and GO/NO-GO gates standing between the work and 
 - [v0.1.0-release-review.md](v0.1.0-release-review.md) — v0.1.0 pre-publish reviewer checklist (the template these reviews follow).
 - [v0.2.0-release-review.md](v0.2.0-release-review.md) — v0.2.0 pre-publish reviewer checklist.
 - [v1.0.0-release-review.md](v1.0.0-release-review.md) — v1.0.0 pre-publish reviewer checklist (the deliberate first-stable-publish gate).
+- [v1.9.1-release-review.md](v1.9.1-release-review.md) — v1.9.1 pre-publish reviewer checklist (the licence-text packaging patch; adds the ECOSYSTEM §8 downstream compatibility gate and a decisive "is the licence actually in the archive" check).
+- [v1.9.1-gate1-evidence.md](v1.9.1-gate1-evidence.md) — the recorded two-phase ECOSYSTEM §8 Gate #1 run for 1.9.1 (both phases' results, tested commits, and a procedural note on the charter's phase-2 recipe).
 
 ## KAT sourcing
 
