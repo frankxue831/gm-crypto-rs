@@ -393,7 +393,13 @@ Dual-licensed under either of
 
 at your option. This is the Rust ecosystem convention: Apache-2.0 carries the
 express patent grant, MIT is the permissive path for downstreams whose legal
-review fast-tracks it. Both texts ship inside every published crate.
+review fast-tracks it.
+
+**Starting with the next release, both texts ship inside every published
+crate.** Every release up to and including 1.9.0 shipped none — the licence
+existed only at the repository root and nothing pointed cargo at it — so the
+archives currently on crates.io do not contain it. The licence that governs
+those releases is unchanged; only the packaging was wrong.
 
 Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in this project by you, as defined in the Apache-2.0

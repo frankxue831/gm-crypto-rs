@@ -17,12 +17,16 @@ the project follows [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - **The published `.crate` archives contained no licence text at all.**
-  `LICENSE` lived only at the repository root, outside every package
-  directory, and no manifest set `license-file` or `include` — so while the
+  `LICENSE` lived only at the repository root and no manifest named it:
+  cargo will copy a file from outside the package directory when a manifest
+  key points at it (as `readme = "../../README.md"` already does here), but
+  no `license-file` key was set and no in-crate copy existed, so while the
   crates.io metadata declared a licence, `cargo package` shipped none of the
   three crates with a copy. Both licence files now sit in each crate
-  directory and are verified present via `cargo package --list`. Affected
-  every release up to and including 1.9.0.
+  directory and are verified present via `cargo package --list`.
+  **Affected every release up to and including 1.9.0; the fix reaches
+  crates.io with the next published version**, since a released version is
+  immutable and cannot be corrected in place.
 - `CONTRIBUTING.md` told contributors that `ct_hmac_sm3` gates at
   `|tau| < 0.20`. That target was demoted to PR telemetry plus a nightly
   `@0.55` sentinel on 2026-06-17; the checklist had not followed. It also

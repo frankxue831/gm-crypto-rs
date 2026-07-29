@@ -25,10 +25,18 @@ version = "1.9.0"
 edition = "2024"
 # Dual-licensed, the Rust ecosystem convention: a consumer may take either.
 # Apache-2.0 carries the express patent grant; MIT is the permissive path for
-# downstreams whose legal review fast-tracks it. Both texts ship inside every
-# published crate (a copy sits in each crate directory) — the root pair alone
-# does NOT reach the `.crate` archives, since cargo only collects files under
-# the package directory.
+# downstreams whose legal review fast-tracks it.
+#
+# Both texts sit in each crate directory so they reach the `.crate` archives.
+# Every release through 1.9.0 shipped NO licence text: the only copies lived at
+# the repository root, and nothing pointed cargo at them. Cargo can copy a file
+# from outside the package directory when a manifest key names it — this
+# workspace already relies on that for `readme = "../../README.md"`, and
+# `license-file` behaves the same way — but no such key was set for the licence,
+# and no in-crate copy existed, so nothing was collected. `license-file` is not
+# the fix here: it takes a single path and cannot carry a dual licence, so
+# per-crate copies are the way to satisfy both. Published archives pick this up
+# starting with the next release; 1.9.0 on crates.io remains without them.
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/frankxue831/gm-crypto-rs"
 homepage = "https://github.com/frankxue831/gm-crypto-rs"
