@@ -4,10 +4,12 @@ description = "C ABI for gmcrypto-core — cdylib + staticlib exposing SM2/SM3/S
 keywords = ["sm2", "sm3", "sm4", "ffi", "c-abi"]
 categories = ["cryptography", "api-bindings"]
 readme = "README.md"
+documentation = "https://docs.rs/gmcrypto-c"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 rust-version.workspace = true
 
 [lib]

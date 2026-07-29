@@ -132,6 +132,20 @@ CLAUDE.md carries the canonical per-target gate table.
   password bytes (v0.3 W2). Both classes' blobs are valid for their class's
   password so both succeed via identical control flow.
 
+**Always-on non-`ct_*` benches (3).** These are not leak targets, and counting
+them is why the always-on bench vector has 15 entries against 12 `ct_*`:
+
+- `negative_control` — a deliberately leaky comparison. It MUST report
+  `|tau| > 1.0` on every single run; if it ever goes quiet, the harness is
+  broken and every other green result that run is meaningless.
+- `noise_floor_fn_invert` / `noise_floor_fp_invert` — fix-vs-fix probes (v0.19)
+  that feed **both** dudect classes one identical input, so they cannot leak by
+  construction and their `|tau|` is pure measurement noise. Telemetry only,
+  never gating. They exist as evidence: they stay quiet (~0.005) while
+  `ct_fn_invert` / `ct_fp_invert` spike, which is what established that the
+  runner noise lives in the two-input **class split** rather than in the
+  operation itself. See `docs/v0.5-dudect-recalibration.md` (v0.19 resolution).
+
 **Cfg-gated on `sm4-bitsliced-simd` (2):**
 
 - `ct_sm4_encrypt_block_bitsliced_simd` — SM4 single-block encrypt under the
@@ -513,8 +527,19 @@ round-trip + fixed-`k` smoke test remains.
   `sign_raw_with_id` (no DER) rather than `sign_with_id`.
 - **Fault attacks.** No fault-injection countermeasures.
 - **Hardware-backed keys (SDF/SKF/HSM).** Out of scope.
-- **TLS / TLCP / GM-TLS profiles.** Out of scope.
-- **Certificate-chain validation, CRL, OCSP, CSR, CMS.** Out of scope.
+- **TLS / TLCP / GM-TLS *protocol* implementations.** Out of scope. The
+  `tlcp` feature ships GB/T 38636 cryptographic building blocks — key
+  schedule, record protection, certificate-pair verification — but **no
+  handshake state machine, no record framing, no connection or session
+  orchestration, and no transport I/O**. Driving those building blocks into
+  a working protocol is the caller's job.
+- **CRL, OCSP, CSR, CMS.** Out of scope.
+- **Endpoint authentication.** Out of scope, permanently. `x509::verify_chain`
+  and `tlcp::chain::verify_pair` (v1.8) do ship, but they establish
+  **structural trust only** — that a chain links to a trusted anchor and that
+  the roles are right. Binding a verified certificate to *the peer you
+  actually dialled* is the caller's responsibility and always will be. See
+  the chain-verification section above for exactly what is and is not checked.
 
 ## Failure-mode invariant (defense-in-depth)
 
@@ -536,10 +561,15 @@ PRs that distinguish failure modes — even "helpfully" — will be rejected.
 
 The failure-mode invariant above is enforced not only by the type system and
 KAT/interop tests over curated inputs, but by **coverage-guided fuzzing over
-adversarial inputs**. v0.14 adds a `cargo-fuzz` (libFuzzer) harness
-(`fuzz/`, a workspace-excluded nightly-only crate — never in the published
-dependency graph) with **16 targets covering the entire untrusted-input
-decode/decrypt boundary**:
+adversarial inputs**. The suite currently stands at **30 targets — see
+"Post-1.0 growth" below for the current census, which is authoritative.**
+
+The rest of this section is the *historical* v0.14 record. v0.14 introduced a
+`cargo-fuzz` (libFuzzer) harness (`fuzz/`, a workspace-excluded nightly-only
+crate — never in the published dependency graph) with **16 targets, which at
+that time covered the whole untrusted-input decode/decrypt boundary**. That
+boundary has since grown — X.509, TLCP records, and the C ABI all arrived
+later — so the 16 below are a starting point, not present-day coverage:
 
 - **Wire formats:** PEM, PKCS#8 (`decode` + PBES2 `decrypt`), SPKI, SEC1, the
   ASN.1 `SEQUENCE { r, s }` signature, the low-level strict-canonical DER reader
@@ -610,6 +640,26 @@ list must name every `fuzz/Cargo.toml` `[[bin]]` — a target absent from it
 builds in CI but is silently never fuzzed (a drift that existed for
 #98/#99's targets and was fixed in #102; the list now carries an explicit
 must-match note).
+
+**Every target must also have a committed `fuzz/seeds/<target>/` directory,
+and CI now preflights this (#117).** libFuzzer treats a *nonexistent* corpus
+directory as a fatal error and exits non-zero before executing a single input.
+Because the sweep passed the seeds path unconditionally, v1.7's
+`fuzz_tlcp_cbc_deprotect` and `fuzz_tlcp_gcm_deprotect` — the only two of 30
+targets shipped without seeds — failed instantly every night and were reported
+as `CRASH`. The nightly ran red for **44 consecutive nights**, and the real
+damage was not the false alarm: **those two targets executed zero inputs the
+entire time**, so the Lucky13-hardened `deprotect_cbc` path had no fuzz
+coverage at all while appearing present in the 30-target census. The seed
+directories now exist, a preflight step fails with an explicit
+`config drift, NOT a crash` message naming the offending targets, and both the
+sweep and the coverage job pass only directories that exist.
+
+The general lesson is recorded because it will recur in other forms: **the
+census proves a target is listed and compiles, not that it ran.** The
+per-target coverage report (`fuzz-coverage` artifact) is the independent
+check — it showed `coverage-build-failed` for both targets throughout, and
+nothing was reading it.
 
 ## Compliance posture
 

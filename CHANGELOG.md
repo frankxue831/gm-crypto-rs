@@ -5,6 +5,42 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Licence: `Apache-2.0` → `MIT OR Apache-2.0`** (dual, at the consumer's
+  option) across all three crates. This is a *widening* — every use permitted
+  before is still permitted, and Apache-2.0 with its express patent grant
+  remains available unchanged, so no existing consumer needs to do anything.
+  The root `LICENSE` is now [`LICENSE-APACHE`](LICENSE-APACHE) (text
+  byte-identical), joined by [`LICENSE-MIT`](LICENSE-MIT).
+
+### Fixed
+
+- **The published `.crate` archives contained no licence text at all.**
+  `LICENSE` lived only at the repository root and no manifest named it:
+  cargo will copy a file from outside the package directory when a manifest
+  key points at it (as `readme = "../../README.md"` already does here), but
+  no `license-file` key was set and no in-crate copy existed, so while the
+  crates.io metadata declared a licence, `cargo package` shipped none of the
+  three crates with a copy. Both licence files now sit in each crate
+  directory and are verified present via `cargo package --list`.
+  **Affected every release up to and including 1.9.0; the fix reaches
+  crates.io with the next published version**, since a released version is
+  immutable and cannot be corrected in place.
+- `CONTRIBUTING.md` told contributors that `ct_hmac_sm3` gates at
+  `|tau| < 0.20`. That target was demoted to PR telemetry plus a nightly
+  `@0.55` sentinel on 2026-06-17; the checklist had not followed. It also
+  omitted `ct_sm4_xts_decrypt`, `ct_sm2_key_exchange`, and
+  `ct_tlcp_cbc_deprotect`, and its bench command silently compiled out 8 of
+  the 20 `ct_*` targets.
+- `SECURITY.md` listed certificate-chain validation and TLCP as out of scope
+  while documenting both as shipped elsewhere in the same file (v1.8 / v1.6–v1.9).
+
+### Added
+
+- `homepage` and per-crate `documentation` manifest metadata (both previously
+  unset, so crates.io rendered neither).
+
 ## [1.9.0] - 2026-06-16
 
 **TLCP toolkit C FFI** — the cadence FFI cycle that closes the TLCP
