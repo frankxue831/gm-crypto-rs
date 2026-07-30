@@ -44,6 +44,7 @@ Per-cycle charters — scope, forks, and sign-offs recorded for each cycle. The 
 - [v1.7-scope.md](v1.7-scope.md) — v1.7 TLCP record protection scope; Q7.1–Q7.11.
 - [v1.8-scope.md](v1.8-scope.md) — v1.8 TLCP cert chain/pair verification scope; Q8.1–Q8.16 (incl. Q8.7b widening).
 - [v1.9-scope.md](v1.9-scope.md) — v1.9 TLCP toolkit C FFI scope; Q9.1–Q9.8 (4 forks maintainer-locked).
+- [v1.10-scope.md](v1.10-scope.md) — v1.10 assurance cycle (non-publishing); Q10.1–Q10.8. Closes F16 by wiring gmssl interop into CI against a pinned from-source oracle — after finding the oracle had silently drifted to 3.2.0 and the "11/11" claim was unreproducible. Also refutes the F21 audit's suggested dudect class-split axis and records the three W2 outcomes committed in advance.
 
 ## Design & decomposition
 
