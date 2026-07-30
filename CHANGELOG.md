@@ -5,6 +5,14 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-07-30
+
+Patch release — carries the licence-text packaging fix and the documentation
+corrections to crates.io. **No API / ABI / wire change**: the only `src/` delta
+since 1.9.0 is inline `// SAFETY:` comments in the C shim, so a `1.9.0` consumer
+upgrades with a plain `cargo update`. `cargo-public-api` and `cargo-semver-checks`
+stayed green across the change.
+
 ### Changed
 
 - **Licence: `Apache-2.0` → `MIT OR Apache-2.0`** (dual, at the consumer's
@@ -24,8 +32,8 @@ the project follows [Semantic Versioning](https://semver.org/).
   crates.io metadata declared a licence, `cargo package` shipped none of the
   three crates with a copy. Both licence files now sit in each crate
   directory and are verified present via `cargo package --list`.
-  **Affected every release up to and including 1.9.0; the fix reaches
-  crates.io with the next published version**, since a released version is
+  **Affected every release up to and including 1.9.0; 1.9.1 is the first
+  published version to carry licence text**, since a released version is
   immutable and cannot be corrected in place.
 - `CONTRIBUTING.md` told contributors that `ct_hmac_sm3` gates at
   `|tau| < 0.20`. That target was demoted to PR telemetry plus a nightly

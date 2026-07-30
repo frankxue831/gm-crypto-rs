@@ -1,8 +1,32 @@
 # CLAUDE.md
 
 Pure-Rust SM2/SM3/SM4 SDK.
-**v1.9.0 — TLCP toolkit C FFI — implemented on `feat/tlcp-ffi`; publish order
-simd → core → c, the maintainer's per-release call.** The **cadence FFI cycle
+**v1.9.1 — licence-text packaging patch — prepped on `release/v1.9.1`; publish
+order simd → core → c, the maintainer's per-release call.** A **patch with ZERO
+runtime behavior change** — the only `src/` delta since 1.9.0 is inline
+`// SAFETY:` comments in the C shim (#115), so `cargo-public-api` +
+`cargo-semver-checks` stay green and a 1.9.0 consumer moves with a plain
+`cargo update`. The headline is a **real packaging defect**: every `.crate`
+archive through 1.9.0 shipped **NO licence text at all** — `LICENSE` lived only
+at the repo root and no manifest key pointed cargo at it (cargo *will* copy from
+outside the package dir when a key names it, as `readme = "../../README.md"`
+already does, but `license-file` takes a single path and **cannot express a dual
+licence**, so per-crate copies are the fix). Published versions are immutable, so
+**1.9.1 is the first release carrying licence text**; 1.9.0 and earlier stay
+without it permanently. Also ships the **`Apache-2.0` → `MIT OR Apache-2.0`
+widening** (every prior use still permitted), `homepage`/`documentation` manifest
+metadata (crates.io rendered neither), and doc corrections to CONTRIBUTING.md
+(stale `ct_hmac_sm3` gate wording + a bench command that silently compiled out 8
+of the 20 `ct_*` targets) and SECURITY.md (listed chain validation + TLCP as out
+of scope while documenting both as shipped). **Gated by `docs/ECOSYSTEM.md` §8
+Gate #1** — the two-phase `gmcrypto-envelope-lite` 0.1.0 RC suite, now a standing
+obligation on EVERY core release (run in a temp export; the downstream `=1.9.0`
+exact pin is bumped ONLY in the gate copy). Landed alongside the project's
+**first external contribution** (PR #124, `ogemboeugene`, fixing #122) — note
+fork PRs from first-time contributors sit at `action_required` until a maintainer
+approves the workflow run; #124's CI sat unrun for two days before anyone noticed.
+**Earlier — v1.9.0 — TLCP toolkit C FFI — implemented on `feat/tlcp-ffi`; publish
+order simd → core → c, the maintainer's per-release call.** The **cadence FFI cycle
 that closes the TLCP arc** (gap-less: `docs/tlcp-decomposition.md` §7 "one FFI
 cycle for the whole toolkit", the maintainer-deferred call now made — ONE
 cycle; scope `docs/v1.9-scope.md` Q9.1–Q9.8). Exposes the accumulated in-core
