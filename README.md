@@ -22,8 +22,9 @@ Official ecosystem membership, layering, versioning, and compatibility gates are
 > ⚠️ **Not independently audited.** No third-party / external security audit has
 > been performed. Assurance is internal: a multi-model adversarial pre-publish
 > re-audit (see [`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md)), in-CI KAT vectors,
-> maintainer-run gmssl 3.1.1 interop (11/11, gated on `GMCRYPTO_GMSSL` — not run in
-> CI), an in-CI `dudect` timing-leak harness, and a 30-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
+> in-CI gmssl 3.2.0 interop (13/13, cross-validated against a pinned from-source
+> build of the reference implementation; currently non-gating), an in-CI `dudect`
+> timing-leak harness, and a 30-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
 > project with no support SLA. Review the code and **use at your own risk.** See
 > [`SECURITY.md`](SECURITY.md) for the threat model and disclosure process.
 
@@ -343,11 +344,19 @@ DUDECT_SAMPLES=10000 cargo bench --bench timing_leaks --features crypto-bigint-s
 ```
 
 `gmssl` interop test (gated; install [`gmssl`](https://github.com/guanzhi/GmSSL)
-v3.1.1 to enable):
+**v3.2.0** to enable — this is what Homebrew currently ships):
 
 ```bash
-GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
+GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl                    # 11 tests
+GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl --features sm4-aead  # 13 tests
 ```
+
+The suite **pins its oracle version** and fails with an `ORACLE DRIFT` message
+on any other build. That pin is load-bearing rather than fussy: GmSSL renames
+subcommands and narrows accepted input ranges between releases, so an unpinned
+oracle quietly changes what "interop passes" means. CI runs the same suite
+against a from-source v3.2.0 build. To cross-validate against a different
+release deliberately, set `GMCRYPTO_GMSSL_VERSION` (e.g. `"GmSSL 3.1.1"`).
 
 ## wasm32 support
 
