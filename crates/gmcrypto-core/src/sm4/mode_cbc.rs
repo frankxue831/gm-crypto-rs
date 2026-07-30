@@ -127,21 +127,31 @@ pub fn decrypt(key: &[u8; KEY_SIZE], iv: &[u8; BLOCK_SIZE], ciphertext: &[u8]) -
     strip_pkcs7_ct(&mut buf).map(|()| buf)
 }
 
-/// Strip PKCS#7 padding from the final block in place. Constant-time on
-/// the byte values of the final block — same amount of work regardless
-/// of `pad_len`.
+/// Validate PKCS#7 padding in a final block and return how many **message**
+/// bytes it holds (`BLOCK_SIZE - pad_len`).
 ///
-/// The final `Some(())` vs `None` is one bit of leakage; combine with
-/// HMAC-SM3 + encrypt-then-MAC (W3) to keep that bit out of an
-/// attacker's reach.
-fn strip_pkcs7_ct(buf: &mut Vec<u8>) -> Option<()> {
-    let n = buf.len();
-    // Length is public — these bounds checks don't leak secrets.
-    if n == 0 || n % BLOCK_SIZE != 0 {
-        return None;
-    }
-
-    let last = buf[n - 1];
+/// Constant-time on the byte values of the block: the 16-byte scan always
+/// runs in full, there is no early return, and the only data-dependent
+/// outcome is the single `Some`/`None` bit.
+///
+/// That one bit is unavoidable leakage; combine with HMAC-SM3 +
+/// encrypt-then-MAC (W3) to keep it out of an attacker's reach.
+///
+/// # Visibility
+///
+/// `pub(crate)` (v1.10) so [`crate::sm4::cbc_streaming`] shares this exact
+/// implementation instead of duplicating it. Until v1.10 there were two
+/// byte-identical private copies, which meant a dudect target could only ever
+/// cover one of them — and someone "optimizing" the other with an early
+/// return would stay *functionally* identical, so the fuzz differential and
+/// the timing target would both stay green while one path leaked. One
+/// primitive, one audited loop.
+///
+/// `pub(crate)` is below `cargo-public-api`'s and `cargo-semver-checks`'
+/// surface, so this is not part of the published API — the same treatment
+/// `sm3::compress` got in v1.7 for the same reason.
+pub(crate) fn strip_pkcs7_block(block: &[u8; BLOCK_SIZE]) -> Option<usize> {
+    let last = block[BLOCK_SIZE - 1];
 
     // pad_len validity: 1 <= last <= 16. Express as `subtle::Choice`
     // without branching on `last`'s value.
@@ -150,32 +160,50 @@ fn strip_pkcs7_ct(buf: &mut Vec<u8>) -> Option<()> {
     let pad_le_block = !last.ct_gt(&(BLOCK_SIZE as u8));
     let pad_in_range = pad_nonzero & pad_le_block;
 
-    // Scan all 16 bytes of the final block. For each byte whose
-    // position-from-end is within the padding region (≤ last), it must
-    // equal `last`; XOR-accumulate any disagreement into `acc`.
+    // Scan all 16 bytes. For each byte whose position-from-end is within
+    // the padding region (≤ last), it must equal `last`; XOR-accumulate
+    // any disagreement into `acc`.
     let mut acc: u8 = 0;
-    for i in 0..BLOCK_SIZE {
+    for (i, byte) in block.iter().enumerate() {
         // BLOCK_SIZE is 16 and `i` is in 0..16, so `BLOCK_SIZE - i` is
         // in 1..=16 — fits in u8 without truncation.
         #[allow(clippy::cast_possible_truncation)]
         let pos_from_end = (BLOCK_SIZE - i) as u8; // 16 down to 1
-        let byte = buf[n - BLOCK_SIZE + i];
         // in_padding ≡ pos_from_end <= last ≡ !(pos_from_end > last).
         let in_padding = !pos_from_end.ct_gt(&last);
-        let diff = byte ^ last;
+        let diff = *byte ^ last;
         let masked = u8::conditional_select(&0u8, &diff, in_padding);
         acc |= masked;
     }
     let acc_zero = acc.ct_eq(&0u8);
 
     let valid = pad_in_range & acc_zero;
-    // The final branch is unavoidable — produces `Some` vs `None`.
+    // The final branch is unavoidable — it produces `Some` vs `None`.
     if bool::from(valid) {
-        buf.truncate(n - last as usize);
-        Some(())
+        Some(BLOCK_SIZE - last as usize)
     } else {
         None
     }
+}
+
+/// Strip PKCS#7 padding from `buf` in place, delegating the constant-time
+/// work to [`strip_pkcs7_block`].
+fn strip_pkcs7_ct(buf: &mut Vec<u8>) -> Option<()> {
+    let n = buf.len();
+    // Length is public — these bounds checks don't leak secrets.
+    if n == 0 || n % BLOCK_SIZE != 0 {
+        return None;
+    }
+
+    let final_block: &[u8; BLOCK_SIZE] = buf[n - BLOCK_SIZE..]
+        .try_into()
+        .expect("slice is exactly BLOCK_SIZE bytes");
+    let kept = strip_pkcs7_block(final_block)?;
+    // `kept == BLOCK_SIZE - pad_len`, so this is the original
+    // `n - pad_len`. `Vec::<u8>::truncate` is O(1) (u8 has no drop glue),
+    // so the success path's length is not itself a timing signal.
+    buf.truncate(n - BLOCK_SIZE + kept);
+    Some(())
 }
 
 #[cfg(test)]
