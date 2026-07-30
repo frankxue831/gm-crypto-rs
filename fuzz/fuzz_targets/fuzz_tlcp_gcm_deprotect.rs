@@ -8,7 +8,7 @@
 #![no_main]
 
 use arbitrary::Unstructured;
-use gmcrypto_core::tlcp::record::{RecordKeysGcm, TLCP_RECORD_VERSION, deprotect_gcm};
+use gmcrypto_core::tlcp::record::{deprotect_gcm, RecordKeysGcm, TLCP_RECORD_VERSION};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {

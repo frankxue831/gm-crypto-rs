@@ -112,6 +112,8 @@ the signal is the per-target trend, not an absolute number.
 | `fuzz_tlcp_cbc_deprotect` | `tlcp::record::deprotect_cbc` (Lucky13-hardened) |
 | `fuzz_tlcp_gcm_deprotect` | `tlcp::record::deprotect_gcm` (RFC 5288 shape) |
 | `fuzz_x509_chain` | `x509::verify_chain` + `tlcp::chain::verify_pair` |
+| `fuzz_sm4_xts_sectors` | `mode_xts::{encrypt,decrypt}_sectors` — DIFFERENTIAL vs the looped single-shot, + buf-untouched-on-`None` |
+| `fuzz_sm4_gcm_tag_len_roundtrip` | `mode_gcm::{encrypt,decrypt}_with_tag_len` — truncated-tag round-trip over all 7 permitted lengths |
 
 (v0.14 W3 added the SM4 single-shot decrypts: `fuzz_sm4_cbc_decrypt` /
 `_gcm_decrypt` / `_ccm_decrypt` / `_xts_decrypt` — negative-input, see
@@ -134,8 +136,17 @@ every committed seed's first byte is audited whenever the modulus
 changes — the v1.4 widening silently remapped `sm3_abc` until its op
 byte was rewritten). **v1.7** added `fuzz_tlcp_{cbc,gcm}_deprotect`,
 **v1.8** added `fuzz_x509_chain`, and **v1.9** extended `fuzz_c_abi`
-with a chain/pair op and a record-deprotect op. **30 targets total** —
-the census must
+with a chain/pair op and a record-deprotect op.
+
+**v1.10** upgraded the four DER parser targets — `fuzz_sig`, `fuzz_spki`,
+`fuzz_sm2_ciphertext_der`, `fuzz_sm2_raw_ciphertext` — from no-panic to
+**byte-idempotence** (`encode(decode(x)) == x`, i.e. the decoder accepts
+exactly one encoding per value), which needs no `PartialEq` on a published
+type and catches a decoder that starts admitting a second spelling; the raw
+target also gained a guard-parity differential between the modern and legacy
+decoders, whose validation prologues are duplicated. v1.10 also added
+`fuzz_sm4_xts_sectors` and `fuzz_sm4_gcm_tag_len_roundtrip`. **32 targets
+total** — the census must
 equal both `fuzz/Cargo.toml`'s `[[bin]]` entries and the `FUZZ_TARGETS`
 list in `.github/workflows/fuzz-nightly.yml`; a target absent from that
 list still compiles in CI but is never fuzzed nor coverage-measured.)
@@ -202,3 +213,30 @@ off a public-length guard.
 > `FUZZ_TARGETS` and fails with a distinct "config drift, NOT a crash"
 > message, and passes only corpus dirs that exist. If you add a target,
 > add its seeds dir in the same commit.
+
+**v1.10 — `fuzz_sm4_xts_sectors` layout:**
+`[key:32][start_sector:16 big-endian][sector_size_sel:1][buf:rest]`. Manual
+slicing, **no `arbitrary`** (matching `fuzz_sm4_xts_encrypt`), so the seed is a
+plain concatenation with no consumption-order dependency. `sector_size_sel`
+indexes `[16, 32, 512]` modulo 3; the run is capped at 8 sectors and `buf` is
+truncated to a whole multiple of the sector size. `start_sector` is read
+**big-endian** purely so the seed reads left-to-right — the *tweak* derived
+from it is little-endian, per the disk-XTS convention. Equal key halves are
+perturbed (`key[16] ^= 1`) so a weak key still reaches real work, which means
+**sector-number overflow is the only rejection the target can reach**; every
+`None` therefore exercises the buf-untouched-on-`None` contract.
+
+Three committed seeds, each verified by replaying the target's own carve:
+
+| seed | `start_sector` | sectors | what it pins |
+|---|---|---|---|
+| `basic` | 1 | 4 × 16 B | the ordinary multi-sector path |
+| `high_lba` | `u128::MAX - 2` | 3 × 16 B | a run ending **exactly** at `u128::MAX` |
+| `overflow` | `u128::MAX` | 3 × 16 B | the overflow rejection + buf-untouched |
+
+**v1.10 — `fuzz_sm4_gcm_tag_len_roundtrip` layout:**
+`[key:16][nonce_len:1][nonce][aad_len:1][aad][tag_sel:1][plaintext:rest]`.
+Manual slicing, no `arbitrary` (matching `fuzz_sm4_gcm_encrypt`). `tag_sel`
+indexes the NIST-permitted set `[4, 8, 12, 13, 14, 15, 16]` modulo 7. Committed
+seeds `tag16` (`tag_sel = 6`) and `tag4` (`tag_sel = 0`, maximal truncation),
+both with a 12-byte nonce and 4-byte AAD.
