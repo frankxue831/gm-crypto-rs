@@ -4,10 +4,13 @@ name: CI
 #
 # Most jobs (build / msrv / cabi / deny / wasm32) run on GitHub-hosted
 # `macos-14` (aarch64) — the same macOS-aarch64 platform the project
-# targets (NEON SIMD + C-ABI coverage). The `simd-x86` job runs on
-# `ubuntu-latest` (x86_64) to exercise the AVX2 / PCLMULQDQ paths the
-# aarch64 hosts can't reach (F17). GitHub Actions on standard runners is
-# free for public repositories.
+# targets (NEON SIMD + C-ABI coverage). Two jobs run on Linux/x86_64:
+# `simd-x86` (`ubuntu-latest`) exercises the AVX2 / PCLMULQDQ paths the
+# aarch64 hosts can't reach (F17), and `interop-gmssl` (`ubuntu-24.04`,
+# OS label pinned because a from-source build's reproducibility rides the
+# runner's compiler) cross-validates the wire format against a pinned
+# GmSSL build (F16). GitHub Actions on standard runners is free for
+# public repositories.
 #
 # History: through v0.16 these ran on a self-hosted macOS runner to dodge
 # GitHub Pro's private-repo minute cap. That runner was retired at the
@@ -248,6 +251,127 @@ jobs:
           shared-key: simd-x86
       - name: cargo test -p gmcrypto-simd (x86_64 AVX2 / CLMUL paths)
         run: cargo test -p gmcrypto-simd
+
+  interop-gmssl:
+    # F16 — the gmssl cross-validation suite is the project's headline wire
+    # guarantee, and until this job it ran in NO CI job: nothing set
+    # `GMCRYPTO_GMSSL`, so every test in `interop_gmssl.rs` self-skipped and
+    # reported `ok`. CI logs showed green lines named `gmssl_sm2_*` that had
+    # executed nothing.
+    #
+    # The oracle is PINNED and built from source. That is load-bearing, not
+    # stylistic: GmSSL renames subcommands and narrows input ranges between
+    # releases (3.2.0 renamed `pbkdf2` -> `sm3_pbkdf2`, split `sm4 -cbc` into
+    # `sm4_cbc`, and narrowed `sm3hmac` keys to 12..=32 bytes), and Homebrew
+    # installs whatever is current. An unpinned oracle silently changes what
+    # "interop passes" even means.
+    #
+    # Running an x86_64 source build here while the maintainer's local oracle
+    # is an aarch64 Homebrew build is deliberate: two independent instances of
+    # the reference implementation agreeing is stronger evidence than one.
+    #
+    # NON-GATING for now (`continue-on-error: true`) — a third-party source
+    # build is a brand-new failure surface (upstream availability, cmake drift
+    # on the image, cache eviction), and making it required on day one would
+    # let any of those block every PR in the repo. Flip to enforced once it has
+    # a green track record, the way cargo-semver-checks was informational until
+    # #86. See docs/v1.10-scope.md.
+    name: gmssl interop (pinned oracle, x86_64)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    if: >-
+      !contains(github.event.pull_request.title, '[skip ci]') &&
+      !contains(github.event.pull_request.title, '[ci skip]') &&
+      !contains(github.event.pull_request.title, '[no ci]') &&
+      !contains(github.event.pull_request.title, '[skip actions]') &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, '[ci skip]') &&
+      !contains(github.event.head_commit.message, '[no ci]') &&
+      !contains(github.event.head_commit.message, '[skip actions]')
+    timeout-minutes: 25
+    env:
+      # Bump GMSSL_TAG to move the oracle (and update DEFAULT_GMSSL_VERSION in
+      # crates/gmcrypto-core/tests/interop_gmssl.rs to match). Bump
+      # GMSSL_CACHE_EPOCH when the cmake flags below change — a flag change
+      # does NOT move the tag, so the key would otherwise restore a binary
+      # built the old way.
+      GMSSL_TAG: v3.2.0
+      GMSSL_CACHE_EPOCH: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: interop-gmssl
+      - name: Cache GmSSL install prefix
+        id: gmssl-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/gmssl-${{ env.GMSSL_TAG }}
+          key: gmssl-${{ runner.os }}-${{ runner.arch }}-${{ env.GMSSL_TAG }}-static-${{ env.GMSSL_CACHE_EPOCH }}
+          # NO `restore-keys`, deliberately. A fuzzy/prefix restore would
+          # satisfy the cache with a WRONG-VERSION binary — precisely the
+          # failure this job exists to prevent.
+      - name: Build GmSSL ${{ env.GMSSL_TAG }} from source (static)
+        if: steps.gmssl-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 --branch "$GMSSL_TAG" \
+            https://github.com/guanzhi/GmSSL.git "$RUNNER_TEMP/gmssl-src"
+          # BUILD_SHARED_LIBS defaults to ON upstream, which yields a binary
+          # linked against @rpath/libgmssl. Static keeps the cached artifact
+          # self-contained, so a cache restore needs no LD_LIBRARY_PATH or
+          # ldconfig to produce a runnable `gmssl`.
+          cmake -S "$RUNNER_TEMP/gmssl-src" -B "$RUNNER_TEMP/gmssl-src/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_INSTALL_PREFIX="$HOME/gmssl-$GMSSL_TAG"
+          cmake --build "$RUNNER_TEMP/gmssl-src/build" --parallel
+          cmake --install "$RUNNER_TEMP/gmssl-src/build"
+      # Unconditional — needed on a cache HIT as well as a fresh build.
+      - name: Put gmssl on PATH
+        run: echo "$HOME/gmssl-$GMSSL_TAG/bin" >> "$GITHUB_PATH"
+      - name: Assert oracle version (drift guard)
+        run: |
+          set -euo pipefail
+          want="GmSSL ${GMSSL_TAG#v}"
+          got="$(gmssl version | head -n1)"
+          if [ "$got" != "$want" ]; then
+            echo "::error::ORACLE DRIFT - NOT a gmcrypto-core regression."
+            echo "  expected: $want"
+            echo "  found:    $got"
+            echo "This job pins its reference implementation. A mismatch means the"
+            echo "GmSSL tag, cache, or build moved - not that our wire output changed."
+            echo "Fix: correct GMSSL_TAG, or bump GMSSL_CACHE_EPOCH, or re-baseline."
+            exit 1
+          fi
+          echo "oracle: $got"
+      # `--features sm4-aead` reaches 13 tests rather than the 11 a
+      # default-features run sees: the two SM4-GCM interop tests are cfg-gated
+      # on that feature.
+      - name: gmssl interop suite (13 tests)
+        env:
+          GMCRYPTO_GMSSL: '1'
+        run: |
+          set -euo pipefail
+          cargo test -p gmcrypto-core --test interop_gmssl --features sm4-aead \
+            -- --nocapture 2>&1 | tee interop.txt
+          # The suite self-skips - and PASSES - when GMCRYPTO_GMSSL is unset.
+          # If the variable ever fails to reach the test process, all 13 report
+          # green while testing nothing. Same bug class as the missing seeds
+          # dir that mis-reported 44 consecutive nightly runs as CRASH.
+          if grep -q 'skipping: GMCRYPTO_GMSSL' interop.txt; then
+            echo "::error::interop tests SKIPPED - GMCRYPTO_GMSSL did not reach the test process"
+            exit 1
+          fi
+          # Census guard: catches a test being added without this count moving.
+          # Brittle to libtest output-format changes; the skip check above is
+          # the load-bearing one.
+          if ! grep -qE '13 passed' interop.txt; then
+            echo "::error::expected 13 interop tests to pass - census drifted"
+            exit 1
+          fi
 
   cabi:
     name: gmcrypto-c FFI build + header drift
