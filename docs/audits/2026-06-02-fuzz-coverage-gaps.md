@@ -16,6 +16,64 @@ Two value tiers (the key distinction severity alone hides):
 
 ---
 
+## Status addendum — 2026-07-31 (v1.10)
+
+> Added on 2026-07-31. **The analysis below is a dated receipt and is left
+> exactly as written on 2026-06-02** — including its unchecked `- [ ]` boxes,
+> which record what was true then. This section records what has since shipped
+> and two places where the original analysis was wrong.
+
+**Shipped in PRs #98/#99 (2026-06-09), six days after this audit was written.**
+Six Tier-A rows, still shown unchecked below: the SM4-CBC, -XTS, -CCM and
+-GCM(16-byte-tag) roundtrips, plus Tier-B row 1 (the CBC streaming-encrypt
+differential) and §3 Hypothesis 2 (the GCM streaming-encrypt differential).
+
+**Shipped in v1.10** (`docs/v1.10-scope.md`), census 30 → 32:
+
+- The **four DER parser upgrades** — `fuzz_sig`, `fuzz_spki`,
+  `fuzz_sm2_ciphertext_der`, `fuzz_sm2_raw_ciphertext` — as
+  **byte-idempotence** (`encode(decode(x)) == x`) rather than the value
+  round-trip the rows propose. Byte-idempotence is strictly stronger for a
+  canonical codec and needs no `PartialEq`, which dissolves what looked like a
+  blocker: `Sm2Ciphertext` and `Sm2PublicKey` have none, and adding a derive to
+  a published type to serve a fuzz target would be an api-baseline change.
+- `fuzz_sm4_xts_sectors` and `fuzz_sm4_gcm_tag_len_roundtrip`.
+
+**Two corrections to the analysis below.** Both are recorded here rather than
+edited into the rows, so the rows keep saying what they said:
+
+1. **"GCM roundtrip × 7 tag lengths" is narrower than written.**
+   `decrypt_with_tag_len` was **already fuzzed** at the time of writing —
+   `fuzz_sm4_gcm_decrypt` drives it with an adversarial `tl % 19` tag. The real
+   gaps were that `encrypt_with_tag_len` was reachable from no target, and that
+   nothing round-tripped at a truncated length. Also: `encrypt_with_tag_len`
+   delegates to `encrypt` and truncates, so "truncated tag == `full_tag[..t]`"
+   and "ciphertext is tag-length-independent" are **tautologies of the
+   implementation** and cannot be falsified by a fuzzer. The shipped target
+   keeps them as a pin against a future rewrite but labels them as such; the
+   load-bearing invariant is the round-trip, which crosses two independent
+   implementations.
+2. **"XTS sectors differential" is Tier B by this document's own definition.**
+   `crates/gmcrypto-core/tests/sm4_xts_sectors.rs:73` already asserts
+   `encrypt_sectors ≡ looped single-shot` deterministically across 36 shapes,
+   plus a 4 KiB / high-LBA case. The audit calls the surface "truly uncovered",
+   which is true of *fuzz* coverage but not of *test* coverage — the 6-lens map
+   appears not to have found that file. The shipped target states its genuinely
+   fuzz-only reach (arbitrary `start_sector` across the full u128 range,
+   including runs ending at `u128::MAX` and runs that overflow) in its
+   doc-comment, so a reader does not conclude it is redundant.
+
+**Still open from Tier A:** nothing. **Still open from Tier B / §3:** the
+`fuzz_pem` roundtrip, the `fuzz_sig` and `fuzz_pkcs8_decode` seed-breadth items,
+the legacy cross-decoder differential (partly subsumed — v1.10 added an
+`is_some()` guard-parity assertion between the two raw decoders), and the
+`fuzz_sec1` roundtrip. **`fuzz_sec1` should stay parked**: its `decode` treats
+`[0] parameters` as OPTIONAL while `encode` always emits it, so
+byte-idempotence is flaky *by construction* — the §3 demotion is confirmed by
+source.
+
+---
+
 ## ▶ SUGGESTED FIRST SLICE (pick up later)
 
 Lowest risk + genuinely new invariant class:

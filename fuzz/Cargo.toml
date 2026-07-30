@@ -272,5 +272,28 @@ test = false
 doc = false
 bench = false
 
+# v1.10 — SM4-XTS multi-sector helpers: encrypt_sectors/decrypt_sectors vs the
+# looped single-shot, plus buf-untouched-on-None. The deterministic sweep in
+# tests/sm4_xts_sectors.rs already pins the differential across 36 shapes; the
+# fuzz-only reach is arbitrary start_sector across the full u128 range
+# (including runs ending at u128::MAX and runs that overflow).
+[[bin]]
+name = "fuzz_sm4_xts_sectors"
+path = "fuzz_targets/fuzz_sm4_xts_sectors.rs"
+test = false
+doc = false
+bench = false
+
+# v1.10 — SM4-GCM truncated-tag round-trip across all 7 NIST-permitted tag
+# lengths. decrypt_with_tag_len was already fuzzed via fuzz_sm4_gcm_decrypt;
+# encrypt_with_tag_len was reachable from no target, and nothing round-tripped
+# at a truncated length (which crosses two independent implementations).
+[[bin]]
+name = "fuzz_sm4_gcm_tag_len_roundtrip"
+path = "fuzz_targets/fuzz_sm4_gcm_tag_len_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
 # v0.14 — its own workspace so it is excluded from the parent.
 [workspace]

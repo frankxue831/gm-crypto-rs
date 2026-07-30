@@ -12,7 +12,7 @@
 #![no_main]
 
 use gmcrypto_core::tlcp::chain::verify_pair;
-use gmcrypto_core::x509::{Certificate, verify_chain};
+use gmcrypto_core::x509::{verify_chain, Certificate};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
