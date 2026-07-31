@@ -37,8 +37,10 @@
 //! PKCS#7). Single uninformative shape per `CLAUDE.md`.
 
 use crate::sm4::cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
+// v1.10 — shared with `mode_cbc::decrypt` rather than duplicated here. See
+// the note on `strip_pkcs7_block` for why one copy matters.
+use crate::sm4::mode_cbc::strip_pkcs7_block;
 use alloc::vec::Vec;
-use subtle::{ConditionallySelectable, ConstantTimeEq, ConstantTimeGreater};
 
 /// Streaming SM4-CBC encryptor with PKCS#7 padding.
 ///
@@ -370,38 +372,6 @@ impl Sm4CbcDecryptor {
         self.held_back = Some(pt_blocks[SIMD_BATCH - 1]);
         // 7. Update prev to the last ciphertext of this batch.
         self.prev = saved[SIMD_BATCH - 1];
-    }
-}
-
-/// Constant-time PKCS#7 strip on a 16-byte block. Returns the byte
-/// count that should be retained (`BLOCK_SIZE - pad_len`) on success,
-/// `None` on any malformed padding.
-///
-/// Same scan logic as [`super::mode_cbc::decrypt`]'s helper —
-/// re-implemented here to avoid making the v0.2 helper public, but
-/// byte-identical in behavior.
-fn strip_pkcs7_block(block: &[u8; BLOCK_SIZE]) -> Option<usize> {
-    let last = block[BLOCK_SIZE - 1];
-    let pad_nonzero = !last.ct_eq(&0u8);
-    #[allow(clippy::cast_possible_truncation)]
-    let pad_le_block = !last.ct_gt(&(BLOCK_SIZE as u8));
-    let pad_in_range = pad_nonzero & pad_le_block;
-
-    let mut acc: u8 = 0;
-    for (i, byte) in block.iter().enumerate() {
-        #[allow(clippy::cast_possible_truncation)]
-        let pos_from_end = (BLOCK_SIZE - i) as u8;
-        let in_padding = !pos_from_end.ct_gt(&last);
-        let diff = *byte ^ last;
-        let masked = u8::conditional_select(&0u8, &diff, in_padding);
-        acc |= masked;
-    }
-    let acc_zero = acc.ct_eq(&0u8);
-    let valid = pad_in_range & acc_zero;
-    if bool::from(valid) {
-        Some(BLOCK_SIZE - last as usize)
-    } else {
-        None
     }
 }
 

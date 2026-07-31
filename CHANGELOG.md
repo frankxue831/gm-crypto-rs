@@ -5,6 +5,92 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**v1.10 — assurance cycle, non-publishing.** No published crate's runtime
+output changes, so the workspace stays at `1.9.1` and crates.io skips a
+`1.10.0` (the v0.14 / v0.20 / v0.21 precedent). Full record:
+[`docs/v1.10-scope.md`](docs/v1.10-scope.md).
+
+### Fixed
+
+- **The gmssl interop suite could not run at all against a current GmSSL.**
+  It hardcoded 3.1.1-era subcommand names, but 3.2.0 renamed `pbkdf2` to
+  `sm3_pbkdf2` and split `sm4 -cbc/-ctr/-gcm` into `sm4_cbc`/`sm4_ctr`/
+  `sm4_gcm`. Every one of those call sites asserts on exit status, so against
+  the build `brew install gmssl` provides today, **5 of the 11 default tests
+  (7 of 13 under `sm4-aead`) failed** — meaning the "11/11 interop" claim in
+  README.md was not reproducible. The suite is migrated (a pure rename; every
+  option flag is unchanged across the two releases).
+
+  Two behavioural bounds had genuinely moved and needed more than a rename:
+  `sm3hmac` now accepts **12..=32 byte keys only** (the 12-byte lower bound is
+  new, and rejected the RFC-style 4-byte `"Jefe"` and empty-key vectors — both
+  already covered by in-tree KATs in `src/hmac.rs`), and `sm3_pbkdf2` rejects
+  iteration counts below **10 000** (measured: 9 999 rejects). The old doc
+  comment claimed `<1000` while its own inline comment claimed `<10000`; they
+  contradicted each other and the doc one was wrong.
+
+### Added
+
+- **`interop-gmssl` CI job — closes audit finding F16.** The gmssl
+  cross-validation suite is the project's headline wire guarantee and it ran
+  in *no* CI job: nothing set `GMCRYPTO_GMSSL`, so every test self-skipped and
+  reported `ok`. CI logs showed green lines named `gmssl_sm2_*` that had
+  executed nothing.
+
+  The job builds GmSSL from source at a **pinned tag** rather than installing a
+  package, because an unpinned oracle silently changes what "interop passes"
+  means. It carries a version assertion whose failure text leads `ORACLE DRIFT
+  - NOT a gmcrypto-core regression`, and a **silent-skip guard** — since the
+  suite passes when the env var is absent, a variable that failed to reach the
+  test process would show 13 green tests that ran nothing (the same bug class
+  as the missing seeds dir that mis-reported 44 consecutive nightly runs as
+  CRASH). Non-gating on landing; flipping it to enforced is a maintainer call.
+
+- **Two fuzz targets, census 30 → 32** — `fuzz_sm4_xts_sectors` (multi-sector
+  XTS vs the looped single-shot, plus buf-untouched-on-`None`) and
+  `fuzz_sm4_gcm_tag_len_roundtrip` (truncated-tag round-trip over all seven
+  NIST-permitted lengths, which crosses two independent implementations since
+  `decrypt_with_tag_len` recomputes rather than calling `decrypt`).
+
+### Changed
+
+- **The four DER parser fuzz targets now assert byte-idempotence**, not just
+  no-panic: `decode(x) == Some(v)` implies `encode(v) == x`, i.e. the decoder
+  accepts exactly one encoding per value. Strictly stronger than a value
+  round-trip, and it needs no `PartialEq` on a published type — adding a derive
+  to serve a fuzz target would have been an api-baseline change.
+  `fuzz_sm2_raw_ciphertext` also gained a guard-parity differential against
+  `decode_c1c2c3_legacy`, whose validation prologue is a byte-for-byte
+  duplicate.
+
+- **The two duplicated PKCS#7 unpad implementations are now one.**
+  `mode_cbc::strip_pkcs7_ct` and `cbc_streaming::strip_pkcs7_block` were
+  byte-identical private copies of the same constant-time masked scan. That is
+  a hazard rather than untidiness: a timing target can only reach one of them,
+  and "optimizing" the other with an early return stays *functionally*
+  identical, so the fuzz differential and the timing target both stay green
+  while one path leaks. Now a single `pub(crate)` primitive — below both
+  `cargo-public-api` and `cargo-semver-checks`, so the published surface is
+  unchanged (the v1.7 `sm3::compress` precedent). Behaviour-preserving.
+
+### Notes
+
+- **Audit finding F21 remains open, and a candidate fix was measured and
+  rejected.** A `ct_sm4_cbc_unpad` dudect target was built and then
+  deliberately *not* landed: its mandatory sensitivity control failed. A
+  deliberately early-return (leaky) strip measured `|tau| = 0.0185` against the
+  constant-time build's `0.0129` — indistinguishable — while a 10 000×
+  amplified control reached `11.6`, proving the measurement path works and the
+  null is a real sensitivity limit rather than a broken experiment.
+
+  The cause is structural: the default `subtle` S-box scans all 256 entries per
+  lookup, so one 32-byte `mode_cbc::decrypt` is ~10⁵ masked operations against
+  ~15 byte comparisons for the leak — 0.015 %, and no ciphertext length
+  improves it because the key schedule alone dominates. Landing it would have
+  produced a gate that *cannot fail*, recorded as coverage of the PKCS#7 strip.
+  The follow-up is recorded in the scope doc: time `Sm4CbcDecryptor::finalize()`
+  instead, which is public and excludes the SM4 work.
+
 ## [1.9.1] - 2026-07-30
 
 Patch release — carries the licence-text packaging fix and the documentation
