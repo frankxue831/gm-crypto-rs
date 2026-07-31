@@ -5,6 +5,56 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**v1.11 — RustCrypto `aead` 0.6 trait fit (additive, opt-in).** Scope +
+maintainer-locked forks: [`docs/v1.11-scope.md`](docs/v1.11-scope.md).
+Default-features build is byte-identical; the whole surface is behind the new
+opt-in `aead-traits` flag.
+
+### Added
+
+- **`sm4::Sm4Gcm` and `sm4::Sm4Ccm<M, N>`** — SM4-GCM and SM4-CCM as
+  `RustCrypto` [`aead`](https://docs.rs/aead) 0.6 ciphers, behind
+  `aead-traits = ["sm4-aead", "dep:aead"]`. This closes a backlog item that had
+  been blocked since v0.11 on `aead` still being `0.6.0-rc.10`; 0.6.1 is now
+  stable, needs only `crypto-common 0.2` + `inout 0.2` (both already in-tree),
+  and declares MSRV 1.85 — exactly ours. `aead` is the only new crate.
+- The implemented traits are `KeySizeUser`, `KeyInit`, `AeadCore` and
+  `AeadInOut`. The `Vec`-returning `Aead` and the `Buffer`-based
+  `encrypt_in_place` / `decrypt_in_place` then arrive free, because `aead` 0.6
+  **blanket-implements `Aead` for every `AeadInOut`** — which also means a
+  direct `impl Aead for Sm4Gcm` cannot compile. (`AeadInPlace` is deprecated in
+  0.6 and deliberately not implemented; `aead::stream` does not exist there, so
+  `gcm_streaming` stays inherent-only.)
+- **`Sm4Gcm`** is fixed at the canonical profile: 12-byte nonce, 16-byte postfix
+  tag. Truncated tags (`GcmTagLen`) and arbitrary-length nonces remain reachable
+  through `mode_gcm`. **`Sm4Ccm<M, N>`** carries tag and nonce sizes as type
+  parameters (defaulting to 16/12) bounded by the sealed `CcmTagSize` /
+  `CcmNonceSize` traits, which admit exactly the RFC 3610 §2.1 sets — so an
+  invalid combination is a compile error rather than a runtime `None`.
+- New differential fuzz target `fuzz_sm4_aead_traits` (census **32 → 33**),
+  driving both ciphers on every input and asserting the trait path is
+  byte-identical to the inherent path, round-trips, and agrees on failure.
+
+### Notes
+
+- **Both types are thin wrappers**, delegating to `mode_gcm` / `mode_ccm`
+  without adding cryptography. That is why v1.11 adds **no dudect target** (the
+  count stays 23): the secret-touching bodies measured by `ct_sm4_gcm_decrypt` /
+  `ct_sm4_ccm_decrypt` are the same code on the trait path, and the wrappers'
+  own work is data movement on public-length data. The new fuzz target exists
+  to guard that premise, since a divergence would invalidate the reasoning and
+  not merely be a wrapper bug.
+- Every failure — the GCM `2^36 − 32`-byte ceiling, CCM's length-vs-`q` gate,
+  invalid parameters, tag mismatch — becomes the single opaque `aead::Error`.
+  The failure-mode invariant crosses the trait boundary by construction, since
+  `aead::Error` is a unit struct with nothing to distinguish.
+- Costs, stated rather than hidden: each call runs a fresh SM4 key schedule (the
+  structs hold key bytes), and the methods named "in place" still allocate
+  internally. Both are the price of wrapper thinness; throughput-sensitive
+  callers should keep using the inherent API.
+- SM4-XTS gets no equivalent and never will: it is confidentiality-only, has no
+  tag, and must not be presented as an AEAD.
+
 **v1.10 — assurance cycle, non-publishing.** No published crate's runtime
 output changes, so the workspace stays at `1.9.1` and crates.io skips a
 `1.10.0` (the v0.14 / v0.20 / v0.21 precedent). Full record:

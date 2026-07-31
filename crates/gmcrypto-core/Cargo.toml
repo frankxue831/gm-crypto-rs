@@ -33,6 +33,13 @@ spin.workspace = true
 # docs/v0.11-scope.md). Default builds are unaffected.
 digest = { version = "0.11", default-features = false, features = ["mac"], optional = true }
 cipher = { version = "0.5", default-features = false, optional = true }
+# v1.11 — opt-in RustCrypto `aead` 0.6 trait fit for SM4-GCM / SM4-CCM.
+# `alloc` is REQUIRED, not decorative: both the `Aead` blanket impl over
+# `AeadInOut` and `Buffer for Vec<u8>` are `cfg(feature = "alloc")`.
+# Default features stay OFF — the default pulls `rand_core`, which this
+# fit never uses. Adds no new transitive deps: aead 0.6 needs only
+# crypto-common 0.2 + inout 0.2, both already in-tree since v0.11.
+aead = { version = "0.6.1", default-features = false, features = ["alloc"], optional = true }
 # v0.5 W4 phase 2 — sibling crate carrying the AVX2 8-way packed
 # bitsliced SM4 S-box (and NEON in phase 3). Quarantines the
 # unavoidable `unsafe` of SIMD intrinsics so `gmcrypto-core` itself
@@ -62,6 +69,17 @@ name = "rustcrypto_traits"
 path = "tests/rustcrypto_traits.rs"
 required-features = ["digest-traits", "cipher-traits"]
 
+# v1.11 (Q11.10) — a SEPARATE test target, deliberately. Folding the aead
+# cases into `rustcrypto_traits` would widen that target's
+# required-features to all three trait flags, and the existing CI leg
+# (`--features digest-traits,cipher-traits`) would then silently stop
+# running it. A test file that quietly stops executing is worse than one
+# that fails.
+[[test]]
+name = "rustcrypto_aead_traits"
+path = "tests/rustcrypto_aead_traits.rs"
+required-features = ["aead-traits"]
+
 [features]
 default = []
 # v0.4 W2 — opt-in RustCrypto-trait fit. Two flags per Q4.3 so
@@ -69,6 +87,12 @@ default = []
 # build is unchanged.
 digest-traits = ["dep:digest"]
 cipher-traits = ["dep:cipher"]
+# v1.11 (Q11.6) — opt-in `aead` 0.6 trait fit for SM4-GCM / SM4-CCM.
+# Pulls `sm4-aead` because the trait impls are thin wrappers over
+# `mode_gcm` / `mode_ccm`, which live behind that flag. The impls add no
+# cryptography: every failure funnels into the one opaque `aead::Error`,
+# so the failure-mode invariant crosses the trait boundary intact.
+aead-traits = ["sm4-aead", "dep:aead"]
 # v0.5 W5 (Q5.17) — opt-in `crypto_bigint::U256` constructor for
 # `Sm2PrivateKey`. The always-on `Sm2PrivateKey::from_bytes_be(&[u8;
 # 32])` is the recommended path for callers who don't want a

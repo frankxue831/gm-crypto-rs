@@ -95,3 +95,12 @@ pub use gcm_streaming::{Sm4GcmDecryptor, Sm4GcmEncryptor};
 // v0.12 — SM4-XTS combined key size (Key1 ‖ Key2 = 2×16 bytes).
 #[cfg(feature = "sm4-xts")]
 pub use mode_xts::XTS_KEY_SIZE;
+
+// v1.11 — RustCrypto `aead` 0.6 cipher types. Thin wrappers over `mode_gcm` /
+// `mode_ccm`; see those modules for the profile and cost notes. SM4-XTS gets no
+// equivalent: it is confidentiality-only, has no tag, and must never be
+// presented as an AEAD.
+#[cfg(feature = "aead-traits")]
+pub use mode_ccm::{CcmNonceSize, CcmTagSize, Sm4Ccm};
+#[cfg(feature = "aead-traits")]
+pub use mode_gcm::Sm4Gcm;

@@ -68,7 +68,7 @@ env:
     fuzz_sm3 fuzz_hmac_sm3 fuzz_c_abi fuzz_sm4_cbc_encrypt
     fuzz_sm4_gcm_encrypt fuzz_sm4_ccm_encrypt fuzz_sm4_xts_encrypt fuzz_x509
     fuzz_tlcp_cbc_deprotect fuzz_tlcp_gcm_deprotect fuzz_x509_chain
-    fuzz_sm4_xts_sectors fuzz_sm4_gcm_tag_len_roundtrip
+    fuzz_sm4_xts_sectors fuzz_sm4_gcm_tag_len_roundtrip fuzz_sm4_aead_traits
 
 permissions:
   contents: read

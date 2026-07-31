@@ -390,6 +390,195 @@ fn ccm_ctr_xor(cipher: &Sm4Cipher, a0: &[u8; BLOCK_SIZE], input: &[u8], output: 
     }
 }
 
+#[cfg(feature = "aead-traits")]
+mod aead_impl {
+    //! v1.11 — `RustCrypto` `aead` 0.6 trait fit for SM4-CCM (Q11.1–Q11.9).
+    //!
+    //! [`Sm4Ccm`] is a **thin wrapper** over the inherent
+    //! [`encrypt`](super::encrypt) / [`decrypt`](super::decrypt); it adds no
+    //! cryptography, which is what lets this surface ride the existing
+    //! `ct_sm4_ccm_decrypt` dudect target instead of needing its own.
+    //!
+    //! **Why generic (Q11.2).** `AeadCore` fixes one nonce length and one tag
+    //! length per type, but CCM deployments genuinely disagree: 13-byte nonces
+    //! in 802.15.4/Zigbee, 12 bytes for GM interop, short tags in constrained
+    //! links. So the sizes are type parameters, defaulting to the canonical
+    //! `Sm4Ccm` = 16-byte tag, 12-byte nonce. The bounds are **sealed** traits
+    //! admitting exactly the RFC 3610 §2.1 sets, so an invalid combination is a
+    //! compile error rather than a runtime `None`. Const-generic `usize`
+    //! parameters cannot work here: the associated types must *be* `ArraySize`
+    //! types.
+    //!
+    //! As with GCM, `AeadInOut` is the entry point — `aead` 0.6
+    //! blanket-implements `Aead` over it, so a direct `Aead` impl would
+    //! conflict. Each call runs a fresh key schedule (the struct holds key
+    //! bytes) and allocates; the inherent API remains the fast path.
+    //!
+    //! **Why the `copy_from_slice` calls below cannot panic** — same reasoning
+    //! as the GCM module: `InOutBuf` carries a single `len` and its checked
+    //! constructor rejects unequal halves, so the two halves always match, and
+    //! the split/join arithmetic here is bounded by `checked_sub`. See
+    //! [`super::super::mode_gcm`]'s `aead_impl` for the full note.
+
+    use core::marker::PhantomData;
+
+    use aead::array::{Array, ArraySize};
+    use aead::consts::{U4, U6, U7, U8, U9, U10, U11, U12, U13, U14, U16};
+    use aead::inout::InOutBuf;
+    use aead::{AeadCore, AeadInOut, Error, KeyInit, KeySizeUser, Nonce, Result, Tag, TagPosition};
+    use alloc::vec::Vec;
+    use zeroize::{Zeroize, ZeroizeOnDrop};
+
+    use super::{KEY_SIZE, MAX_NONCE_LEN, MIN_NONCE_LEN, VALID_TAG_LENS, decrypt, encrypt};
+
+    const _: () = assert!(KEY_SIZE == 16, "Sm4Ccm declares KeySize = U16");
+    const _: () = assert!(
+        VALID_TAG_LENS.len() == 7 && VALID_TAG_LENS[0] == 4 && VALID_TAG_LENS[6] == 16,
+        "CcmTagSize impls must mirror VALID_TAG_LENS"
+    );
+    const _: () = assert!(
+        MIN_NONCE_LEN == 7 && MAX_NONCE_LEN == 13,
+        "CcmNonceSize impls must mirror the nonce bounds"
+    );
+
+    mod sealed {
+        pub trait Sealed {}
+    }
+
+    /// Tag lengths CCM permits: 4, 6, 8, 10, 12, 14, 16 bytes (RFC 3610 §2.1).
+    ///
+    /// Sealed — the set is fixed by the standard, not extensible.
+    pub trait CcmTagSize: ArraySize + sealed::Sealed {}
+
+    /// Nonce lengths CCM permits: 7..=13 bytes (RFC 3610 §2.1).
+    ///
+    /// Sealed. A shorter nonce buys a larger length field and so a larger
+    /// maximum message; 12 is the common interop choice.
+    pub trait CcmNonceSize: ArraySize + sealed::Sealed {}
+
+    macro_rules! impl_tag_sizes {
+        ($($n:ty),+ $(,)?) => { $(
+            impl sealed::Sealed for $n {}
+            impl CcmTagSize for $n {}
+        )+ };
+    }
+    macro_rules! impl_nonce_sizes {
+        ($($n:ty),+ $(,)?) => { $(
+            impl CcmNonceSize for $n {}
+        )+ };
+    }
+
+    // U12 and U16 are both a valid tag size and a valid nonce size, so `Sealed`
+    // is implemented once here for the union and the two marker traits layer on
+    // top — implementing it in both macros would collide.
+    impl_tag_sizes!(U4, U6, U8, U10, U12, U14, U16);
+    impl sealed::Sealed for U7 {}
+    impl sealed::Sealed for U9 {}
+    impl sealed::Sealed for U11 {}
+    impl sealed::Sealed for U13 {}
+    impl_nonce_sizes!(U7, U8, U9, U10, U11, U12, U13);
+
+    /// SM4-CCM as a `RustCrypto` [`aead`] cipher, parameterized by tag size `M`
+    /// and nonce size `N`.
+    ///
+    /// Defaults give the canonical profile: `Sm4Ccm` = 16-byte tag, 12-byte
+    /// nonce. Wire format is `ciphertext ‖ tag`, byte-identical to
+    /// [`mode_ccm::encrypt`](super::encrypt).
+    ///
+    /// As with every AEAD here, `(key, nonce)` uniqueness is the caller's
+    /// contract.
+    #[derive(Clone, Zeroize, ZeroizeOnDrop)]
+    pub struct Sm4Ccm<M = U16, N = U12>
+    where
+        M: CcmTagSize,
+        N: CcmNonceSize,
+    {
+        key: [u8; KEY_SIZE],
+        #[zeroize(skip)]
+        _sizes: PhantomData<(M, N)>,
+    }
+
+    impl<M: CcmTagSize, N: CcmNonceSize> KeySizeUser for Sm4Ccm<M, N> {
+        type KeySize = U16;
+    }
+
+    impl<M: CcmTagSize, N: CcmNonceSize> KeyInit for Sm4Ccm<M, N> {
+        fn new(key: &aead::Key<Self>) -> Self {
+            let mut k = [0u8; KEY_SIZE];
+            k.copy_from_slice(key.as_slice());
+            Self {
+                key: k,
+                _sizes: PhantomData,
+            }
+        }
+    }
+
+    impl<M: CcmTagSize, N: CcmNonceSize> AeadCore for Sm4Ccm<M, N> {
+        type NonceSize = N;
+        type TagSize = M;
+        const TAG_POSITION: TagPosition = TagPosition::Postfix;
+    }
+
+    impl<M: CcmTagSize, N: CcmNonceSize> AeadInOut for Sm4Ccm<M, N> {
+        fn encrypt_inout_detached(
+            &self,
+            nonce: &Nonce<Self>,
+            associated_data: &[u8],
+            mut buffer: InOutBuf<'_, '_, u8>,
+        ) -> Result<Tag<Self>> {
+            let tag_len = M::USIZE;
+            // The inherent API returns ct‖tag in one buffer; the trait wants
+            // them detached, so split at the plaintext length.
+            let joined = encrypt(
+                &self.key,
+                nonce.as_slice(),
+                associated_data,
+                buffer.get_in(),
+                tag_len,
+            )
+            .ok_or(Error)?;
+            let split = joined.len().checked_sub(tag_len).ok_or(Error)?;
+            let (ct, tag) = joined.split_at(split);
+            buffer.get_out().copy_from_slice(ct);
+            // try_from, never expect: a length mismatch must surface as the
+            // ordinary opaque error, not a panic.
+            Array::try_from(tag).map_err(|_| Error)
+        }
+
+        fn decrypt_inout_detached(
+            &self,
+            nonce: &Nonce<Self>,
+            associated_data: &[u8],
+            mut buffer: InOutBuf<'_, '_, u8>,
+            tag: &Tag<Self>,
+        ) -> Result<()> {
+            // Rejoin ct‖tag for the inherent API. Both halves are ciphertext —
+            // public bytes — so this temporary needs no wiping.
+            let mut joined = Vec::with_capacity(buffer.len() + M::USIZE);
+            joined.extend_from_slice(buffer.get_in());
+            joined.extend_from_slice(tag.as_slice());
+
+            let mut pt = decrypt(
+                &self.key,
+                nonce.as_slice(),
+                associated_data,
+                &joined,
+                M::USIZE,
+            )
+            .ok_or(Error)?;
+            buffer.get_out().copy_from_slice(&pt);
+            // CCM decrypts before verifying, but the tentative-plaintext wipe
+            // on tag failure already lives in `decrypt`. This wipes only our
+            // transient copy of a successfully verified plaintext.
+            pt.zeroize();
+            Ok(())
+        }
+    }
+}
+
+#[cfg(feature = "aead-traits")]
+pub use aead_impl::{CcmNonceSize, CcmTagSize, Sm4Ccm};
+
 #[cfg(test)]
 mod tests {
     use super::*;

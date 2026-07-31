@@ -1,7 +1,37 @@
 # CLAUDE.md
 
 Pure-Rust SM2/SM3/SM4 SDK.
-**v1.10 — assurance cycle, NON-PUBLISHING (on `main`).** Workspace stays
+**v1.11 — RustCrypto `aead` 0.6 trait fit — implemented on `feat/aead-traits`;
+publishing cycle, workspace `1.9.1` → `1.11.0` (crates.io skips `1.10.0`, the
+v0.14→v0.15 precedent), sibling pins `=1.11.0`, publish order simd → core → c,
+the maintainer's per-release call.** Closes the backlog item blocked since v0.11
+on "`aead` still 0.6.0-rc.10": **0.6.1 is stable**, needs only `crypto-common
+0.2` + `inout 0.2` (both in-tree since v0.11), and declares **MSRV 1.85** —
+exactly ours, so `aead` is the ONE new crate. New opt-in **`aead-traits =
+["sm4-aead", "dep:aead"]`**; default build byte-identical. Adds `sm4::Sm4Gcm`
+(fixed U12 nonce / U16 postfix tag — the canonical profile; truncated tags +
+arbitrary nonces stay inherent-only) and `sm4::Sm4Ccm<M = U16, N = U12>` (tag +
+nonce as type params bounded by the **sealed** `CcmTagSize` / `CcmNonceSize`,
+admitting exactly the RFC 3610 §2.1 sets, so an invalid combination is a
+COMPILE error not a runtime `None`). **The trait set is not a free choice**:
+`aead` 0.6 **blanket-implements `Aead` for every `AeadInOut`**, so a direct
+`impl Aead for Sm4Gcm` CANNOT compile — implement `KeySizeUser` + `KeyInit` +
+`AeadCore` + `AeadInOut` and the Vec-returning `Aead` + the `Buffer`-based
+in-place methods arrive free. (`AeadInPlace` is DEPRECATED in 0.6; there is NO
+`aead::stream` module — it moved to its own crate — so `gcm_streaming` stays
+inherent-only.) `aead::Error` is a unit struct, so the single-failure invariant
+crosses the trait boundary **by construction**. **Both types are THIN wrappers**
+over `mode_gcm`/`mode_ccm`, which is why **NO new dudect target (count stays
+23)** — the measured bodies are byte-identical on the trait path and the
+wrappers only move public-length data; that premise is guarded directly by the
+new differential fuzz target **`fuzz_sm4_aead_traits` (census 32 → 33)**, which
+asserts trait-path == inherent-path for BOTH ciphers on every input. Stated
+costs, not hidden: a fresh key schedule per call (the structs hold key bytes)
+and allocation inside the methods named "in place". api-baseline regenerated
+**additively** (96 added lines, ZERO removals). Scope + forks:
+`docs/v1.11-scope.md` Q11.1–Q11.10. **SM4-XTS gets no aead fit, ever** —
+confidentiality-only, no tag.
+**Earlier — v1.10 — assurance cycle, NON-PUBLISHING (on `main`).** Workspace stays
 `1.9.1`; crates.io skips a `1.10.0` (the v0.14/v0.20/v0.21/v0.22/v0.23
 precedent). Three follow-ups recorded at the end of v1.9.1, per
 `docs/v1.10-scope.md`: **F16 CLOSED** — `ci.yml` gains an `interop-gmssl` job
@@ -897,6 +927,11 @@ cargo clippy -p gmcrypto-core --features x509 --all-targets -- -D warnings
 cargo clippy -p gmcrypto-core --features tlcp --all-targets -- -D warnings
 # v1.8 — tlcp::chain needs BOTH tlcp+x509; its own clippy pass.
 cargo clippy -p gmcrypto-core --features tlcp,x509 --all-targets -- -D warnings
+# v1.11 — aead 0.6 trait fit. NOTE the test leg is NOT optional: the
+# rustcrypto_aead_traits [[test]] is required-features-gated, so a plain
+# `cargo test --workspace` never builds or runs it.
+cargo clippy -p gmcrypto-core --features aead-traits --all-targets -- -D warnings
+cargo test -p gmcrypto-core --features aead-traits
 
 # Supply chain — note: --exclude-dev (dev-deps are exempt from the ban list).
 cargo deny check --exclude-dev
@@ -904,11 +939,11 @@ cargo deny check --exclude-dev
 # feature flags (digest/cipher/inout/crypto-common allowlisted in deny.toml;
 # sm4-aead pulls gmcrypto-simd::ghash which has no new transitive deps; sm4-xts
 # adds NO new dep — pure-core).
-cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509,gmcrypto-core/tlcp check --exclude-dev
+cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509,gmcrypto-core/tlcp,gmcrypto-core/aead-traits check --exclude-dev
 
 # MSRV reproducibility.
 cargo +1.85 build -p gmcrypto-core
-cargo +1.85 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar,sm2-key-exchange,x509,tlcp
+cargo +1.85 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar,sm2-key-exchange,x509,tlcp,aead-traits
 cargo build -p gmcrypto-core --no-default-features  # confirms no_std posture
 
 # v0.4 W1 — wasm32 build (caller-supplied RNG only).
@@ -923,6 +958,8 @@ cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features x509 --n
 cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features tlcp --no-default-features
 # v1.8 — tlcp::chain (cert-pair verify) is pure-core/no_std; needs tlcp+x509.
 cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features tlcp,x509 --no-default-features
+# v1.11 — the aead trait fit is pure-core/no_std too (aead 0.6 is no_std).
+cargo build -p gmcrypto-core --target wasm32-unknown-unknown --features aead-traits --no-default-features
 
 # v0.4 W4 — C ABI shim build + header drift check.
 cargo build -p gmcrypto-c --release
@@ -995,7 +1032,12 @@ anchors + comparison time are public; the v1.3 `x509` rationale extends), so
 the count stays twenty-three. v1.9 (the TLCP toolkit C FFI) also adds NO dudect
 target — a thin shim riding existing targets (record → `ct_tlcp_cbc_deprotect`,
 KX → `ct_sm2_key_exchange`, key schedule → `ct_hmac_sm3`; chain/pair is
-public-inputs), so the count stays twenty-three.** (v0.3 added
+public-inputs), so the count stays twenty-three. v1.11 (the `aead` 0.6 trait
+fit) adds NO dudect target either — `Sm4Gcm`/`Sm4Ccm` delegate to
+`mode_gcm`/`mode_ccm`, so `ct_sm4_gcm_decrypt` / `ct_sm4_ccm_decrypt` measure
+byte-identical code on the trait path; the thinness that argument rests on is
+guarded by the differential `fuzz_sm4_aead_traits`, NOT by prose. Count stays
+twenty-three.** (v0.3 added
 `ct_pkcs8_decrypt`; v0.5 W4 phase 1 added
 `ct_sm4_encrypt_block_bitsliced_simd` cfg-gated on `sm4-bitsliced-simd`;
 v0.6 W6 added `ct_sm4_cbc_decrypt_fanout` cfg-gated on the same feature
@@ -1215,8 +1257,8 @@ crates/gmcrypto-simd/       # v0.5 W4 phase 2 / v0.6 W6 / v0.8 W1 — SIMD backe
   tests/ghash_kat.rs        # v0.8 W1 — NIST-derived GHASH triple (H, X, Y) regression KAT across all three dispatch paths
   tests/ghash_lane_equivalence.rs # v0.8 W1 — software vs CLMUL vs PMULL byte-equivalence sweep over 75 inputs (random + structural edges)
 
-fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN WORKSPACE (empty [workspace] table) + parent exclude=["fuzz"] → nightly-only libfuzzer-sys/arbitrary deps never enter the published 3-crate graph; unpublished, NOT MSRV-bound, NOT in cargo deny. fuzz/Cargo.lock IS committed (.gitignore anchors /Cargo.lock to root so it isn't swallowed). 32 targets (v0.14's 16 + v0.20's 2 streaming-decryptor differential + #98/#99's 7 post-1.0 hardening [SM3/HMAC-SM3/C-ABI/SM4-mode-encrypt] + v1.1's fuzz_sm2_kx + v1.3's fuzz_x509 + v1.7's fuzz_tlcp_{cbc,gcm}_deprotect + v1.8's fuzz_x509_chain + **v1.10's fuzz_sm4_xts_sectors + fuzz_sm4_gcm_tag_len_roundtrip**); v0.14's prove the failure-mode invariant (no panic/OOM/hang), v0.20's prove streaming==single-shot; initial sweeps zero crashes (+ zero divergences for v0.20). **v1.10 also upgraded the 4 DER parser targets (fuzz_sig / fuzz_spki / fuzz_sm2_ciphertext_der / fuzz_sm2_raw_ciphertext) from no-panic to BYTE-IDEMPOTENCE — `encode(decode(x)) == x`, which needs no PartialEq on a published type (adding a derive to serve a fuzz target would be an api-baseline change) and catches a decoder admitting a second spelling of the same value; the raw target also gained an is_some()-parity differential vs decode_c1c2c3_legacy, whose validation prologue is a byte-for-byte duplicate.** The FUZZ_TARGETS list in fuzz-nightly.yml MUST name every [[bin]] — a target absent there builds (fuzz-build.yml) but is silently never fuzzed (the #98/#99 drift, fixed post-#101). **This is now ENFORCED**, not prose: fuzz-nightly.yml has a preflight step that parses the `[[bin]]` names out of fuzz/Cargo.toml and fails with `config drift, NOT a crash` naming any target missing from FUZZ_TARGETS (it sits beside the per-target seeds-dir preflight, which guards the other half of the same failure).
-  Cargo.toml                # gmcrypto-core path dep w/ features=["sm4-aead","sm4-xts","sm2-key-exchange","x509","tlcp"] always on (no per-target feature juggling); 32 [[bin]] entries; empty [workspace]
+fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN WORKSPACE (empty [workspace] table) + parent exclude=["fuzz"] → nightly-only libfuzzer-sys/arbitrary deps never enter the published 3-crate graph; unpublished, NOT MSRV-bound, NOT in cargo deny. fuzz/Cargo.lock IS committed (.gitignore anchors /Cargo.lock to root so it isn't swallowed). 33 targets (v0.14's 16 + v0.20's 2 streaming-decryptor differential + #98/#99's 7 post-1.0 hardening [SM3/HMAC-SM3/C-ABI/SM4-mode-encrypt] + v1.1's fuzz_sm2_kx + v1.3's fuzz_x509 + v1.7's fuzz_tlcp_{cbc,gcm}_deprotect + v1.8's fuzz_x509_chain + **v1.10's fuzz_sm4_xts_sectors + fuzz_sm4_gcm_tag_len_roundtrip** + **v1.11's fuzz_sm4_aead_traits**, the aead-0.6 trait-path-vs-inherent-path differential that guards the thin-wrapper premise behind v1.11's no-new-dudect-target decision); v0.14's prove the failure-mode invariant (no panic/OOM/hang), v0.20's prove streaming==single-shot; initial sweeps zero crashes (+ zero divergences for v0.20). **v1.10 also upgraded the 4 DER parser targets (fuzz_sig / fuzz_spki / fuzz_sm2_ciphertext_der / fuzz_sm2_raw_ciphertext) from no-panic to BYTE-IDEMPOTENCE — `encode(decode(x)) == x`, which needs no PartialEq on a published type (adding a derive to serve a fuzz target would be an api-baseline change) and catches a decoder admitting a second spelling of the same value; the raw target also gained an is_some()-parity differential vs decode_c1c2c3_legacy, whose validation prologue is a byte-for-byte duplicate.** The FUZZ_TARGETS list in fuzz-nightly.yml MUST name every [[bin]] — a target absent there builds (fuzz-build.yml) but is silently never fuzzed (the #98/#99 drift, fixed post-#101). **This is now ENFORCED**, not prose: fuzz-nightly.yml has a preflight step that parses the `[[bin]]` names out of fuzz/Cargo.toml and fails with `config drift, NOT a crash` naming any target missing from FUZZ_TARGETS (it sits beside the per-target seeds-dir preflight, which guards the other half of the same failure).
+  Cargo.toml                # gmcrypto-core path dep w/ features=["sm4-aead","sm4-xts","sm2-key-exchange","x509","tlcp","aead-traits"] always on (no per-target feature juggling); 33 [[bin]] entries; empty [workspace]
   fuzz_targets/             # fuzz_pem, fuzz_pkcs8_{decode,decrypt}, fuzz_spki, fuzz_sec1, fuzz_sig, fuzz_asn1_reader, fuzz_sm2_{ciphertext_der,raw_ciphertext,pubkey_sec1,decrypt,verify}, fuzz_sm4_{cbc,gcm,ccm,xts}_decrypt + v0.20 fuzz_sm4_{cbc,gcm}_streaming_decrypt (DIFFERENTIAL: streaming Sm4{Cbc,Gcm}Decryptor fed in arbitrary chunks == single-shot mode_{cbc,gcm}::decrypt; layouts add a chunk_len byte) + #98/#99 fuzz_sm3 / fuzz_hmac_sm3 (one-shot==streaming differentials), fuzz_c_abi (raw-pointer extern "C" surface), fuzz_sm4_{cbc,gcm}_encrypt (encrypt differentials + round-trip), fuzz_sm4_{ccm,xts}_encrypt (encrypt→decrypt round-trips) + v1.1 fuzz_sm2_kx ([R_B:65][S_B:32] adversarial peer bytes; v1.6: THREE paths per input — confirm + derive_without_key_confirmation + respond_without_key_confirmation with the same 65 B as R_A; no dispatch byte, seed format unchanged) + v1.3 fuzz_x509 (certificate decode + verify; seeds = the gmssl KAT fixtures) + v1.7 fuzz_tlcp_{cbc,gcm}_deprotect (adversarial record bodies, layout [kb][seq:8][record]; the CBC one drives the Lucky13 deprotect; seeds = 2 each — `valid_record`/`valid_empty`, genuinely protected records, ADDED 2026-07-28: shipping these two with NO seeds dir made libFuzzer exit before running a single input, which fuzz-nightly mis-reported as `CRASH` for 44 consecutive nights while the Lucky13 path went entirely unfuzzed — the workflow now preflights a seeds dir per target) + v1.8 fuzz_x509_chain (BE-u16-length-prefixed DER blobs -> from_der each -> verify_chain + verify_pair over chain/anchor splittings; no-panic; seed = the 4 gmssl chain fixtures length-prefixed). SM4 targets carve key/iv/nonce/aad/tag via FRONT-consuming arbitrary::Unstructured (so seeds are plain concatenations; pinned to arbitrary 1.4.2 order). sm2_decrypt/verify use a fixed test key via OnceLock. v1.9 extended fuzz_c_abi with op 9 (verify_chain + verify_pair + readers over attacker cert-handle arrays, BE-u16-prefixed DER blobs; frees each handle once) + op 10 (deprotect_cbc/gcm over attacker record bytes vs fixed carriers); FUZZ_OP_COUNT 9 → 11, all seeds audited (op bytes 7/1/8 still select 7/1/8 under %11), new seed tlcp_verify_chain_op; census stays 30.
   seeds/<target>/           # committed curated valid seeds (from a one-time generator using gmcrypto-core's encode/sign/encrypt). corpus/, target/, artifacts/ are gitignored.
   README.md                 # build/run/repro runbook + seed-regen recipe
@@ -1498,6 +1540,18 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
 
 ## Agent gotchas
 
+- **A new opt-in feature must be added to SEVEN places, and two of them fail
+  late.** The obvious five are `Cargo.toml` (dep + feature), `deny.toml`
+  (allowlist), and ci.yml's test / clippy / MSRV / wasm32 legs. The two that
+  bite: (1) **`api-stability.yml`'s `cargo doc` leg enumerates every opt-in
+  feature by name** — a feature missing there is simply never doc-checked, and
+  worse, any **intra-doc link to a cfg-gated item** (`` [`sm4::Sm4Gcm`] ``)
+  written in an always-compiled doc comment becomes an unresolved link in that
+  configuration, which `-D warnings` turns into a CI failure (v1.11 hit exactly
+  this). Add the feature to the list AND use plain code spans, not intra-doc
+  links, when referring to cfg-gated items from always-compiled docs. (2) A new
+  `[[test]]` with `required-features` is **never built by `cargo test
+  --workspace`** — without its own ci.yml leg the suite silently does not run.
 - **MSRV 1.85** — don't use `Integer::is_multiple_of` (stable in 1.87).
   Use `n % m == 0` / `% m != 0`. Clippy catches it at PR time, but
   the detour wastes a fmt+clippy cycle.

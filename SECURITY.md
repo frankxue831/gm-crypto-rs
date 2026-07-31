@@ -219,6 +219,20 @@ public-inputs-only (the v1.8 rationale, doubled). The single `GMCRYPTO_ERR` on
 every failure carries the chain-rejection-oracle / Lucky13 failure-mode
 invariant across the ABI unchanged.
 
+**The v1.11 `aead-traits` fit adds NO dudect target** — the same thin-shim
+rationale, one layer up. `Sm4Gcm` / `Sm4Ccm` delegate to `mode_gcm` /
+`mode_ccm` without adding cryptography, so the secret-touching bodies already
+measured by `ct_sm4_gcm_decrypt` and `ct_sm4_ccm_decrypt` are **byte-identical
+code** on the trait path; what the wrappers add is buffer copying and
+allocation sized by public lengths, and their only branch is on the same
+success/failure bit the caller already receives. Every failure funnels into the
+single opaque `aead::Error`, so no failure-mode distinction is introduced.
+Because that thinness is the argument rather than a nicety, it is guarded
+directly: `fuzz_sm4_aead_traits` asserts the trait path is byte-identical to
+the inherent path, so a future rewrite that quietly reimplemented mode logic in
+the wrapper would fail the fuzz sweep rather than silently invalidate this
+paragraph.
+
 **Cfg-gated on `sm2-key-exchange` (1):**
 
 - `ct_sm2_key_exchange` — the full SM2 key-exchange initiator side
@@ -561,7 +575,7 @@ PRs that distinguish failure modes — even "helpfully" — will be rejected.
 
 The failure-mode invariant above is enforced not only by the type system and
 KAT/interop tests over curated inputs, but by **coverage-guided fuzzing over
-adversarial inputs**. The suite currently stands at **32 targets — see
+adversarial inputs**. The suite currently stands at **33 targets — see
 "Post-1.0 growth" below for the current census, which is authoritative.**
 
 The rest of this section is the *historical* v0.14 record. v0.14 introduced a
@@ -609,7 +623,7 @@ also gained a non-gating **`cargo fuzz coverage`** job that renders per-target
 an artifact (the report is the deliverable, not a coverage-% gate). v0.20 is an
 infra-assurance cycle — no published-crate change; workspace stays `0.16.0`.
 
-**Post-1.0 growth (current census: 32 targets).** The post-1.0 hardening cycle
+**Post-1.0 growth (current census: 33 targets).** The post-1.0 hardening cycle
 (PRs #98/#99) added seven more: primitive one-shot-vs-streaming differentials
 `fuzz_sm3` / `fuzz_hmac_sm3`, the raw-pointer C-ABI surface `fuzz_c_abi`
 (happy-path / NULL-rejection / undersized-buffer op families over the

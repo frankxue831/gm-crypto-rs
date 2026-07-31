@@ -63,7 +63,12 @@ allow = [
     # crypto-common 0.2 / hybrid-array generation).
     { name = "digest" },
     { name = "cipher" },
-    # Transitive deps shared by digest / cipher via crypto-common 0.2.
+    # v1.11 — the `aead` 0.6 trait fit for SM4-GCM / SM4-CCM, pulled only
+    # under the opt-in `aead-traits` flag. It adds no NEW transitive deps:
+    # crypto-common 0.2 and inout are already allowlisted just below, having
+    # arrived with the v0.11 digest/cipher migration.
+    { name = "aead" },
+    # Transitive deps shared by digest / cipher / aead via crypto-common 0.2.
     { name = "crypto-common" },
     { name = "inout" },
     # Build-time helper of generic-array. Post-v0.11 the digest/cipher
