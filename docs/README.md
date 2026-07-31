@@ -7,9 +7,10 @@ These are the receipts behind the method described in [CASE-STUDY.md](../CASE-ST
 The receipts the case study leans on most live at the repo root and in the crate tree, not under `docs/`:
 
 - [SECURITY.md](../SECURITY.md) — threat model, constant-time posture, the dudect gate policy, and the v0.1 leak narrative.
-- [CLAUDE.md](../CLAUDE.md) — the project's living memory: hard constraints, per-version history, the dudect gate table, the *Don't* list.
+- [CLAUDE.md](../CLAUDE.md) — the project's living memory: hard constraints, the dudect gate table, the architecture map, the *Don't* list.
+- [version-history.md](version-history.md) — the per-cycle narrative (v0.8 → v1.11, newest-first): what each cycle shipped, what it deliberately excluded, and why. Split out of CLAUDE.md, where it had grown to 42% of a file re-read at every session.
 - [crates/gmcrypto-core/benches/timing_leaks.rs](../crates/gmcrypto-core/benches/timing_leaks.rs) — the dudect timing harness (the 23 bench functions).
-- [fuzz/](../fuzz/) — the 30 fuzz targets plus the run/seed runbook.
+- [fuzz/](../fuzz/) — the 33 fuzz targets plus the run/seed runbook.
 
 ## Scope docs (pre-registration)
 
