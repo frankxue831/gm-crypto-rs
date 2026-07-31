@@ -43,7 +43,7 @@ design rather than by neglect. Issues and PRs get a response.
 | TLCP (GB/T 38636) toolkit | ✅ | — | — |
 | `no_std` | ✅ | not advertised | ✅ |
 | Enforced SemVer (`cargo-semver-checks`) | ✅ | — | — |
-| Latest release | **1.9.1** | 0.6.1 | `sm4` 0.6.0, `sm2` 0.14.0-rc |
+| Latest release | **1.11.0** | 0.6.1 | `sm4` 0.6.0, `sm2` 0.14.0-rc |
 | **External security audit** | **none** | none | none |
 | **Production track record** | **thin — first published 2026** | years | years |
 
@@ -234,12 +234,15 @@ Three crates, released together at one lockstep version:
 ## Stability & SemVer
 
 The line graduated to **1.0 (stable)** with the **1.0.0** release; the current release is
-**1.9.1** (a patch carrying the licence-text packaging fix; **1.9.0** was the TLCP toolkit
-C FFI, the cadence cycle closing the TLCP arc). crates.io history
-goes **0.16.0 → 1.0.0 → 1.0.1 → 1.1.0 → 1.2.0 → 1.3.0 → 1.4.0 → 1.6.0 → 1.7.0 → 1.8.0 → 1.9.0 → 1.9.1**, skipping 0.17.0–0.23.0
-and 1.5.0 (those were non-publishing milestones — the 0.x run was the assurance +
+**1.11.0** (the RustCrypto `aead` 0.6 trait fit; **1.9.1** was a patch carrying the
+licence-text packaging fix, and **1.9.0** the TLCP toolkit C FFI that closed the TLCP
+arc). crates.io history
+goes **0.16.0 → 1.0.0 → 1.0.1 → 1.1.0 → 1.2.0 → 1.3.0 → 1.4.0 → 1.6.0 → 1.7.0 → 1.8.0 → 1.9.0 → 1.9.1 → 1.11.0**, skipping 0.17.0–0.23.0,
+1.5.0 and 1.10.0 (those were non-publishing milestones — the 0.x run was the assurance +
 API-finalization arc that shipped together in `1.0.0`; 1.5 was the TLCP-decomposition
-design cycle, [`docs/tlcp-decomposition.md`](docs/tlcp-decomposition.md)). Every post-1.0 release has been additive (SemVer-checked);
+design cycle, [`docs/tlcp-decomposition.md`](docs/tlcp-decomposition.md); 1.10 was an
+assurance cycle that changed no published crate's runtime behavior, so its work ships
+here in `1.11.0`). Every post-1.0 release has been additive (SemVer-checked);
 the only migration ever required is 0.16 → 1.0, a single major bump — no published 0.x
 consumer ever saw an intermediate break. The public API had been stable in
 practice since v0.5; the **v1.0 readiness audit** (v0.21) froze and tooling-guarded
@@ -252,7 +255,7 @@ see [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md).
 **From 1.0, SemVer is enforced**: breaking changes to the covered surface require a
 major bump, and `cargo-semver-checks` runs as the forward breaking-change gate in
 CI (the three crates always release together at one lockstep version, with
-intra-workspace deps pinned exactly — `=1.9.1`). The runtime wire output (SM2
+intra-workspace deps pinned exactly — `=1.11.0`). The runtime wire output (SM2
 signatures / ciphertexts, SM4 mode bytes) is byte-identical to 0.16.0.
 
 - **What's covered by SemVer:** the public Rust API of `gmcrypto-core` (the
@@ -376,7 +379,7 @@ by enabling `getrandom`'s `wasm_js` feature in *their* `Cargo.toml`:
 
 ```toml
 [dependencies]
-gmcrypto-core = "1.9"
+gmcrypto-core = "1.11"
 rand_core = { version = "0.10", default-features = false }
 getrandom = { version = "0.4", default-features = false, features = ["wasm_js"] }
 ```

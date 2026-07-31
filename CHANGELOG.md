@@ -5,6 +5,10 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.11.0] - 2026-08-01
+
 **v1.11 — RustCrypto `aead` 0.6 trait fit (additive, opt-in).** Scope +
 maintainer-locked forks: [`docs/v1.11-scope.md`](docs/v1.11-scope.md).
 Default-features build is byte-identical; the whole surface is behind the new
