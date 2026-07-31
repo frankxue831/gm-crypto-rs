@@ -49,6 +49,22 @@ cargo test --workspace
 cargo deny check --exclude-dev
 ```
 
+If you changed anything that affects **wire output** (a cipher mode, a codec,
+a signature or ciphertext encoding), also run the gmssl cross-validation
+suite. It is skipped unless `GMCRYPTO_GMSSL=1` is set — and it *passes* while
+skipping, so an unset variable looks identical to a green run:
+
+```bash
+GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl --features sm4-aead   # 13 tests
+```
+
+This needs **GmSSL v3.2.0** on your `PATH` (`brew install gmssl` currently
+gives you exactly that). The suite pins its oracle version and fails with an
+`ORACLE DRIFT` message on any other build, because GmSSL renames subcommands
+and narrows accepted input ranges between releases. You do not have to run
+this: CI's `interop-gmssl` job runs the same suite against a pinned
+from-source build.
+
 If you touched anything in `crates/gmcrypto-core/src/sm2/`,
 `crates/gmcrypto-core/src/sm4/`, `crates/gmcrypto-core/src/tlcp/`, `sm3.rs`,
 `hmac.rs`, `kdf.rs`, `pkcs8.rs`, or `benches/`:

@@ -49,6 +49,23 @@ fn gmssl_present() -> bool {
     Command::new("gmssl").arg("version").output().is_ok()
 }
 
+/// The `GmSSL` release this suite is pinned to.
+///
+/// CI builds exactly this tag from source. The pin is load-bearing, not
+/// cosmetic: subcommand names and accepted input ranges move between
+/// releases (3.2.0 renamed `pbkdf2` to `sm3_pbkdf2` and `sm4 -cbc` to
+/// `sm4_cbc`, and narrowed `sm3hmac` keys to 12..=32 bytes), so an
+/// unpinned oracle fails deep inside an unrelated test with a confusing
+/// message instead of failing here with an accurate one.
+const DEFAULT_GMSSL_VERSION: &str = "GmSSL 3.2.0";
+
+/// Expected `gmssl version` first line, overridable via
+/// `GMCRYPTO_GMSSL_VERSION` so a maintainer can deliberately probe a
+/// different build without editing this file.
+fn expected_gmssl_version() -> String {
+    env::var("GMCRYPTO_GMSSL_VERSION").unwrap_or_else(|_| DEFAULT_GMSSL_VERSION.to_string())
+}
+
 /// Hex-format a byte slice (lowercase, no separator).
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
@@ -80,21 +97,50 @@ fn gmssl_binary_reachable() {
         output.status,
         String::from_utf8_lossy(&output.stderr)
     );
+    let reported = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
     assert!(
-        !output.stdout.is_empty(),
+        !reported.is_empty(),
         "`gmssl version` produced empty stdout"
+    );
+
+    // This must be the FIRST thing that fails on a drifted oracle. Without
+    // it, a mismatched build dies several tests later on a renamed
+    // subcommand, which reads like a wire-format regression.
+    let expected = expected_gmssl_version();
+    assert_eq!(
+        reported, expected,
+        "\n\nORACLE DRIFT — this is NOT a gmcrypto-core regression.\n\
+         \n    expected: {expected}\
+         \n    found:    {reported}\n\
+         \nThis suite pins its reference implementation, because GmSSL changes\n\
+         subcommand names and input ranges between releases. A mismatch means\n\
+         the gmssl build moved, not that our wire output changed.\n\
+         \nFix: install the pinned release, or set GMCRYPTO_GMSSL_VERSION to the\n\
+         build you deliberately want to cross-validate against.\n"
     );
 }
 
-/// Cross-validate `hmac_sm3` against `gmssl sm3hmac` over a small set
-/// of (key, message) inputs covering the short-key, short-key-empty-msg,
-/// and exact-block-size key paths.
+/// Cross-validate `hmac_sm3` against `gmssl sm3hmac` over a small set of
+/// (key, message) inputs spanning gmssl's admissible key-length window,
+/// pinning both of its boundaries and the empty-message path.
 ///
-/// gmssl 3.1.1's `sm3hmac` CLI rejects keys > 32 bytes. The long-key
-/// hash-first path is exercised by the in-tree KAT in
-/// `crates/gmcrypto-core/src/hmac.rs::tests::test6_long_key_hash_first`,
-/// where the canonical value was computed via gmssl by hand-applying
-/// the RFC 2104 hash-first equivalence.
+/// **gmssl 3.2.0's `sm3hmac` CLI accepts keys of 12..=32 bytes only.** The
+/// upper bound is unchanged from 3.1.1; the 12-byte *lower* bound is new in
+/// 3.2.0 — shorter keys abort inside `sm3_digest_init()` with
+/// `sm3hmac: inner error` and a non-zero exit. That is why the RFC-style
+/// 4-byte `"Jefe"` and empty-key vectors are no longer cross-checked here.
+///
+/// Those two paths, and the long-key hash-first path that has never been
+/// CLI-reachable, are covered by in-tree KATs in
+/// `crates/gmcrypto-core/src/hmac.rs::tests` —
+/// `test2_jefe_what_do_ya_want`, `empty_key_empty_message`, and
+/// `test6_long_key_hash_first`, the last of which had its canonical value
+/// computed via gmssl by hand-applying the RFC 2104 hash-first equivalence.
 #[test]
 fn hmac_sm3_matches_gmssl() {
     if !enabled() {
@@ -104,12 +150,15 @@ fn hmac_sm3_matches_gmssl() {
     assert!(gmssl_present(), "GMCRYPTO_GMSSL=1 but no gmssl on PATH");
 
     // (key, message) test cases — kept short so this test runs in <1s.
-    // Keys are limited to ≤ 32 bytes per gmssl's CLI restriction.
+    // Keys stay inside gmssl 3.2.0's 12..=32-byte CLI window; the first
+    // and last entries sit exactly on its two boundaries, so a future
+    // narrowing of either one fails here loudly instead of silently
+    // shrinking what the oracle actually checks.
     let cases: &[(&[u8], &[u8])] = &[
+        (b"twelve-bytes", b"what do ya want for nothing?"),
+        (b"twelve-bytes", b""),
         (&[0x0bu8; 20], b"Hi There"),
-        (b"Jefe", b"what do ya want for nothing?"),
-        (b"", b""),
-        (b"32-byte-key-padded-with-bytesXX", b"another short message"),
+        (&[0xccu8; 32], b"another short message"),
     ];
 
     for (key, message) in cases {
@@ -151,12 +200,13 @@ fn hmac_sm3_matches_gmssl() {
     }
 }
 
-/// Cross-validate `pbkdf2_hmac_sm3` against `gmssl pbkdf2 -hex` over a
+/// Cross-validate `pbkdf2_hmac_sm3` against `gmssl sm3_pbkdf2 -hex` over a
 /// small set of (password, salt, iter, outlen) inputs.
 ///
-/// gmssl 3.1.1's `pbkdf2` CLI rejects very small iteration counts
-/// (<1000 by observation), so we don't test the c=1 boundary here —
-/// it's covered by the in-tree self-consistency tests.
+/// gmssl 3.2.0's `sm3_pbkdf2` CLI rejects iteration counts below 10 000
+/// (measured: 9 999 rejects, 10 000 is accepted), so the c=1 boundary is
+/// not cross-checked here — it is covered by the in-tree self-consistency
+/// tests. The subcommand was named `pbkdf2` through 3.1.1.
 #[test]
 fn pbkdf2_hmac_sm3_matches_gmssl() {
     if !enabled() {
@@ -166,9 +216,9 @@ fn pbkdf2_hmac_sm3_matches_gmssl() {
     assert!(gmssl_present(), "GMCRYPTO_GMSSL=1 but no gmssl on PATH");
 
     // (password, salt, iterations, outlen). Keep iter modest so the
-    // test runs in seconds, not minutes. gmssl 3.1.1's pbkdf2 CLI
-    // rejects iterations < 10000; that boundary is covered by the
-    // in-tree self-consistency tests, not here.
+    // test runs in seconds, not minutes. 10 000 is exactly gmssl
+    // 3.2.0's minimum, so these entries sit on the boundary and a
+    // future tightening fails here loudly.
     let cases: &[(&[u8], &[u8], u32, usize)] = &[
         (b"password", b"salt", 10_000, 32),
         (b"password", b"salt", 10_000, 20),
@@ -185,7 +235,7 @@ fn pbkdf2_hmac_sm3_matches_gmssl() {
 
         let output = Command::new("gmssl")
             .args([
-                "pbkdf2",
+                "sm3_pbkdf2",
                 "-pass",
                 pass_str,
                 "-salt",
@@ -197,10 +247,10 @@ fn pbkdf2_hmac_sm3_matches_gmssl() {
                 "-hex",
             ])
             .output()
-            .expect("spawn gmssl pbkdf2");
+            .expect("spawn gmssl sm3_pbkdf2");
         assert!(
             output.status.success(),
-            "gmssl pbkdf2 exit {:?}: {}",
+            "gmssl sm3_pbkdf2 exit {:?}: {}",
             output.status,
             String::from_utf8_lossy(&output.stderr)
         );
@@ -466,11 +516,10 @@ fn gmssl_sm4_cbc_encrypt_them_decrypt_us() {
     let ct_path = dir.join("ct.bin");
     fs::write(&pt_path, plaintext).expect("write pt");
 
-    // gmssl sm4 -cbc -encrypt -key <hex> -iv <hex> -in pt -out ct
+    // gmssl sm4_cbc -encrypt -key <hex> -iv <hex> -in pt -out ct
     let output = Command::new("gmssl")
         .args([
-            "sm4",
-            "-cbc",
+            "sm4_cbc",
             "-encrypt",
             "-key",
             &hex(&key),
@@ -482,10 +531,10 @@ fn gmssl_sm4_cbc_encrypt_them_decrypt_us() {
             ct_path.to_str().unwrap(),
         ])
         .output()
-        .expect("spawn gmssl sm4");
+        .expect("spawn gmssl sm4_cbc");
     assert!(
         output.status.success(),
-        "gmssl sm4 -cbc -encrypt failed: {}",
+        "gmssl sm4_cbc -encrypt failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -515,8 +564,7 @@ fn gmssl_sm4_cbc_encrypt_us_decrypt_them() {
 
     let output = Command::new("gmssl")
         .args([
-            "sm4",
-            "-cbc",
+            "sm4_cbc",
             "-decrypt",
             "-key",
             &hex(&key),
@@ -528,10 +576,10 @@ fn gmssl_sm4_cbc_encrypt_us_decrypt_them() {
             recovered_path.to_str().unwrap(),
         ])
         .output()
-        .expect("spawn gmssl sm4");
+        .expect("spawn gmssl sm4_cbc");
     assert!(
         output.status.success(),
-        "gmssl sm4 -cbc -decrypt rejected our ciphertext: {}",
+        "gmssl sm4_cbc -decrypt rejected our ciphertext: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -541,8 +589,9 @@ fn gmssl_sm4_cbc_encrypt_us_decrypt_them() {
 
 /// SM4-CTR (v0.7 W2): gmssl encrypts, gmcrypto-core decrypts. gmssl's
 /// `-iv` flag holds the initial counter (CTR has no IV/counter split
-/// in gmssl 3.1.1's CLI — the `-iv` value IS the initial 16-byte
-/// counter, BE-incremented per block).
+/// in gmssl's CLI — the `-iv` value IS the initial 16-byte counter,
+/// BE-incremented per block). Re-confirmed against 3.2.0, where the
+/// subcommand is `sm4_ctr` rather than 3.1.1's `sm4 -ctr`.
 #[test]
 fn gmssl_sm4_ctr_encrypt_them_decrypt_us() {
     if !enabled() {
@@ -564,8 +613,7 @@ fn gmssl_sm4_ctr_encrypt_them_decrypt_us() {
 
     let output = Command::new("gmssl")
         .args([
-            "sm4",
-            "-ctr",
+            "sm4_ctr",
             "-encrypt",
             "-key",
             &hex(&key),
@@ -577,10 +625,10 @@ fn gmssl_sm4_ctr_encrypt_them_decrypt_us() {
             ct_path.to_str().unwrap(),
         ])
         .output()
-        .expect("spawn gmssl sm4");
+        .expect("spawn gmssl sm4_ctr");
     assert!(
         output.status.success(),
-        "gmssl sm4 -ctr -encrypt failed: {}",
+        "gmssl sm4_ctr -encrypt failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -610,8 +658,7 @@ fn gmssl_sm4_ctr_encrypt_us_decrypt_them() {
 
     let output = Command::new("gmssl")
         .args([
-            "sm4",
-            "-ctr",
+            "sm4_ctr",
             "-decrypt",
             "-key",
             &hex(&key),
@@ -623,10 +670,10 @@ fn gmssl_sm4_ctr_encrypt_us_decrypt_them() {
             recovered_path.to_str().unwrap(),
         ])
         .output()
-        .expect("spawn gmssl sm4");
+        .expect("spawn gmssl sm4_ctr");
     assert!(
         output.status.success(),
-        "gmssl sm4 -ctr -decrypt rejected our ciphertext: {}",
+        "gmssl sm4_ctr -decrypt rejected our ciphertext: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -637,11 +684,12 @@ fn gmssl_sm4_ctr_encrypt_us_decrypt_them() {
 // ============================================================
 // SM4-GCM (v0.8 W2) — cfg-gated on `sm4-aead`.
 //
-// gmssl's `sm4 -gcm -encrypt ... -aad <str>` emits `ciphertext ‖ tag`
+// gmssl's `sm4_gcm -encrypt ... -aad <str>` emits `ciphertext ‖ tag`
 // concatenated to the output file. Our `mode_gcm::encrypt` returns a
 // tuple; the shim handles the concat/split on the gmssl boundary.
-// gmssl 3.1.1 accepts arbitrary IV lengths (verified locally); the
-// tests below use the canonical 12-byte nonce.
+// gmssl 3.2.0 still accepts arbitrary IV lengths (re-verified locally
+// at 8/12/16/24 bytes); the tests below use the canonical 12-byte
+// nonce. The subcommand was `sm4 -gcm` through 3.1.1.
 // ============================================================
 
 /// SM4-GCM (v0.8 W2): gmssl encrypts, gmcrypto-core decrypts.
@@ -668,8 +716,7 @@ fn gmssl_sm4_gcm_encrypt_them_decrypt_us() {
 
     let output = Command::new("gmssl")
         .args([
-            "sm4",
-            "-gcm",
+            "sm4_gcm",
             "-encrypt",
             "-key",
             &hex(&key),
@@ -683,10 +730,10 @@ fn gmssl_sm4_gcm_encrypt_them_decrypt_us() {
             ct_path.to_str().unwrap(),
         ])
         .output()
-        .expect("spawn gmssl sm4");
+        .expect("spawn gmssl sm4_gcm");
     assert!(
         output.status.success(),
-        "gmssl sm4 -gcm -encrypt failed: {}",
+        "gmssl sm4_gcm -encrypt failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -737,8 +784,7 @@ fn gmssl_sm4_gcm_encrypt_us_decrypt_them() {
 
     let output = Command::new("gmssl")
         .args([
-            "sm4",
-            "-gcm",
+            "sm4_gcm",
             "-decrypt",
             "-key",
             &hex(&key),
@@ -752,10 +798,10 @@ fn gmssl_sm4_gcm_encrypt_us_decrypt_them() {
             recovered_path.to_str().unwrap(),
         ])
         .output()
-        .expect("spawn gmssl sm4");
+        .expect("spawn gmssl sm4_gcm");
     assert!(
         output.status.success(),
-        "gmssl sm4 -gcm -decrypt rejected our (ct||tag): {}",
+        "gmssl sm4_gcm -decrypt rejected our (ct||tag): {}",
         String::from_utf8_lossy(&output.stderr)
     );
 

@@ -809,7 +809,7 @@ v0.10.0 = streaming AEAD FFI for SM4-GCM (gmcrypto-c; 9 symbols + 2 opaque types
 v0.11.0 = RustCrypto trait-fit modernization (digest 0.10→0.11 / cipher 0.4→0.5; crypto-common 0.2 / hybrid-array; opt-in features only, byte-identical output; per `docs/v0.11-scope.md` Q11.1–Q11.11).
 v0.12.0 = SM4-XTS single-shot tweakable disk/sector mode (GB/T 17964-2021 / GM-T OID 1.2.156.10197.1.104.10, **not** IEEE 1619 — bit-reflected α-doubling; full ciphertext stealing; byte-identical to OpenSSL EVP SM4-XTS xts_standard=GB; pure-core opt-in `sm4-xts`, no new dep; per `docs/v0.12-scope.md` Q12.1–Q12.13). Also fixed the latent dudect CI gate bug (MATRIX_FEATURES env scoping).
 v0.13.0 → v1.0.1 are documented once, in the per-version prose above (the `**Earlier — vX.Y —**` paragraphs, newest-first) + the header (the current `1.0.1` release and the `1.0.0` graduation) — not duplicated here. This arc list keeps only the `v0.5 → v0.12` throughput/AEAD/XTS sequence it was created to summarize.
-post-1.0 / deferred = class-split-aware "noise-twin" dudect reference (the only design that could re-promote `ct_fn_invert`/`ct_fp_invert`) + round-trip/differential parser fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + AVX-512 sbox_x64 + CCM buffered input + (from the v1.0.1 synthesis, all non-blocking) a `ct_sm4_cbc_unpad` dudect target for the PKCS#7-strip path (F21 — needs a reviewed dudect re-baseline) + gmssl interop in CI (F16). (NB: the §3.A crypto-bigint-exposure decision was **pre-1.0** and is now **resolved in v0.22** — see the **Earlier — v0.22 —** paragraph + the header above; nothing pre-1.0 remains outstanding.)
+post-1.0 / deferred = class-split-aware "noise-twin" dudect reference (the only design that could re-promote `ct_fn_invert`/`ct_fp_invert`) + round-trip/differential parser fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + AVX-512 sbox_x64 + CCM buffered input + (from the v1.0.1 synthesis, all non-blocking) a `ct_sm4_cbc_unpad` dudect target for the PKCS#7-strip path (F21 — needs a reviewed dudect re-baseline). **F16 (gmssl interop in CI) is CLOSED in v1.10** — `ci.yml`'s `interop-gmssl` job runs the suite against a pinned from-source GmSSL build. (NB: the §3.A crypto-bigint-exposure decision was **pre-1.0** and is now **resolved in v0.22** — see the **Earlier — v0.22 —** paragraph + the header above; nothing pre-1.0 remains outstanding.)
 
 Read `README.md`, `SECURITY.md`, `CONTRIBUTING.md` for the user-facing posture.
 This file lists the constraints a coding agent will violate by default.
@@ -937,8 +937,16 @@ DUDECT_SAMPLES=10000  cargo bench --bench timing_leaks --features sm4-xts,sm4-ae
 DUDECT_SAMPLES=10000  cargo bench --bench timing_leaks --features sm2-key-exchange,sm4-xts,sm4-aead,sm4-bitsliced-simd,crypto-bigint-scalar
 # Gate: |tau| < 0.20 on ct_sm2_key_exchange (full initiator side, class-split by static d_A).
 
-# gmssl interop (gated; needs gmssl 3.1.1 installed).
-GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl
+# gmssl interop (gated; needs gmssl 3.2.0 — what Homebrew ships today).
+# The suite PINS its oracle version (DEFAULT_GMSSL_VERSION in the test) and
+# fails with "ORACLE DRIFT" on any other build: GmSSL 3.2.0 renamed `pbkdf2`
+# -> `sm3_pbkdf2`, split `sm4 -cbc/-ctr/-gcm` into `sm4_cbc`/`sm4_ctr`/
+# `sm4_gcm`, and narrowed `sm3hmac` keys to 12..=32 bytes. v1.10 wired this
+# into ci.yml's `interop-gmssl` job (pinned from-source build, non-gating).
+GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl                      # 11 tests
+GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl --features sm4-aead  # 13 tests
+# Deliberately probe a different build (does not edit the pin):
+GMCRYPTO_GMSSL=1 GMCRYPTO_GMSSL_VERSION="GmSSL 3.1.1" cargo test --test interop_gmssl
 
 # v0.14 — parser fuzzing (cargo-fuzz / libFuzzer). NIGHTLY-ONLY toolchain.
 # One-time: rustup toolchain install nightly && cargo install cargo-fuzz --version 0.13.1 --locked
@@ -1196,7 +1204,7 @@ fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN 
   README.md                 # build/run/repro runbook + seed-regen recipe
 
 .github/workflows/
-  ci.yml                    # 5 jobs on GitHub-hosted macos-14 (aarch64, v0.17+): build/test (stable, full) + msrv (1.85, build-only) + cabi + cargo-deny + wasm32 matrix. Per-feature clippy passes (digest-traits, cipher-traits, sm4-bitsliced, sm4-bitsliced-simd, crypto-bigint-scalar). concurrency: cancel-in-progress. UNAFFECTED by fuzz/ (excluded).
+  ci.yml                    # 7 jobs (v0.17+). FIVE on GitHub-hosted macos-14 (aarch64): build/test (stable, full) + msrv (1.85, build-only) + cabi + cargo-deny + wasm32 matrix. TWO on Linux/x86_64: simd-x86 (ubuntu-latest, F17 — the AVX2/PCLMULQDQ paths aarch64 can't reach) + interop-gmssl (ubuntu-24.04, F16 — v1.10; gmssl cross-validation against a PINNED from-source GmSSL build, non-gating via continue-on-error). Per-feature clippy passes (digest-traits, cipher-traits, sm4-bitsliced, sm4-bitsliced-simd, crypto-bigint-scalar). concurrency: cancel-in-progress. UNAFFECTED by fuzz/ (excluded).
   dudect-pr.yml             # 10K samples on ubuntu-24.04 (v0.18 pin), |tau| gate, matrix on features=[default, sm4-bitsliced, sm4-bitsliced-simd, "sm4-bitsliced-simd,sm4-aead,sm4-xts"] (4 legs; the 4th gates the AEAD/XTS CT targets), path-allowlisted (incl. gmcrypto-simd/src/**), concurrency: cancel-in-progress
   dudect-nightly.yml        # 100K samples on ubuntu-24.04 (v0.18 pin), same gate + matrix, 30-day artifact retention; concurrency: cancel-in-progress=false (a partial 100K run is wasted compute). PR #38 drops the push:main trigger in favour of cron-only (regression watch) + workflow_dispatch (manual reruns).
   fuzz-nightly.yml          # v0.14 — capped cargo-fuzz sweep over all 27 targets (v0.20: FUZZ_TARGETS env is the single source of truth — MUST name every fuzz/Cargo.toml [[bin]], see the fuzz/ entry above) on GitHub-hosted ubuntu-latest (v0.17+; cron 06:00 UTC + workflow_dispatch w/ max_total_time input; installs nightly + pinned cargo-fuzz 0.13.1 per run; -max_total_time/-rss_limit_mb/-timeout caps; crash-artifact upload 30d; concurrency cancel-in-progress=false). NOT a PR gate. v0.20 adds a SEPARATE non-gating `coverage` job: cargo +nightly fuzz coverage per target over committed seeds → llvm-cov TOTALS SUMMARY.txt artifact (report-as-deliverable, no %-gate).
@@ -1240,8 +1248,12 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
 
 ## Workflow notes
 
-- **GitHub-hosted CI (v0.17+).** `ci.yml`'s five jobs (build / msrv / cabi
-  / deny / wasm32) run on GitHub-hosted **`macos-14`** (aarch64);
+- **GitHub-hosted CI (v0.17+).** Five of `ci.yml`'s seven jobs (build / msrv /
+  cabi / deny / wasm32) run on GitHub-hosted **`macos-14`** (aarch64); the other
+  two run on Linux/x86_64 — `simd-x86` on **`ubuntu-latest`** and (v1.10)
+  `interop-gmssl` on **`ubuntu-24.04`**, OS-label-pinned because a from-source
+  GmSSL build's reproducibility rides the runner's compiler (this is NOT the
+  dudect calibration pin — no `|tau|` is at stake — but the same discipline).
   `fuzz-nightly.yml` runs on **`ubuntu-latest`**. The two dudect workflows
   are pinned to **`ubuntu-24.04`** (v0.18) — their `|tau|` gates were empirically
   calibrated against GitHub's `ubuntu-24.04` runner-image noise floor (v0.4
