@@ -561,7 +561,7 @@ PRs that distinguish failure modes — even "helpfully" — will be rejected.
 
 The failure-mode invariant above is enforced not only by the type system and
 KAT/interop tests over curated inputs, but by **coverage-guided fuzzing over
-adversarial inputs**. The suite currently stands at **30 targets — see
+adversarial inputs**. The suite currently stands at **32 targets — see
 "Post-1.0 growth" below for the current census, which is authoritative.**
 
 The rest of this section is the *historical* v0.14 record. v0.14 introduced a
@@ -609,7 +609,7 @@ also gained a non-gating **`cargo fuzz coverage`** job that renders per-target
 an artifact (the report is the deliverable, not a coverage-% gate). v0.20 is an
 infra-assurance cycle — no published-crate change; workspace stays `0.16.0`.
 
-**Post-1.0 growth (current census: 30 targets).** The post-1.0 hardening cycle
+**Post-1.0 growth (current census: 32 targets).** The post-1.0 hardening cycle
 (PRs #98/#99) added seven more: primitive one-shot-vs-streaming differentials
 `fuzz_sm3` / `fuzz_hmac_sm3`, the raw-pointer C-ABI surface `fuzz_c_abi`
 (happy-path / NULL-rejection / undersized-buffer op families over the
@@ -635,7 +635,13 @@ bodies; census 27 → 29); **v1.8** added `fuzz_x509_chain` (chain/pair over
 length-prefixed DER blobs; 29 → 30); **v1.9** extended `fuzz_c_abi` with ops
 9 (chain/pair verify) + 10 (record deprotect) over attacker handle / record
 bytes (no new target — census stays 30 — op modulus 9 → 11, all seeds
-audited). The nightly `FUZZ_TARGETS` sweep
+audited). **v1.10** added `fuzz_sm4_xts_sectors` (the multi-sector helper
+against a looped single-shot oracle) + `fuzz_sm4_gcm_tag_len_roundtrip`
+(truncated-tag round-trip; census 30 → **32**), and upgraded the four DER
+parser targets (`fuzz_sig`, `fuzz_spki`, `fuzz_sm2_ciphertext_der`,
+`fuzz_sm2_raw_ciphertext`) from no-panic to **byte-idempotence**
+(`encode(decode(x)) == x`), which catches a decoder admitting a second
+spelling of the same value. The nightly `FUZZ_TARGETS` sweep
 list must name every `fuzz/Cargo.toml` `[[bin]]` — a target absent from it
 builds in CI but is silently never fuzzed (a drift that existed for
 #98/#99's targets and was fixed in #102; the list now carries an explicit
