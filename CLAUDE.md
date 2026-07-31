@@ -1540,6 +1540,18 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
 
 ## Agent gotchas
 
+- **A new opt-in feature must be added to SEVEN places, and two of them fail
+  late.** The obvious five are `Cargo.toml` (dep + feature), `deny.toml`
+  (allowlist), and ci.yml's test / clippy / MSRV / wasm32 legs. The two that
+  bite: (1) **`api-stability.yml`'s `cargo doc` leg enumerates every opt-in
+  feature by name** — a feature missing there is simply never doc-checked, and
+  worse, any **intra-doc link to a cfg-gated item** (`` [`sm4::Sm4Gcm`] ``)
+  written in an always-compiled doc comment becomes an unresolved link in that
+  configuration, which `-D warnings` turns into a CI failure (v1.11 hit exactly
+  this). Add the feature to the list AND use plain code spans, not intra-doc
+  links, when referring to cfg-gated items from always-compiled docs. (2) A new
+  `[[test]]` with `required-features` is **never built by `cargo test
+  --workspace`** — without its own ci.yml leg the suite silently does not run.
 - **MSRV 1.85** — don't use `Integer::is_multiple_of` (stable in 1.87).
   Use `n % m == 0` / `% m != 0`. Clippy catches it at PR time, but
   the detour wastes a fmt+clippy cycle.
