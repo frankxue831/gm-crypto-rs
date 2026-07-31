@@ -413,6 +413,12 @@ mod aead_impl {
     //! blanket-implements `Aead` over it, so a direct `Aead` impl would
     //! conflict. Each call runs a fresh key schedule (the struct holds key
     //! bytes) and allocates; the inherent API remains the fast path.
+    //!
+    //! **Why the `copy_from_slice` calls below cannot panic** — same reasoning
+    //! as the GCM module: `InOutBuf` carries a single `len` and its checked
+    //! constructor rejects unequal halves, so the two halves always match, and
+    //! the split/join arithmetic here is bounded by `checked_sub`. See
+    //! [`super::super::mode_gcm`]'s `aead_impl` for the full note.
 
     use core::marker::PhantomData;
 

@@ -468,6 +468,16 @@ mod aead_impl {
     //! a fresh SM4 key schedule; and because the underlying functions allocate,
     //! so do the methods named "in place". Throughput-sensitive callers should
     //! use the inherent API. Both costs buy the wrapper thinness above.
+    //!
+    //! **Why the `copy_from_slice` calls below cannot panic.** They rely on an
+    //! invariant of `InOutBuf` rather than of this module: the type carries a
+    //! single `len` and its checked constructor rejects unequal halves
+    //! (`InOutBuf::new -> Result<_, NotEqualError>`), so `get_in().len()` and
+    //! `get_out().len()` are always equal — a caller cannot hand us mismatched
+    //! halves even deliberately. Since the underlying functions return output
+    //! exactly as long as their input, the copy lengths always agree. If a
+    //! future `inout` major version ever relaxed that, these copies would need
+    //! explicit length checks.
 
     use aead::array::Array;
     use aead::consts::{U12, U16};
