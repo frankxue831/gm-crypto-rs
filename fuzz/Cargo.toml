@@ -21,13 +21,16 @@ arbitrary = { version = "1", features = ["derive"] }
 # v1.1 — fuzz_sm2_kx drives the key-exchange API, whose ephemeral step
 # takes a caller-supplied `TryCryptoRng` (deterministic in-target impl).
 rand_core = "0.10"
+# v1.11 — fuzz_sm4_aead_traits imports the `aead` traits directly to drive the
+# trait path. Same version gmcrypto-core's `aead-traits` feature resolves.
+aead = { version = "0.6.1", default-features = false, features = ["alloc"] }
 
 # The crate under test. AEAD + XTS + key-exchange features always on so
 # every target compiles without per-target feature juggling (scope
 # Q14.2/§2; v1.1 adds sm2-key-exchange for fuzz_sm2_kx).
 [dependencies.gmcrypto-core]
 path = "../crates/gmcrypto-core"
-features = ["sm4-aead", "sm4-xts", "sm2-key-exchange", "x509", "tlcp"]
+features = ["sm4-aead", "sm4-xts", "sm2-key-exchange", "x509", "tlcp", "aead-traits"]
 
 # The C ABI shim, pulled in via its `rlib` crate-type so the `fuzz_c_abi`
 # target can drive the `extern "C"` entry points directly (raw pointers +
@@ -291,6 +294,17 @@ bench = false
 [[bin]]
 name = "fuzz_sm4_gcm_tag_len_roundtrip"
 path = "fuzz_targets/fuzz_sm4_gcm_tag_len_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+# v1.11 — the `aead` 0.6 trait path vs the inherent mode_gcm / mode_ccm path.
+# Guards the thin-wrapper premise that v1.11's "no new dudect target" decision
+# rests on: a divergence here would not just be a wrapper bug, it would
+# invalidate that assurance claim.
+[[bin]]
+name = "fuzz_sm4_aead_traits"
+path = "fuzz_targets/fuzz_sm4_aead_traits.rs"
 test = false
 doc = false
 bench = false

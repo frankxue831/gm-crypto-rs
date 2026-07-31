@@ -441,6 +441,130 @@ fn ghash(h_block: &[u8; BLOCK_SIZE], data: &[u8]) -> [u8; BLOCK_SIZE] {
     y
 }
 
+#[cfg(feature = "aead-traits")]
+mod aead_impl {
+    //! v1.11 — `RustCrypto` `aead` 0.6 trait fit for SM4-GCM (Q11.1–Q11.9).
+    //!
+    //! [`Sm4Gcm`] is a **thin wrapper**: every method delegates to the inherent
+    //! [`encrypt`](super::encrypt) / [`decrypt`](super::decrypt) above and adds
+    //! no cryptography. That is load-bearing, not incidental — it is why this
+    //! surface needs no dudect target of its own (the measured bodies behind
+    //! `ct_sm4_gcm_decrypt` are byte-identical on this path).
+    //!
+    //! **The trait set is not a free choice.** `aead` 0.6 blanket-implements
+    //! `Aead` for every `AeadInOut`, so a direct `impl Aead for Sm4Gcm` cannot
+    //! compile — it would conflict. `AeadInOut` is the entry point; the
+    //! `Vec`-returning `Aead` and the `Buffer`-based in-place methods come
+    //! free. (`AeadInPlace` is deprecated in 0.6 and deliberately not
+    //! implemented.)
+    //!
+    //! **Profile (Q11.3):** fixed 12-byte nonce, 16-byte postfix tag — the
+    //! canonical safe shape, and what RFC 8998 and TLS use. Truncated tags
+    //! ([`GcmTagLen`](super::GcmTagLen)) and arbitrary-length nonces stay
+    //! reachable through the inherent functions; the trait types are not the
+    //! place to expose them.
+    //!
+    //! **Costs, stated plainly.** The struct holds key bytes, so each call runs
+    //! a fresh SM4 key schedule; and because the underlying functions allocate,
+    //! so do the methods named "in place". Throughput-sensitive callers should
+    //! use the inherent API. Both costs buy the wrapper thinness above.
+
+    use aead::array::Array;
+    use aead::consts::{U12, U16};
+    use aead::inout::InOutBuf;
+    use aead::{AeadCore, AeadInOut, Error, KeyInit, KeySizeUser, Nonce, Result, Tag, TagPosition};
+    use zeroize::{Zeroize, ZeroizeOnDrop};
+
+    use super::{KEY_SIZE, TAG_SIZE, decrypt, encrypt};
+
+    const _: () = assert!(KEY_SIZE == 16, "Sm4Gcm declares KeySize = U16");
+    const _: () = assert!(TAG_SIZE == 16, "Sm4Gcm declares TagSize = U16");
+
+    /// SM4-GCM as a `RustCrypto` [`aead`] cipher: 128-bit key, 96-bit nonce,
+    /// 128-bit postfix tag.
+    ///
+    /// Wire format from [`Aead::encrypt`](aead::Aead::encrypt) is
+    /// `ciphertext ‖ tag`, byte-identical to
+    /// [`mode_gcm::encrypt`](super::encrypt).
+    ///
+    /// The `(key, nonce)` pair must never repeat — nonce reuse under one key
+    /// breaks GCM catastrophically, revealing plaintext XORs and leaking the
+    /// authentication subkey. This type does not and cannot enforce that;
+    /// choosing nonces is the caller's contract.
+    #[derive(Clone, Zeroize, ZeroizeOnDrop)]
+    pub struct Sm4Gcm {
+        key: [u8; KEY_SIZE],
+    }
+
+    impl KeySizeUser for Sm4Gcm {
+        type KeySize = U16;
+    }
+
+    impl KeyInit for Sm4Gcm {
+        fn new(key: &aead::Key<Self>) -> Self {
+            let mut k = [0u8; KEY_SIZE];
+            k.copy_from_slice(key.as_slice());
+            Self { key: k }
+        }
+    }
+
+    impl AeadCore for Sm4Gcm {
+        type NonceSize = U12;
+        type TagSize = U16;
+        const TAG_POSITION: TagPosition = TagPosition::Postfix;
+    }
+
+    impl AeadInOut for Sm4Gcm {
+        fn encrypt_inout_detached(
+            &self,
+            nonce: &Nonce<Self>,
+            associated_data: &[u8],
+            mut buffer: InOutBuf<'_, '_, u8>,
+        ) -> Result<Tag<Self>> {
+            // `encrypt` already returns the detached (ct, tag) shape, so there
+            // is nothing to split. Its `None` (the 2^36−32-byte ceiling)
+            // becomes the one opaque error, like every other failure.
+            let (ct, tag) = encrypt(
+                &self.key,
+                nonce.as_slice(),
+                associated_data,
+                buffer.get_in(),
+            )
+            .ok_or(Error)?;
+            buffer.get_out().copy_from_slice(&ct);
+            Ok(Array(tag))
+        }
+
+        fn decrypt_inout_detached(
+            &self,
+            nonce: &Nonce<Self>,
+            associated_data: &[u8],
+            mut buffer: InOutBuf<'_, '_, u8>,
+            tag: &Tag<Self>,
+        ) -> Result<()> {
+            let tag_arr: [u8; TAG_SIZE] = (*tag).into();
+            // GCM verifies before releasing plaintext, so on failure nothing
+            // was decrypted and the out-half stays untouched.
+            let mut pt = decrypt(
+                &self.key,
+                nonce.as_slice(),
+                associated_data,
+                buffer.get_in(),
+                &tag_arr,
+            )
+            .ok_or(Error)?;
+            buffer.get_out().copy_from_slice(&pt);
+            // The inherent API hands this Vec to the caller; here it is purely
+            // transient, and dropping a Vec frees without scrubbing.
+            pt.zeroize();
+            Ok(())
+        }
+    }
+}
+
+#[cfg(feature = "aead-traits")]
+pub use aead_impl::Sm4Gcm;
+
 #[cfg(test)]
 mod tests {
     use super::*;

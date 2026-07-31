@@ -50,6 +50,13 @@
 //!   KeySizeUser, KeyInit}` for [`sm4::Sm4Cipher`]. Pulls `cipher = "0.5"` —
 //!   a pre-1.0 ecosystem crate, so a breaking `cipher` release is **not**
 //!   covered by `gmcrypto-core`'s `SemVer` (bump your own).
+//! - `aead-traits` — opt-in (v1.11). Implements `aead::{AeadCore, AeadInOut,
+//!   KeyInit, KeySizeUser}` for [`sm4::Sm4Gcm`] and [`sm4::Sm4Ccm`], which in
+//!   turn yields the `Vec`-returning `aead::Aead` via that crate's blanket
+//!   impl. Thin wrappers over [`sm4::mode_gcm`] / [`sm4::mode_ccm`] — every
+//!   failure becomes the one opaque `aead::Error`. Implies `sm4-aead`. Pulls
+//!   `aead = "0.6"` — a pre-1.0 ecosystem crate, so a breaking `aead` release
+//!   is **not** covered by `gmcrypto-core`'s `SemVer` (bump your own).
 //! - `sm4-bitsliced` — opt-in (v0.4 W3). Routes the SM4 S-box through
 //!   a bitsliced (table-less, gate-only) Itoh-Tsujii inversion in
 //!   GF(2^8). Byte-identical output to the default linear-scan path;

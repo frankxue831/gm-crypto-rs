@@ -114,6 +114,7 @@ the signal is the per-target trend, not an absolute number.
 | `fuzz_x509_chain` | `x509::verify_chain` + `tlcp::chain::verify_pair` |
 | `fuzz_sm4_xts_sectors` | `mode_xts::{encrypt,decrypt}_sectors` — DIFFERENTIAL vs the looped single-shot, + buf-untouched-on-`None` |
 | `fuzz_sm4_gcm_tag_len_roundtrip` | `mode_gcm::{encrypt,decrypt}_with_tag_len` — truncated-tag round-trip over all 7 permitted lengths |
+| `fuzz_sm4_aead_traits` | `Sm4Gcm` / `Sm4Ccm` (`aead` 0.6) — DIFFERENTIAL vs inherent `mode_gcm` / `mode_ccm`, both ciphers per input |
 
 (v0.14 W3 added the SM4 single-shot decrypts: `fuzz_sm4_cbc_decrypt` /
 `_gcm_decrypt` / `_ccm_decrypt` / `_xts_decrypt` — negative-input, see
@@ -145,11 +146,17 @@ exactly one encoding per value), which needs no `PartialEq` on a published
 type and catches a decoder that starts admitting a second spelling; the raw
 target also gained a guard-parity differential between the modern and legacy
 decoders, whose validation prologues are duplicated. v1.10 also added
-`fuzz_sm4_xts_sectors` and `fuzz_sm4_gcm_tag_len_roundtrip`. **32 targets
+`fuzz_sm4_xts_sectors` and `fuzz_sm4_gcm_tag_len_roundtrip`. v1.11 added
+`fuzz_sm4_aead_traits`, which asserts the new `aead` 0.6 trait path is
+byte-identical to the inherent `mode_gcm` / `mode_ccm` path — that thinness is
+the argument behind v1.11 adding no dudect target, so a divergence there would
+invalidate an assurance claim rather than merely be a wrapper bug. **33 targets
 total** — the census must
 equal both `fuzz/Cargo.toml`'s `[[bin]]` entries and the `FUZZ_TARGETS`
 list in `.github/workflows/fuzz-nightly.yml`; a target absent from that
-list still compiles in CI but is never fuzzed nor coverage-measured.)
+list still compiles in CI but is never fuzzed nor coverage-measured. That
+pairing is now **enforced** by a preflight step in `fuzz-nightly.yml` rather
+than left to prose.)
 
 ### Regenerating seeds
 

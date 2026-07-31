@@ -166,6 +166,12 @@ jobs:
       # (tlcp_key_schedule_kat) is cfg-gated on the feature.
       - name: cargo test --features tlcp
         run: cargo test -p gmcrypto-core --features tlcp
+      # v1.11 — RustCrypto `aead` 0.6 trait fit. This leg is not optional
+      # bookkeeping: `tests/rustcrypto_aead_traits.rs` is a
+      # `required-features`-gated [[test]] target, so a plain
+      # `cargo test --workspace` never builds or runs it.
+      - name: cargo test --features aead-traits
+        run: cargo test -p gmcrypto-core --features aead-traits
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
       - name: cargo clippy
@@ -177,7 +183,7 @@ jobs:
       - name: cargo clippy --features sm4-bitsliced-simd
         run: cargo clippy -p gmcrypto-core --features sm4-bitsliced-simd --all-targets -- -D warnings
       - name: cargo clippy --features sm4-aead (full matrix)
-        run: cargo clippy -p gmcrypto-core --features sm4-aead,sm4-bitsliced-simd,digest-traits,cipher-traits,crypto-bigint-scalar,sm2-key-exchange,x509,tlcp --all-targets -- -D warnings
+        run: cargo clippy -p gmcrypto-core --features sm4-aead,sm4-bitsliced-simd,digest-traits,cipher-traits,crypto-bigint-scalar,sm2-key-exchange,x509,tlcp,aead-traits --all-targets -- -D warnings
       - name: cargo clippy --features crypto-bigint-scalar
         run: cargo clippy -p gmcrypto-core --features crypto-bigint-scalar --all-targets -- -D warnings
       - name: cargo clippy --features sm2-key-exchange
@@ -186,6 +192,8 @@ jobs:
         run: cargo clippy -p gmcrypto-core --features x509 --all-targets -- -D warnings
       - name: cargo clippy --features tlcp
         run: cargo clippy -p gmcrypto-core --features tlcp --all-targets -- -D warnings
+      - name: cargo clippy --features aead-traits
+        run: cargo clippy -p gmcrypto-core --features aead-traits --all-targets -- -D warnings
 
   msrv:
     # MSRV-only build check. Behaviour is rust-version-independent, so
@@ -221,7 +229,7 @@ jobs:
       - name: cargo build (all targets)
         run: cargo build --workspace --all-targets
       - name: cargo build with opt-in features
-        run: cargo build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar,sm2-key-exchange,x509,tlcp --all-targets
+        run: cargo build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar,sm2-key-exchange,x509,tlcp,aead-traits --all-targets
 
   simd-x86:
     # F17 — the SIMD backend's x86_64 intrinsic paths (AVX2 S-box via
@@ -455,7 +463,7 @@ jobs:
       # transitive deps). Uses --features on the workspace-default crate
       # (`gmcrypto-core`).
       - name: Run cargo-deny (runtime opt-in features, excluding dev-deps)
-        run: cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509,gmcrypto-core/tlcp check --exclude-dev
+        run: cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509,gmcrypto-core/tlcp,gmcrypto-core/aead-traits check --exclude-dev
 
   wasm32:
     name: build wasm32-unknown-unknown (Rust ${{ matrix.toolchain }})
@@ -520,3 +528,7 @@ jobs:
       # v1.6 — tlcp is pure-core / no_std too (key schedule: byte-in/byte-out).
       - name: cargo +${{ matrix.toolchain }} build --target wasm32-unknown-unknown --features tlcp
         run: cargo +${{ matrix.toolchain }} build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features --features tlcp
+      # v1.11 — the aead trait fit is pure-core / no_std too (aead 0.6 is
+      # no_std; only its `alloc` feature is enabled, which we already have).
+      - name: cargo +${{ matrix.toolchain }} build --target wasm32-unknown-unknown --features aead-traits
+        run: cargo +${{ matrix.toolchain }} build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features --features aead-traits

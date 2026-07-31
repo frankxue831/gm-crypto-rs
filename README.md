@@ -24,7 +24,7 @@ Official ecosystem membership, layering, versioning, and compatibility gates are
 > re-audit (see [`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md)), in-CI KAT vectors,
 > in-CI gmssl 3.2.0 interop (13/13, cross-validated against a pinned from-source
 > build of the reference implementation; currently non-gating), an in-CI `dudect`
-> timing-leak harness, and a 32-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
+> timing-leak harness, and a 33-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
 > project with no support SLA. Review the code and **use at your own risk.** See
 > [`SECURITY.md`](SECURITY.md) for the threat model and disclosure process.
 
@@ -38,7 +38,7 @@ design rather than by neglect. Issues and PRs get a response.
 |---|---|---|---|
 | SM2 + SM3 + SM4 in one crate | ✅ | ✅ | separate crates |
 | Timing-leak harness in CI | ✅ 20 `dudect` targets, gated | — | — |
-| Fuzzing | ✅ 32 targets, nightly | — | — |
+| Fuzzing | ✅ 33 targets, nightly | — | — |
 | C ABI | ✅ 104 entry points | — | — |
 | TLCP (GB/T 38636) toolkit | ✅ | — | — |
 | `no_std` | ✅ | not advertised | ✅ |
@@ -228,6 +228,7 @@ Three crates, released together at one lockstep version:
 | `sm4-bitsliced` | Table-less, gate-only SM4 S-box (constant-time by construction; byte-identical output). |
 | `sm4-bitsliced-simd` | AVX2 (x86_64) / NEON (aarch64) packed bitsliced SM4 batches; runtime detection, scalar fallback. |
 | `digest-traits` / `cipher-traits` | RustCrypto trait fit (`digest 0.11` / `cipher 0.5`) for `Sm3` / `HmacSm3` / `Sm4Cipher`. |
+| `aead-traits` | RustCrypto trait fit (`aead 0.6`) for SM4-GCM / SM4-CCM: `Sm4Gcm` (12-byte nonce, 16-byte tag) and `Sm4Ccm<M, N>` (tag/nonce sizes as type parameters). Implies `sm4-aead`. |
 | `crypto-bigint-scalar` | `Sm2PrivateKey::from_scalar(U256)` — the documented `crypto-bigint 0.7` escape hatch. |
 
 ## Stability & SemVer

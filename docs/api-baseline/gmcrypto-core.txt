@@ -229,6 +229,38 @@ pub mod gmcrypto_core::sm4::mode_cbc
 pub fn gmcrypto_core::sm4::mode_cbc::decrypt(&[u8; 16], &[u8; 16], &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
 pub fn gmcrypto_core::sm4::mode_cbc::encrypt(&[u8; 16], &[u8; 16], &[u8]) -> alloc::vec::Vec<u8>
 pub mod gmcrypto_core::sm4::mode_ccm
+pub struct gmcrypto_core::sm4::mode_ccm::Sm4Ccm<M, N> where M: gmcrypto_core::sm4::CcmTagSize, N: gmcrypto_core::sm4::CcmNonceSize
+impl<M, N> core::ops::drop::Drop for gmcrypto_core::sm4::Sm4Ccm<M, N> where M: gmcrypto_core::sm4::CcmTagSize, N: gmcrypto_core::sm4::CcmNonceSize
+pub fn gmcrypto_core::sm4::Sm4Ccm<M, N>::drop(&mut self)
+impl<M, N> zeroize::Zeroize for gmcrypto_core::sm4::Sm4Ccm<M, N> where M: gmcrypto_core::sm4::CcmTagSize, N: gmcrypto_core::sm4::CcmNonceSize
+pub fn gmcrypto_core::sm4::Sm4Ccm<M, N>::zeroize(&mut self)
+impl<M: gmcrypto_core::sm4::CcmTagSize, N: gmcrypto_core::sm4::CcmNonceSize> aead::AeadCore for gmcrypto_core::sm4::Sm4Ccm<M, N>
+pub type gmcrypto_core::sm4::Sm4Ccm<M, N>::NonceSize = N
+pub type gmcrypto_core::sm4::Sm4Ccm<M, N>::TagSize = M
+pub const gmcrypto_core::sm4::Sm4Ccm<M, N>::TAG_POSITION: aead::TagPosition
+impl<M: gmcrypto_core::sm4::CcmTagSize, N: gmcrypto_core::sm4::CcmNonceSize> aead::AeadInOut for gmcrypto_core::sm4::Sm4Ccm<M, N>
+pub fn gmcrypto_core::sm4::Sm4Ccm<M, N>::decrypt_inout_detached(&self, &aead::Nonce<Self>, &[u8], inout::inout_buf::InOutBuf<'_, '_, u8>, &aead::Tag<Self>) -> aead::Result<()>
+pub fn gmcrypto_core::sm4::Sm4Ccm<M, N>::encrypt_inout_detached(&self, &aead::Nonce<Self>, &[u8], inout::inout_buf::InOutBuf<'_, '_, u8>) -> aead::Result<aead::Tag<Self>>
+impl<M: gmcrypto_core::sm4::CcmTagSize, N: gmcrypto_core::sm4::CcmNonceSize> crypto_common::KeyInit for gmcrypto_core::sm4::Sm4Ccm<M, N>
+pub fn gmcrypto_core::sm4::Sm4Ccm<M, N>::new(&crypto_common::Key<Self>) -> Self
+impl<M: gmcrypto_core::sm4::CcmTagSize, N: gmcrypto_core::sm4::CcmNonceSize> crypto_common::KeySizeUser for gmcrypto_core::sm4::Sm4Ccm<M, N>
+pub type gmcrypto_core::sm4::Sm4Ccm<M, N>::KeySize = typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UTerm, typenum::bit::B1>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>
+pub trait gmcrypto_core::sm4::mode_ccm::CcmNonceSize: hybrid_array::traits::ArraySize + gmcrypto_core::sm4::mode_ccm::aead_impl::sealed::Sealed
+impl gmcrypto_core::sm4::CcmNonceSize for typenum::gen::consts::U10
+impl gmcrypto_core::sm4::CcmNonceSize for typenum::gen::consts::U11
+impl gmcrypto_core::sm4::CcmNonceSize for typenum::gen::consts::U12
+impl gmcrypto_core::sm4::CcmNonceSize for typenum::gen::consts::U13
+impl gmcrypto_core::sm4::CcmNonceSize for typenum::gen::consts::U7
+impl gmcrypto_core::sm4::CcmNonceSize for typenum::gen::consts::U8
+impl gmcrypto_core::sm4::CcmNonceSize for typenum::gen::consts::U9
+pub trait gmcrypto_core::sm4::mode_ccm::CcmTagSize: hybrid_array::traits::ArraySize + gmcrypto_core::sm4::mode_ccm::aead_impl::sealed::Sealed
+impl gmcrypto_core::sm4::CcmTagSize for typenum::gen::consts::U10
+impl gmcrypto_core::sm4::CcmTagSize for typenum::gen::consts::U12
+impl gmcrypto_core::sm4::CcmTagSize for typenum::gen::consts::U14
+impl gmcrypto_core::sm4::CcmTagSize for typenum::gen::consts::U16
+impl gmcrypto_core::sm4::CcmTagSize for typenum::gen::consts::U4
+impl gmcrypto_core::sm4::CcmTagSize for typenum::gen::consts::U6
+impl gmcrypto_core::sm4::CcmTagSize for typenum::gen::consts::U8
 pub fn gmcrypto_core::sm4::mode_ccm::decrypt(&[u8; 16], &[u8], &[u8], &[u8], usize) -> core::option::Option<alloc::vec::Vec<u8>>
 pub fn gmcrypto_core::sm4::mode_ccm::encrypt(&[u8; 16], &[u8], &[u8], &[u8], usize) -> core::option::Option<alloc::vec::Vec<u8>>
 pub mod gmcrypto_core::sm4::mode_ctr
@@ -239,6 +271,22 @@ pub struct gmcrypto_core::sm4::mode_gcm::GcmTagLen(_)
 impl gmcrypto_core::sm4::mode_gcm::GcmTagLen
 pub const fn gmcrypto_core::sm4::mode_gcm::GcmTagLen::as_usize(self) -> usize
 pub const fn gmcrypto_core::sm4::mode_gcm::GcmTagLen::new(usize) -> core::option::Option<Self>
+pub struct gmcrypto_core::sm4::mode_gcm::Sm4Gcm
+impl aead::AeadCore for gmcrypto_core::sm4::Sm4Gcm
+pub type gmcrypto_core::sm4::Sm4Gcm::NonceSize = typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UTerm, typenum::bit::B1>, typenum::bit::B1>, typenum::bit::B0>, typenum::bit::B0>
+pub type gmcrypto_core::sm4::Sm4Gcm::TagSize = typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UTerm, typenum::bit::B1>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>
+pub const gmcrypto_core::sm4::Sm4Gcm::TAG_POSITION: aead::TagPosition
+impl aead::AeadInOut for gmcrypto_core::sm4::Sm4Gcm
+pub fn gmcrypto_core::sm4::Sm4Gcm::decrypt_inout_detached(&self, &aead::Nonce<Self>, &[u8], inout::inout_buf::InOutBuf<'_, '_, u8>, &aead::Tag<Self>) -> aead::Result<()>
+pub fn gmcrypto_core::sm4::Sm4Gcm::encrypt_inout_detached(&self, &aead::Nonce<Self>, &[u8], inout::inout_buf::InOutBuf<'_, '_, u8>) -> aead::Result<aead::Tag<Self>>
+impl core::ops::drop::Drop for gmcrypto_core::sm4::Sm4Gcm
+pub fn gmcrypto_core::sm4::Sm4Gcm::drop(&mut self)
+impl crypto_common::KeyInit for gmcrypto_core::sm4::Sm4Gcm
+pub fn gmcrypto_core::sm4::Sm4Gcm::new(&crypto_common::Key<Self>) -> Self
+impl crypto_common::KeySizeUser for gmcrypto_core::sm4::Sm4Gcm
+pub type gmcrypto_core::sm4::Sm4Gcm::KeySize = typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UTerm, typenum::bit::B1>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>
+impl zeroize::Zeroize for gmcrypto_core::sm4::Sm4Gcm
+pub fn gmcrypto_core::sm4::Sm4Gcm::zeroize(&mut self)
 pub const gmcrypto_core::sm4::mode_gcm::TAG_SIZE: usize
 pub fn gmcrypto_core::sm4::mode_gcm::decrypt(&[u8; 16], &[u8], &[u8], &[u8], &[u8; 16]) -> core::option::Option<alloc::vec::Vec<u8>>
 pub fn gmcrypto_core::sm4::mode_gcm::decrypt_with_tag_len(&[u8; 16], &[u8], &[u8], &[u8], &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
@@ -264,6 +312,22 @@ impl gmcrypto_core::sm4::cbc_streaming::Sm4CbcEncryptor
 pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcEncryptor::finalize(self) -> alloc::vec::Vec<u8>
 pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcEncryptor::new(&[u8; 16], &[u8; 16]) -> Self
 pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcEncryptor::update(&mut self, &[u8])
+pub struct gmcrypto_core::sm4::Sm4Ccm<M, N> where M: gmcrypto_core::sm4::CcmTagSize, N: gmcrypto_core::sm4::CcmNonceSize
+impl<M, N> core::ops::drop::Drop for gmcrypto_core::sm4::Sm4Ccm<M, N> where M: gmcrypto_core::sm4::CcmTagSize, N: gmcrypto_core::sm4::CcmNonceSize
+pub fn gmcrypto_core::sm4::Sm4Ccm<M, N>::drop(&mut self)
+impl<M, N> zeroize::Zeroize for gmcrypto_core::sm4::Sm4Ccm<M, N> where M: gmcrypto_core::sm4::CcmTagSize, N: gmcrypto_core::sm4::CcmNonceSize
+pub fn gmcrypto_core::sm4::Sm4Ccm<M, N>::zeroize(&mut self)
+impl<M: gmcrypto_core::sm4::CcmTagSize, N: gmcrypto_core::sm4::CcmNonceSize> aead::AeadCore for gmcrypto_core::sm4::Sm4Ccm<M, N>
+pub type gmcrypto_core::sm4::Sm4Ccm<M, N>::NonceSize = N
+pub type gmcrypto_core::sm4::Sm4Ccm<M, N>::TagSize = M
+pub const gmcrypto_core::sm4::Sm4Ccm<M, N>::TAG_POSITION: aead::TagPosition
+impl<M: gmcrypto_core::sm4::CcmTagSize, N: gmcrypto_core::sm4::CcmNonceSize> aead::AeadInOut for gmcrypto_core::sm4::Sm4Ccm<M, N>
+pub fn gmcrypto_core::sm4::Sm4Ccm<M, N>::decrypt_inout_detached(&self, &aead::Nonce<Self>, &[u8], inout::inout_buf::InOutBuf<'_, '_, u8>, &aead::Tag<Self>) -> aead::Result<()>
+pub fn gmcrypto_core::sm4::Sm4Ccm<M, N>::encrypt_inout_detached(&self, &aead::Nonce<Self>, &[u8], inout::inout_buf::InOutBuf<'_, '_, u8>) -> aead::Result<aead::Tag<Self>>
+impl<M: gmcrypto_core::sm4::CcmTagSize, N: gmcrypto_core::sm4::CcmNonceSize> crypto_common::KeyInit for gmcrypto_core::sm4::Sm4Ccm<M, N>
+pub fn gmcrypto_core::sm4::Sm4Ccm<M, N>::new(&crypto_common::Key<Self>) -> Self
+impl<M: gmcrypto_core::sm4::CcmTagSize, N: gmcrypto_core::sm4::CcmNonceSize> crypto_common::KeySizeUser for gmcrypto_core::sm4::Sm4Ccm<M, N>
+pub type gmcrypto_core::sm4::Sm4Ccm<M, N>::KeySize = typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UTerm, typenum::bit::B1>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>
 pub struct gmcrypto_core::sm4::Sm4Cipher
 impl gmcrypto_core::sm4::cipher::Sm4Cipher
 pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::decrypt_block(&self, &mut [u8; 16])
@@ -290,6 +354,22 @@ impl gmcrypto_core::sm4::ctr_streaming::Sm4CtrCipher
 pub fn gmcrypto_core::sm4::ctr_streaming::Sm4CtrCipher::finalize(self)
 pub fn gmcrypto_core::sm4::ctr_streaming::Sm4CtrCipher::new(&[u8; 16], &[u8; 16]) -> Self
 pub fn gmcrypto_core::sm4::ctr_streaming::Sm4CtrCipher::update(&mut self, &[u8], &mut [u8])
+pub struct gmcrypto_core::sm4::Sm4Gcm
+impl aead::AeadCore for gmcrypto_core::sm4::Sm4Gcm
+pub type gmcrypto_core::sm4::Sm4Gcm::NonceSize = typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UTerm, typenum::bit::B1>, typenum::bit::B1>, typenum::bit::B0>, typenum::bit::B0>
+pub type gmcrypto_core::sm4::Sm4Gcm::TagSize = typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UTerm, typenum::bit::B1>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>
+pub const gmcrypto_core::sm4::Sm4Gcm::TAG_POSITION: aead::TagPosition
+impl aead::AeadInOut for gmcrypto_core::sm4::Sm4Gcm
+pub fn gmcrypto_core::sm4::Sm4Gcm::decrypt_inout_detached(&self, &aead::Nonce<Self>, &[u8], inout::inout_buf::InOutBuf<'_, '_, u8>, &aead::Tag<Self>) -> aead::Result<()>
+pub fn gmcrypto_core::sm4::Sm4Gcm::encrypt_inout_detached(&self, &aead::Nonce<Self>, &[u8], inout::inout_buf::InOutBuf<'_, '_, u8>) -> aead::Result<aead::Tag<Self>>
+impl core::ops::drop::Drop for gmcrypto_core::sm4::Sm4Gcm
+pub fn gmcrypto_core::sm4::Sm4Gcm::drop(&mut self)
+impl crypto_common::KeyInit for gmcrypto_core::sm4::Sm4Gcm
+pub fn gmcrypto_core::sm4::Sm4Gcm::new(&crypto_common::Key<Self>) -> Self
+impl crypto_common::KeySizeUser for gmcrypto_core::sm4::Sm4Gcm
+pub type gmcrypto_core::sm4::Sm4Gcm::KeySize = typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UTerm, typenum::bit::B1>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>
+impl zeroize::Zeroize for gmcrypto_core::sm4::Sm4Gcm
+pub fn gmcrypto_core::sm4::Sm4Gcm::zeroize(&mut self)
 pub struct gmcrypto_core::sm4::Sm4GcmDecryptor
 impl gmcrypto_core::sm4::gcm_streaming::Sm4GcmDecryptor
 pub fn gmcrypto_core::sm4::gcm_streaming::Sm4GcmDecryptor::finalize_verify(self, &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
@@ -304,6 +384,22 @@ pub fn gmcrypto_core::sm4::gcm_streaming::Sm4GcmEncryptor::update(&mut self, &[u
 pub const gmcrypto_core::sm4::BLOCK_SIZE: usize
 pub const gmcrypto_core::sm4::KEY_SIZE: usize
 pub const gmcrypto_core::sm4::XTS_KEY_SIZE: usize
+pub trait gmcrypto_core::sm4::CcmNonceSize: hybrid_array::traits::ArraySize + gmcrypto_core::sm4::mode_ccm::aead_impl::sealed::Sealed
+impl gmcrypto_core::sm4::CcmNonceSize for typenum::gen::consts::U10
+impl gmcrypto_core::sm4::CcmNonceSize for typenum::gen::consts::U11
+impl gmcrypto_core::sm4::CcmNonceSize for typenum::gen::consts::U12
+impl gmcrypto_core::sm4::CcmNonceSize for typenum::gen::consts::U13
+impl gmcrypto_core::sm4::CcmNonceSize for typenum::gen::consts::U7
+impl gmcrypto_core::sm4::CcmNonceSize for typenum::gen::consts::U8
+impl gmcrypto_core::sm4::CcmNonceSize for typenum::gen::consts::U9
+pub trait gmcrypto_core::sm4::CcmTagSize: hybrid_array::traits::ArraySize + gmcrypto_core::sm4::mode_ccm::aead_impl::sealed::Sealed
+impl gmcrypto_core::sm4::CcmTagSize for typenum::gen::consts::U10
+impl gmcrypto_core::sm4::CcmTagSize for typenum::gen::consts::U12
+impl gmcrypto_core::sm4::CcmTagSize for typenum::gen::consts::U14
+impl gmcrypto_core::sm4::CcmTagSize for typenum::gen::consts::U16
+impl gmcrypto_core::sm4::CcmTagSize for typenum::gen::consts::U4
+impl gmcrypto_core::sm4::CcmTagSize for typenum::gen::consts::U6
+impl gmcrypto_core::sm4::CcmTagSize for typenum::gen::consts::U8
 pub mod gmcrypto_core::spki
 pub fn gmcrypto_core::spki::decode(&[u8]) -> core::option::Option<gmcrypto_core::sm2::public_key::Sm2PublicKey>
 pub fn gmcrypto_core::spki::encode(&gmcrypto_core::sm2::public_key::Sm2PublicKey) -> alloc::vec::Vec<u8>
