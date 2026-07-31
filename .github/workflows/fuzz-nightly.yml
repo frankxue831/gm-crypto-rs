@@ -100,6 +100,29 @@ jobs:
       - name: Build all fuzz targets
         run: cargo +nightly fuzz build
 
+      # The FUZZ_TARGETS-names-every-[[bin]] rule was prose-only (see the note
+      # above the env block) and therefore unenforced: a target added to
+      # fuzz/Cargo.toml but not to FUZZ_TARGETS still COMPILES here and in
+      # fuzz-build.yml, so nothing goes red — it is simply never fuzzed nor
+      # coverage-measured. That is exactly the #98/#99 drift, where seven
+      # targets sat unfuzzed. The list is complete today; this keeps it so.
+      - name: Preflight — FUZZ_TARGETS names every [[bin]]
+        run: |
+          missing=""
+          for b in $(grep -A1 '^\[\[bin\]\]' fuzz/Cargo.toml \
+                     | sed -n 's/^name = "\(.*\)"/\1/p'); do
+            case " $FUZZ_TARGETS " in
+              *" $b "*) ;;
+              *) missing="$missing $b" ;;
+            esac
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::config drift, NOT a crash — [[bin]] target(s) absent from FUZZ_TARGETS:$missing"
+            echo "Add them to FUZZ_TARGETS in this workflow, or remove the [[bin]] from fuzz/Cargo.toml."
+            exit 1
+          fi
+          echo "FUZZ_TARGETS covers all $(echo $FUZZ_TARGETS | wc -w) [[bin]] targets"
+
       # Preflight census check. libFuzzer treats a NONEXISTENT corpus dir as a
       # fatal error ("No such file or directory: <dir>; exiting") and exits
       # non-zero WITHOUT running a single input — which the sweep below would

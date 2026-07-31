@@ -24,7 +24,7 @@ Official ecosystem membership, layering, versioning, and compatibility gates are
 > re-audit (see [`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md)), in-CI KAT vectors,
 > in-CI gmssl 3.2.0 interop (13/13, cross-validated against a pinned from-source
 > build of the reference implementation; currently non-gating), an in-CI `dudect`
-> timing-leak harness, and a 30-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
+> timing-leak harness, and a 32-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
 > project with no support SLA. Review the code and **use at your own risk.** See
 > [`SECURITY.md`](SECURITY.md) for the threat model and disclosure process.
 
@@ -38,7 +38,7 @@ design rather than by neglect. Issues and PRs get a response.
 |---|---|---|---|
 | SM2 + SM3 + SM4 in one crate | ✅ | ✅ | separate crates |
 | Timing-leak harness in CI | ✅ 20 `dudect` targets, gated | — | — |
-| Fuzzing | ✅ 30 targets, nightly | — | — |
+| Fuzzing | ✅ 32 targets, nightly | — | — |
 | C ABI | ✅ 104 entry points | — | — |
 | TLCP (GB/T 38636) toolkit | ✅ | — | — |
 | `no_std` | ✅ | not advertised | ✅ |
