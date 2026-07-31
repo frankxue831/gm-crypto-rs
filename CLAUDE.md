@@ -17,16 +17,16 @@ This file lists the constraints a coding agent will violate by default.
 
 | | |
 |---|---|
-| Workspace version | `1.9.1` |
-| Live on crates.io | `1.9.0` (2026-06-16) — **`1.9.1` is prepped but NOT published** |
-| Last landed cycle | **v1.11** — RustCrypto `aead` 0.6 trait fit (merged to `main`) |
-| Next steps | publish `1.9.1` **from `530013b`**, then bump `1.9.1` → `1.11.0` (crates.io skips `1.10.0`, the v0.14→v0.15 precedent) |
+| Workspace version | `1.11.0` (sibling pins `=1.11.0`) |
+| Live on crates.io | `1.9.0` (2026-06-16) |
+| Prepped, NOT published | **`1.9.1`** (candidate `530013b`, runbook `docs/v1.9.1-release-review.md`, gate evidence recorded) and **`1.11.0`** (runbook `docs/v1.11.0-release-review.md`, gate `docs/v1.11.0-gate1-evidence.md` PASS) |
+| Publish order | `1.9.1` **first** (from `530013b` — zero runtime change, so 1.9.0 consumers get licence text without the v1.11 surface), then `1.11.0` from `main`. crates.io skips `1.10.0`, the v0.14→v0.15 precedent |
 
 `cargo publish` and the SSH-signed tag are the **maintainer's authenticated
-call, never the agent's** — the agent path stays branch + PR. Tag the release
-SHA explicitly (`git tag -s v1.9.1 530013b`): `main` has moved on since the
-release candidate was frozen, so a bare `git tag` would point at a tree
-crates.io never received.
+call, never the agent's** — the agent path stays branch + PR. **Tag the reviewed
+SHA explicitly** (`git tag -s v1.9.1 530013b`): a bare `git tag` points at
+whatever `HEAD` is, and the 1.9.1 candidate is frozen while `main` has moved on
+— that would silently publish one tree and tag another.
 
 ### v1.11 — the current, unpublished cycle
 
