@@ -36,7 +36,8 @@ edition = "2024"
 # and no in-crate copy existed, so nothing was collected. `license-file` is not
 # the fix here: it takes a single path and cannot carry a dual licence, so
 # per-crate copies are the way to satisfy both. Published archives pick this up
-# starting with 1.9.1; 1.9.0 and earlier on crates.io remain without them.
+# starting with 1.11.0; 1.9.0 and earlier on crates.io remain without them.
+# (1.9.1 prepared this fix but was never published — see CHANGELOG.)
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/frankxue831/gm-crypto-rs"
 homepage = "https://github.com/frankxue831/gm-crypto-rs"

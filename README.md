@@ -234,15 +234,17 @@ Three crates, released together at one lockstep version:
 ## Stability & SemVer
 
 The line graduated to **1.0 (stable)** with the **1.0.0** release; the current release is
-**1.11.0** (the RustCrypto `aead` 0.6 trait fit; **1.9.1** was a patch carrying the
-licence-text packaging fix, and **1.9.0** the TLCP toolkit C FFI that closed the TLCP
-arc). crates.io history
-goes **0.16.0 → 1.0.0 → 1.0.1 → 1.1.0 → 1.2.0 → 1.3.0 → 1.4.0 → 1.6.0 → 1.7.0 → 1.8.0 → 1.9.0 → 1.9.1 → 1.11.0**, skipping 0.17.0–0.23.0,
-1.5.0 and 1.10.0 (those were non-publishing milestones — the 0.x run was the assurance +
+**1.11.0** (the RustCrypto `aead` 0.6 trait fit; **1.9.0** was the TLCP toolkit C FFI
+that closed the TLCP arc). crates.io history
+goes **0.16.0 → 1.0.0 → 1.0.1 → 1.1.0 → 1.2.0 → 1.3.0 → 1.4.0 → 1.6.0 → 1.7.0 → 1.8.0 → 1.9.0 → 1.11.0**, skipping 0.17.0–0.23.0,
+1.5.0, 1.9.1 and 1.10.0 (the 0.x run was the assurance +
 API-finalization arc that shipped together in `1.0.0`; 1.5 was the TLCP-decomposition
 design cycle, [`docs/tlcp-decomposition.md`](docs/tlcp-decomposition.md); 1.10 was an
 assurance cycle that changed no published crate's runtime behavior, so its work ships
-here in `1.11.0`). Every post-1.0 release has been additive (SemVer-checked);
+here in `1.11.0`. **1.9.1 is the one skip that was not planned as such**: it was a
+fully prepared and verified licence-text packaging patch, superseded when `1.11.0`
+shipped that same fix — see [`docs/v1.9.1-release-review.md`](docs/v1.9.1-release-review.md),
+kept as the record). Every post-1.0 release has been additive (SemVer-checked);
 the only migration ever required is 0.16 → 1.0, a single major bump — no published 0.x
 consumer ever saw an intermediate break. The public API had been stable in
 practice since v0.5; the **v1.0 readiness audit** (v0.21) froze and tooling-guarded
@@ -409,7 +411,7 @@ at your option. This is the Rust ecosystem convention: Apache-2.0 carries the
 express patent grant, MIT is the permissive path for downstreams whose legal
 review fast-tracks it.
 
-**Starting with 1.9.1, both texts ship inside every published crate.** Every
+**Starting with 1.11.0, both texts ship inside every published crate.** Every
 release up to and including 1.9.0 shipped none — the licence existed only at the
 repository root and nothing pointed cargo at it — so those archives on crates.io
 do not contain it. The licence that governs those releases is unchanged; only
