@@ -46,6 +46,7 @@ Per-cycle charters — scope, forks, and sign-offs recorded for each cycle. The 
 - [v1.8-scope.md](v1.8-scope.md) — v1.8 TLCP cert chain/pair verification scope; Q8.1–Q8.16 (incl. Q8.7b widening).
 - [v1.9-scope.md](v1.9-scope.md) — v1.9 TLCP toolkit C FFI scope; Q9.1–Q9.8 (4 forks maintainer-locked).
 - [v1.10-scope.md](v1.10-scope.md) — v1.10 assurance cycle (non-publishing); Q10.1–Q10.8. Closes F16 by wiring gmssl interop into CI against a pinned from-source oracle — after finding the oracle had silently drifted to 3.2.0 and the "11/11" claim was unreproducible. Also refutes the F21 audit's suggested dudect class-split axis and records the three W2 outcomes committed in advance.
+- [v1.11-scope.md](v1.11-scope.md) — v1.11 `RustCrypto` `aead` 0.6 trait fit scope; Q11.1–Q11.10. Records the two constraints that are not free choices: `aead` 0.6 blanket-implements `Aead` for every `AeadInOut` (so a direct `impl Aead` cannot compile), and the CCM tag/nonce sets are sealed typenum bounds so an invalid combination is a compile error rather than a runtime `None`.
 
 ## Design & decomposition
 
@@ -86,7 +87,9 @@ Multi-model adversarial audits and GO/NO-GO gates standing between the work and 
 - [v0.2.0-release-review.md](v0.2.0-release-review.md) — v0.2.0 pre-publish reviewer checklist.
 - [v1.0.0-release-review.md](v1.0.0-release-review.md) — v1.0.0 pre-publish reviewer checklist (the deliberate first-stable-publish gate).
 - [v1.9.1-release-review.md](v1.9.1-release-review.md) — v1.9.1 pre-publish reviewer checklist (the licence-text packaging patch; adds the ECOSYSTEM §8 downstream compatibility gate and a decisive "is the licence actually in the archive" check).
-- [v1.9.1-gate1-evidence.md](v1.9.1-gate1-evidence.md) — the recorded two-phase ECOSYSTEM §8 Gate #1 run for 1.9.1 (both phases' results, tested commits, and a procedural note on the charter's phase-2 recipe).
+- [v1.9.1-gate1-evidence.md](v1.9.1-gate1-evidence.md) — the recorded two-phase ECOSYSTEM §8 Gate #1 run for 1.9.1 (both phases' results, tested commits, and a procedural note on the charter's phase-2 recipe). **1.9.1 was never published** — superseded when 1.11.0 shipped the same licence fix; both v1.9.1 docs are kept as the record of a prepared release.
+- [v1.11.0-release-review.md](v1.11.0-release-review.md) — v1.11.0 pre-publish reviewer checklist, and the **executed** record. Its headline check is inverted from 1.9.1's: an additive release asks "is `aead` absent from the default dep graph, and is the api-baseline diff `-0` removals?". Its OUTCOME section keeps what actually happened rather than rewriting the plan — the first publish command ran from the wrong directory, so `gmcrypto-simd 1.11.0` shipped as step 1 of the wrong release.
+- [v1.11.0-gate1-evidence.md](v1.11.0-gate1-evidence.md) — the two-phase ECOSYSTEM §8 Gate #1 run for 1.11.0 (PASS). §4 records a trap in the charter's own recipe: the phase-2 `[patch]` override must use a **relative** path, or the boundary scanner fails on the developer home directory embedded in the manifest — which reads as a candidate defect and is not.
 
 ## KAT sourcing
 
