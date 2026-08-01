@@ -20,9 +20,13 @@ only a condensed current-release block — see its `Don't` section.
 ## Cycles
 
 **v1.11 — RustCrypto `aead` 0.6 trait fit — implemented on `feat/aead-traits`;
-publishing cycle, workspace `1.9.1` → `1.11.0` (crates.io skips `1.10.0`, the
-v0.14→v0.15 precedent), sibling pins `=1.11.0`, publish order simd → core → c,
-the maintainer's per-release call.** Closes the backlog item blocked since v0.11
+PUBLISHED to crates.io 2026-08-01 from `613f619` (all three crates, order simd →
+core → c), workspace `1.9.1` → `1.11.0`, sibling pins `=1.11.0`. crates.io skips
+BOTH `1.10.0` (non-publishing assurance cycle, the v0.14→v0.15 precedent) and
+`1.9.1` — the latter was a fully prepared + gate-passed licence-text packaging
+patch that was superseded when `1.11.0` shipped the same fix, so **`1.11.0` is
+the first published release carrying licence text** and `1.9.0` and earlier stay
+without it permanently. Record kept at `docs/v1.9.1-release-review.md`.** Closes the backlog item blocked since v0.11
 on "`aead` still 0.6.0-rc.10": **0.6.1 is stable**, needs only `crypto-common
 0.2` + `inout 0.2` (both in-tree since v0.11), and declares **MSRV 1.85** —
 exactly ours, so `aead` is the ONE new crate. New opt-in **`aead-traits =

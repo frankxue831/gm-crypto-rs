@@ -145,10 +145,18 @@ output changes, so the workspace stays at `1.9.1` and crates.io skips a
   The follow-up is recorded in the scope doc: time `Sm4CbcDecryptor::finalize()`
   instead, which is public and excludes the SM4 work.
 
-## [1.9.1] - 2026-07-30
+## [1.9.1] - 2026-07-30 — PREPARED BUT NEVER PUBLISHED
+
+> **This version is not on crates.io.** It was fully prepared, reviewed and
+> gate-passed (`docs/v1.9.1-release-review.md`, candidate `530013b`), but was
+> superseded before the authenticated publish ran: `1.11.0` shipped the same
+> licence-text packaging fix, so crates.io goes `1.9.0 → 1.11.0`. The section
+> below is kept verbatim as the record of what was prepared. **`1.11.0` is the
+> first published release carrying licence text**; `1.9.0` and earlier remain
+> without it permanently, since published archives are immutable.
 
 Patch release — carries the licence-text packaging fix and the documentation
-corrections to crates.io. **No API / ABI / wire change**: the only `src/` delta
+corrections. **No API / ABI / wire change**: the only `src/` delta
 since 1.9.0 is inline `// SAFETY:` comments in the C shim, so a `1.9.0` consumer
 upgrades with a plain `cargo update`. `cargo-public-api` and `cargo-semver-checks`
 stayed green across the change.

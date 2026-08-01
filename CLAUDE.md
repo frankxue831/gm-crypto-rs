@@ -18,17 +18,23 @@ This file lists the constraints a coding agent will violate by default.
 | | |
 |---|---|
 | Workspace version | `1.11.0` (sibling pins `=1.11.0`) |
-| Live on crates.io | `1.9.0` (2026-06-16) |
-| Prepped, NOT published | **`1.9.1`** (candidate `530013b`, runbook `docs/v1.9.1-release-review.md`, gate evidence recorded) and **`1.11.0`** (runbook `docs/v1.11.0-release-review.md`, gate `docs/v1.11.0-gate1-evidence.md` PASS) |
-| Publish order | `1.9.1` **first** (from `530013b` — zero runtime change, so 1.9.0 consumers get licence text without the v1.11 surface), then `1.11.0` from `main`. crates.io skips `1.10.0`, the v0.14→v0.15 precedent |
+| Live on crates.io | **`1.11.0`** — all three crates, published 2026-08-01 from `613f619` |
+| crates.io skips | `1.10.0` (non-publishing assurance cycle) and **`1.9.1`** — a fully prepared, gate-passed licence-text patch, superseded when `1.11.0` shipped the same fix. Record kept at `docs/v1.9.1-release-review.md`; **`1.11.0` is the first published release carrying licence text**, and `1.9.0` and earlier stay without it permanently (archives are immutable) |
+| Runbook / gate | `docs/v1.11.0-release-review.md`, `docs/v1.11.0-gate1-evidence.md` (PASS) |
 
 `cargo publish` and the SSH-signed tag are the **maintainer's authenticated
-call, never the agent's** — the agent path stays branch + PR. **Tag the reviewed
-SHA explicitly** (`git tag -s v1.9.1 530013b`): a bare `git tag` points at
-whatever `HEAD` is, and the 1.9.1 candidate is frozen while `main` has moved on
-— that would silently publish one tree and tag another.
+call** — the agent path is branch + PR. The 1.11.0 publish was a **recorded
+one-off delegation** (the v1.1.0 precedent), not a standing grant.
 
-### v1.11 — the current, unpublished cycle
+**When handing a maintainer a publish command, put the `cd` INSIDE the code
+block.** The 1.11.0 publish started from the wrong directory because the target
+directory was named in prose above a bare `cargo publish`; the app's Run button
+executes in the current directory, so `gmcrypto-simd 1.11.0` shipped while the
+intended candidate was 1.9.1 in a worktree. No harm — it published a verified
+tree — but it silently reordered the release. Same rule for `git tag`: **name
+the SHA explicitly**, since `HEAD` may have moved.
+
+### v1.11 — the current release
 
 Opt-in **`aead-traits = ["sm4-aead", "dep:aead"]`** adds `sm4::Sm4Gcm` (fixed
 U12 nonce / U16 postfix tag — the canonical profile; truncated tags + arbitrary
@@ -59,7 +65,7 @@ aead fit, ever** — confidentiality-only, no tag.
 
 ## Open backlog / deferred
 
-post-1.0 / deferred = class-split-aware "noise-twin" dudect reference (the only design that could re-promote `ct_fn_invert`/`ct_fp_invert`) + round-trip/differential parser fuzzing + RustCrypto aead trait fit (blocked: aead still 0.6.0-rc.10) + AVX-512 sbox_x64 + CCM buffered input + (from the v1.0.1 synthesis, all non-blocking) a `ct_sm4_cbc_unpad` dudect target for the PKCS#7-strip path (**F21 — STILL OPEN, and v1.10 ATTEMPTED IT AND STOPPED: the composite window is blind.** A `mode_cbc::decrypt`-over-32-bytes window measured |tau| 0.0129 constant-time vs **0.0185 with a deliberately early-return leaky strip** — indistinguishable — while a 10 000× amplified control hit 11.6, proving the measurement path works and the null is a real sensitivity limit. Cause: the default `subtle` linear-scan S-box costs ~256 ops **per byte**, so one CBC decrypt is ~10⁵ masked ops vs ~15 byte-compares for the leak — 0.015%, and no ciphertext length fixes it because the key schedule alone dominates. **Landing it would have produced a gate that cannot fail.** Follow-up: time `Sm4CbcDecryptor::finalize()` instead (public; the SM4 work sits in `update()`, outside the window) — blocked on `CtRunner::run_one` taking `Fn` while `finalize(self)` consumes, so it needs interior mutability whose own in-window cost must be measured, not assumed. Re-run the three-way constant-time/leaky/amplified control before trusting any number. Full record: `docs/v1.10-scope.md` Q10.9). **F16 (gmssl interop in CI) is CLOSED in v1.10** — `ci.yml`'s `interop-gmssl` job runs the suite against a pinned from-source GmSSL build. (NB: the §3.A crypto-bigint-exposure decision was **pre-1.0** and is now **resolved in v0.22** — see the **Earlier — v0.22 —** paragraph in `docs/version-history.md`; nothing pre-1.0 remains outstanding.)
+post-1.0 / deferred = class-split-aware "noise-twin" dudect reference (the only design that could re-promote `ct_fn_invert`/`ct_fp_invert`) + AVX-512 sbox_x64 + CCM buffered input + (from the v1.0.1 synthesis, all non-blocking) a `ct_sm4_cbc_unpad` dudect target for the PKCS#7-strip path (**F21 — STILL OPEN, and v1.10 ATTEMPTED IT AND STOPPED: the composite window is blind.** A `mode_cbc::decrypt`-over-32-bytes window measured |tau| 0.0129 constant-time vs **0.0185 with a deliberately early-return leaky strip** — indistinguishable — while a 10 000× amplified control hit 11.6, proving the measurement path works and the null is a real sensitivity limit. Cause: the default `subtle` linear-scan S-box costs ~256 ops **per byte**, so one CBC decrypt is ~10⁵ masked ops vs ~15 byte-compares for the leak — 0.015%, and no ciphertext length fixes it because the key schedule alone dominates. **Landing it would have produced a gate that cannot fail.** Follow-up: time `Sm4CbcDecryptor::finalize()` instead (public; the SM4 work sits in `update()`, outside the window) — blocked on `CtRunner::run_one` taking `Fn` while `finalize(self)` consumes, so it needs interior mutability whose own in-window cost must be measured, not assumed. Re-run the three-way constant-time/leaky/amplified control before trusting any number. Full record: `docs/v1.10-scope.md` Q10.9). **F16 (gmssl interop in CI) is CLOSED in v1.10** — `ci.yml`'s `interop-gmssl` job runs the suite against a pinned from-source GmSSL build. (NB: the §3.A crypto-bigint-exposure decision was **pre-1.0** and is now **resolved in v0.22** — see the **Earlier — v0.22 —** paragraph in `docs/version-history.md`; nothing pre-1.0 remains outstanding.)
 
 ## Hard constraints (non-negotiable)
 
