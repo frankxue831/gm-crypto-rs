@@ -58,21 +58,22 @@ A governance or tooling meta-repository is created only after at least three ind
 
 ## 8. Compatibility gates
 
-The charter maintains a registry of downstream gates that a core release must respect. Gate #1 is the `gmcrypto-envelope-lite` 0.1.0 RC suite. From a clean envelope checkout, its local gate is:
+The charter maintains a registry of downstream gates that a core release must respect. Gate #1 is the `gmcrypto-envelope-lite` gate suite at that crate's current tip. The gate is deliberately not pinned to a downstream version: pinning it to one meant the gate definition silently aged behind the crate it protects.
+
+The canonical recipe is `ci/check-compatibility-gate.sh` in the envelope repository. Run it rather than reconstructing the commands by hand:
 
 ```sh
-cargo fmt --all -- --check
-cargo clippy --all-targets --locked -- -D warnings
-cargo test --all-targets --locked
-cargo test --doc --locked
-sh tests/open_source_boundary.sh
-./ci/check-open-source-boundary.sh --worktree .
+./ci/check-compatibility-gate.sh PATH_TO_CORE_CANDIDATE /absolute/path/to/evidence.md
 ```
 
-Before every `gmcrypto-core` release, run the compatibility gate in two phases in a temporary envelope export. Before applying the candidate override, validate the strict `release_documents` integration target and cryptographic inventory against the pristine committed registry lock. Do not weaken the normal release-document or inventory assertions.
+It exports a clean envelope tree and the candidate core side by side into a disposable directory and runs both phases below. The `compatibility-gate` workflow in the envelope repository is the same script under a `workflow_dispatch` trigger, taking the candidate ref as input and uploading the evidence table as an artifact. That workflow lives downstream rather than in this repository because the envelope repository is private while this one is public: a workflow there can read this repository at any ref without credentials, whereas the inverse would require keeping a private-repository token in a public repository's secrets.
 
-Then inject the core release candidate through a temporary path dependency or Cargo `[patch]` override. Run the Cargo behavioral operations without `--locked` so Cargo may rewrite only the disposable lockfile; the committed downstream lockfile remains untouched. Keep the formatting and boundary commands unchanged. Against the patched candidate, run Clippy, unit tests, examples, documentation tests, and every dynamically discovered behavioral integration target. `release_documents` is the sole deliberate post-patch exclusion because it validates registry metadata rather than runtime or API compatibility, and path packages have no registry checksum. If the candidate version no longer satisfies the downstream exact pin, change that pin only in the temporary gate copy. A breaking result requires a documented migration note before the core release ships.
+**Every phase runs in every feature configuration the downstream crate ships.** For `gmcrypto-envelope-lite` that is the default build and `--features aead`. This is not a formality: the `aead` feature enables `gmcrypto-core/sm4-aead` and pulls `gmcrypto-simd` and `cpufeatures` into the compiled graph, so a default-features-only gate never reaches that core surface at all.
 
-On the downstream side, the same gate runs for every exact core-pin bump while the crate is unpublished. After first publication with a caret requirement, downstream CI must cover both the minimum supported and newest compatible core versions.
+**Phase 1 — pristine.** Before applying the candidate override, run the suite with `--locked` against the committed lockfile, and validate the strict `release_documents` integration target and the cryptographic inventory against the pristine committed registry lock. Do not weaken the normal release-document or inventory assertions. The inventory checker pins exact package versions, so it cannot run under the override; phase 1 is its only opportunity.
 
-**Verification:** preserve both phases' command output and the exact tested core and envelope commits as release evidence. Operation is manual and policy-only in this phase; cross-repository CI is deferred until repeated maintenance justifies it.
+**Phase 2 — candidate injected.** Inject the core release candidate through a Cargo `[patch]` override. **The override path must be relative.** An absolute path writes a developer home directory into `Cargo.toml`, and the boundary scanner rejects exactly that; the resulting failure names no matched expression and reads at first glance like a candidate defect. Exporting the candidate beside the envelope and pointing at `../core/crates/gmcrypto-core` avoids it. Run the Cargo behavioral operations without `--locked` so Cargo may rewrite only the disposable lockfile; the committed downstream lockfile remains untouched. Keep the formatting and boundary commands unchanged — they are what proves no absolute path survived. Against the patched candidate, run Clippy, unit tests, documentation tests, and every dynamically discovered behavioral integration target. `release_documents` is the sole deliberate post-patch exclusion, because it validates registry metadata rather than runtime or API compatibility and a path package has no registry checksum. A breaking result requires a documented migration note before the core release ships.
+
+**When the gate runs.** Before every `gmcrypto-core` release, without exception. The downstream-side trigger that once supplemented it — a run on every exact core-pin bump — no longer exists: `gmcrypto-envelope-lite` relaxed to a caret requirement at its 0.1.0 publication cut and stays there (section 4), so a compatible core release reaches it with no downstream change to trigger on. The pre-release run is now the only thing standing between a breaking core release and its downstream. Once the crate publishes, its own CI must additionally cover both the minimum supported and the newest compatible core version.
+
+**Verification:** preserve the evidence table and the exact tested core and envelope commits as release evidence. The script fails closed, so a recorded run is a passing run; `tests/compatibility_gate.sh` in the envelope repository is its self-test. The trigger remains manual by design — a maintainer runs it as a step in the core release runbook. Automatic cross-repository triggering is deferred until repeated maintenance justifies it.
