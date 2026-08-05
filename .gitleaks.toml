@@ -31,11 +31,8 @@ paths = [
   # (keys, nonces, ciphertexts) in their reproduce recipes.
   '''docs/v0\.8-ccm-kat-sourcing\.md$''',
   '''docs/v0\.12-xts-kat-sourcing\.md$''',
-  # Local, gitignored, never-published paths (only relevant to a working-tree
-  # `gitleaks dir` scan — the publication-relevant `gitleaks git` history scan
-  # never touches them). Build artifacts bake KAT hex into test binaries;
-  # .repolens/ and docs/superpowers/ are local scan/plan scratch.
+  # Build artifacts: gitignored and never published, but a working-tree
+  # `gitleaks dir` scan still walks them, and test binaries bake KAT hex in.
+  # (The publication-relevant `gitleaks git` history scan never sees them.)
   '''^target/''',
-  '''^\.repolens/''',
-  '''^docs/superpowers/''',
 ]
