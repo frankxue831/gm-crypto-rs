@@ -61,9 +61,19 @@ cargo +nightly fuzz build
 ## Coverage report (v0.20)
 
 The nightly workflow renders per-target `llvm-cov` region/line coverage over the
-**committed seed corpus** and uploads a `SUMMARY.txt` artifact. It is
-**non-gating** — the report is the deliverable, not a coverage-% threshold. To
-render locally:
+**committed seed corpus**, uploads a `SUMMARY.txt` artifact, and prints the same
+table into the run's **job summary** so it is readable without downloading
+anything.
+
+It is **non-gating on the coverage percentage** — no threshold, the report is
+the deliverable. It *does* fail the job if any target reports
+`coverage-build-failed`, which means that target produced no coverage data at
+all (a profdata that merely failed to render reports `profdata OK` instead and
+does not trip it). That line is the general check that a target is actually
+running: it read `coverage-build-failed` for both `fuzz_tlcp_*_deprotect`
+targets for 44 consecutive nights while they executed zero inputs.
+
+To render locally:
 
 ```bash
 rustup component add llvm-tools-preview --toolchain nightly

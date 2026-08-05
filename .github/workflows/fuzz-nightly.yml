@@ -184,11 +184,13 @@ jobs:
 
   # v0.20 (Q20.3) — coverage report. A SEPARATE job (parallel to `fuzz`) so a
   # coverage-tooling hiccup can never mask a real fuzz crash, and vice versa.
-  # This is NOT a gate on coverage numbers: the deliverable is the report
-  # artifact; the job passes iff it completes + uploads (both models: report,
-  # not a vanity %-gate). Coverage replays the COMMITTED `seeds/` (the
-  # gitignored `corpus/` is empty on a clean checkout) — i.e. seed-corpus
-  # coverage; growing-corpus coverage is a later refinement.
+  # This is NOT a gate on coverage NUMBERS: the percentage is never
+  # thresholded, and the report artifact stays the deliverable. It IS a gate on
+  # a target producing no coverage data AT ALL — see the tail of the generate
+  # step, where the table is also appended to the run's job summary, because an
+  # artifact nobody opens is not a report (#121). Coverage replays the
+  # COMMITTED `seeds/` (the gitignored `corpus/` is empty on a clean checkout)
+  # — i.e. seed-corpus coverage; growing-corpus coverage is a later refinement.
   coverage:
     name: cargo-fuzz coverage report
     runs-on: ubuntu-latest
@@ -250,6 +252,36 @@ jobs:
           done
           echo "===== coverage summary (seed-corpus) ====="
           cat "$SUMMARY"
+
+          # Render the table on the run page. Uploading it as an artifact and
+          # stopping there meant seeing it required knowing the artifact
+          # existed, downloading the zip and opening a text file — so for 44
+          # consecutive nights this file reported `coverage-build-failed` for
+          # both fuzz_tlcp_*_deprotect targets (i.e. they were executing zero
+          # inputs) and nobody looked. The artifact upload below is unchanged;
+          # this adds visibility, it does not replace the deliverable.
+          {
+            echo '### Fuzz coverage (seed corpus)'
+            echo
+            echo '```'
+            cat "$SUMMARY"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # ...and fail on the one line that means "this target produced no
+          # coverage data at all". Still NOT a %-gate — the percentage is never
+          # thresholded, and a profdata that merely failed to RENDER falls to
+          # the `profdata OK` branch above, so it cannot trip this. Same posture
+          # as the two preflights in the sweep job: a config/tooling failure
+          # must never pass green, and must never be mistaken for a crash.
+          # Written after the step summary above, deliberately, so the table
+          # still renders on the failing run.
+          nodata="$(awk '/coverage-build-failed/ {printf " %s", $1}' "$SUMMARY")"
+          if [ -n "$nodata" ]; then
+            echo "::error::produced NO coverage data, NOT a fuzz crash — target(s):$nodata"
+            echo "A target that cannot be coverage-built may not be running at all; reproduce per fuzz/README.md."
+            exit 1
+          fi
 
       - name: Upload coverage report
         if: always()
