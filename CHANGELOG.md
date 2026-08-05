@@ -5,7 +5,55 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Nothing yet.
+**2026-08-06 maintenance batch** — the three open `good first issue`s plus two
+defects found while fixing them (#140–#147). No crate *code* change and no
+publish; the example-file changes below ship with the next `gmcrypto-c`
+package.
+
+### Added
+
+- **`crates/gmcrypto-c/examples/sm4_ccm.c`** (#142, closes #120) — SM4-CCM was
+  the one AEAD mode with a full C ABI and no worked example. Encrypt with AAD →
+  print the `ct ‖ tag` single-buffer layout (the shape CCM callers coming from
+  GCM get wrong) → decrypt round-trip → three rejection demonstrations
+  (tampered tag, tampered ciphertext byte, modified AAD), since an AEAD example
+  that only shows the happy path teaches the wrong lesson.
+
+### Fixed
+
+- **Three shipped C examples did not compile** (#144, closes #143):
+  `sm4_gcm_streaming.c`, `sm4_xts_sector.c` and `sm4_xts_multisector.c` each
+  carried a nested `/* … */` inside the header block comment, so the inner `*/`
+  closed the header early and everything below parsed as code. The stale claim
+  that nested comment was patching ("requires the `sm4-aead` feature" —
+  removed in v0.23) is corrected by the same edit. CI does not build C examples
+  (v0.4 W4 / Q4.14), which is how this shipped unnoticed; all nine examples now
+  pass a `cc -fsyntax-only -Wall -Wextra` sweep and the touched ones run to
+  exit 0.
+
+### Changed
+
+- **fuzz-nightly coverage job** (#141, closes #121): the per-target coverage
+  table is now appended to the run's job summary — previously it existed only
+  inside an artifact zip, which is how `coverage-build-failed` for both TLCP
+  deprotect targets went unread for 44 nights — and the job now **fails** on
+  any `coverage-build-failed` line (a target that produced no coverage data at
+  all; a profdata that merely failed to render reports `profdata OK` and does
+  not trip it). The coverage *percentage* remains ungated.
+
+### Security
+
+- **gitleaks allowlist re-tightened in both directions.** #140 (closes #123)
+  removed two dead scratch-path entries (`^docs/superpowers/`, `^\.repolens/`)
+  whose directories do not exist — stale allowlist entries are how a secret
+  scanner quietly grows to permit more than intended. #147 (closes #145;
+  supersedes #146, auto-closed when its base branch was deleted on merge)
+  covered the five benign post-audit findings **string-precisely** (path AND
+  regex AND `targetRules` per entry, never a whole file or tree) and
+  re-established the clean scan `docs/pre-opensource-audit.md` claims, with a
+  planted-canary negative test proving the new entries do not suppress a real
+  key in the same files. Nothing in CI runs gitleaks, so the clean-scan claim
+  is point-in-time and decays — re-run both modes before relying on it.
 
 ## [1.11.0] - 2026-08-01
 

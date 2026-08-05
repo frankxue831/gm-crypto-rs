@@ -681,6 +681,16 @@ per-target coverage report (`fuzz-coverage` artifact) is the independent
 check — it showed `coverage-build-failed` for both targets throughout, and
 nothing was reading it.
 
+**The "nothing was reading it" half was closed 2026-08-06 (#121 → #141).** The
+coverage table is now appended to the run's job summary — readable on the run
+page without downloading an artifact — and the coverage job **fails on any
+`coverage-build-failed` line**, which is emitted only when a target produced no
+coverage data at all (a profdata that merely failed to *render* reports
+`profdata OK` instead and cannot trip it). The coverage *percentage* remains
+ungated, as designed since v0.20. Had this gate existed, the 44-night gap would
+have turned the nightly red on night one for the true reason instead of the
+false one.
+
 ## Compliance posture
 
 This is a personal open-source project. It is not a certified cryptographic
