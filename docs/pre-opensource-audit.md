@@ -233,6 +233,15 @@ test material, never reused as real keys. Safe.
       in `.gitleaks.toml` so `gitleaks git` **and** `gitleaks dir` both
       report *no leaks found*. Strengthens S1 (the at-audit sweep had eyes
       on only 2 of the 4; both new hits are benign KAT hex).
+      **Re-established 2026-08-06 (#145).** The clean-scan claim above had
+      silently stopped holding: by 288 commits the same scan reported 4
+      findings (`dir`) / 5 (`git`), all benign and all post-dating this
+      pass — a fuzz-seed `.pem` banner plus three `generic-api-key` hits on
+      a toolchain pin date, a prose phrase, and a Rust type name. The
+      allowlist was extended to cover exactly those, string-precisely; both
+      modes report *no leaks found* again. **This is a point-in-time claim
+      that decays** — nothing in CI runs gitleaks, so re-run both modes
+      before trusting it (see the "Verifying" recipe in #145).
 - [x] Add a `.mailmap` to unify the two author display names (S2). **Done
       v0.17** (`git shortlog -sne` now collapses to one author).
 - [x] Add a one-line "not independently audited" banner near the top of the
