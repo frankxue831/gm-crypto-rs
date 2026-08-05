@@ -3,8 +3,9 @@
  * C ABI. Encrypt a message in two chunks, then decrypt it in
  * differently-sized chunks and verify the tag.
  *
- * Requires the library built with the `sm4-aead` feature:
- *   cargo build -p gmcrypto-c --release   /* AEAD+XTS are always-on (v0.23) */
+ * Build the library first. Since v0.23 the AEAD and XTS symbols are always-on
+ * in gmcrypto-c, so a default release build exports them — no feature flag:
+ *   cargo build -p gmcrypto-c --release
  *
  * Build (Linux/macOS, dynamic):
  *   cc -I ../include -L ../../../target/release -lgmcrypto_c \
