@@ -3,8 +3,9 @@
  * gmcrypto-c C ABI. Encrypt a 512-byte "disk sector" and decrypt it back,
  * using the sector number as the 16-byte tweak (GB/T 17964-2021).
  *
- * Requires the library built with the `sm4-xts` feature:
- *   cargo build -p gmcrypto-c --release   /* AEAD+XTS are always-on (v0.23) */
+ * Build the library first. Since v0.23 the AEAD and XTS symbols are always-on
+ * in gmcrypto-c, so a default release build exports them — no feature flag:
+ *   cargo build -p gmcrypto-c --release
  *
  * Build (Linux/macOS, dynamic):
  *   cc -I ../include -L ../../../target/release -lgmcrypto_c \
