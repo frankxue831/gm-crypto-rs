@@ -35,4 +35,39 @@ paths = [
   # `gitleaks dir` scan still walks them, and test binaries bake KAT hex in.
   # (The publication-relevant `gitleaks git` history scan never sees them.)
   '''^target/''',
+  # The committed cargo-fuzz seed corpus is curated test material by
+  # definition — `fuzz_pem`'s seeds are PEM-shaped on purpose, since a PEM
+  # parser cannot be fuzzed with inputs that are not PEM-shaped. Same
+  # rationale as the tests/data/ entry above; scoped to seeds/ only, so a
+  # real key committed anywhere else under fuzz/ still trips the scanner.
+  '''^fuzz/seeds/.*\.pem$''',
 ]
+
+# The three entries below suppress `generic-api-key` — the default ruleset's
+# broadest, most heuristic rule — at three EXACT sites. Each requires the path
+# AND the regex to match (`condition = "AND"`), and each names the single rule
+# it silences, so nothing else in these files, and no other rule anywhere, is
+# affected. Allowlisting the whole file (or all of `fuzz/`, or all of
+# `.github/`) would be the easy version and would suppress a genuine future
+# leak in the same tree.
+
+[[allowlists]]
+description = "Toolchain pin date read as an API key (api-stability.yml)."
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^\.github/workflows/api-stability\.yml$''']
+regexes = ['''nightly-\d{4}-\d{2}-\d{2}''']
+
+[[allowlists]]
+description = "English prose in the TLCP decomposition doc read as an API key."
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^docs/tlcp-decomposition\.md$''']
+regexes = ['''\d+-byte-length-prefixed''']
+
+[[allowlists]]
+description = "A gmcrypto-core type name in a fuzz target read as an API key."
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^fuzz/fuzz_targets/fuzz_sm2_verify\.rs$''']
+regexes = ['''Sm2PrivateKey''']
