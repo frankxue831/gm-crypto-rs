@@ -202,7 +202,7 @@ The same surfaces are reachable from C / C++ / Python / Go / Zig through
 `gmcrypto-c` — see [`crates/gmcrypto-c/README.md`](crates/gmcrypto-c/README.md)
 and the doc-only examples under
 [`crates/gmcrypto-c/examples/`](crates/gmcrypto-c/examples/)
-(`sm2_sign.c`, `sm4_gcm_streaming.c`, `sm4_xts_sector.c`,
+(`sm2_sign.c`, `sm4_gcm_streaming.c`, `sm4_ccm.c`, `sm4_xts_sector.c`,
 `sm4_xts_multisector.c`, `sm2_key_exchange.c`, `x509_verify.c`,
 `tlcp_handshake.c`, `tlcp_verify_pair.c`).
 
