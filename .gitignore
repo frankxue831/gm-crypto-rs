@@ -29,6 +29,9 @@ perf.data*
 # CCD / Claude Code session metadata (worktrees, etc.)
 .claude/
 
+# Superpowers/Codex isolated implementation worktrees.
+.worktrees/
+
 # Superpowers plan/spec scratch (local working notes; not published)
 docs/superpowers/
 
