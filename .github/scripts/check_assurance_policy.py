@@ -111,6 +111,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     checkout = step_uses(scan, "actions/checkout@v4")
     install = step_named(scan, "Install gitleaks")
     scan_step = step_named(scan, "Scan committed history")
+    install_script = active_run(install)
     require("dedicated gitleaks workflow exists", bool(gitleaks))
     require(
         "gitleaks workflow scans main pushes",
@@ -125,7 +126,20 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "paths:" not in trigger and "paths-ignore:" not in trigger,
     )
     require("gitleaks checkout has full history", scalar(checkout, "fetch-depth", 10) == "0")
-    require("gitleaks is pinned", "tool: gitleaks@8.30.1" in install)
+    require(
+        "gitleaks installs the pinned official release",
+        "GITLEAKS_VERSION=8.30.1" in install_script
+        and "https://github.com/gitleaks/gitleaks/releases/download/" in install_script
+        and "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" in install_script
+        and 'tar -xzf "$archive" -C "$install_dir" gitleaks' in install_script
+        and 'echo "$install_dir" >> "$GITHUB_PATH"' in install_script,
+    )
+    require(
+        "gitleaks verifies the pinned release checksum",
+        "GITLEAKS_SHA256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        in install_script
+        and "sha256sum --check --status" in install_script,
+    )
     require(
         "gitleaks scans committed history",
         active_run(scan_step) == "gitleaks git --no-banner --redact --verbose",
@@ -247,6 +261,15 @@ def mutation_self_test() -> list[str]:
         "shallow gitleaks checkout",
         "gitleaks checkout has full history",
         gitleaks=GITLEAKS.replace("          fetch-depth: 0", "          fetch-depth: 1", 1),
+    )
+    must_reject(
+        "unverified gitleaks release asset",
+        "gitleaks verifies the pinned release checksum",
+        gitleaks=GITLEAKS.replace(
+            "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
+            "0" * 64,
+            1,
+        ),
     )
     must_reject(
         "gitleaks push moved off main",
