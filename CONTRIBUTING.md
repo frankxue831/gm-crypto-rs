@@ -16,8 +16,9 @@ safe to touch without triggering the dudect checklist below:
 
 - **Documentation** — `README.md`, `fuzz/README.md`, the `docs/` index, or
   rustdoc on any public item.
-- **C examples** — `crates/gmcrypto-c/examples/`. These are doc-only; CI does
-  not build them, but they should compile and run before you send them.
+- **C examples** — `crates/gmcrypto-c/examples/`. CI syntax-checks every
+  example with strict C11 warnings; you should also link and run the example
+  before you send it.
 - **Known-answer tests** for primitives that already exist, provided you cite
   the published source of the vector (see "Coding conventions").
 - **Fuzz targets** for parsing / decoding surfaces — see below.
@@ -46,7 +47,8 @@ Before opening a PR:
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo deny check --exclude-dev
+cargo generate-lockfile
+cargo deny --exclude-dev check
 ```
 
 If you changed anything that affects **wire output** (a cipher mode, a codec,

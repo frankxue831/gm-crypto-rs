@@ -98,7 +98,8 @@ CLAUDE.md carries the canonical per-target gate table.
   diagnostics (nightly median 0.2570–0.2768 while the direct diagnostics stayed
   quiet → false alarm, not a leak). `ct_fn_invert` / `ct_fp_invert` remain the
   authoritative invert-leak guards; a medium `k`-only leak in [0.25, 0.55] is
-  unguarded until a class-split-aware "noise-twin" exists. See
+  unguarded until the new class-split-aware noise twin is calibrated and
+  passes injected-leak controls. See
   `docs/v0.5-dudect-recalibration.md`.
 - `ct_fn_invert`     — direct `Fn::invert((1+d) mod n)` diagnostic (W0).
   PR-smoke telemetry-only; nightly gross-regression sentinel at
@@ -132,8 +133,8 @@ CLAUDE.md carries the canonical per-target gate table.
   password bytes (v0.3 W2). Both classes' blobs are valid for their class's
   password so both succeed via identical control flow.
 
-**Always-on non-`ct_*` benches (3).** These are not leak targets, and counting
-them is why the always-on bench vector has 15 entries against 12 `ct_*`:
+**Always-on non-`ct_*` benches (4).** These are not leak targets, and counting
+them is why the always-on bench vector has 16 entries against 12 `ct_*`:
 
 - `negative_control` — a deliberately leaky comparison. It MUST report
   `|tau| > 1.0` on every single run; if it ever goes quiet, the harness is
@@ -145,6 +146,10 @@ them is why the always-on bench vector has 15 entries against 12 `ct_*`:
   `ct_fn_invert` / `ct_fp_invert` spike, which is what established that the
   runner noise lives in the two-input **class split** rather than in the
   operation itself. See `docs/v0.5-dudect-recalibration.md` (v0.19 resolution).
+- `noise_twin_class_split` — two distinct fixed inputs through fixed-work,
+  branch-free code. Its measurement is required in every PR/nightly run but
+  its value is non-blocking until hosted-runner calibration and injected-leak
+  controls establish an authoritative relative threshold.
 
 **Cfg-gated on `sm4-bitsliced-simd` (2):**
 

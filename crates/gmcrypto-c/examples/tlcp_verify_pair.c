@@ -17,7 +17,7 @@
  *      ../../gmcrypto-core/tests/data/x509_chain_int.der \
  *      ../../gmcrypto-core/tests/data/x509_chain_root.der
  *
- * Documentation-only (Q4.14): CI does not build C examples.
+ * CI syntax-checks this example; link and run it locally for functional use.
  *
  * *** READ THIS ***: a `1` here is STRUCTURAL trust — each chain links to the
  * trusted root and each leaf is usable for its TLCP role. It is NOT endpoint

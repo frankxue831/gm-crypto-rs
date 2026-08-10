@@ -20,8 +20,8 @@
  *      ../../../target/release/libgmcrypto_c.a -o tlcp_handshake-static
  *   ./tlcp_handshake-static
  *
- * Documentation-only (Q4.14): CI does not build C examples. Run locally to
- * confirm the toolkit FFI works end-to-end from C.
+ * CI syntax-checks this example. Link and run it locally to confirm the
+ * toolkit FFI works end-to-end from C.
  *
  * NOTE ON KEYS: only your own PRIVATE key is local; the peer's PUBLIC key
  * arrives in its certificate (see tlcp_verify_pair.c) or out-of-band — the C

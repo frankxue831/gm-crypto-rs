@@ -2,7 +2,7 @@
  * x509_verify.c — X.509-with-SM2 leaf-vs-issuer signature verification
  * through the gmcrypto C ABI (v1.4).
  *
- * Doc-only example (CI does not build C examples). Compile + run locally:
+ * CI syntax-checks this example; compile, link, and run it locally:
  *
  *   cargo build -p gmcrypto-c --release
  *   cc -Wall -Wextra -o x509_verify \

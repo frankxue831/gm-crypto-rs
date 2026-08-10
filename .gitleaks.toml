@@ -3,7 +3,7 @@
 # An authoritative `gitleaks git` pass over the full history (2026-05-24)
 # found NO real secrets. The only matches are intentional, published test
 # vectors / parser-rejection test strings — documented and allowlisted
-# below so future automated runs (pre-flip sweep or CI) stay green and
+# below so the committed-history CI scan and future sweeps stay green and
 # reviewers can see the matches are deliberate. See the
 # "2026-05-24 pre-flip dry-run" note in docs/pre-opensource-audit.md.
 #
