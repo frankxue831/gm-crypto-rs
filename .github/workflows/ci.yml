@@ -4,13 +4,14 @@ name: CI
 #
 # Most jobs (build / msrv / cabi / deny / wasm32) run on GitHub-hosted
 # `macos-14` (aarch64) — the same macOS-aarch64 platform the project
-# targets (NEON SIMD + C-ABI coverage). Two jobs run on Linux/x86_64:
+# targets (NEON SIMD + C-ABI coverage). Three jobs run on Linux/x86_64:
 # `simd-x86` (`ubuntu-latest`) exercises the AVX2 / PCLMULQDQ paths the
 # aarch64 hosts can't reach (F17), and `interop-gmssl` (`ubuntu-24.04`,
 # OS label pinned because a from-source build's reproducibility rides the
-# runner's compiler) cross-validates the wire format against a pinned
-# GmSSL build (F16). GitHub Actions on standard runners is free for
-# public repositories.
+# runner's compiler) cross-validates the wire format against a pinned GmSSL
+# build (F16). `secrets` (`ubuntu-24.04`) scans committed history with a pinned
+# gitleaks binary. GitHub Actions on standard runners is free for public
+# repositories.
 #
 # History: through v0.16 these ran on a self-hosted macOS runner to dodge
 # GitHub Pro's private-repo minute cap. That runner was retired at the
@@ -78,9 +79,6 @@ env:
 # return null and `contains(null, ...)` is false, so the gate is a
 # no-op there (GitHub's native skip already handled it).
 #
-# Drop into a YAML anchor so all jobs share the same expression
-# without duplicating it five times.
-#
 # YAML anchors don't work inside GitHub Actions `if:` directly, so the
 # expression is repeated per-job below. Keep them in lock-step.
 
@@ -106,6 +104,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Verify assurance workflow policy
+        run: python3 .github/scripts/check_assurance_policy.py
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -260,6 +260,32 @@ jobs:
       - name: cargo test -p gmcrypto-simd (x86_64 AVX2 / CLMUL paths)
         run: cargo test -p gmcrypto-simd
 
+  secrets:
+    # Scan the complete committed history, not the generated working tree.
+    # `.gitleaks.toml` is the single, path-and-rule-scoped allowlist.
+    name: gitleaks (committed history)
+    runs-on: ubuntu-24.04
+    if: >-
+      !contains(github.event.pull_request.title, '[skip ci]') &&
+      !contains(github.event.pull_request.title, '[ci skip]') &&
+      !contains(github.event.pull_request.title, '[no ci]') &&
+      !contains(github.event.pull_request.title, '[skip actions]') &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, '[ci skip]') &&
+      !contains(github.event.head_commit.message, '[no ci]') &&
+      !contains(github.event.head_commit.message, '[skip actions]')
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        uses: taiki-e/install-action@v2
+        with:
+          tool: gitleaks@8.30.1
+      - name: Scan committed history
+        run: gitleaks git --no-banner --redact --verbose
+
   interop-gmssl:
     # F16 — the gmssl cross-validation suite is the project's headline wire
     # guarantee, and until this job it ran in NO CI job: nothing set
@@ -278,15 +304,13 @@ jobs:
     # is an aarch64 Homebrew build is deliberate: two independent instances of
     # the reference implementation agreeing is stronger evidence than one.
     #
-    # NON-GATING for now (`continue-on-error: true`) — a third-party source
-    # build is a brand-new failure surface (upstream availability, cmake drift
-    # on the image, cache eviction), and making it required on day one would
-    # let any of those block every PR in the repo. Flip to enforced once it has
-    # a green track record, the way cargo-semver-checks was informational until
-    # #86. See docs/v1.10-scope.md.
+    # A real wire mismatch is gating. Oracle infrastructure is not: cache,
+    # acquisition/build, and version-drift failures are tolerated at the STEP
+    # level, reported explicitly, and cause the suite to be skipped. This keeps
+    # a third-party outage from blocking every PR without turning a skipped
+    # suite into an interoperability pass.
     name: gmssl interop (pinned oracle, x86_64)
     runs-on: ubuntu-24.04
-    continue-on-error: true
     if: >-
       !contains(github.event.pull_request.title, '[skip ci]') &&
       !contains(github.event.pull_request.title, '[ci skip]') &&
@@ -314,6 +338,7 @@ jobs:
           shared-key: interop-gmssl
       - name: Cache GmSSL install prefix
         id: gmssl-cache
+        continue-on-error: true
         uses: actions/cache@v4
         with:
           path: ~/gmssl-${{ env.GMSSL_TAG }}
@@ -321,26 +346,37 @@ jobs:
           # NO `restore-keys`, deliberately. A fuzzy/prefix restore would
           # satisfy the cache with a WRONG-VERSION binary — precisely the
           # failure this job exists to prevent.
-      - name: Build GmSSL ${{ env.GMSSL_TAG }} from source (static)
-        if: steps.gmssl-cache.outputs.cache-hit != 'true'
+      - name: Provision GmSSL ${{ env.GMSSL_TAG }} oracle
+        id: gmssl-provision
+        continue-on-error: true
+        env:
+          CACHE_HIT: ${{ steps.gmssl-cache.outputs.cache-hit }}
         run: |
           set -euxo pipefail
-          git clone --depth 1 --branch "$GMSSL_TAG" \
-            https://github.com/guanzhi/GmSSL.git "$RUNNER_TEMP/gmssl-src"
-          # BUILD_SHARED_LIBS defaults to ON upstream, which yields a binary
-          # linked against @rpath/libgmssl. Static keeps the cached artifact
-          # self-contained, so a cache restore needs no LD_LIBRARY_PATH or
-          # ldconfig to produce a runnable `gmssl`.
-          cmake -S "$RUNNER_TEMP/gmssl-src" -B "$RUNNER_TEMP/gmssl-src/build" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DCMAKE_INSTALL_PREFIX="$HOME/gmssl-$GMSSL_TAG"
-          cmake --build "$RUNNER_TEMP/gmssl-src/build" --parallel
-          cmake --install "$RUNNER_TEMP/gmssl-src/build"
-      # Unconditional — needed on a cache HIT as well as a fresh build.
+          if [ "$CACHE_HIT" != "true" ]; then
+            git clone --depth 1 --branch "$GMSSL_TAG" \
+              https://github.com/guanzhi/GmSSL.git "$RUNNER_TEMP/gmssl-src"
+            # BUILD_SHARED_LIBS defaults to ON upstream, which yields a binary
+            # linked against @rpath/libgmssl. Static keeps the cached artifact
+            # self-contained, so a cache restore needs no LD_LIBRARY_PATH or
+            # ldconfig to produce a runnable `gmssl`.
+            cmake -S "$RUNNER_TEMP/gmssl-src" -B "$RUNNER_TEMP/gmssl-src/build" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DCMAKE_INSTALL_PREFIX="$HOME/gmssl-$GMSSL_TAG"
+            cmake --build "$RUNNER_TEMP/gmssl-src/build" --parallel
+            cmake --install "$RUNNER_TEMP/gmssl-src/build"
+          fi
+          test -x "$HOME/gmssl-$GMSSL_TAG/bin/gmssl"
+      # Needed on a cache hit as well as a fresh build; skipped only when the
+      # tolerated provisioning step could not produce a usable oracle.
       - name: Put gmssl on PATH
+        if: steps.gmssl-provision.outcome == 'success'
         run: echo "$HOME/gmssl-$GMSSL_TAG/bin" >> "$GITHUB_PATH"
       - name: Assert oracle version (drift guard)
+        id: gmssl-version
+        if: steps.gmssl-provision.outcome == 'success'
+        continue-on-error: true
         run: |
           set -euo pipefail
           want="GmSSL ${GMSSL_TAG#v}"
@@ -359,6 +395,7 @@ jobs:
       # default-features run sees: the two SM4-GCM interop tests are cfg-gated
       # on that feature.
       - name: gmssl interop suite (13 tests)
+        if: steps.gmssl-provision.outcome == 'success' && steps.gmssl-version.outcome == 'success'
         env:
           GMCRYPTO_GMSSL: '1'
         run: |
@@ -380,6 +417,23 @@ jobs:
             echo "::error::expected 13 interop tests to pass - census drifted"
             exit 1
           fi
+      - name: Report GmSSL infrastructure status
+        if: ${{ always() && (steps.gmssl-provision.outcome != 'success' || steps.gmssl-version.outcome != 'success') }}
+        env:
+          PROVISION_OUTCOME: ${{ steps.gmssl-provision.outcome }}
+          VERSION_OUTCOME: ${{ steps.gmssl-version.outcome }}
+        run: |
+          echo "::warning title=GmSSL infrastructure unavailable::provision=$PROVISION_OUTCOME version=$VERSION_OUTCOME; interoperability suite was not run"
+          {
+            echo "### GmSSL infrastructure unavailable"
+            echo
+            echo "The interoperability suite was not run because the pinned oracle could not be prepared."
+            echo
+            echo "- provision: \`$PROVISION_OUTCOME\`"
+            echo "- version assertion: \`$VERSION_OUTCOME\`"
+            echo
+            echo "This is non-blocking infrastructure telemetry, not a gmcrypto-core interoperability pass."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   cabi:
     name: gmcrypto-c FFI build + header drift
@@ -420,6 +474,24 @@ jobs:
       # build runs all 65 c_smoke tests (no per-feature invocation).
       - name: cargo test -p gmcrypto-c
         run: cargo test -p gmcrypto-c
+      # Compile every shipped translation unit against the committed header.
+      # Syntax-only avoids platform-specific linker/loader noise while still
+      # catching malformed examples and stale declarations before release.
+      - name: Compile shipped C examples
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          examples=(crates/gmcrypto-c/examples/*.c)
+          if (( ${#examples[@]} == 0 )); then
+            echo "::error::no shipped C examples found"
+            exit 1
+          fi
+          for example in "${examples[@]}"; do
+            echo "checking $example"
+            cc -std=c11 -Wall -Wextra -Werror -fsyntax-only \
+              -I crates/gmcrypto-c/include "$example"
+          done
 
   deny:
     name: cargo-deny (no forbidden runtime deps)
@@ -443,7 +515,7 @@ jobs:
       - name: Install cargo-deny
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny@0.19
+          tool: cargo-deny@0.20.2
       # Cargo.lock is gitignored (lib-crate policy), so generate a fresh
       # lockfile for a reproducible, fully-resolved dependency graph before
       # the deny passes (per the documented recipe in CLAUDE.md).
@@ -452,7 +524,7 @@ jobs:
       # Default deny pass — gates the zero-runtime-deps surface of the
       # default-features build.
       - name: Run cargo-deny (default features, excluding dev-deps)
-        run: cargo deny check --exclude-dev
+        run: cargo deny --exclude-dev check
       # v0.4 W2 / Q4.5 + v0.8 W2-W3 — second pass with the runtime opt-in
       # feature flags a downstream consumer might enable (digest/cipher
       # traits, bitsliced, SIMD, AEAD, scalar). gmcrypto-c's build-time
@@ -463,7 +535,7 @@ jobs:
       # transitive deps). Uses --features on the workspace-default crate
       # (`gmcrypto-core`).
       - name: Run cargo-deny (runtime opt-in features, excluding dev-deps)
-        run: cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509,gmcrypto-core/tlcp,gmcrypto-core/aead-traits check --exclude-dev
+        run: cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509,gmcrypto-core/tlcp,gmcrypto-core/aead-traits --exclude-dev check
 
   wasm32:
     name: build wasm32-unknown-unknown (Rust ${{ matrix.toolchain }})

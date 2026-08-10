@@ -139,12 +139,12 @@ cargo clippy -p gmcrypto-core --features aead-traits --all-targets -- -D warning
 cargo test -p gmcrypto-core --features aead-traits
 
 # Supply chain — note: --exclude-dev (dev-deps are exempt from the ban list).
-cargo deny check --exclude-dev
+cargo deny --exclude-dev check
 # v0.4 W2 / W3 / v0.8 W2-W3 / v0.12 — second pass under the opt-in runtime
 # feature flags (digest/cipher/inout/crypto-common allowlisted in deny.toml;
 # sm4-aead pulls gmcrypto-simd::ghash which has no new transitive deps; sm4-xts
 # adds NO new dep — pure-core).
-cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509,gmcrypto-core/tlcp,gmcrypto-core/aead-traits check --exclude-dev
+cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509,gmcrypto-core/tlcp,gmcrypto-core/aead-traits --exclude-dev check
 
 # MSRV reproducibility.
 cargo +1.85 build -p gmcrypto-core
@@ -202,7 +202,9 @@ DUDECT_SAMPLES=10000  cargo bench --bench timing_leaks --features sm2-key-exchan
 # fails with "ORACLE DRIFT" on any other build: GmSSL 3.2.0 renamed `pbkdf2`
 # -> `sm3_pbkdf2`, split `sm4 -cbc/-ctr/-gcm` into `sm4_cbc`/`sm4_ctr`/
 # `sm4_gcm`, and narrowed `sm3hmac` keys to 12..=32 bytes. v1.10 wired this
-# into ci.yml's `interop-gmssl` job (pinned from-source build, non-gating).
+# into ci.yml's `interop-gmssl` job. A real interoperability mismatch gates;
+# cache/acquisition/build/version infrastructure failures are reported and
+# non-blocking, and never misreported as an interoperability pass.
 GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl                      # 11 tests
 GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl --features sm4-aead  # 13 tests
 # Deliberately probe a different build (does not edit the pin):
@@ -476,7 +478,7 @@ fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN 
   README.md                 # build/run/repro runbook + seed-regen recipe
 
 .github/workflows/
-  ci.yml                    # 7 jobs (v0.17+). FIVE on GitHub-hosted macos-14 (aarch64): build/test (stable, full) + msrv (1.85, build-only) + cabi + cargo-deny + wasm32 matrix. TWO on Linux/x86_64: simd-x86 (ubuntu-latest, F17 — the AVX2/PCLMULQDQ paths aarch64 can't reach) + interop-gmssl (ubuntu-24.04, F16 — v1.10; gmssl cross-validation against a PINNED from-source GmSSL build, non-gating via continue-on-error). Per-feature clippy passes (digest-traits, cipher-traits, sm4-bitsliced, sm4-bitsliced-simd, crypto-bigint-scalar). concurrency: cancel-in-progress. UNAFFECTED by fuzz/ (excluded).
+  ci.yml                    # 8 jobs (v0.17+). FIVE on GitHub-hosted macos-14 (aarch64): build/test (stable, full) + msrv (1.85, build-only) + cabi + cargo-deny + wasm32 matrix. THREE on Linux/x86_64: simd-x86 (ubuntu-latest, F17 — the AVX2/PCLMULQDQ paths aarch64 can't reach) + interop-gmssl (ubuntu-24.04, F16 — v1.10; mismatch-gating with cache/acquisition/build/version infrastructure classified non-blocking) + gitleaks committed-history scan (ubuntu-24.04). Per-feature clippy passes (digest-traits, cipher-traits, sm4-bitsliced, sm4-bitsliced-simd, crypto-bigint-scalar). concurrency: cancel-in-progress. UNAFFECTED by fuzz/ (excluded).
   dudect-pr.yml             # 10K samples on ubuntu-24.04 (v0.18 pin), |tau| gate, matrix on features=[default, sm4-bitsliced, sm4-bitsliced-simd, "sm4-bitsliced-simd,sm4-aead,sm4-xts"] (4 legs; the 4th gates the AEAD/XTS CT targets), path-allowlisted (incl. gmcrypto-simd/src/**), concurrency: cancel-in-progress
   dudect-nightly.yml        # 100K samples on ubuntu-24.04 (v0.18 pin), same gate + matrix, 30-day artifact retention; concurrency: cancel-in-progress=false (a partial 100K run is wasted compute). PR #38 drops the push:main trigger in favour of cron-only (regression watch) + workflow_dispatch (manual reruns).
   fuzz-nightly.yml          # v0.14 — capped cargo-fuzz sweep over all 33 targets (v0.20: FUZZ_TARGETS env is the single source of truth — MUST name every fuzz/Cargo.toml [[bin]], see the fuzz/ entry above) on GitHub-hosted ubuntu-latest (v0.17+; cron 06:00 UTC + workflow_dispatch w/ max_total_time input; installs nightly + pinned cargo-fuzz 0.13.1 per run; -max_total_time/-rss_limit_mb/-timeout caps; crash-artifact upload 30d; concurrency cancel-in-progress=false). NOT a PR gate. v0.20 adds a SEPARATE `coverage` job: cargo +nightly fuzz coverage per target over committed seeds → llvm-cov TOTALS SUMMARY.txt artifact (report-as-deliverable, **still no %-gate**). #121 made that report VISIBLE and partially gating: the table is also appended to `$GITHUB_STEP_SUMMARY` (an artifact nobody downloads is not a report — this file said `coverage-build-failed` for both `fuzz_tlcp_*_deprotect` targets for 44 nights unread), and the step then FAILS on any `coverage-build-failed` line, which means a target produced no coverage data at all. A merely-unrenderable profdata reports `profdata OK` and does NOT trip it; the percentage is never thresholded. Order is load-bearing — the step summary is written BEFORE the exit 1, so the table renders on the failing run.
@@ -886,6 +888,6 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
   `gh workflow run ci.yml --ref <branch>` (workflow_dispatch added
   in `bdf4678`).
 - **`cargo deny` in CI** uses the prebuilt `taiki-e/install-action@v2`
-  with `tool: cargo-deny@0.19` — don't switch back to
+  with `tool: cargo-deny@0.20.2` — don't switch back to
   `cargo install --locked cargo-deny` (compiled from source, adds
   ~3 min per CI run; see `431df89`).
