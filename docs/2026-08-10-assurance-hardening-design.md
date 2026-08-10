@@ -31,13 +31,13 @@ The file list will be discovered from the examples directory rather than duplica
 
 ### Secret scanning
 
-A dedicated `gitleaks` job will:
+A dedicated `gitleaks.yml` workflow will:
 
 1. check out full history with `fetch-depth: 0`;
 2. install an exact gitleaks version;
 3. run `gitleaks git --no-banner --redact --verbose` from the repository root.
 
-The committed `.gitleaks.toml` remains the single allowlist. Generated targets, local fuzz corpora, and analysis artifacts are not part of this history scan.
+The workflow deliberately has no path exclusions, so a doc-only push skipped by `ci.yml` is still scanned. The committed `.gitleaks.toml` remains the single allowlist. Generated targets, local fuzz corpora, and analysis artifacts are not part of this history scan.
 
 ### cargo-deny alignment
 
@@ -56,7 +56,7 @@ The `interop-gmssl` job itself will no longer use `continue-on-error`. Oracle pr
 
 The 13-test interoperability suite runs only when provisioning and version assertion both have `outcome == 'success'`. Its step remains uncompensated: a skipped-test census, wire mismatch, or gmcrypto regression fails the job and blocks merging once the check is required.
 
-If provisioning or version validation fails, the suite is skipped and an `always()` summary step emits a warning plus a `GITHUB_STEP_SUMMARY` explanation identifying the infrastructure stage. The overall job remains successful so a third-party outage does not block unrelated work. Checkout or Rust setup failures remain ordinary CI failures because they affect repository-owned CI execution, not the GmSSL oracle specifically.
+If cache restoration fails, fallback provisioning still runs and the degraded cache plus final suite outcome are reported. If provisioning or version validation fails, the suite is skipped and an `always()` summary step emits a warning plus a `GITHUB_STEP_SUMMARY` explanation identifying every infrastructure outcome. The overall job remains successful so a third-party outage does not block unrelated work. Checkout or Rust setup failures remain ordinary CI failures because they affect repository-owned CI execution, not the GmSSL oracle specifically.
 
 ### Class-split dudect noise twin
 

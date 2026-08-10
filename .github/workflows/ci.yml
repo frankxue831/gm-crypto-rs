@@ -4,14 +4,14 @@ name: CI
 #
 # Most jobs (build / msrv / cabi / deny / wasm32) run on GitHub-hosted
 # `macos-14` (aarch64) — the same macOS-aarch64 platform the project
-# targets (NEON SIMD + C-ABI coverage). Three jobs run on Linux/x86_64:
+# targets (NEON SIMD + C-ABI coverage). Two jobs run on Linux/x86_64:
 # `simd-x86` (`ubuntu-latest`) exercises the AVX2 / PCLMULQDQ paths the
 # aarch64 hosts can't reach (F17), and `interop-gmssl` (`ubuntu-24.04`,
 # OS label pinned because a from-source build's reproducibility rides the
 # runner's compiler) cross-validates the wire format against a pinned GmSSL
-# build (F16). `secrets` (`ubuntu-24.04`) scans committed history with a pinned
-# gitleaks binary. GitHub Actions on standard runners is free for public
-# repositories.
+# build (F16). The separate `gitleaks.yml` workflow scans all eligible PRs and
+# main pushes, including doc-only pushes skipped by this workflow. GitHub
+# Actions on standard runners is free for public repositories.
 #
 # History: through v0.16 these ran on a self-hosted macOS runner to dodge
 # GitHub Pro's private-repo minute cap. That runner was retired at the
@@ -20,7 +20,7 @@ name: CI
 # docs/pre-opensource-audit.md (item C1).
 #
 # The dudect workflows (`dudect-pr.yml`, `dudect-nightly.yml`) run on
-# `ubuntu-latest` and DO NOT move — their `|tau|` gates were empirically
+# `ubuntu-24.04` and DO NOT move — their `|tau|` gates were empirically
 # calibrated against the GitHub Actions `ubuntu-24.04` runner image's
 # noise floor (see CLAUDE.md dudect table / docs/v0.5-dudect-recalibration.md).
 # Moving them would invalidate the calibration.
@@ -260,32 +260,6 @@ jobs:
       - name: cargo test -p gmcrypto-simd (x86_64 AVX2 / CLMUL paths)
         run: cargo test -p gmcrypto-simd
 
-  secrets:
-    # Scan the complete committed history, not the generated working tree.
-    # `.gitleaks.toml` is the single, path-and-rule-scoped allowlist.
-    name: gitleaks (committed history)
-    runs-on: ubuntu-24.04
-    if: >-
-      !contains(github.event.pull_request.title, '[skip ci]') &&
-      !contains(github.event.pull_request.title, '[ci skip]') &&
-      !contains(github.event.pull_request.title, '[no ci]') &&
-      !contains(github.event.pull_request.title, '[skip actions]') &&
-      !contains(github.event.head_commit.message, '[skip ci]') &&
-      !contains(github.event.head_commit.message, '[ci skip]') &&
-      !contains(github.event.head_commit.message, '[no ci]') &&
-      !contains(github.event.head_commit.message, '[skip actions]')
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Install gitleaks
-        uses: taiki-e/install-action@v2
-        with:
-          tool: gitleaks@8.30.1
-      - name: Scan committed history
-        run: gitleaks git --no-banner --redact --verbose
-
   interop-gmssl:
     # F16 — the gmssl cross-validation suite is the project's headline wire
     # guarantee, and until this job it ran in NO CI job: nothing set
@@ -395,6 +369,7 @@ jobs:
       # default-features run sees: the two SM4-GCM interop tests are cfg-gated
       # on that feature.
       - name: gmssl interop suite (13 tests)
+        id: gmssl-suite
         if: steps.gmssl-provision.outcome == 'success' && steps.gmssl-version.outcome == 'success'
         env:
           GMCRYPTO_GMSSL: '1'
@@ -418,22 +393,42 @@ jobs:
             exit 1
           fi
       - name: Report GmSSL infrastructure status
-        if: ${{ always() && (steps.gmssl-provision.outcome != 'success' || steps.gmssl-version.outcome != 'success') }}
+        if: ${{ always() && (steps.gmssl-cache.outcome != 'success' || steps.gmssl-provision.outcome != 'success' || steps.gmssl-version.outcome != 'success') }}
         env:
+          CACHE_OUTCOME: ${{ steps.gmssl-cache.outcome }}
           PROVISION_OUTCOME: ${{ steps.gmssl-provision.outcome }}
           VERSION_OUTCOME: ${{ steps.gmssl-version.outcome }}
+          SUITE_OUTCOME: ${{ steps.gmssl-suite.outcome }}
         run: |
-          echo "::warning title=GmSSL infrastructure unavailable::provision=$PROVISION_OUTCOME version=$VERSION_OUTCOME; interoperability suite was not run"
-          {
-            echo "### GmSSL infrastructure unavailable"
-            echo
-            echo "The interoperability suite was not run because the pinned oracle could not be prepared."
-            echo
-            echo "- provision: \`$PROVISION_OUTCOME\`"
-            echo "- version assertion: \`$VERSION_OUTCOME\`"
-            echo
-            echo "This is non-blocking infrastructure telemetry, not a gmcrypto-core interoperability pass."
-          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PROVISION_OUTCOME" != "success" ] || [ "$VERSION_OUTCOME" != "success" ]; then
+            echo "::warning title=GmSSL infrastructure unavailable::cache=$CACHE_OUTCOME provision=$PROVISION_OUTCOME version=$VERSION_OUTCOME suite=$SUITE_OUTCOME"
+            {
+              echo "### GmSSL infrastructure unavailable"
+              echo
+              echo "The interoperability suite was not run because the pinned oracle could not be prepared."
+              echo
+              echo "- cache: \`$CACHE_OUTCOME\`"
+              echo "- provision: \`$PROVISION_OUTCOME\`"
+              echo "- version assertion: \`$VERSION_OUTCOME\`"
+              echo "- interoperability suite: \`$SUITE_OUTCOME\`"
+              echo
+              echo "This is non-blocking infrastructure telemetry, not a gmcrypto-core interoperability pass."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning title=GmSSL cache degraded::cache=$CACHE_OUTCOME; fallback provisioning succeeded; suite=$SUITE_OUTCOME"
+            {
+              echo "### GmSSL cache degraded"
+              echo
+              echo "The cache step failed, but fallback provisioning and version validation succeeded."
+              echo
+              echo "- cache: \`$CACHE_OUTCOME\`"
+              echo "- provision: \`$PROVISION_OUTCOME\`"
+              echo "- version assertion: \`$VERSION_OUTCOME\`"
+              echo "- interoperability suite: \`$SUITE_OUTCOME\`"
+              echo
+              echo "The suite outcome above remains authoritative; an actual mismatch is still blocking."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   cabi:
     name: gmcrypto-c FFI build + header drift
@@ -471,7 +466,7 @@ jobs:
       # cryptographic-correctness gate (Rust-equivalence on every
       # entry point). As of v0.23 W3 (A-1) the AEAD (SM4-GCM/CCM) +
       # SM4-XTS FFI is always compiled into the C ABI, so the default
-      # build runs all 65 c_smoke tests (no per-feature invocation).
+      # build runs all 97 c_smoke tests (no per-feature invocation).
       - name: cargo test -p gmcrypto-c
         run: cargo test -p gmcrypto-c
       # Compile every shipped translation unit against the committed header.

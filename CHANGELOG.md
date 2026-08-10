@@ -45,9 +45,9 @@ change; the example-file changes below ship with the next `gmcrypto-c` package.
   all; a profdata that merely failed to render reports `profdata OK` and does
   not trip it). The coverage *percentage* remains ungated.
 - **GmSSL failure classification:** an actual mismatch in the pinned 13-test
-  interoperability suite is now blocking. Cache, acquisition/build, and oracle
-  version failures remain non-blocking infrastructure events, but are reported
-  explicitly and skip the suite instead of being misread as an interop pass.
+  interoperability suite is now blocking. Cache failure is reported separately
+  while fallback provisioning proceeds; acquisition/build or oracle-version
+  failure remains a non-blocking infrastructure event that skips the suite.
 - **cargo-deny aligned to pinned `0.20.2`:** CI and contributor commands use
   the current option order for the default and explicit runtime-feature
   profiles. The optional `regen-header`/cbindgen build-tool tree remains

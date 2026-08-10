@@ -1,0 +1,36 @@
+name: Secret scan
+
+# Kept separate from ci.yml because that workflow intentionally skips
+# doc-only pushes. Secret scanning covers every eligible main PR and push,
+# regardless of which paths changed.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitleaks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    # Scan the complete committed history, not the generated working tree.
+    # `.gitleaks.toml` is the single, path-and-rule-scoped allowlist.
+    name: gitleaks (committed history)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        uses: taiki-e/install-action@v2
+        with:
+          tool: gitleaks@8.30.1
+      - name: Scan committed history
+        run: gitleaks git --no-banner --redact --verbose

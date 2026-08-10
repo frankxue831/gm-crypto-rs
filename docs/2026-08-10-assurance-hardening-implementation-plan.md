@@ -4,7 +4,9 @@
 
 **Goal:** Add deterministic CI gates, correctly classify GmSSL infrastructure failures, introduce required-but-nonblocking class-split dudect telemetry, and synchronize repository/Notion project state.
 
-**Architecture:** Keep repository-owned checks blocking and place them in the existing `CI` workflow. Classify GmSSL failures within one stable job by using step-level `continue-on-error` plus `steps.<id>.outcome`; only the actual interoperability suite remains uncompensated. Add one telemetry-only dudect target and require measurement completeness without changing any statistical threshold.
+**Architecture:** Keep repository-owned checks blocking. The C and dependency gates live in the existing `CI` workflow; committed-history secret scanning lives in a dedicated workflow with no path exclusions, because `ci.yml` intentionally skips doc-only main pushes. Classify GmSSL failures within one stable job by using step-level `continue-on-error` plus `steps.<id>.outcome`; only the actual interoperability suite remains uncompensated. Add one telemetry-only dudect target and require measurement completeness without changing any statistical threshold.
+
+**Post-review amendment (2026-08-10):** The implementation extracts gitleaks into `.github/workflows/gitleaks.yml`, reports cache degradation independently from oracle unavailability, uses indentation-scoped semantic policy checks with deliberate mutation self-tests, and puts the noise twin behind opaque, materialized inputs plus a non-inlined fixed-work helper. These decisions supersede the illustrative first-draft snippets below where they differ.
 
 **Tech Stack:** GitHub Actions YAML, Python 3 standard library, Rust benchmark harness, C11 compiler, gitleaks 8.30.1, cargo-deny 0.20.2, Notion connector.
 
@@ -15,6 +17,7 @@
 **Files:**
 - Create: `.github/scripts/check_assurance_policy.py`
 - Modify: `.github/workflows/ci.yml`
+- Create: `.github/workflows/gitleaks.yml`
 
 - [ ] **Step 1: Create the failing policy verifier**
 
@@ -341,7 +344,7 @@ Run:
 ```bash
 python3 .github/scripts/check_assurance_policy.py
 cargo fmt --all -- --check
-DUDECT_SAMPLES=1000 cargo bench -p gmcrypto-core --bench timing_leaks --features crypto-bigint-scalar -- noise_twin_class_split
+DUDECT_SAMPLES=1000 cargo bench -p gmcrypto-core --bench timing_leaks --features crypto-bigint-scalar -- --filter noise_twin_class_split
 ```
 
 Expected: policy verifier exits 0; format check exits 0; benchmark output contains one `bench noise_twin_class_split` line with a parsed `max tau` value.
@@ -436,7 +439,7 @@ cargo generate-lockfile
 cargo deny --exclude-dev check
 cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509,gmcrypto-core/tlcp,gmcrypto-core/aead-traits --exclude-dev check
 GMCRYPTO_GMSSL=1 cargo test -p gmcrypto-core --test interop_gmssl --features sm4-aead -- --nocapture
-DUDECT_SAMPLES=1000 cargo bench -p gmcrypto-core --bench timing_leaks --features crypto-bigint-scalar -- noise_twin_class_split
+DUDECT_SAMPLES=1000 cargo bench -p gmcrypto-core --bench timing_leaks --features crypto-bigint-scalar -- --filter noise_twin_class_split
 ```
 
 - [ ] **Step 3: Run the full Rust regression suite**

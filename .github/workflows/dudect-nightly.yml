@@ -226,8 +226,9 @@ jobs:
               # stayed at 0.0053 / 0.0115 (no real leak). The direct diagnostics
               # remain the invert-leak guards; the honest trade is that a medium
               # k-only full-sign leak in [0.25, 0.55] is no longer
-              # authoritatively gated until a class-split-aware "noise-twin"
-              # exists. See docs/v0.5-dudect-recalibration.md (2026-06-07).
+              # authoritatively gated until the class-split-aware noise twin is
+              # calibrated and validated with injected-leak controls. See
+              # docs/v0.5-dudect-recalibration.md (2026-08-10).
               #
               # v0.5 W4 phase 2 prep — `ct_fn_invert` and `ct_fp_invert`
               # moved out of `required_low` and into

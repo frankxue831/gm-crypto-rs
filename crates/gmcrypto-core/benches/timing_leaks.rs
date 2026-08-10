@@ -467,24 +467,31 @@ fn noise_floor_fp_invert(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// values at distinct addresses. The timed body has no data-dependent branch,
 /// lookup, allocation, or loop bound. This first calibration target is
 /// telemetry only; it is not claimed to be duration-matched to field invert.
+/// The non-inlined helper and opaque arrays/reference are load-bearing: release
+/// assembly under the CI Rust 1.95 pin was checked to retain two stack arrays,
+/// choose their address before timing, and call this helper inside the window.
+#[inline(never)]
+fn noise_twin_fixed_work(input: &[u8; 32]) -> u64 {
+    let mut acc = 0x9e37_79b9_7f4a_7c15u64;
+    for _ in 0..8 {
+        for &byte in input {
+            acc = acc.rotate_left(7) ^ u64::from(std::hint::black_box(byte));
+        }
+    }
+    std::hint::black_box(acc)
+}
+
 fn noise_twin_class_split(runner: &mut CtRunner, rng: &mut BenchRng) {
-    let left = [0x36u8; 32];
-    let right = [0xc9u8; 32];
+    let left = std::hint::black_box([0x36u8; 32]);
+    let right = std::hint::black_box([0xc9u8; 32]);
     for _ in 0..sample_count() {
         let (class, input) = if rng.random::<bool>() {
             (Class::Left, &left)
         } else {
             (Class::Right, &right)
         };
-        runner.run_one(class, || {
-            let mut acc = 0x9e37_79b9_7f4a_7c15u64;
-            for _ in 0..8 {
-                for &byte in input {
-                    acc = acc.rotate_left(7) ^ u64::from(std::hint::black_box(byte));
-                }
-            }
-            std::hint::black_box(acc)
-        });
+        let input = std::hint::black_box(input);
+        runner.run_one(class, || noise_twin_fixed_work(input));
     }
 }
 
