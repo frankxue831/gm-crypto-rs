@@ -348,14 +348,19 @@ jobs:
           # comment above + docs/v0.5-dudect-recalibration.md).
           telemetry_only = ["ct_fn_invert", "ct_fp_invert", "ct_sign_k_class",
                             "ct_hmac_sm3"]
+          # 2026-08-10 — the class-split noise-twin value is non-blocking until
+          # hosted-runner calibration exists, but its PRESENCE is required in
+          # every run so a rename/removal cannot silently erase the telemetry.
+          required_telemetry = ["noise_twin_class_split"]
 
           fail = False
-          # Completeness: every REQUIRED target must be measured in EVERY run.
+          # Completeness: every REQUIRED target/telemetry reference must be
+          # measured in EVERY run.
           # A target missing from one numbered log (e.g. a malformed line the
           # regex skipped) must FAIL — never silently gate the median/min over
           # a reduced (< n_runs) sample set. WARN above stays for the
           # non-required telemetry targets.
-          for name in list(required_high) + list(required_low):
+          for name in list(required_high) + list(required_low) + required_telemetry:
               got = len(findings.get(name, []))
               if got != n_runs:
                   print(f"FAIL: {name} measured {got}/{n_runs} runs (incomplete) — expected all {n_runs}")
@@ -377,6 +382,8 @@ jobs:
           # Telemetry-only: print median + all runs, no pass/fail gate.
           for name in telemetry_only:
               print(f"TELEMETRY: {name} {telem(name)} (non-blocking)")
+          for name in required_telemetry:
+              print(f"NOISE-TWIN: {name} {telem(name)} (required measurement; non-blocking value)")
 
           # v0.19 — relative-gate TELEMETRY (non-blocking). The matched fix-vs-fix
           # probe approach was FALSIFIED at the 100K nightly (W3, 2026-05-30): the

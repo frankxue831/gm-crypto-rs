@@ -1,6 +1,6 @@
 //! `dudect-bencher` detectable-leak regression harness.
 //!
-//! Fifteen base targets (plus the feature-gated SM4 targets registered
+//! Sixteen base targets (plus the feature-gated SM4 targets registered
 //! later), grouped here by role rather than the harness's alphabetical
 //! output order:
 //!
@@ -12,6 +12,9 @@
 //!   gate uses to calibrate `ct_fn_invert`. Cannot leak by construction.
 //! - `noise_floor_fp_invert` — fix-vs-fix `Fp::invert` noise-floor probe
 //!   (v0.19 W1); same construction over `Fp`, calibrates `ct_fp_invert`.
+//! - `noise_twin_class_split` — two-distinct-input, fixed-work reference for
+//!   class-split runner-noise telemetry (2026-08-10). Measurement presence is
+//!   required; its `|tau|` is deliberately non-blocking pending calibration.
 //! - `ct_hmac_sm3`          — HMAC-SM3, class-split by key (W3).
 //! - `ct_mul_g`             — fixed-base scalar multiplication `k·G`.
 //! - `ct_mul_var`           — variable-base scalar multiplication `k·P`.
@@ -455,6 +458,33 @@ fn noise_floor_fp_invert(runner: &mut CtRunner, rng: &mut BenchRng) {
             Class::Right
         };
         runner.run_one(class, || z.invert());
+    }
+}
+
+/// Two-distinct-input, fixed-work noise reference for class-split telemetry.
+///
+/// Unlike the v0.19 fix-vs-fix probes, the two dudect classes select distinct
+/// values at distinct addresses. The timed body has no data-dependent branch,
+/// lookup, allocation, or loop bound. This first calibration target is
+/// telemetry only; it is not claimed to be duration-matched to field invert.
+fn noise_twin_class_split(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let left = [0x36u8; 32];
+    let right = [0xc9u8; 32];
+    for _ in 0..sample_count() {
+        let (class, input) = if rng.random::<bool>() {
+            (Class::Left, &left)
+        } else {
+            (Class::Right, &right)
+        };
+        runner.run_one(class, || {
+            let mut acc = 0x9e37_79b9_7f4a_7c15u64;
+            for _ in 0..8 {
+                for &byte in input {
+                    acc = acc.rotate_left(7) ^ u64::from(std::hint::black_box(byte));
+                }
+            }
+            std::hint::black_box(acc)
+        });
     }
 }
 
@@ -1219,6 +1249,14 @@ fn main() {
             name: BenchName("noise_floor_fp_invert"),
             seed: None,
             benchfn: noise_floor_fp_invert,
+        },
+        // 2026-08-10 — class-split-aware runner-noise candidate. Unlike the
+        // same-input probes above, the two classes choose distinct values and
+        // addresses through one fixed-work body. Required telemetry only.
+        BenchMetadata {
+            name: BenchName("noise_twin_class_split"),
+            seed: None,
+            benchfn: noise_twin_class_split,
         },
         BenchMetadata {
             name: BenchName("ct_sm4_key_schedule"),

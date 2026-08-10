@@ -356,10 +356,14 @@ jobs:
               # path). Codex+Grok-reviewed. docs/v0.5-dudect-recalibration.md.
               "ct_hmac_sm3": 0.55,
           }
+          # 2026-08-10 — value is non-blocking pending hosted-runner
+          # calibration, but presence in every run is required.
+          required_telemetry = ["noise_twin_class_split"]
 
           fail = False
-          # Completeness: every REQUIRED + SENTINEL target must be measured in
-          # EVERY run. A target missing from one numbered log (e.g. a malformed
+          # Completeness: every REQUIRED + SENTINEL target and the required
+          # telemetry reference must be measured in EVERY run. A target
+          # missing from one numbered log (e.g. a malformed
           # line the regex skipped) must FAIL — never silently gate the
           # median/min over a reduced (< n_runs) sample set. v1.0.x (2026-06-07)
           # added the sentinel dict here: the sentinel loop below prints-without-
@@ -367,7 +371,8 @@ jobs:
           # target (e.g. ct_sign_k_class) that went missing/renamed would pass
           # green — completeness is what guards that. (Pure telemetry — the
           # noise_floor_* probes — is intentionally NOT completeness-gated.)
-          for name in list(required_high) + list(required_low) + list(gross_regression_sentinel):
+          for name in (list(required_high) + list(required_low)
+                       + list(gross_regression_sentinel) + required_telemetry):
               got = len(findings.get(name, []))
               if got != n_runs:
                   print(f"FAIL: {name} measured {got}/{n_runs} runs (incomplete) — expected all {n_runs}")
@@ -435,6 +440,8 @@ jobs:
                   fail = True
               else:
                   print(f"SENTINEL: {name} median|tau|={v:.4f} (non-blocking; gross-regression gate at {upper_bound}) ({telem(name)})")
+          for name in required_telemetry:
+              print(f"NOISE-TWIN: {name} {telem(name)} (required measurement; non-blocking value)")
           sys.exit(1 if fail else 0)
           PY
 
