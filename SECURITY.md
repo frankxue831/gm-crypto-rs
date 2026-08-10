@@ -290,8 +290,10 @@ primitive `ct_hmac_sm3` measures (the v0.3 Q7.6 streaming-HMAC precedent).
 telemetry/sentinel `@0.55` posture (`ubuntu-24.04` two-input image-noise; see
 its target entry above), so the key schedule's HMAC primitive no longer has a
 *direct* gate — its residual coverage is the diluted `ct_pkcs8_decrypt` PBKDF2
-path, and a future class-split-aware noise-twin is the re-promotion path. The
-SM4-GCM record deprotect adds no secret-dependent branch over `mode_gcm`'s
+path. The class-split-aware noise twin now exists as required non-blocking
+telemetry, but it cannot support re-promotion until multi-night/multi-image
+calibration and injected-leak controls pass. The SM4-GCM record deprotect adds
+no secret-dependent branch over `mode_gcm`'s
 already-gated constant-time tag compare (salt/AAD shaping is on public
 data). Only the SM4-CBC Lucky13 path earns the new `ct_tlcp_cbc_deprotect`
 target above.

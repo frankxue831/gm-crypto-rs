@@ -393,7 +393,8 @@ jobs:
           # everywhere; ct_fn_invert / ct_fp_invert remain in `telemetry_only`
           # above (PR) and on the @0.55 sentinel (nightly). The probes + ratio are
           # printed as a longitudinal diagnostic that documents the class-split
-          # noise for a future v0.20 class-split-aware reference. The probes are
+          # noise alongside the current required `noise_twin_class_split`
+          # reference. The probes are
           # non-gating (a missing one is reported, not failed). See
           # docs/v0.5-dudect-recalibration.md (v0.19 resolution).
           REL_K = 4.0
