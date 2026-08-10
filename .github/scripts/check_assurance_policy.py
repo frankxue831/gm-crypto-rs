@@ -105,13 +105,21 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     require("C example gate fails an empty glob", "${#examples[@]} == 0" in c_script)
 
     trigger = indented_block(gitleaks, "on:", 0)
+    push_trigger = indented_block(trigger, "push:", 2)
+    pull_request_trigger = indented_block(trigger, "pull_request:", 2)
     scan = job(gitleaks, "scan")
     checkout = step_uses(scan, "actions/checkout@v4")
     install = step_named(scan, "Install gitleaks")
     scan_step = step_named(scan, "Scan committed history")
     require("dedicated gitleaks workflow exists", bool(gitleaks))
-    require("gitleaks workflow scans main pushes", "push:" in trigger and "branches: [main]" in trigger)
-    require("gitleaks workflow scans main pull requests", "pull_request:" in trigger)
+    require(
+        "gitleaks workflow scans main pushes",
+        scalar(push_trigger, "branches", 4) == "[main]",
+    )
+    require(
+        "gitleaks workflow scans main pull requests",
+        scalar(pull_request_trigger, "branches", 4) == "[main]",
+    )
     require(
         "gitleaks workflow has no path exclusions",
         "paths:" not in trigger and "paths-ignore:" not in trigger,
@@ -239,6 +247,24 @@ def mutation_self_test() -> list[str]:
         "shallow gitleaks checkout",
         "gitleaks checkout has full history",
         gitleaks=GITLEAKS.replace("          fetch-depth: 0", "          fetch-depth: 1", 1),
+    )
+    must_reject(
+        "gitleaks push moved off main",
+        "gitleaks workflow scans main pushes",
+        gitleaks=GITLEAKS.replace(
+            "  push:\n    branches: [main]",
+            "  push:\n    branches: [develop]",
+            1,
+        ),
+    )
+    must_reject(
+        "gitleaks pull request moved off main",
+        "gitleaks workflow scans main pull requests",
+        gitleaks=GITLEAKS.replace(
+            "  pull_request:\n    branches: [main]",
+            "  pull_request:\n    branches: [develop]",
+            1,
+        ),
     )
     must_reject(
         "tolerated interoperability suite",
