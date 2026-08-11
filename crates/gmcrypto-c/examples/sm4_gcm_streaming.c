@@ -17,9 +17,8 @@
  *      ../../../target/release/libgmcrypto_c.a -o sm4_gcm_streaming-static
  *   ./sm4_gcm_streaming-static
  *
- * Per v0.4 W4 / Q4.14, this example is documentation-only; CI does not
- * build C examples. Run locally to confirm the streaming AEAD FFI works
- * end-to-end from C.
+ * CI syntax-checks this example. Link and run it locally to confirm the
+ * streaming SM4-GCM AEAD FFI works end-to-end from C.
  *
  * Asymmetry to note: the ENCRYPTOR is output-streaming (each _update
  * returns the ciphertext for that chunk); the DECRYPTOR is

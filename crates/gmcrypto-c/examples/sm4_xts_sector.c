@@ -17,8 +17,8 @@
  *      ../../../target/release/libgmcrypto_c.a -o sm4_xts_sector-static
  *   ./sm4_xts_sector-static
  *
- * Per v0.4 W4 / Q4.14, this example is documentation-only; CI does not
- * build C examples. Run locally to confirm the SM4-XTS FFI works end-to-end.
+ * CI syntax-checks this example. Link and run it locally to confirm the
+ * SM4-XTS sector FFI works end-to-end from C.
  *
  * Notes:
  *   - The key is 32 bytes = Key1 || Key2 (two distinct 128-bit keys;
