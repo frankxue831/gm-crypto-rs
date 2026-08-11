@@ -481,13 +481,13 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "nightly dudect": job(dudect_nightly, "full"),
     }
     reviewed_job_fingerprints = {
-        "build": "076a69e992bdd5a21ba6af25d078b2594daa1fadaa59961662309ca4eaaf9b86",
-        "cabi": "9ad9b0ea094f6890e65f302b01a5e06b17469f19bf07f87739c305e433ee4f6f",
-        "GmSSL": "4020f6c7438bcfac65ebfe007b1256de93fae9d3f5f78c1c0504496d59e904fd",
-        "cargo-deny": "94fada03aa7f3fa3a3e879ac2d758beb39c84dd93109e9ca74dce9d768ae75b0",
-        "gitleaks scan": "f9af8e35f7762194f2baa30ab69d235efa5dfd81ff9e1bb66cf805e1645357c9",
-        "PR dudect": "ab6b3c2030d48dca8dc828a697713ccf054425eb7af6dfbdf34bc6cc5897142c",
-        "nightly dudect": "4e20a8a6b198f21186a30b3faa1c97f069f323cf4fd8e8a969c1598529763680",
+        "build": "85462b6ff58a6497e0360a5cf7c057097818b9fb6c2aeb761de9248425ecc956",
+        "cabi": "4ff7eccfa333d3858ef97ceb3e517c043c44a962e7333976d21896cf1b404c31",
+        "GmSSL": "796eafa03285b30a7b70389b5c4ddab6f064fae0339f3b898de0210a4601ab79",
+        "cargo-deny": "efc9a2787bc8b48022d35d3419af0e9987c6a11c3a5c44959fc93b1d33be9174",
+        "gitleaks scan": "c7889df5e874f1a5cee871c24cd49cc539d845c0627861e49b1a9e6335d1c15f",
+        "PR dudect": "529beff9f3cd6bc507a64c121f142f1cbcc67b3874117ff972cd2a3fdadaac80",
+        "nightly dudect": "a4ae0fa1c1a36c943d7917703b9f29022bbc34e6e1af8e2021957d4a422a4422",
     }
     for label, expected_fingerprint in reviewed_job_fingerprints.items():
         require(
@@ -531,8 +531,8 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
             f"{label} checkout step is exact",
             exact_action_step(
                 protected_job,
-                "actions/checkout@v4",
-                ["      - uses: actions/checkout@v4"],
+                "actions/checkout@v7",
+                ["      - uses: actions/checkout@v7"],
             ),
         )
 
@@ -563,7 +563,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "build step prefix is exact",
         step_headers(build)[:2]
         == (
-            "- uses: actions/checkout@v4",
+            "- uses: actions/checkout@v7",
             "- name: Verify assurance workflow policy",
         ),
     )
@@ -580,7 +580,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "cabi step sequence is exact",
         step_headers(cabi)
         == (
-            "- uses: actions/checkout@v4",
+            "- uses: actions/checkout@v7",
             "- uses: dtolnay/rust-toolchain@stable",
             "- uses: Swatinem/rust-cache@v2",
             "- name: cargo build -p gmcrypto-c --release",
@@ -673,7 +673,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         mapping_keys(scan, 4)
         == ("name", "runs-on", "timeout-minutes", "steps"),
     )
-    checkout = step_uses(scan, "actions/checkout@v4")
+    checkout = step_uses(scan, "actions/checkout@v7")
     install = step_named(scan, "Install gitleaks")
     scan_step = step_named(scan, "Scan committed history")
     install_script = active_run(install)
@@ -732,7 +732,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         and key_count(checkout, "env", 8) == 0
     )
     checkout_exact = active_source_lines(checkout) == [
-        "      - uses: actions/checkout@v4",
+        "      - uses: actions/checkout@v7",
         "        with:",
         "          fetch-depth: 0",
     ]
@@ -743,7 +743,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "gitleaks step sequence is exact",
         step_headers(scan)
         == (
-            "- uses: actions/checkout@v4",
+            "- uses: actions/checkout@v7",
             "- name: Install gitleaks",
             "- name: Scan committed history",
         ),
@@ -819,7 +819,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "cargo-deny step sequence is exact",
         step_headers(deny)
         == (
-            "- uses: actions/checkout@v4",
+            "- uses: actions/checkout@v7",
             "- uses: dtolnay/rust-toolchain@stable",
             "- name: Install cargo-deny",
             "- name: Generate lockfile",
@@ -926,7 +926,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "GmSSL step sequence is exact",
         step_headers(interop)
         == (
-            "- uses: actions/checkout@v4",
+            "- uses: actions/checkout@v7",
             "- uses: dtolnay/rust-toolchain@stable",
             "- name: Cache cargo",
             "- name: Cache GmSSL install prefix",
@@ -1305,7 +1305,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         config = dudect_job_config[workflow_name]
         workflow_source = dudect_sources[workflow_name]
         producer = producer_steps[workflow_name]
-        checkout_step = step_uses(dudect_job, "actions/checkout@v4")
+        checkout_step = step_uses(dudect_job, "actions/checkout@v7")
         toolchain_step = step_uses(dudect_job, "dtolnay/rust-toolchain@1.95.0")
         rust_cache_step = step_uses(dudect_job, "Swatinem/rust-cache@v2")
         capture_step = step_named(
@@ -1316,7 +1316,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         producer_env = indented_block(producer, "env:", 8)
         matrix_block = indented_block(dudect_job, "matrix:", 6)
         expected_headers = (
-            "- uses: actions/checkout@v4",
+            "- uses: actions/checkout@v7",
             "- uses: dtolnay/rust-toolchain@1.95.0",
             "- uses: Swatinem/rust-cache@v2",
             "- name: Capture runner environment (for noise-floor correlation)",
@@ -1363,7 +1363,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         require(
             f"{workflow_name} dudect checkout step is exact",
             active_source_lines(checkout_step)
-            == ["      - uses: actions/checkout@v4"],
+            == ["      - uses: actions/checkout@v7"],
         )
         require(
             f"{workflow_name} dudect rust toolchain metadata is exact",
@@ -3266,7 +3266,7 @@ def mutation_self_test() -> list[str]:
         gitleaks=replace_once(
             GITLEAKS,
             "      - name: Install gitleaks\n",
-            "      - uses: actions/checkout@v4\n      - name: Install gitleaks\n",
+            "      - uses: actions/checkout@v7\n      - name: Install gitleaks\n",
             "gitleaks second checkout",
         ),
     )
@@ -3276,7 +3276,7 @@ def mutation_self_test() -> list[str]:
         dudect_pr=replace_once(
             DUDECT_PR,
             "      - name: Parse and gate\n",
-            "      - uses: actions/checkout@v4\n      - name: Parse and gate\n",
+            "      - uses: actions/checkout@v7\n      - name: Parse and gate\n",
             "PR second checkout",
         ),
     )
@@ -3287,7 +3287,7 @@ def mutation_self_test() -> list[str]:
             CI,
             "interop-gmssl",
             "      - uses: dtolnay/rust-toolchain@stable\n",
-            "      - uses: actions/checkout@v4\n"
+            "      - uses: actions/checkout@v7\n"
             "      - uses: dtolnay/rust-toolchain@stable\n",
             "interop second checkout",
         ),
@@ -3299,7 +3299,7 @@ def mutation_self_test() -> list[str]:
             CI,
             "cabi",
             "      - uses: dtolnay/rust-toolchain@stable\n",
-            "      - uses: actions/checkout@v4\n"
+            "      - uses: actions/checkout@v7\n"
             "      - uses: dtolnay/rust-toolchain@stable\n",
             "cabi second checkout",
         ),
@@ -3310,9 +3310,9 @@ def mutation_self_test() -> list[str]:
         ci=replace_in_job(
             CI,
             "build",
-            "      - uses: actions/checkout@v4\n",
+            "      - uses: actions/checkout@v7\n",
             "      - name: Tamper environment\n        run: 'true'\n"
-            "      - uses: actions/checkout@v4\n",
+            "      - uses: actions/checkout@v7\n",
             "build first step",
         ),
     )
@@ -3462,7 +3462,7 @@ def mutation_self_test() -> list[str]:
         gitleaks=replace_in_uses(
             GITLEAKS,
             "scan",
-            "actions/checkout@v4",
+            "actions/checkout@v7",
             "          fetch-depth: 0",
             "          fetch-depth: 0\n          ref: refs/heads/unreviewed",
             "gitleaks checkout ref",
@@ -3474,7 +3474,7 @@ def mutation_self_test() -> list[str]:
         gitleaks=replace_in_uses(
             GITLEAKS,
             "scan",
-            "actions/checkout@v4",
+            "actions/checkout@v7",
             "          fetch-depth: 0",
             "          fetch-depth: 0\n          persist-credentials: false",
             "gitleaks checkout extra input",
@@ -3486,9 +3486,9 @@ def mutation_self_test() -> list[str]:
         gitleaks=replace_in_uses(
             GITLEAKS,
             "scan",
-            "actions/checkout@v4",
-            "      - uses: actions/checkout@v4\n",
-            "      - uses: actions/checkout@v4\n"
+            "actions/checkout@v7",
+            "      - uses: actions/checkout@v7\n",
+            "      - uses: actions/checkout@v7\n"
             '        "uses" : attacker/checkout@v1\n',
             "gitleaks quoted uses",
         ),
@@ -3499,9 +3499,9 @@ def mutation_self_test() -> list[str]:
         gitleaks=replace_in_uses(
             GITLEAKS,
             "scan",
-            "actions/checkout@v4",
-            "      - uses: actions/checkout@v4\n",
-            "      - uses: actions/checkout@v4\n"
+            "actions/checkout@v7",
+            "      - uses: actions/checkout@v7\n",
+            "      - uses: actions/checkout@v7\n"
             '        "u\\u0073es" : attacker/checkout@v1\n',
             "gitleaks Unicode uses",
         ),
@@ -3517,9 +3517,9 @@ def mutation_self_test() -> list[str]:
                 source_key: replace_in_uses(
                     source,
                     job_name,
-                    "actions/checkout@v4",
-                    "      - uses: actions/checkout@v4\n",
-                    "      - uses: actions/checkout@v4\n"
+                    "actions/checkout@v7",
+                    "      - uses: actions/checkout@v7\n",
+                    "      - uses: actions/checkout@v7\n"
                     "        with:\n"
                     "          ref: refs/heads/unreviewed\n",
                     f"{workflow_name} checkout ref",
@@ -3643,11 +3643,11 @@ def mutation_self_test() -> list[str]:
         ci=replace_in_job(
             CI,
             "build",
-            "      - uses: actions/checkout@v4\n",
+            "      - uses: actions/checkout@v7\n",
             "      -\n"
             "        name: Hidden environment tamper\n"
             "        run: 'true'\n"
-            "      - uses: actions/checkout@v4\n",
+            "      - uses: actions/checkout@v7\n",
             "build dash-alone step",
         ),
     )
@@ -3751,9 +3751,9 @@ def mutation_self_test() -> list[str]:
             ci=replace_in_uses(
                 CI,
                 job_name,
-                "actions/checkout@v4",
-                "      - uses: actions/checkout@v4",
-                "      - uses: actions/checkout@v4\n"
+                "actions/checkout@v7",
+                "      - uses: actions/checkout@v7",
+                "      - uses: actions/checkout@v7\n"
                 "        with:\n"
                 "          ref: main",
                 f"{label} field",
@@ -3798,9 +3798,9 @@ def mutation_self_test() -> list[str]:
             ci=replace_in_uses(
                 CI,
                 job_name,
-                "actions/checkout@v4",
-                "      - uses: actions/checkout@v4",
-                "      - uses: actions/checkout@v4\n" + injected.rstrip(),
+                "actions/checkout@v7",
+                "      - uses: actions/checkout@v7",
+                "      - uses: actions/checkout@v7\n" + injected.rstrip(),
                 f"{label} field",
             ),
         )
@@ -4147,7 +4147,7 @@ def mutation_self_test() -> list[str]:
             CI,
             "interop-gmssl",
             "Cache GmSSL install prefix",
-            "        uses: actions/cache@v4\n",
+            "        uses: actions/cache@v6\n",
             "        uses: attacker/cache@v1\n",
             "GmSSL oracle cache action",
         ),
@@ -4195,7 +4195,7 @@ def mutation_self_test() -> list[str]:
             DUDECT_PR,
             "smoke",
             "Upload raw log",
-            "        uses: actions/upload-artifact@v4\n",
+            "        uses: actions/upload-artifact@v7\n",
             "        uses: attacker/upload-artifact@v1\n",
             "PR dudect upload action",
         ),
