@@ -45,17 +45,28 @@ skipped suite is visibly classified as non-passing infrastructure telemetry.
 
 The policy verifier will require the repair-first cache-health checks, the
 transparent job name, and the unconditional final execution-state report. It
-will also reject `noise_twin_class_split` as a mapping key anywhere in either
-dudect workflow; the target may appear only in `required_telemetry` and output
-formatting, never in `required_low`, `required_high`, or
-`gross_regression_sentinel`.
+also binds each exact dudect `Parse and gate` step to an immutable one-element
+`required_telemetry` tuple. Immediately before the first blocking gate, every
+gate map is frozen into an immutable item tuple, the combined blocking items
+are checked for telemetry overlap, and each gate loop must consume only its
+validated snapshot. The verifier fixes the ordered set of active
+`required_telemetry` uses and requires the output loop to contain only the
+non-blocking `NOISE-TWIN:` print.
+
+The verifier also checks the active C-example, gitleaks-checksum, and GmSSL
+suite command structures at their named steps: strict shell mode, exact
+blocking command pipelines, required environment wiring and failure guards,
+and no local or step-level tolerance.
 
 Deliberate mutation self-tests will prove that the verifier rejects:
 
 - promoting the noise twin into a PR or nightly gate map;
+- gating its measured value directly, through an effective union, or after
+  clearing the telemetry membership before the overlap check;
 - removing `required_telemetry` from either workflow;
 - removing the `NOISE-TWIN:` output from either workflow;
 - deregistering `BenchName("noise_twin_class_split")`;
+- replacing or tolerating the GmSSL, gitleaks checksum, or C compile command;
 - weakening cache repair or unconditional interop status reporting.
 
 ## C example documentation

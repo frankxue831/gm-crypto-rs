@@ -359,7 +359,7 @@ jobs:
           }
           # 2026-08-10 — value is non-blocking pending hosted-runner
           # calibration, but presence in every run is required.
-          required_telemetry = ["noise_twin_class_split"]
+          required_telemetry = ("noise_twin_class_split",)
 
           fail = False
           # Completeness: every REQUIRED + SENTINEL target and the required
@@ -372,26 +372,31 @@ jobs:
           # target (e.g. ct_sign_k_class) that went missing/renamed would pass
           # green — completeness is what guards that. (Pure telemetry — the
           # noise_floor_* probes — is intentionally NOT completeness-gated.)
-          for name in (list(required_high) + list(required_low)
-                       + list(gross_regression_sentinel) + required_telemetry):
+          for name in (*required_high, *required_low, *gross_regression_sentinel, *required_telemetry):
               got = len(findings.get(name, []))
               if got != n_runs:
                   print(f"FAIL: {name} measured {got}/{n_runs} runs (incomplete) — expected all {n_runs}")
                   fail = True
+          required_high_items = tuple(required_high.items())
+          required_low_items = tuple(required_low.items())
+          gross_regression_sentinel_items = tuple(gross_regression_sentinel.items())
+          blocking_items = required_high_items + required_low_items + gross_regression_sentinel_items
+          if any(name in required_telemetry for name, _ in blocking_items):
+              raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")
           # required_high: gate on MIN (must fire every run).
-          for name, lower_bound in required_high.items():
+          for name, lower_bound in required_high_items:
               v = mn(name)
               if v is None: print(f"FAIL: {name} not measured"); fail = True
               elif v <= lower_bound:
                   print(f"FAIL: {name} min|tau|={v:.4f} <= {lower_bound} — harness broken ({telem(name)})"); fail = True
               else: print(f"OK:   {name} min|tau|={v:.4f} (> {lower_bound}) ({telem(name)})")
           # required_low: gate on MEDIAN (robust to single-run noise).
-          for name, upper_bound in required_low.items():
+          for name, upper_bound in required_low_items:
               v = med(name)
               if v is None: print(f"FAIL: {name} not measured"); fail = True
               elif v > upper_bound:
                   print(f"FAIL: {name} median|tau|={v:.4f} > {upper_bound} — timing leak ({telem(name)})"); fail = True
-              else: print(f"OK:   {name} median|tau|={v:.4f} (< {upper_bound}) ({telem(name)})")
+              else: print(f"OK:   {name} median|tau|={v:.4f} (<= {upper_bound}) ({telem(name)})")
 
           # v0.19 (Q19.1) — self-calibrating RELATIVE gate for the two direct-
           # invert diagnostics, gated against a MATCHED-SENSITIVITY fix-vs-fix
@@ -432,7 +437,7 @@ jobs:
           # values that would indicate a real cryptographic leak rather than
           # runner-image noise. Prefix `SENTINEL:` so log readers can
           # distinguish from the primary gating lines above.
-          for name, upper_bound in gross_regression_sentinel.items():
+          for name, upper_bound in gross_regression_sentinel_items:
               v = med(name)
               if v is None:
                   print(f"SENTINEL: {name} not measured")
@@ -443,8 +448,6 @@ jobs:
                   print(f"SENTINEL: {name} median|tau|={v:.4f} (non-blocking; gross-regression gate at {upper_bound}) ({telem(name)})")
           for name in required_telemetry:
               print(f"NOISE-TWIN: {name} {telem(name)} (required measurement; non-blocking value)")
-          if any(name in gate for gate in (required_high, required_low, gross_regression_sentinel) for name in required_telemetry):
-              raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")
           sys.exit(1 if fail else 0)
           PY
 

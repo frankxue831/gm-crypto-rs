@@ -77,6 +77,46 @@ def active_run(step: str) -> str:
     return ""
 
 
+def active_source_lines(block: str) -> list[str]:
+    """Return non-comment source lines while preserving indentation and order."""
+    active: list[str] = []
+    for line in block.splitlines():
+        source = line.split("#", 1)[0].rstrip()
+        if source.strip():
+            active.append(source)
+    return active
+
+
+def contains_line_sequence(lines: list[str], expected: tuple[str, ...]) -> bool:
+    """Return whether exact active lines occur contiguously in order."""
+    width = len(expected)
+    return any(tuple(lines[index : index + width]) == expected for index in range(len(lines) - width + 1))
+
+
+def active_loop_body(block: str, header: str) -> list[str]:
+    """Return active lines in the one exact Python loop headed by ``header``."""
+    lines = block.splitlines()
+    matches = [index for index, line in enumerate(lines) if line.rstrip() == header]
+    if len(matches) != 1:
+        return []
+    start = matches[0]
+    base_indent = len(header) - len(header.lstrip())
+    body: list[str] = []
+    for line in lines[start + 1 :]:
+        source = line.split("#", 1)[0].rstrip()
+        if not source.strip():
+            continue
+        if len(source) - len(source.lstrip()) <= base_indent:
+            break
+        body.append(source)
+    return body
+
+
+def strict_shell(script: str) -> bool:
+    """Require fail-fast shell execution without local error tolerance."""
+    return script.startswith("set -euo pipefail\n") and "||" not in script and "set +e" not in script
+
+
 def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: str) -> list[str]:
     failures: list[str] = []
 
@@ -97,12 +137,34 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
 
     c_examples = step_named(cabi, "Compile shipped C examples")
     c_script = active_run(c_examples)
+    c_compile_command = (
+        "cc -std=c11 -Wall -Wextra -Werror -fsyntax-only \\\n"
+        '-I crates/gmcrypto-c/include "$example"'
+    )
+    c_compile_loop = (
+        'for example in "${examples[@]}"; do\n'
+        'echo "checking $example"\n'
+        f"{c_compile_command}\n"
+        "done"
+    )
+    c_empty_glob_guard = (
+        "if (( ${#examples[@]} == 0 )); then\n"
+        'echo "::error::no shipped C examples found"\n'
+        "exit 1\n"
+        "fi"
+    )
     require("C examples are compiled by the cabi job", bool(c_examples))
     require(
         "C example gate uses strict syntax flags",
         "-std=c11 -Wall -Wextra -Werror -fsyntax-only" in c_script,
     )
-    require("C example gate fails an empty glob", "${#examples[@]} == 0" in c_script)
+    require("C example gate fails an empty glob", c_empty_glob_guard in c_script)
+    require(
+        "C example compile command is structurally blocking",
+        strict_shell(c_script)
+        and c_compile_loop in c_script
+        and scalar(c_examples, "continue-on-error", 8) is None,
+    )
 
     trigger = indented_block(gitleaks, "on:", 0)
     push_trigger = indented_block(trigger, "push:", 2)
@@ -112,6 +174,13 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     install = step_named(scan, "Install gitleaks")
     scan_step = step_named(scan, "Scan committed history")
     install_script = active_run(install)
+    checksum_command = 'echo "$GITLEAKS_SHA256  $archive" | sha256sum --check --status'
+    extraction_command = 'tar -xzf "$archive" -C "$install_dir" gitleaks'
+    verified_extraction = (
+        f"{checksum_command}\n"
+        'mkdir -p "$install_dir"\n'
+        f"{extraction_command}"
+    )
     require("dedicated gitleaks workflow exists", bool(gitleaks))
     require(
         "gitleaks workflow scans main pushes",
@@ -138,7 +207,13 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "gitleaks verifies the pinned release checksum",
         "GITLEAKS_SHA256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
         in install_script
-        and "sha256sum --check --status" in install_script,
+        and checksum_command in install_script,
+    )
+    require(
+        "gitleaks checksum command is structurally blocking",
+        strict_shell(install_script)
+        and verified_extraction in install_script
+        and scalar(install, "continue-on-error", 8) is None,
     )
     require(
         "gitleaks scans committed history",
@@ -165,7 +240,9 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     version = step_named(interop, "Assert oracle version (drift guard)")
     suite = step_named(interop, "gmssl interop suite (13 tests)")
     report = step_named(interop, "Report GmSSL interoperability status")
+    suite_env = indented_block(suite, "env:", 8)
     provision_script = active_run(provision)
+    suite_script = active_run(suite)
     report_script = active_run(report)
     require(
         "GmSSL check name discloses non-blocking infrastructure",
@@ -192,6 +269,35 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "interop runs only with a ready pinned oracle",
         scalar(suite, "if", 8)
         == "steps.gmssl-provision.outcome == 'success' && steps.gmssl-version.outcome == 'success'",
+    )
+    suite_command = (
+        "cargo test -p gmcrypto-core --test interop_gmssl --features sm4-aead \\\n"
+        "-- --nocapture 2>&1 | tee interop.txt"
+    )
+    suite_skip_guard = (
+        "if grep -q 'skipping: GMCRYPTO_GMSSL' interop.txt; then\n"
+        'echo "::error::interop tests SKIPPED - GMCRYPTO_GMSSL did not reach the test process"\n'
+        "exit 1\n"
+        "fi"
+    )
+    suite_census_guard = (
+        "if ! grep -qE '13 passed' interop.txt; then\n"
+        'echo "::error::expected 13 interop tests to pass - census drifted"\n'
+        "exit 1\n"
+        "fi"
+    )
+    suite_execution = f"{suite_command}\n{suite_skip_guard}\n{suite_census_guard}"
+    require(
+        "GmSSL interoperability suite enables oracle execution",
+        scalar(suite_env, "GMCRYPTO_GMSSL", 10) == "'1'",
+    )
+    require(
+        "GmSSL interoperability command is structurally blocking",
+        strict_shell(suite_script) and suite_execution in suite_script,
+    )
+    require(
+        "GmSSL interoperability suite keeps active skip and census guards",
+        suite_skip_guard in suite_script and suite_census_guard in suite_script,
     )
     tag_validation = (
         '          if [[ ! "$GMSSL_TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then\n'
@@ -273,27 +379,6 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "let input = std::hint::black_box(input);" in timing,
     )
     noise_twin_reference = re.compile(r"\bnoise_twin_class_split\b")
-    required_telemetry_assignment = re.compile(
-        r"^\s*required_telemetry\s*=\s*\[\s*[\"']noise_twin_class_split[\"']\s*\]\s*$",
-        re.M,
-    )
-    runtime_guard = {
-        "PR": re.compile(
-            r"^ {10}if any\(name in gate for gate in \(required_high, required_low\) "
-            r"for name in required_telemetry\):$\n"
-            r'^ {14}raise SystemExit\("FAIL: required telemetry promoted to a blocking dudect gate"\)$\n'
-            r"^ {10}sys\.exit\(1 if fail else 0\)$",
-            re.M,
-        ),
-        "nightly": re.compile(
-            r"^ {10}if any\(name in gate for gate in \(required_high, required_low, "
-            r"gross_regression_sentinel\) for name in required_telemetry\):$\n"
-            r'^ {14}raise SystemExit\("FAIL: required telemetry promoted to a blocking dudect gate"\)$\n'
-            r"^ {10}sys\.exit\(1 if fail else 0\)$",
-            re.M,
-        ),
-    }
-    noise_twin_output = re.compile(r"^\s*print\(f[\"']NOISE-TWIN:", re.M)
     noise_twin_registration = re.compile(
         r"^\s*name:\s*BenchName\([\"']noise_twin_class_split[\"']\),\s*$",
         re.M,
@@ -303,28 +388,96 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "PR": step_named(job(dudect_pr, "smoke"), "Parse and gate"),
         "nightly": step_named(job(dudect_nightly, "full"), "Parse and gate"),
     }
-    for workflow_name, workflow in (("PR", dudect_pr), ("nightly", dudect_nightly)):
-        active_noise_twin_references = []
-        for line in workflow.splitlines():
-            active_line = line.split("#", 1)[0].rstrip()
-            if noise_twin_reference.search(active_line):
-                active_noise_twin_references.append(active_line)
+    assignment = '          required_telemetry = ("noise_twin_class_split",)'
+    dudect_contract = {
+        "PR": {
+            "uses": (
+                'required_telemetry = ("noise_twin_class_split",)',
+                "for name in (*required_high, *required_low, *required_telemetry):",
+                "if any(name in required_telemetry for name, _ in blocking_items):",
+                "for name in required_telemetry:",
+            ),
+            "snapshot": (
+                "          required_high_items = tuple(required_high.items())",
+                "          required_low_items = tuple(required_low.items())",
+                "          blocking_items = required_high_items + required_low_items",
+                "          if any(name in required_telemetry for name, _ in blocking_items):",
+                '              raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")',
+                "          for name, lower_bound in required_high_items:",
+            ),
+            "gate_loops": (
+                "          for name, lower_bound in required_high_items:",
+                "          for name, upper_bound in required_low_items:",
+            ),
+        },
+        "nightly": {
+            "uses": (
+                'required_telemetry = ("noise_twin_class_split",)',
+                "for name in (*required_high, *required_low, *gross_regression_sentinel, *required_telemetry):",
+                "if any(name in required_telemetry for name, _ in blocking_items):",
+                "for name in required_telemetry:",
+            ),
+            "snapshot": (
+                "          required_high_items = tuple(required_high.items())",
+                "          required_low_items = tuple(required_low.items())",
+                "          gross_regression_sentinel_items = tuple(gross_regression_sentinel.items())",
+                "          blocking_items = required_high_items + required_low_items + gross_regression_sentinel_items",
+                "          if any(name in required_telemetry for name, _ in blocking_items):",
+                '              raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")',
+                "          for name, lower_bound in required_high_items:",
+            ),
+            "gate_loops": (
+                "          for name, lower_bound in required_high_items:",
+                "          for name, upper_bound in required_low_items:",
+                "          for name, upper_bound in gross_regression_sentinel_items:",
+            ),
+        },
+    }
+    gate_loop = re.compile(r"^ {10}for name, (?:lower_bound|upper_bound) in .+:$")
+    output_header = "          for name in required_telemetry:"
+    output_body = [
+        '              print(f"NOISE-TWIN: {name} {telem(name)} (required measurement; non-blocking value)")'
+    ]
+    for workflow_name, parse_step in parse_steps.items():
+        contract = dudect_contract[workflow_name]
+        active_lines = active_source_lines(parse_step)
+        active_noise_twin_references = [
+            line for line in active_lines if noise_twin_reference.search(line)
+        ]
+        telemetry_uses = tuple(
+            line.strip() for line in active_lines if re.search(r"\brequired_telemetry\b", line)
+        )
+        actual_gate_loops = tuple(line for line in active_lines if gate_loop.fullmatch(line))
+        exact_consumption_boundary = contains_line_sequence(active_lines, contract["snapshot"])
+        exact_uses = telemetry_uses == contract["uses"]
         require(
             f"{workflow_name} dudect requires noise-twin telemetry",
-            required_telemetry_assignment.search(workflow) is not None,
+            active_lines.count(assignment) == 1,
         )
         require(
             f"{workflow_name} dudect labels noise-twin output",
-            noise_twin_output.search(workflow) is not None,
+            active_loop_body(parse_step, output_header) == output_body,
         )
         require(
             f"{workflow_name} dudect keeps noise-twin telemetry out of gate maps",
             len(active_noise_twin_references) == 1
-            and required_telemetry_assignment.fullmatch(active_noise_twin_references[0]) is not None,
+            and active_noise_twin_references[0] == assignment,
+        )
+        require(
+            f"{workflow_name} dudect limits required_telemetry to approved uses",
+            exact_uses,
+        )
+        require(
+            f"{workflow_name} dudect gate loops consume validated snapshots",
+            actual_gate_loops == contract["gate_loops"],
+        )
+        require(
+            f"{workflow_name} dudect required-low gate consumes validated snapshot",
+            "          for name, upper_bound in required_low_items:" in actual_gate_loops,
         )
         require(
             f"{workflow_name} dudect runtime-rejects telemetry gate promotion",
-            runtime_guard[workflow_name].search(parse_steps[workflow_name]) is not None,
+            exact_consumption_boundary and exact_uses,
         )
 
     return failures
@@ -540,7 +693,7 @@ def mutation_self_test() -> list[str]:
         "PR noise-twin telemetry requirement removed",
         "PR dudect requires noise-twin telemetry",
         dudect_pr=DUDECT_PR.replace(
-            '          required_telemetry = ["noise_twin_class_split"]\n',
+            '          required_telemetry = ("noise_twin_class_split",)\n',
             "",
             1,
         ),
@@ -549,7 +702,7 @@ def mutation_self_test() -> list[str]:
         "nightly noise-twin telemetry requirement removed",
         "nightly dudect requires noise-twin telemetry",
         dudect_nightly=DUDECT_NIGHTLY.replace(
-            '          required_telemetry = ["noise_twin_class_split"]\n',
+            '          required_telemetry = ("noise_twin_class_split",)\n',
             "",
             1,
         ),
@@ -645,8 +798,8 @@ def mutation_self_test() -> list[str]:
         "PR noise-twin telemetry requirement commented out",
         "PR dudect requires noise-twin telemetry",
         dudect_pr=DUDECT_PR.replace(
-            '          required_telemetry = ["noise_twin_class_split"]\n',
-            '          # required_telemetry = ["noise_twin_class_split"]\n',
+            '          required_telemetry = ("noise_twin_class_split",)\n',
+            '          # required_telemetry = ("noise_twin_class_split",)\n',
             1,
         ),
     )
@@ -654,8 +807,8 @@ def mutation_self_test() -> list[str]:
         "nightly noise-twin telemetry requirement commented out",
         "nightly dudect requires noise-twin telemetry",
         dudect_nightly=DUDECT_NIGHTLY.replace(
-            '          required_telemetry = ["noise_twin_class_split"]\n',
-            '          # required_telemetry = ["noise_twin_class_split"]\n',
+            '          required_telemetry = ("noise_twin_class_split",)\n',
+            '          # required_telemetry = ("noise_twin_class_split",)\n',
             1,
         ),
     )
@@ -720,8 +873,8 @@ def mutation_self_test() -> list[str]:
         "PR telemetry runtime guard omits required_high",
         "PR dudect runtime-rejects telemetry gate promotion",
         dudect_pr=DUDECT_PR.replace(
-            "for gate in (required_high, required_low) for name in required_telemetry",
-            "for gate in (required_low,) for name in required_telemetry",
+            "          blocking_items = required_high_items + required_low_items\n",
+            "          blocking_items = required_low_items\n",
             1,
         ),
     )
@@ -729,9 +882,8 @@ def mutation_self_test() -> list[str]:
         "nightly telemetry runtime guard omits gross-regression sentinel",
         "nightly dudect runtime-rejects telemetry gate promotion",
         dudect_nightly=DUDECT_NIGHTLY.replace(
-            "for gate in (required_high, required_low, gross_regression_sentinel) "
-            "for name in required_telemetry",
-            "for gate in (required_high, required_low) for name in required_telemetry",
+            "          blocking_items = required_high_items + required_low_items + gross_regression_sentinel_items\n",
+            "          blocking_items = required_high_items + required_low_items\n",
             1,
         ),
     )
@@ -760,6 +912,95 @@ def mutation_self_test() -> list[str]:
             "          sys.exit(1 if fail else 0)\n",
             "          required_low[required_telemetry[0]] = 0.20\n"
             "          sys.exit(1 if fail else 0)\n",
+            1,
+        ),
+    )
+    must_reject(
+        "PR telemetry value used as a direct gate",
+        "PR dudect limits required_telemetry to approved uses",
+        dudect_pr=DUDECT_PR.replace(
+            "          sys.exit(1 if fail else 0)\n",
+            "          for name in required_telemetry:\n"
+            "              if med(name) > 0.20:\n"
+            "                  fail = True\n"
+            "          sys.exit(1 if fail else 0)\n",
+            1,
+        ),
+    )
+    must_reject(
+        "nightly telemetry value used as a direct gate",
+        "nightly dudect limits required_telemetry to approved uses",
+        dudect_nightly=DUDECT_NIGHTLY.replace(
+            "          sys.exit(1 if fail else 0)\n",
+            "          for name in required_telemetry:\n"
+            "              if med(name) > 0.20:\n"
+            "                  fail = True\n"
+            "          sys.exit(1 if fail else 0)\n",
+            1,
+        ),
+    )
+    must_reject(
+        "PR telemetry copied into required_low then cleared before overlap guard",
+        "PR dudect limits required_telemetry to approved uses",
+        dudect_pr=DUDECT_PR.replace(
+            '          required_telemetry = ("noise_twin_class_split",)\n',
+            '          required_telemetry = ["noise_twin_class_split"]\n',
+            1,
+        ).replace(
+            "          fail = False\n",
+            "          required_low.update(dict.fromkeys(required_telemetry, 0.20))\n"
+            "          fail = False\n",
+            1,
+        ).replace(
+            "          if any(name in required_telemetry for name, _ in blocking_items):\n",
+            "          required_telemetry.clear()\n"
+            "          if any(name in required_telemetry for name, _ in blocking_items):\n",
+            1,
+        ),
+    )
+    must_reject(
+        "PR required-low gate consumes effective union with telemetry",
+        "PR dudect required-low gate consumes validated snapshot",
+        dudect_pr=DUDECT_PR.replace(
+            "          for name, upper_bound in required_low_items:\n",
+            "          for name, upper_bound in (required_low | dict.fromkeys(required_telemetry, 0.20)).items():\n",
+            1,
+        ),
+    )
+    must_reject(
+        "GmSSL cargo-test pipeline replaced with true",
+        "GmSSL interoperability command is structurally blocking",
+        ci=CI.replace(
+            "          cargo test -p gmcrypto-core --test interop_gmssl --features sm4-aead \\\n"
+            "            -- --nocapture 2>&1 | tee interop.txt",
+            "          true",
+            1,
+        ),
+    )
+    must_reject(
+        "GmSSL cargo-test pipeline tolerated",
+        "GmSSL interoperability command is structurally blocking",
+        ci=CI.replace(
+            "            -- --nocapture 2>&1 | tee interop.txt",
+            "            -- --nocapture 2>&1 | tee interop.txt || true",
+            1,
+        ),
+    )
+    must_reject(
+        "gitleaks checksum failure tolerated",
+        "gitleaks checksum command is structurally blocking",
+        gitleaks=GITLEAKS.replace(
+            '          echo "$GITLEAKS_SHA256  $archive" | sha256sum --check --status',
+            '          echo "$GITLEAKS_SHA256  $archive" | sha256sum --check --status || true',
+            1,
+        ),
+    )
+    must_reject(
+        "C example compilation failure tolerated",
+        "C example compile command is structurally blocking",
+        ci=CI.replace(
+            '              -I crates/gmcrypto-c/include "$example"',
+            '              -I crates/gmcrypto-c/include "$example" || true',
             1,
         ),
     )

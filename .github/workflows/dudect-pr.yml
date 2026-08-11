@@ -351,7 +351,7 @@ jobs:
           # 2026-08-10 — the class-split noise-twin value is non-blocking until
           # hosted-runner calibration exists, but its PRESENCE is required in
           # every run so a rename/removal cannot silently erase the telemetry.
-          required_telemetry = ["noise_twin_class_split"]
+          required_telemetry = ("noise_twin_class_split",)
 
           fail = False
           # Completeness: every REQUIRED target/telemetry reference must be
@@ -360,25 +360,30 @@ jobs:
           # regex skipped) must FAIL — never silently gate the median/min over
           # a reduced (< n_runs) sample set. WARN above stays for the
           # non-required telemetry targets.
-          for name in list(required_high) + list(required_low) + required_telemetry:
+          for name in (*required_high, *required_low, *required_telemetry):
               got = len(findings.get(name, []))
               if got != n_runs:
                   print(f"FAIL: {name} measured {got}/{n_runs} runs (incomplete) — expected all {n_runs}")
                   fail = True
+          required_high_items = tuple(required_high.items())
+          required_low_items = tuple(required_low.items())
+          blocking_items = required_high_items + required_low_items
+          if any(name in required_telemetry for name, _ in blocking_items):
+              raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")
           # required_high: gate on MIN (must fire every run).
-          for name, lower_bound in required_high.items():
+          for name, lower_bound in required_high_items:
               v = mn(name)
               if v is None: print(f"FAIL: {name} not measured"); fail = True
               elif v <= lower_bound:
                   print(f"FAIL: {name} min|tau|={v:.4f} <= {lower_bound} — harness broken ({telem(name)})"); fail = True
               else: print(f"OK:   {name} min|tau|={v:.4f} (> {lower_bound}) ({telem(name)})")
           # required_low: gate on MEDIAN (robust to single-run noise).
-          for name, upper_bound in required_low.items():
+          for name, upper_bound in required_low_items:
               v = med(name)
               if v is None: print(f"FAIL: {name} not measured"); fail = True
               elif v > upper_bound:
                   print(f"FAIL: {name} median|tau|={v:.4f} > {upper_bound} — timing leak ({telem(name)})"); fail = True
-              else: print(f"OK:   {name} median|tau|={v:.4f} (< {upper_bound}) ({telem(name)})")
+              else: print(f"OK:   {name} median|tau|={v:.4f} (<= {upper_bound}) ({telem(name)})")
           # Telemetry-only: print median + all runs, no pass/fail gate.
           for name in telemetry_only:
               print(f"TELEMETRY: {name} {telem(name)} (non-blocking)")
@@ -414,8 +419,6 @@ jobs:
               verdict = "would-PASS" if t <= threshold else "would-FAIL"
               print(f"REL-TELEMETRY: {target} median={t:.4f} vs threshold={threshold:.4f} "
                     f"(= max({REL_ABS_FLOOR}, {REL_K}*probe={p:.4f}), ratio={ratio:.2f}) → {verdict} (non-blocking)")
-          if any(name in gate for gate in (required_high, required_low) for name in required_telemetry):
-              raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")
           sys.exit(1 if fail else 0)
           PY
 
