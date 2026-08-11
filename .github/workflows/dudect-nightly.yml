@@ -360,8 +360,6 @@ jobs:
           # 2026-08-10 — value is non-blocking pending hosted-runner
           # calibration, but presence in every run is required.
           required_telemetry = ["noise_twin_class_split"]
-          if any(name in gate for gate in (required_high, required_low, gross_regression_sentinel) for name in required_telemetry):
-              raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")
 
           fail = False
           # Completeness: every REQUIRED + SENTINEL target and the required
@@ -445,6 +443,8 @@ jobs:
                   print(f"SENTINEL: {name} median|tau|={v:.4f} (non-blocking; gross-regression gate at {upper_bound}) ({telem(name)})")
           for name in required_telemetry:
               print(f"NOISE-TWIN: {name} {telem(name)} (required measurement; non-blocking value)")
+          if any(name in gate for gate in (required_high, required_low, gross_regression_sentinel) for name in required_telemetry):
+              raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")
           sys.exit(1 if fail else 0)
           PY
 

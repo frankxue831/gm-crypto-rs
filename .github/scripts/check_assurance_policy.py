@@ -219,13 +219,15 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "PR": re.compile(
             r"^ {10}if any\(name in gate for gate in \(required_high, required_low\) "
             r"for name in required_telemetry\):$\n"
-            r'^ {14}raise SystemExit\("FAIL: required telemetry promoted to a blocking dudect gate"\)$',
+            r'^ {14}raise SystemExit\("FAIL: required telemetry promoted to a blocking dudect gate"\)$\n'
+            r"^ {10}sys\.exit\(1 if fail else 0\)$",
             re.M,
         ),
         "nightly": re.compile(
             r"^ {10}if any\(name in gate for gate in \(required_high, required_low, "
             r"gross_regression_sentinel\) for name in required_telemetry\):$\n"
-            r'^ {14}raise SystemExit\("FAIL: required telemetry promoted to a blocking dudect gate"\)$',
+            r'^ {14}raise SystemExit\("FAIL: required telemetry promoted to a blocking dudect gate"\)$\n'
+            r"^ {10}sys\.exit\(1 if fail else 0\)$",
             re.M,
         ),
     }
@@ -235,6 +237,10 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         re.M,
     )
     require("noise twin benchmark is registered", noise_twin_registration.search(timing) is not None)
+    parse_steps = {
+        "PR": step_named(job(dudect_pr, "smoke"), "Parse and gate"),
+        "nightly": step_named(job(dudect_nightly, "full"), "Parse and gate"),
+    }
     for workflow_name, workflow in (("PR", dudect_pr), ("nightly", dudect_nightly)):
         active_noise_twin_references = []
         for line in workflow.splitlines():
@@ -256,7 +262,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         )
         require(
             f"{workflow_name} dudect runtime-rejects telemetry gate promotion",
-            runtime_guard[workflow_name].search(workflow) is not None,
+            runtime_guard[workflow_name].search(parse_steps[workflow_name]) is not None,
         )
 
     return failures
@@ -576,6 +582,16 @@ def mutation_self_test() -> list[str]:
         dudect_nightly=DUDECT_NIGHTLY.replace(
             '              raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")',
             '              print("FAIL: required telemetry promoted to a blocking dudect gate")',
+            1,
+        ),
+    )
+    must_reject(
+        "PR telemetry promotion inserted after runtime guard",
+        "PR dudect runtime-rejects telemetry gate promotion",
+        dudect_pr=DUDECT_PR.replace(
+            "          sys.exit(1 if fail else 0)\n",
+            "          required_low[required_telemetry[0]] = 0.20\n"
+            "          sys.exit(1 if fail else 0)\n",
             1,
         ),
     )

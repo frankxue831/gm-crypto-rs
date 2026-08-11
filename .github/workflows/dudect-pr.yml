@@ -352,8 +352,6 @@ jobs:
           # hosted-runner calibration exists, but its PRESENCE is required in
           # every run so a rename/removal cannot silently erase the telemetry.
           required_telemetry = ["noise_twin_class_split"]
-          if any(name in gate for gate in (required_high, required_low) for name in required_telemetry):
-              raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")
 
           fail = False
           # Completeness: every REQUIRED target/telemetry reference must be
@@ -416,6 +414,8 @@ jobs:
               verdict = "would-PASS" if t <= threshold else "would-FAIL"
               print(f"REL-TELEMETRY: {target} median={t:.4f} vs threshold={threshold:.4f} "
                     f"(= max({REL_ABS_FLOOR}, {REL_K}*probe={p:.4f}), ratio={ratio:.2f}) → {verdict} (non-blocking)")
+          if any(name in gate for gate in (required_high, required_low) for name in required_telemetry):
+              raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")
           sys.exit(1 if fail else 0)
           PY
 
