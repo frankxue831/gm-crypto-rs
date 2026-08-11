@@ -5,9 +5,10 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-**2026-08-06–10 maintenance batch** — the three open `good first issue`s, two
-defects found while fixing them (#140–#147), and a follow-up assurance-hardening
-pass. No production cryptographic code, public API, C ABI, or release version
+**2026-08-06–11 maintenance batch** — the three open `good first issue`s, two
+defects found while fixing them (#140–#147), a follow-up assurance-hardening
+pass (#149), and a records-correction + actions-version follow-up (#150–#152).
+No production cryptographic code, public API, C ABI, or release version
 change; the example-file changes below ship with the next `gmcrypto-c` package.
 
 ### Added
@@ -34,6 +35,20 @@ change; the example-file changes below ship with the next `gmcrypto-c` package.
   removed in v0.23) is corrected by the same edit. The former CI gap is now
   closed: all nine shipped examples must pass a C11
   `cc -fsyntax-only -Wall -Wextra -Werror` sweep against the committed header.
+- **The v1.11.0 gate-evidence record falsely claimed no release tag exists**
+  (#150): `docs/v1.11.0-gate1-evidence.md` §6 (2026-08-03) concluded the exact
+  tested tree was unrecoverable because "no `v1.11.0` tag was created — the
+  newest tag is `v1.9.0`". Ground truth: the SSH-signed annotated `v1.11.0`
+  tag → release commit `613f619` had been on origin since 2026-08-01, two days
+  before §6 was written; the false negative came from lexicographic tag
+  ordering (`v1.11.0` sorts before `v1.2.0`, so the tail of a sorted listing
+  ends at `v1.9.0`). §7 corrects the record by addendum — §6 itself stands
+  unedited per the file's convention — and a CLAUDE.md gotcha now flags
+  version-sorted tag listings. The pre-squash commit `6e89e722` remains
+  unrecoverable, but the tag preserves a tree whose `crates/` + `Cargo.lock`
+  are byte-identical to it, so ECOSYSTEM §8's "preserve the exact tested
+  commits" is materially satisfied for 1.11.0. Every gate result in §§1–6
+  stands as run.
 
 ### Changed
 
@@ -52,6 +67,23 @@ change; the example-file changes below ship with the next `gmcrypto-c` package.
   the current option order for the default and explicit runtime-feature
   profiles. The optional `regen-header`/cbindgen build-tool tree remains
   deliberately outside the downstream runtime-dependency policy.
+- **GitHub Actions majors bumped across all seven workflows** (#151, #152):
+  `actions/checkout` v4 → v7, `actions/upload-artifact` v4 → v7,
+  `actions/cache` v4 → v6 — the v4 generation runs node20, which GitHub now
+  prints a deprecation notice for on every run. Two halves by design: #151
+  covered the three workflows outside the assurance policy's reach
+  (api-stability, fuzz-build, fuzz-nightly) and also pinned
+  **`cargo-semver-checks` at 0.50.0** (previously the only unpinned tool in an
+  enforced gate — a new release adding lints could redden a PR unrelated to
+  its diff) and bumped `CARGO_FUZZ_VERSION` 0.13.1 → 0.13.2; #152 covered the
+  four workflows fingerprinted by `check_assurance_policy.py` (ci, gitleaks,
+  dudect-pr, dudect-nightly) with the required checker co-move — the interim
+  all-red checker run before the co-move is the by-design evidence that an
+  unreviewed action retarget cannot pass that gate. **Not a dudect
+  re-baseline:** the calibration pins (`ubuntu-24.04` OS label +
+  `dtolnay/rust-toolchain@1.95.0`) are byte-identical; a post-merge
+  `dudect-nightly` dispatch sanity-checks the medians against the
+  recent-nights envelope.
 
 ### Security
 
