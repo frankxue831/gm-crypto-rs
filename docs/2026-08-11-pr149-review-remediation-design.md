@@ -72,6 +72,17 @@ and `\U` escapes in double-quoted keys—and whitespace before the colon as the
 same key, then requires a unique value or an exact zero count.
 This closes first-value/last-value disagreement for `branches`, `fetch-depth`,
 job names, step IDs, `if`, `continue-on-error`, `shell`, `env`, and `run`.
+Before those decoded-key checks, one lexical/structural preflight restricts
+each protected workflow to canonical, physical-line mapping keys: plain ASCII
+identifier keys or single-/double-quoted keys. YAML explicit complex keys,
+key-position tags, anchors, aliases, and physically continued quoted keys are
+rejected before they can decode to protected metadata under a spelling the
+line-oriented recognizer cannot see. Literal and folded scalar *values* are
+skipped by indentation, so `run: |` shell/Python and folded `if: >-`
+expressions remain data rather than being mistaken for workflow keys. The
+preflight also conservatively rejects merge-key syntax, although merge keys
+are not claimed as the motivating bypass because actionlint already rejects
+them in these workflows.
 Each protected command-bearing step now declares and uniquely retains
 `shell: bash`: the policy verifier, C compiler, GmSSL version/suite/report,
 gitleaks install/scan, and dudect producer/parser steps. Unexpected step
@@ -129,6 +140,8 @@ Deliberate mutation self-tests will prove that the verifier rejects:
   shells, or extra checkout steps;
 - hiding protected keys behind valid double-quoted Unicode escapes, appending
   duplicate critical jobs, or inserting a dash-alone step;
+- spelling protected metadata as an explicit, tagged, anchored, aliased, or
+  physically continued YAML key while leaving its decoded meaning unchanged;
 - adding checkout inputs or an alternate ref, skipping the pinned dudect
   toolchain, or poisoning a later shell through `GITHUB_ENV`/`BASH_ENV`;
 - retargeting a protected CI checkout away from the triggering revision, or

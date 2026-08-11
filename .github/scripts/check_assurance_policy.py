@@ -129,6 +129,95 @@ def mapping_line(line: str) -> tuple[int, str, str] | None:
     return len(match.group("indent")), key, match.group("value")
 
 
+BLOCK_SCALAR_VALUE = re.compile(
+    r"[|>](?:[1-9][+-]?|[+-][1-9]?)?(?:[ \t]+#.*)?"
+)
+
+
+def has_mapping_delimiter(source: str) -> bool:
+    """Return whether one physical line contains a block-mapping colon."""
+    quote: str | None = None
+    flow_depth = 0
+    index = 0
+    while index < len(source):
+        char = source[index]
+        if quote == "'":
+            if char == "'" and index + 1 < len(source) and source[index + 1] == "'":
+                index += 2
+                continue
+            if char == "'":
+                quote = None
+        elif quote == '"':
+            if char == "\\":
+                index += 2
+                continue
+            if char == '"':
+                quote = None
+        elif char in "'\"":
+            quote = char
+        elif char in "[{":
+            flow_depth += 1
+        elif char in "]}" and flow_depth:
+            flow_depth -= 1
+        elif (
+            char == ":"
+            and flow_depth == 0
+            and (index + 1 == len(source) or source[index + 1] in " \t#")
+        ):
+            return True
+        index += 1
+    return False
+
+
+def canonical_mapping_key_syntax(text: str) -> bool:
+    """Reject non-canonical YAML key forms outside scalar value bodies.
+
+    Protected workflows deliberately use only single-line plain, single-
+    quoted, or double-quoted mapping keys. YAML's alternate explicit-key,
+    tag, anchor, alias, and continued-quoted spellings can otherwise decode to
+    policy metadata while evading the line-oriented semantic checks. Literal
+    and folded scalar values are skipped as data, so shell and embedded Python
+    are never interpreted as workflow keys.
+    """
+    scalar_owner_indent: int | None = None
+    for line in text.splitlines():
+        stripped = line.lstrip(" ")
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(stripped)
+        if scalar_owner_indent is not None:
+            if indent > scalar_owner_indent:
+                continue
+            scalar_owner_indent = None
+
+        content = stripped
+        sequence_item = False
+        if content == "-":
+            continue
+        if content.startswith("- ") or content.startswith("-\t"):
+            sequence_item = True
+            content = content[1:].lstrip(" \t")
+
+        parsed = mapping_line(content)
+        if parsed is not None:
+            value = parsed[2]
+            if BLOCK_SCALAR_VALUE.fullmatch(value):
+                scalar_owner_indent = indent
+            continue
+
+        # A sequence scalar is data rather than a key. A sequence mapping
+        # entry, however, still has to use the canonical key grammar above.
+        if sequence_item and not has_mapping_delimiter(content):
+            continue
+
+        if has_mapping_delimiter(content):
+            return False
+        if content[0] in "?:!&*'\"":
+            return False
+
+    return True
+
+
 def mapping_values(block: str, key: str, indent: int | None = None) -> list[str]:
     """Return all values for one YAML mapping key at the selected indentation."""
     values: list[str] = []
@@ -325,6 +414,17 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     def require(label: str, condition: bool) -> None:
         if not condition:
             failures.append(label)
+
+    for workflow_name, source in (
+        ("CI", ci),
+        ("gitleaks", gitleaks),
+        ("PR dudect", dudect_pr),
+        ("nightly dudect", dudect_nightly),
+    ):
+        require(
+            f"{workflow_name} workflow uses canonical YAML mapping-key syntax",
+            canonical_mapping_key_syntax(source),
+        )
 
     build = job(ci, "build")
     cabi = job(ci, "cabi")
@@ -3549,6 +3649,167 @@ def mutation_self_test() -> list[str]:
             "      - run: 'true'\n"
             "\n  wasm32:\n",
             "duplicate cargo-deny job",
+        ),
+    )
+
+    parser_preflight_label = "CI workflow uses canonical YAML mapping-key syntax"
+    for label, injected in (
+        (
+            "GmSSL suite gains an explicit plain tolerance key",
+            "        ? continue-on-error\n        : true\n",
+        ),
+        (
+            "GmSSL suite gains an explicit Unicode-escaped tolerance key",
+            '        ? "continue-on-\\u0065rror"\n        : true\n',
+        ),
+        (
+            "GmSSL suite gains an explicit double-quoted tolerance key",
+            '        ? "continue-on-error"\n        : true\n',
+        ),
+        (
+            "GmSSL suite gains an explicit single-quoted tolerance key",
+            "        ? 'continue-on-error'\n        : true\n",
+        ),
+        (
+            "GmSSL suite gains an explicit block-scalar tolerance key",
+            "        ? |-\n          continue-on-error\n        : true\n",
+        ),
+        (
+            "GmSSL suite gains a short-tagged tolerance key",
+            "        !!str continue-on-error: true\n",
+        ),
+        (
+            "GmSSL suite gains a URI-tagged tolerance key",
+            "        !<tag:yaml.org,2002:str> continue-on-error: true\n",
+        ),
+        (
+            "GmSSL suite gains a continued double-quoted tolerance key",
+            '        "continue-on-\\\n          error" : true\n',
+        ),
+    ):
+        must_reject(
+            label,
+            parser_preflight_label,
+            ci=replace_in_step(
+                CI,
+                "interop-gmssl",
+                "gmssl interop suite (13 tests)",
+                "        id: gmssl-suite\n",
+                injected + "        id: gmssl-suite\n",
+                label,
+            ),
+        )
+
+    tolerate_anchor = replace_once(
+        CI,
+        "env:\n  CARGO_TERM_COLOR: always\n",
+        "env:\n"
+        '  &tolerate continue-on-error: "marker"\n'
+        "  CARGO_TERM_COLOR: always\n",
+        "GmSSL suite alias tolerance anchor",
+    )
+    must_reject(
+        "GmSSL suite gains an alias tolerance key",
+        parser_preflight_label,
+        ci=replace_in_step(
+            tolerate_anchor,
+            "interop-gmssl",
+            "gmssl interop suite (13 tests)",
+            "        id: gmssl-suite\n",
+            "        *tolerate: true\n        id: gmssl-suite\n",
+            "GmSSL suite alias tolerance",
+        ),
+    )
+
+    skip_anchor = replace_once(
+        CI,
+        "env:\n  CARGO_TERM_COLOR: always\n",
+        "env:\n  &skipkey if: marker\n  CARGO_TERM_COLOR: always\n",
+        "policy verifier alias condition anchor",
+    )
+    must_reject(
+        "policy verifier gains an alias false condition",
+        parser_preflight_label,
+        ci=replace_in_step(
+            skip_anchor,
+            "build",
+            "Verify assurance workflow policy",
+            "        shell: bash\n",
+            "        *skipkey: ${{ false }}\n        shell: bash\n",
+            "policy verifier alias condition",
+        ),
+    )
+
+    must_reject(
+        "build job gains a tagged tolerance key",
+        parser_preflight_label,
+        ci=replace_in_job(
+            CI,
+            "build",
+            "    timeout-minutes: 30\n",
+            "    !!str continue-on-error: true\n    timeout-minutes: 30\n",
+            "build tagged tolerance",
+        ),
+    )
+
+    must_reject(
+        "gitleaks trigger gains an explicit quoted path exclusion",
+        "gitleaks workflow uses canonical YAML mapping-key syntax",
+        gitleaks=replace_once(
+            GITLEAKS,
+            "  pull_request:\n    branches: [main]\n",
+            "  pull_request:\n"
+            "    branches: [main]\n"
+            '    ? "paths\\u002dignore"\n'
+            "    :\n"
+            "      - '**'\n",
+            "gitleaks explicit quoted path exclusion",
+        ),
+    )
+
+    must_reject(
+        "gitleaks scan gains an alias tolerance key",
+        "gitleaks workflow uses canonical YAML mapping-key syntax",
+        gitleaks=replace_once(
+            replace_once(
+                GITLEAKS,
+                "permissions:\n  contents: read\n",
+                "permissions:\n"
+                "  contents: read\n"
+                "  &tolerate continue-on-error: marker\n",
+                "gitleaks alias tolerance anchor",
+            ),
+            "      - name: Scan committed history\n",
+            "      - name: Scan committed history\n        *tolerate: true\n",
+            "gitleaks alias tolerance key",
+        ),
+    )
+
+    must_reject(
+        "PR dudect producer gains a tagged tolerance key",
+        "PR dudect workflow uses canonical YAML mapping-key syntax",
+        dudect_pr=replace_in_step(
+            DUDECT_PR,
+            "smoke",
+            "Run dudect harness (smoke budget, 3 runs for median)",
+            "        shell: bash\n",
+            "        !!str continue-on-error: true\n        shell: bash\n",
+            "PR dudect tagged producer tolerance",
+        ),
+    )
+
+    must_reject(
+        "nightly dudect parser gains an explicit quoted tolerance key",
+        "nightly dudect workflow uses canonical YAML mapping-key syntax",
+        dudect_nightly=replace_in_step(
+            DUDECT_NIGHTLY,
+            "full",
+            "Parse and gate",
+            "        shell: bash\n",
+            "        ? 'continue-on-error'\n"
+            "        : true\n"
+            "        shell: bash\n",
+            "nightly dudect explicit parser tolerance",
         ),
     )
     return failures
