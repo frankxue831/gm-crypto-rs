@@ -1,7 +1,7 @@
-//! Cross-validation against the GmSSL 3.2.0 CLI.
+//! Cross-validation against the `GmSSL` 3.2.0 CLI.
 //!
 //! Skipped silently when `GMCRYPTO_GMSSL=1` is not set. CI prepares a pinned
-//! GmSSL oracle, sets the flag, and treats an actual interoperability mismatch
+//! `GmSSL` oracle, sets the flag, and treats an actual interoperability mismatch
 //! as blocking. Oracle infrastructure failure remains visible but non-blocking
 //! and prevents the suite from running rather than reporting an interop pass.
 //!

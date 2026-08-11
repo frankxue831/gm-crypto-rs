@@ -52,25 +52,94 @@ def step_uses(job_text: str, action: str) -> str:
     return indented_block(job_text, f"- uses: {action}", 6)
 
 
-def mapping_key_re(key: str, indent: int | None = None) -> re.Pattern[str]:
-    """Recognize one YAML mapping key regardless of safe key spelling.
+MAPPING_LINE = re.compile(
+    r"^(?P<indent> *)(?P<key>"
+    r"[A-Za-z0-9_-]+|"
+    r"'(?:[^']|'')*'|"
+    r'"(?:[^"\\]|\\.)*"'
+    r")[ \t]*:[ \t]*(?P<value>.*?)[ \t]*$"
+)
 
-    Assurance metadata may use a plain, single-quoted, or double-quoted key,
-    and YAML permits whitespace before ``:``.  Every scalar/count check below
-    shares this parser so alternate spelling cannot bypass uniqueness checks.
-    """
-    escaped = re.escape(key)
-    key_source = rf"(?:{escaped}|'(?:{escaped})'|\"(?:{escaped})\")"
-    prefix = re.escape(" " * indent) if indent is not None else r"[ ]*"
-    return re.compile(
-        rf"^{prefix}{key_source}[ \t]*:[ \t]*(.*?)[ \t]*$",
-        re.M,
-    )
+
+def decode_double_quoted_key(token: str) -> str | None:
+    """Decode YAML double-quoted escapes used by protected mapping keys."""
+    simple = {
+        "0": "\0",
+        "a": "\a",
+        "b": "\b",
+        "t": "\t",
+        "n": "\n",
+        "v": "\v",
+        "f": "\f",
+        "r": "\r",
+        "e": "\x1b",
+        " ": " ",
+        '"': '"',
+        "/": "/",
+        "\\": "\\",
+        "N": "\x85",
+        "_": "\xa0",
+        "L": "\u2028",
+        "P": "\u2029",
+    }
+    raw = token[1:-1]
+    decoded: list[str] = []
+    index = 0
+    while index < len(raw):
+        if raw[index] != "\\":
+            decoded.append(raw[index])
+            index += 1
+            continue
+        if index + 1 >= len(raw):
+            return None
+        escape = raw[index + 1]
+        if escape in simple:
+            decoded.append(simple[escape])
+            index += 2
+            continue
+        widths = {"x": 2, "u": 4, "U": 8}
+        width = widths.get(escape)
+        if width is None or index + 2 + width > len(raw):
+            return None
+        digits = raw[index + 2 : index + 2 + width]
+        if not re.fullmatch(r"[0-9A-Fa-f]+", digits):
+            return None
+        codepoint = int(digits, 16)
+        if codepoint > 0x10FFFF or 0xD800 <= codepoint <= 0xDFFF:
+            return None
+        decoded.append(chr(codepoint))
+        index += 2 + width
+    return "".join(decoded)
+
+
+def mapping_line(line: str) -> tuple[int, str, str] | None:
+    """Return indentation, decoded key, and value for one YAML mapping line."""
+    match = MAPPING_LINE.fullmatch(line)
+    if match is None:
+        return None
+    token = match.group("key")
+    if token.startswith("'"):
+        key = token[1:-1].replace("''", "'")
+    elif token.startswith('"'):
+        key = decode_double_quoted_key(token)
+        if key is None:
+            return None
+    else:
+        key = token
+    return len(match.group("indent")), key, match.group("value")
 
 
 def mapping_values(block: str, key: str, indent: int | None = None) -> list[str]:
     """Return all values for one YAML mapping key at the selected indentation."""
-    return [match.group(1) for match in mapping_key_re(key, indent).finditer(block)]
+    values: list[str] = []
+    for line in block.splitlines():
+        parsed = mapping_line(line)
+        if parsed is None:
+            continue
+        line_indent, decoded_key, value = parsed
+        if decoded_key == key and (indent is None or line_indent == indent):
+            values.append(value)
+    return values
 
 
 def scalar(block: str, key: str, indent: int) -> str | None:
@@ -90,7 +159,9 @@ def mapping_block(block: str, key: str, indent: int) -> list[str]:
     matches = [
         index
         for index, line in enumerate(lines)
-        if mapping_key_re(key, indent).fullmatch(line)
+        if (parsed := mapping_line(line)) is not None
+        and parsed[0] == indent
+        and parsed[1] == key
     ]
     if len(matches) != 1:
         return []
@@ -111,7 +182,7 @@ def step_headers(job_text: str) -> tuple[str, ...]:
     return tuple(
         line[6:]
         for line in active_source_lines(job_text)
-        if line.startswith("      - ")
+        if line == "      -" or line.startswith("      - ")
     )
 
 
@@ -119,9 +190,11 @@ def active_run(step: str) -> str:
     """Extract active shell from a step's run key, excluding YAML comments."""
     lines = step.splitlines()
     matches = [
-        (index, match.group(1))
+        (index, parsed[2])
         for index, line in enumerate(lines)
-        if (match := mapping_key_re("run", 8).fullmatch(line))
+        if (parsed := mapping_line(line)) is not None
+        and parsed[0] == 8
+        and parsed[1] == "run"
     ]
     if len(matches) != 1:
         return ""
@@ -142,9 +215,11 @@ def literal_run_body(step: str) -> str | None:
     """Return a literal-block run body with the YAML indentation removed."""
     lines = step.splitlines()
     matches = [
-        (index, match.group(1))
+        (index, parsed[2])
         for index, line in enumerate(lines)
-        if (match := mapping_key_re("run", 8).fullmatch(line))
+        if (parsed := mapping_line(line)) is not None
+        and parsed[0] == 8
+        and parsed[1] == "run"
     ]
     if len(matches) != 1 or matches[0][1] != "|":
         return None
@@ -247,6 +322,9 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     cabi = job(ci, "cabi")
     deny = job(ci, "deny")
     interop = job(ci, "interop-gmssl")
+    require("build job key is unique", key_count(ci, "build", 2) == 1)
+    require("cabi job key is unique", key_count(ci, "cabi", 2) == 1)
+    require("GmSSL job key is unique", key_count(ci, "interop-gmssl", 2) == 1)
 
     skip_ci_if = [
         "    if: >-",
@@ -279,6 +357,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
             "- name: Verify assurance workflow policy",
         ),
     )
+    require("build has no dash-alone steps", "-" not in step_headers(build))
     cabi_contract = (
         key_count(cabi, "if", 4) == 1
         and mapping_block(cabi, "if", 4) == skip_ci_if
@@ -378,6 +457,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     push_trigger = indented_block(trigger, "push:", 2)
     pull_request_trigger = indented_block(trigger, "pull_request:", 2)
     scan = job(gitleaks, "scan")
+    require("gitleaks job key is unique", key_count(gitleaks, "scan", 2) == 1)
     checkout = step_uses(scan, "actions/checkout@v4")
     install = step_named(scan, "Install gitleaks")
     scan_step = step_named(scan, "Scan committed history")
@@ -436,8 +516,14 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         and key_count(checkout, "shell", 8) == 0
         and key_count(checkout, "env", 8) == 0
     )
+    checkout_exact = active_source_lines(checkout) == [
+        "      - uses: actions/checkout@v4",
+        "        with:",
+        "          fetch-depth: 0",
+    ]
+    require("gitleaks checkout step is exact", checkout_exact)
     require("gitleaks checkout metadata is exact", checkout_metadata)
-    require("gitleaks checkout has full history", checkout_metadata)
+    require("gitleaks checkout has full history", checkout_metadata and checkout_exact)
     require(
         "gitleaks step sequence is exact",
         step_headers(scan)
@@ -856,6 +942,13 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "PR": job(dudect_pr, "smoke"),
         "nightly": job(dudect_nightly, "full"),
     }
+    dudect_sources = {"PR": dudect_pr, "nightly": dudect_nightly}
+    dudect_job_keys = {"PR": "smoke", "nightly": "full"}
+    for workflow_name, source in dudect_sources.items():
+        require(
+            f"{workflow_name} dudect job key is unique",
+            key_count(source, dudect_job_keys[workflow_name], 2) == 1,
+        )
     parse_steps = {
         workflow_name: step_named(job_text, "Parse and gate")
         for workflow_name, job_text in dudect_jobs.items()
@@ -904,9 +997,41 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         'cargo bench --bench timing_leaks --features "$FEATURES" 2>&1 | tee "dudect-$i.log"\n'
         "done"
     )
+    dudect_capture_canonical = (
+        "set +e\n"
+        'echo "=== Runner image ==="\n'
+        'echo "ImageVersion: ${ImageVersion:-<unset>}"\n'
+        'echo "ImageOS:      ${ImageOS:-<unset>}"\n'
+        "echo\n"
+        'echo "=== Kernel ==="\n'
+        "uname -a\n"
+        "echo\n"
+        'echo "=== CPU ==="\n'
+        "lscpu 2>/dev/null | head -30 || cat /proc/cpuinfo | head -25\n"
+        "echo\n"
+        'echo "=== CPU governor / turbo state ==="\n'
+        "for cpu in /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor; do\n"
+        '[ -r "$cpu" ] && echo "$cpu = $(cat "$cpu")"\n'
+        "done\n"
+        "[ -r /sys/devices/system/cpu/intel_pstate/no_turbo ] && \\\n"
+        'echo "intel_pstate/no_turbo = $(cat /sys/devices/system/cpu/intel_pstate/no_turbo)"\n'
+        "echo\n"
+        'echo "=== Rust ==="\n'
+        "rustc -Vv\n"
+        "cargo -V"
+    )
     for workflow_name, dudect_job in dudect_jobs.items():
         config = dudect_job_config[workflow_name]
+        workflow_source = dudect_sources[workflow_name]
         producer = producer_steps[workflow_name]
+        checkout_step = step_uses(dudect_job, "actions/checkout@v4")
+        toolchain_step = step_uses(dudect_job, "dtolnay/rust-toolchain@1.95.0")
+        rust_cache_step = step_uses(dudect_job, "Swatinem/rust-cache@v2")
+        capture_step = step_named(
+            dudect_job,
+            "Capture runner environment (for noise-floor correlation)",
+        )
+        workflow_env = indented_block(workflow_source, "env:", 0)
         producer_env = indented_block(producer, "env:", 8)
         matrix_block = indented_block(dudect_job, "matrix:", 6)
         expected_headers = (
@@ -935,8 +1060,51 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         )
         require(f"{workflow_name} dudect job contract is exact", job_contract)
         require(
+            f"{workflow_name} dudect workflow environment is exact",
+            key_count(workflow_source, "env", 0) == 1
+            and active_source_lines(workflow_env)
+            == ["env:", "  CARGO_TERM_COLOR: always"],
+        )
+        require(
             f"{workflow_name} dudect step sequence is exact",
             step_headers(dudect_job) == expected_headers,
+        )
+        require(
+            f"{workflow_name} dudect checkout step is exact",
+            active_source_lines(checkout_step)
+            == ["      - uses: actions/checkout@v4"],
+        )
+        require(
+            f"{workflow_name} dudect rust toolchain metadata is exact",
+            active_source_lines(toolchain_step)
+            == ["      - uses: dtolnay/rust-toolchain@1.95.0"],
+        )
+        require(
+            f"{workflow_name} dudect rust cache step is exact",
+            active_source_lines(rust_cache_step)
+            == [
+                "      - uses: Swatinem/rust-cache@v2",
+                "        with:",
+                "          shared-key: gmcrypto-stable-${{ strategy.job-index }}",
+            ],
+        )
+        capture_metadata = (
+            key_count(capture_step, "if", 8) == 0
+            and key_count(capture_step, "continue-on-error", 8) == 0
+            and key_count(capture_step, "shell", 8) == 0
+            and key_count(capture_step, "env", 8) == 0
+            and key_count(capture_step, "uses", 8) == 0
+            and key_count(capture_step, "with", 8) == 0
+            and key_count(capture_step, "run", 8) == 1
+            and key_count(capture_step, "name", 8) == 0
+        )
+        require(
+            f"{workflow_name} dudect capture metadata is exact",
+            capture_metadata,
+        )
+        require(
+            f"{workflow_name} dudect capture script is exact",
+            capture_metadata and active_run(capture_step) == dudect_capture_canonical,
         )
         require(
             f"{workflow_name} dudect matrix is exact",
@@ -1144,6 +1312,25 @@ def mutation_self_test() -> list[str]:
     ) -> str:
         target_job = job(text, job_name)
         target_step = step_named(target_job, step_name)
+        mutated_step = replace_once(target_step, before, after, f"{label} field")
+        mutated_job = replace_once(
+            target_job,
+            target_step,
+            mutated_step,
+            f"{label} step",
+        )
+        return replace_once(text, target_job, mutated_job, f"{label} job")
+
+    def replace_in_uses(
+        text: str,
+        job_name: str,
+        action: str,
+        before: str,
+        after: str,
+        label: str,
+    ) -> str:
+        target_job = job(text, job_name)
+        target_step = step_uses(target_job, action)
         mutated_step = replace_once(target_step, before, after, f"{label} field")
         mutated_job = replace_once(
             target_job,
@@ -2914,6 +3101,350 @@ def mutation_self_test() -> list[str]:
             "        if: ${{ always() }}\n",
             "        if: false\n",
             "GmSSL report if false",
+        ),
+    )
+
+    # YAML double-quoted keys decode Unicode escapes before key comparison.
+    # These are valid spellings of already-protected keys, not new metadata.
+    for label, expected, source_key, mutated in (
+        (
+            "policy verifier Unicode-escaped continue-on-error key",
+            "policy verifier metadata is exact",
+            "ci",
+            replace_in_step(
+                CI,
+                "build",
+                "Verify assurance workflow policy",
+                "      - name: Verify assurance workflow policy\n",
+                "      - name: Verify assurance workflow policy\n"
+                '        "continue\\u002don\\u002derror" : true\n',
+                "policy Unicode continue",
+            ),
+        ),
+        (
+            "C compiler Unicode-escaped false condition",
+            "C example metadata is exact",
+            "ci",
+            replace_in_step(
+                CI,
+                "cabi",
+                "Compile shipped C examples",
+                "      - name: Compile shipped C examples\n",
+                "      - name: Compile shipped C examples\n"
+                '        "i\\u0066" : false\n',
+                "C Unicode if",
+            ),
+        ),
+        (
+            "workflow Unicode-escaped defaults key",
+            "workflow defaults cannot alter assurance commands",
+            "ci",
+            replace_once(
+                CI,
+                "permissions:\n",
+                '"de\\u0066aults" :\n'
+                "  run:\n"
+                "    shell: bash {0} || true\n\n"
+                "permissions:\n",
+                "Unicode workflow defaults",
+            ),
+        ),
+        (
+            "gitleaks Unicode-escaped path exclusions",
+            "gitleaks triggers are exact",
+            "gitleaks",
+            replace_once(
+                GITLEAKS,
+                "    branches: [main]\n  workflow_dispatch:\n",
+                "    branches: [main]\n"
+                '    "paths\\u002dignore" : [\'docs/**\']\n'
+                "  workflow_dispatch:\n",
+                "Unicode paths-ignore",
+            ),
+        ),
+    ):
+        must_reject(label, expected, **{source_key: mutated})
+
+    must_reject(
+        "gitleaks checkout pins an attacker-controlled ref",
+        "gitleaks checkout step is exact",
+        gitleaks=replace_in_uses(
+            GITLEAKS,
+            "scan",
+            "actions/checkout@v4",
+            "          fetch-depth: 0",
+            "          fetch-depth: 0\n          ref: refs/heads/unreviewed",
+            "gitleaks checkout ref",
+        ),
+    )
+    must_reject(
+        "gitleaks checkout gains an extra with input",
+        "gitleaks checkout step is exact",
+        gitleaks=replace_in_uses(
+            GITLEAKS,
+            "scan",
+            "actions/checkout@v4",
+            "          fetch-depth: 0",
+            "          fetch-depth: 0\n          persist-credentials: false",
+            "gitleaks checkout extra input",
+        ),
+    )
+    must_reject(
+        "gitleaks checkout gains a quoted duplicate uses key",
+        "gitleaks checkout step is exact",
+        gitleaks=replace_in_uses(
+            GITLEAKS,
+            "scan",
+            "actions/checkout@v4",
+            "      - uses: actions/checkout@v4\n",
+            "      - uses: actions/checkout@v4\n"
+            '        "uses" : attacker/checkout@v1\n',
+            "gitleaks quoted uses",
+        ),
+    )
+    must_reject(
+        "gitleaks checkout gains a Unicode-escaped duplicate uses key",
+        "gitleaks checkout step is exact",
+        gitleaks=replace_in_uses(
+            GITLEAKS,
+            "scan",
+            "actions/checkout@v4",
+            "      - uses: actions/checkout@v4\n",
+            "      - uses: actions/checkout@v4\n"
+            '        "u\\u0073es" : attacker/checkout@v1\n',
+            "gitleaks Unicode uses",
+        ),
+    )
+    for workflow_name, source, source_key, job_name in (
+        ("PR", DUDECT_PR, "dudect_pr", "smoke"),
+        ("nightly", DUDECT_NIGHTLY, "dudect_nightly", "full"),
+    ):
+        must_reject(
+            f"{workflow_name} dudect checkout pins an unreviewed ref",
+            f"{workflow_name} dudect checkout step is exact",
+            **{
+                source_key: replace_in_uses(
+                    source,
+                    job_name,
+                    "actions/checkout@v4",
+                    "      - uses: actions/checkout@v4\n",
+                    "      - uses: actions/checkout@v4\n"
+                    "        with:\n"
+                    "          ref: refs/heads/unreviewed\n",
+                    f"{workflow_name} checkout ref",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect Rust toolchain is skipped",
+            f"{workflow_name} dudect rust toolchain metadata is exact",
+            **{
+                source_key: replace_in_uses(
+                    source,
+                    job_name,
+                    "dtolnay/rust-toolchain@1.95.0",
+                    "      - uses: dtolnay/rust-toolchain@1.95.0",
+                    "      - uses: dtolnay/rust-toolchain@1.95.0\n"
+                    "        if: false",
+                    f"{workflow_name} toolchain if false",
+                )
+            },
+        )
+
+    duplicate_jobs = (
+        (
+            "build job has a quoted trailing duplicate",
+            "build job key is unique",
+            "ci",
+            replace_once(
+                CI,
+                "\n  msrv:\n",
+                "\n  \"build\" :\n"
+                "    runs-on: ubuntu-latest\n"
+                "    steps:\n"
+                "      - run: 'true'\n"
+                "\n  msrv:\n",
+                "duplicate build job",
+            ),
+        ),
+        (
+            "C ABI job has a trailing duplicate",
+            "cabi job key is unique",
+            "ci",
+            replace_once(
+                CI,
+                "\n  deny:\n",
+                "\n  cabi:\n"
+                "    runs-on: ubuntu-latest\n"
+                "    steps:\n"
+                "      - run: 'true'\n"
+                "\n  deny:\n",
+                "duplicate cabi job",
+            ),
+        ),
+        (
+            "GmSSL job has a Unicode-escaped trailing duplicate",
+            "GmSSL job key is unique",
+            "ci",
+            replace_once(
+                CI,
+                "\n  cabi:\n",
+                '\n  "interop\\u002dgmssl" :\n'
+                "    runs-on: ubuntu-latest\n"
+                "    steps:\n"
+                "      - run: 'true'\n"
+                "\n  cabi:\n",
+                "duplicate GmSSL job",
+            ),
+        ),
+        (
+            "gitleaks job has a quoted trailing duplicate",
+            "gitleaks job key is unique",
+            "gitleaks",
+            replace_once(
+                GITLEAKS,
+                "        run: gitleaks git --no-banner --redact --verbose\n",
+                "        run: gitleaks git --no-banner --redact --verbose\n"
+                "\n  'scan' :\n"
+                "    runs-on: ubuntu-latest\n"
+                "    steps:\n"
+                "      - run: 'true'\n",
+                "duplicate gitleaks job",
+            ),
+        ),
+        (
+            "PR dudect job has a Unicode-escaped trailing duplicate",
+            "PR dudect job key is unique",
+            "dudect_pr",
+            replace_once(
+                DUDECT_PR,
+                "          retention-days: 7\n",
+                "          retention-days: 7\n"
+                '\n  "sm\\u006fke" :\n'
+                "    runs-on: ubuntu-latest\n"
+                "    steps:\n"
+                "      - run: 'true'\n",
+                "duplicate PR dudect job",
+            ),
+        ),
+        (
+            "nightly dudect job has a trailing duplicate",
+            "nightly dudect job key is unique",
+            "dudect_nightly",
+            replace_once(
+                DUDECT_NIGHTLY,
+                "          retention-days: 30\n",
+                "          retention-days: 30\n"
+                "\n  full:\n"
+                "    runs-on: ubuntu-latest\n"
+                "    steps:\n"
+                "      - run: 'true'\n",
+                "duplicate nightly dudect job",
+            ),
+        ),
+    )
+    for label, expected, source_key, mutated in duplicate_jobs:
+        must_reject(label, expected, **{source_key: mutated})
+
+    must_reject(
+        "build hides a dash-alone step before checkout",
+        "build step prefix is exact",
+        ci=replace_in_job(
+            CI,
+            "build",
+            "      - uses: actions/checkout@v4\n",
+            "      -\n"
+            "        name: Hidden environment tamper\n"
+            "        run: 'true'\n"
+            "      - uses: actions/checkout@v4\n",
+            "build dash-alone step",
+        ),
+    )
+    must_reject(
+        "build hides a dash-alone step after the policy verifier",
+        "build has no dash-alone steps",
+        ci=replace_in_job(
+            CI,
+            "build",
+            "      - name: Install Rust stable\n",
+            "      -\n"
+            "        name: Hidden post-policy environment tamper\n"
+            "        run: 'true'\n"
+            "      - name: Install Rust stable\n",
+            "build post-policy dash-alone step",
+        ),
+    )
+    must_reject(
+        "gitleaks hides a dash-alone step before install",
+        "gitleaks step sequence is exact",
+        gitleaks=replace_in_job(
+            GITLEAKS,
+            "scan",
+            "      - name: Install gitleaks\n",
+            "      -\n"
+            "        name: Hidden environment tamper\n"
+            "        run: 'true'\n"
+            "      - name: Install gitleaks\n",
+            "gitleaks dash-alone step",
+        ),
+    )
+    must_reject(
+        "PR dudect hides an environment writer before the producer",
+        "PR dudect step sequence is exact",
+        dudect_pr=replace_in_job(
+            DUDECT_PR,
+            "smoke",
+            "      - name: Run dudect harness (smoke budget, 3 runs for median)\n",
+            "      -\n"
+            "        name: Hidden environment tamper\n"
+            "        run: echo 'BASH_ENV=/tmp/bypass' >> \"$GITHUB_ENV\"\n"
+            "      - name: Run dudect harness (smoke budget, 3 runs for median)\n",
+            "PR dudect dash-alone environment step",
+        ),
+    )
+
+    must_reject(
+        "PR dudect workflow injects BASH_ENV",
+        "PR dudect workflow environment is exact",
+        dudect_pr=replace_once(
+            DUDECT_PR,
+            "  CARGO_TERM_COLOR: always\n",
+            "  CARGO_TERM_COLOR: always\n  BASH_ENV: /tmp/bypass\n",
+            "PR workflow BASH_ENV",
+        ),
+    )
+    for workflow_name, source, source_key, job_name in (
+        ("PR", DUDECT_PR, "dudect_pr", "smoke"),
+        ("nightly", DUDECT_NIGHTLY, "dudect_nightly", "full"),
+    ):
+        capture_name = "Capture runner environment (for noise-floor correlation)"
+        must_reject(
+            f"{workflow_name} dudect capture persists BASH_ENV through GITHUB_ENV",
+            f"{workflow_name} dudect capture script is exact",
+            **{
+                source_key: replace_in_step(
+                    source,
+                    job_name,
+                    capture_name,
+                    "        run: |\n",
+                    "        run: |\n"
+                    '          echo "BASH_ENV=$RUNNER_TEMP/bash-env" >> "$GITHUB_ENV"\n',
+                    f"{workflow_name} capture environment write",
+                )
+            },
+        )
+    must_reject(
+        "PR dudect cache step injects BASH_ENV metadata",
+        "PR dudect rust cache step is exact",
+        dudect_pr=replace_in_uses(
+            DUDECT_PR,
+            "smoke",
+            "Swatinem/rust-cache@v2",
+            "      - uses: Swatinem/rust-cache@v2\n",
+            "      - uses: Swatinem/rust-cache@v2\n"
+            "        env:\n"
+            "          BASH_ENV: /tmp/bypass\n",
+            "PR rust cache BASH_ENV",
         ),
     )
     return failures
