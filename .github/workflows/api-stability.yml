@@ -9,6 +9,8 @@
 #      breaking change to the covered surface must be a major bump, so a non-empty
 #      report FAILS the job. Flipped enforced after the 1.0.0 publish
 #      (docs/v1.0-readiness.md §4 step 7); #[doc(hidden)] items are excluded.
+#      The tool version is PINNED (see the install step) — bumping it is a
+#      reviewed update, same posture as the public-api pins below.
 #   3. docs (ENFORCED) — `cargo doc` with -D warnings; allows the one
 #      `private_intra_doc_links` lint (intentional internal cross-refs that render
 #      as code text on docs.rs — not broken links).
@@ -46,7 +48,7 @@ jobs:
     name: public-api drift-check (enforced)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install pinned nightly (rustdoc JSON)
         run: rustup toolchain install "$PUBLIC_API_NIGHTLY" --profile minimal
       - uses: Swatinem/rust-cache@v2
@@ -73,16 +75,21 @@ jobs:
     name: cargo-semver-checks (enforced, >=1.0)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Install pinned nightly (semver-checks rustdoc JSON)
         run: rustup toolchain install "$PUBLIC_API_NIGHTLY" --profile minimal
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: api-stability-semver
+      # PINNED (the ci.yml cargo-deny@ pattern): this job is an ENFORCED gate, and
+      # an unpinned tool means a new semver-checks release (new lints) can redden a
+      # PR unrelated to its diff. 0.50.0 = the version the last green run resolved,
+      # known-compatible with $PUBLIC_API_NIGHTLY's rustdoc JSON. Bumping the pin is
+      # a reviewed update: bump, dispatch this workflow, confirm green.
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-semver-checks
+          tool: cargo-semver-checks@0.50.0
       # ENFORCED from 1.0 (flipped after the 1.0.0 publish; docs/v1.0-readiness.md §4
       # step 7). No continue-on-error: semver-checks compares HEAD against the latest
       # crates.io release (now 1.0.0), and a breaking change to the SemVer-covered
@@ -102,7 +109,7 @@ jobs:
     env:
       RUSTDOCFLAGS: "-D warnings -A rustdoc::private_intra_doc_links"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -121,7 +128,7 @@ jobs:
     name: feature matrix (no-default-features / all-features)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:

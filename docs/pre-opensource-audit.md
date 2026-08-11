@@ -319,7 +319,7 @@ release — workspace stays `0.16.0`).
   (it has no `pull_request` trigger, so it was never a fork-PR RCE vector,
   but it had to move so the runner can be fully retired — and to take the
   adversarial fuzz workload off the personal Mac). Now `runs-on:
-  ubuntu-latest`, installing nightly + the pinned `cargo-fuzz 0.13.1` per
+  ubuntu-latest`, installing nightly + the pinned `cargo-fuzz 0.13.2` per
   run.
 - **S3 — `CLAUDE.md` runbook removed.** Deleted the `## Self-hosted CI
   runner setup` section (~140 lines); rewrote the Workflow-notes bullet +

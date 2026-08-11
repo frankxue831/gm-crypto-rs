@@ -20,7 +20,7 @@ It is **unpublished** and **nightly-only** — MSRV 1.85 does not apply here.
 
 ```bash
 rustup toolchain install nightly
-cargo install cargo-fuzz --version 0.13.1   # pinned for reproducibility
+cargo install cargo-fuzz --version 0.13.2   # pinned for reproducibility
 ```
 
 (Apple clang / a system LLVM provides libFuzzer; no extra step on macOS.)
