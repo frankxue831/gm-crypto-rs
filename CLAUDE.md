@@ -903,3 +903,12 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
   with `tool: cargo-deny@0.20.2` — don't switch back to
   `cargo install --locked cargo-deny` (compiled from source, adds
   ~3 min per CI run; see `431df89`).
+- **Default git tag ordering is lexicographic, and it lies about which tag
+  is newest.** `v1.11.0` sorts *before* `v1.2.0`, so the tail of a plain
+  `git tag` / `git ls-remote --tags` listing shows `v1.9.0` as the last
+  entry even when `v1.11.0` exists. This produced a false "no v1.11.0 tag
+  was created" claim in `docs/v1.11.0-gate1-evidence.md` §6 (corrected in
+  §7) and independently fooled the 2026-08-11 review that caught it. Verify
+  tag existence with `git tag --sort=-creatordate` / `--sort=-v:refname`
+  or an exact-name `git ls-remote --tags origin vX.Y.Z` — never a sorted
+  tail.
