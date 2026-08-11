@@ -408,4 +408,3 @@ Convert the Draft PR to ready-for-review, then repeat the metadata and required-
 - [ ] **Step 5: Merge PR #149**
 
 Use the repository's permitted merge method only after Step 4 proves readiness. Confirm the returned merged state and merge commit SHA, then verify `origin/main` contains that commit.
-
