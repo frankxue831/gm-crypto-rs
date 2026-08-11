@@ -231,6 +231,15 @@ def mapping_values(block: str, key: str, indent: int | None = None) -> list[str]
     return values
 
 
+def mapping_keys(block: str, indent: int) -> tuple[str, ...]:
+    """Return decoded mapping keys at one indentation level in source order."""
+    return tuple(
+        parsed[1]
+        for line in block.splitlines()
+        if (parsed := mapping_line(line)) is not None and parsed[0] == indent
+    )
+
+
 def scalar(block: str, key: str, indent: int) -> str | None:
     """Return a scalar only when its mapping key occurs exactly once."""
     values = mapping_values(block, key, indent)
@@ -434,6 +443,32 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     require("cabi job key is unique", key_count(ci, "cabi", 2) == 1)
     require("GmSSL job key is unique", key_count(ci, "interop-gmssl", 2) == 1)
     require("cargo-deny job key is unique", key_count(ci, "deny", 2) == 1)
+    for label, protected_job, expected_keys in (
+        (
+            "build",
+            build,
+            ("name", "runs-on", "if", "timeout-minutes", "steps"),
+        ),
+        (
+            "cabi",
+            cabi,
+            ("name", "runs-on", "if", "timeout-minutes", "steps"),
+        ),
+        (
+            "GmSSL",
+            interop,
+            ("name", "runs-on", "if", "timeout-minutes", "env", "steps"),
+        ),
+        (
+            "cargo-deny",
+            deny,
+            ("name", "runs-on", "if", "timeout-minutes", "steps"),
+        ),
+    ):
+        require(
+            f"{label} job top-level key sequence is exact",
+            mapping_keys(protected_job, 4) == expected_keys,
+        )
     for label, protected_job in (
         ("build", build),
         ("cabi", cabi),
@@ -581,6 +616,11 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     pull_request_trigger = indented_block(trigger, "pull_request:", 2)
     scan = job(gitleaks, "scan")
     require("gitleaks job key is unique", key_count(gitleaks, "scan", 2) == 1)
+    require(
+        "gitleaks scan job top-level key sequence is exact",
+        mapping_keys(scan, 4)
+        == ("name", "runs-on", "timeout-minutes", "steps"),
+    )
     checkout = step_uses(scan, "actions/checkout@v4")
     install = step_named(scan, "Install gitleaks")
     scan_step = step_named(scan, "Scan committed history")
@@ -719,8 +759,74 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     )
 
     deny_install = step_named(deny, "Install cargo-deny")
+    deny_toolchain = step_uses(deny, "dtolnay/rust-toolchain@stable")
+    deny_lockfile = step_named(deny, "Generate lockfile")
     deny_default = step_named(deny, "Run cargo-deny (default features, excluding dev-deps)")
     deny_runtime = step_named(deny, "Run cargo-deny (runtime opt-in features, excluding dev-deps)")
+    require(
+        "cargo-deny step sequence is exact",
+        step_headers(deny)
+        == (
+            "- uses: actions/checkout@v4",
+            "- uses: dtolnay/rust-toolchain@stable",
+            "- name: Install cargo-deny",
+            "- name: Generate lockfile",
+            "- name: Run cargo-deny (default features, excluding dev-deps)",
+            "- name: Run cargo-deny (runtime opt-in features, excluding dev-deps)",
+        ),
+    )
+    require(
+        "cargo-deny toolchain step is exact",
+        active_source_lines(deny_toolchain)
+        == ["      - uses: dtolnay/rust-toolchain@stable"],
+    )
+    require(
+        "cargo-deny install step is exact",
+        active_source_lines(deny_install)
+        == [
+            "      - name: Install cargo-deny",
+            "        uses: taiki-e/install-action@v2",
+            "        with:",
+            "          tool: cargo-deny@0.20.2",
+        ],
+    )
+    require(
+        "cargo-deny lockfile step is exact",
+        active_source_lines(deny_lockfile)
+        == [
+            "      - name: Generate lockfile",
+            "        shell: bash",
+            "        run: cargo generate-lockfile",
+        ],
+    )
+    require(
+        "cargo-deny default command step is exact",
+        active_source_lines(deny_default)
+        == [
+            "      - name: Run cargo-deny (default features, excluding dev-deps)",
+            "        shell: bash",
+            "        run: cargo deny --exclude-dev check",
+        ],
+    )
+    require(
+        "cargo-deny runtime command step is exact",
+        active_source_lines(deny_runtime)
+        == [
+            "      - name: Run cargo-deny (runtime opt-in features, excluding dev-deps)",
+            "        shell: bash",
+            "        run: cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509,gmcrypto-core/tlcp,gmcrypto-core/aead-traits --exclude-dev check",
+        ],
+    )
+    deny_job_contract = (
+        scalar(deny, "name", 4) == "cargo-deny (no forbidden runtime deps)"
+        and scalar(deny, "runs-on", 4) == "macos-14"
+        and key_count(deny, "if", 4) == 1
+        and mapping_block(deny, "if", 4) == skip_ci_if
+        and scalar(deny, "timeout-minutes", 4) == "15"
+        and mapping_keys(deny, 4)
+        == ("name", "runs-on", "if", "timeout-minutes", "steps")
+    )
+    require("cargo-deny job contract is exact", deny_job_contract)
     require("cargo-deny is pinned to 0.20.2", "tool: cargo-deny@0.20.2" in deny_install)
     require(
         "cargo-deny default profile uses 0.20 syntax",
@@ -1172,6 +1278,15 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
             if config["has_skip_if"]
             else key_count(dudect_job, "if", 4) == 0
         )
+        expected_job_keys = (
+            ("name", "runs-on", "if", "timeout-minutes", "strategy", "steps")
+            if config["has_skip_if"]
+            else ("name", "runs-on", "timeout-minutes", "strategy", "steps")
+        )
+        require(
+            f"{workflow_name} dudect job top-level key sequence is exact",
+            mapping_keys(dudect_job, 4) == expected_job_keys,
+        )
         job_contract = (
             scalar(dudect_job, "name", 4) == config["name"]
             and scalar(dudect_job, "runs-on", 4) == "ubuntu-24.04"
@@ -1180,6 +1295,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
             and key_count(dudect_job, "continue-on-error", 4) == 0
             and key_count(dudect_job, "defaults", 4) == 0
             and key_count(dudect_job, "env", 4) == 0
+            and mapping_keys(dudect_job, 4) == expected_job_keys
         )
         require(f"{workflow_name} dudect job contract is exact", job_contract)
         require(
@@ -3649,6 +3765,182 @@ def mutation_self_test() -> list[str]:
             "      - run: 'true'\n"
             "\n  wasm32:\n",
             "duplicate cargo-deny job",
+        ),
+    )
+
+    def add_job_field(
+        text: str,
+        job_name: str,
+        field: str,
+        label: str,
+    ) -> str:
+        target = job(text, job_name)
+        runner = scalar(target, "runs-on", 4)
+        if runner is None:
+            failures.append(f"mutation could not identify runner: {label}")
+            return text
+        anchor = f"    runs-on: {runner}\n"
+        return replace_in_job(
+            text,
+            job_name,
+            anchor,
+            anchor + field,
+            label,
+        )
+
+    def add_skipped_dependency(text: str, job_name: str, label: str) -> str:
+        mutated = add_job_field(
+            text,
+            job_name,
+            "    needs: skip-assurance\n",
+            f"{label} needs field",
+        )
+        if "\n  skip-assurance:" in mutated:
+            failures.append(f"mutation helper job already existed: {label}")
+            return mutated
+        return (
+            mutated.rstrip()
+            + "\n\n"
+            + "  skip-assurance:\n"
+            + "    runs-on: ubuntu-latest\n"
+            + "    if: false\n"
+            + "    steps:\n"
+            + "      - run: 'true'\n"
+        )
+
+    protected_job_cases = (
+        ("build", "ci", CI, "build"),
+        ("cabi", "ci", CI, "cabi"),
+        ("GmSSL", "ci", CI, "interop-gmssl"),
+        ("cargo-deny", "ci", CI, "deny"),
+        ("gitleaks scan", "gitleaks", GITLEAKS, "scan"),
+        ("PR dudect", "dudect_pr", DUDECT_PR, "smoke"),
+        ("nightly dudect", "dudect_nightly", DUDECT_NIGHTLY, "full"),
+    )
+    for job_label, source_name, source, job_name in protected_job_cases:
+        expected = f"{job_label} job top-level key sequence is exact"
+        must_reject(
+            f"{job_label} job gains a container",
+            expected,
+            **{
+                source_name: add_job_field(
+                    source,
+                    job_name,
+                    "    container: ghcr.io/example/fake-tools:latest\n",
+                    f"{job_label} container",
+                )
+            },
+        )
+        must_reject(
+            f"{job_label} job depends on a skipped helper",
+            expected,
+            **{
+                source_name: add_skipped_dependency(
+                    source,
+                    job_name,
+                    f"{job_label} skipped dependency",
+                )
+            },
+        )
+
+    for label, before, after in (
+        (
+            "cargo-deny job name is disguised",
+            "    name: cargo-deny (no forbidden runtime deps)\n",
+            "    name: dependency diagnostics\n",
+        ),
+        (
+            "cargo-deny job runner changes",
+            "    runs-on: macos-14\n",
+            "    runs-on: ubuntu-latest\n",
+        ),
+        (
+            "cargo-deny job timeout changes",
+            "    timeout-minutes: 15\n",
+            "    timeout-minutes: 1\n",
+        ),
+    ):
+        must_reject(
+            label,
+            "cargo-deny job contract is exact",
+            ci=replace_in_job(CI, "deny", before, after, label),
+        )
+
+    deny_job = job(CI, "deny")
+    deny_install = step_named(deny_job, "Install cargo-deny")
+    deny_shadow_step = (
+        "      - name: Shadow cargo-deny\n"
+        "        shell: bash\n"
+        "        run: |\n"
+        "          fake_dir=\"$RUNNER_TEMP/fake-deny\"\n"
+        "          mkdir -p \"$fake_dir\"\n"
+        "          printf '#!/usr/bin/env bash\\nexit 0\\n' > \"$fake_dir/cargo-deny\"\n"
+        "          chmod +x \"$fake_dir/cargo-deny\"\n"
+        "          echo \"$fake_dir\" >> \"$GITHUB_PATH\"\n"
+    )
+    shadowed_deny = replace_once(
+        deny_job,
+        deny_install,
+        deny_install + "\n" + deny_shadow_step.rstrip(),
+        "cargo-deny PATH shadow step",
+    )
+    must_reject(
+        "cargo-deny is shadowed through GITHUB_PATH",
+        "cargo-deny step sequence is exact",
+        ci=replace_once(CI, deny_job, shadowed_deny, "shadowed cargo-deny job"),
+    )
+
+    for label, step_name, injected, expected in (
+        (
+            "cargo-deny installer is skipped",
+            "Install cargo-deny",
+            "        if: false\n",
+            "cargo-deny install step is exact",
+        ),
+        (
+            "cargo-deny lockfile step is skipped",
+            "Generate lockfile",
+            "        if: false\n",
+            "cargo-deny lockfile step is exact",
+        ),
+        (
+            "cargo-deny default command is tolerated",
+            "Run cargo-deny (default features, excluding dev-deps)",
+            "        continue-on-error: true\n",
+            "cargo-deny default command step is exact",
+        ),
+        (
+            "cargo-deny runtime command uses a custom shell",
+            "Run cargo-deny (runtime opt-in features, excluding dev-deps)",
+            "        shell: sh\n",
+            "cargo-deny runtime command step is exact",
+        ),
+    ):
+        must_reject(
+            label,
+            expected,
+            ci=replace_in_step(
+                CI,
+                "deny",
+                step_name,
+                f"      - name: {step_name}\n",
+                f"      - name: {step_name}\n" + injected,
+                label,
+            ),
+        )
+
+    must_reject(
+        "cargo-deny toolchain action gains environment metadata",
+        "cargo-deny toolchain step is exact",
+        ci=replace_in_uses(
+            CI,
+            "deny",
+            "dtolnay/rust-toolchain@stable",
+            "      - uses: dtolnay/rust-toolchain@stable",
+            "      - uses: dtolnay/rust-toolchain@stable\n"
+            "        env:\n"
+            "          BASH_ENV: /tmp/fake-deny",
+            "cargo-deny toolchain environment",
         ),
     )
 

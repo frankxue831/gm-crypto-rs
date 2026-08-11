@@ -546,10 +546,12 @@ jobs:
       # lockfile for a reproducible, fully-resolved dependency graph before
       # the deny passes (per the documented recipe in CLAUDE.md).
       - name: Generate lockfile
+        shell: bash
         run: cargo generate-lockfile
       # Default deny pass — gates the zero-runtime-deps surface of the
       # default-features build.
       - name: Run cargo-deny (default features, excluding dev-deps)
+        shell: bash
         run: cargo deny --exclude-dev check
       # v0.4 W2 / Q4.5 + v0.8 W2-W3 — second pass with the runtime opt-in
       # feature flags a downstream consumer might enable (digest/cipher
@@ -561,6 +563,7 @@ jobs:
       # transitive deps). Uses --features on the workspace-default crate
       # (`gmcrypto-core`).
       - name: Run cargo-deny (runtime opt-in features, excluding dev-deps)
+        shell: bash
         run: cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509,gmcrypto-core/tlcp,gmcrypto-core/aead-traits --exclude-dev check
 
   wasm32:

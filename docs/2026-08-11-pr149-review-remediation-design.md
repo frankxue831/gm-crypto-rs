@@ -95,7 +95,12 @@ dudect and gitleaks retain no job condition. None may add job or workflow
 `defaults`, job tolerance, or an unexpected job environment. The interop job
 environment remains exactly `GMSSL_TAG=v3.2.0` plus cache epoch `1`. Dudect
 retains `ubuntu-24.04`, Rust `1.95.0`, the 10/40 minute timeouts, the exact four
-feature legs, and the 10K×3 / 100K×5 producer budgets. Ordered step-header
+feature legs, and the 10K×3 / 100K×5 producer budgets. Each of the seven
+protected jobs—build, C ABI, GmSSL, cargo-deny, gitleaks, and both dudect
+jobs—also has an exact ordered set of indentation-four mapping keys. This
+rejects `container`, `needs`, and any other unreviewed job field instead of
+trying to enumerate only known bypasses; a skipped helper job therefore cannot
+silently skip a required assurance job. Ordered step-header
 contracts prevent a second checkout or an environment-tampering step from
 being inserted into build, C ABI, interop, gitleaks, or dudect execution.
 Finally, the gitleaks trigger requires unique `main` push and pull-request
@@ -116,7 +121,12 @@ otherwise invisible command from being placed between reviewed steps. Before
 the dudect producer runs, the workflow environment and runner-capture script
 are fixed exactly; this prevents an ordinary workflow edit from persisting
 `BASH_ENV` through `GITHUB_ENV` and changing the producer or parser shell
-boundary.
+boundary. Cargo-deny likewise retains exactly checkout, toolchain, pinned
+installer, lockfile generation, default-policy check, and runtime-feature
+check in that order. Each action or command step is a complete active-source
+contract, and the three command steps explicitly use `shell: bash`; an
+intermediate step cannot shadow `cargo-deny` through `GITHUB_PATH` while
+leaving the reviewed command text untouched.
 
 Deliberate mutation self-tests will prove that the verifier rejects:
 
@@ -142,6 +152,10 @@ Deliberate mutation self-tests will prove that the verifier rejects:
   duplicate critical jobs, or inserting a dash-alone step;
 - spelling protected metadata as an explicit, tagged, anchored, aliased, or
   physically continued YAML key while leaving its decoded meaning unchanged;
+- adding `container`, a skipped-job `needs` dependency, or any other
+  unreviewed top-level field to one of the seven protected jobs;
+- inserting a PATH-shadowing step after the pinned cargo-deny installer, or
+  adding skip, tolerance, environment, or shell metadata to its exact steps;
 - adding checkout inputs or an alternate ref, skipping the pinned dudect
   toolchain, or poisoning a later shell through `GITHUB_ENV`/`BASH_ENV`;
 - retargeting a protected CI checkout away from the triggering revision, or
