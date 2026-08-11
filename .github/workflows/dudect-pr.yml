@@ -352,6 +352,8 @@ jobs:
           # hosted-runner calibration exists, but its PRESENCE is required in
           # every run so a rename/removal cannot silently erase the telemetry.
           required_telemetry = ["noise_twin_class_split"]
+          if any(name in gate for gate in (required_high, required_low) for name in required_telemetry):
+              raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")
 
           fail = False
           # Completeness: every REQUIRED target/telemetry reference must be

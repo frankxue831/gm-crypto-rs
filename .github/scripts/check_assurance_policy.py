@@ -215,6 +215,20 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         r"^\s*required_telemetry\s*=\s*\[\s*[\"']noise_twin_class_split[\"']\s*\]\s*$",
         re.M,
     )
+    runtime_guard = {
+        "PR": re.compile(
+            r"^ {10}if any\(name in gate for gate in \(required_high, required_low\) "
+            r"for name in required_telemetry\):$\n"
+            r'^ {14}raise SystemExit\("FAIL: required telemetry promoted to a blocking dudect gate"\)$',
+            re.M,
+        ),
+        "nightly": re.compile(
+            r"^ {10}if any\(name in gate for gate in \(required_high, required_low, "
+            r"gross_regression_sentinel\) for name in required_telemetry\):$\n"
+            r'^ {14}raise SystemExit\("FAIL: required telemetry promoted to a blocking dudect gate"\)$',
+            re.M,
+        ),
+    }
     noise_twin_output = re.compile(r"^\s*print\(f[\"']NOISE-TWIN:", re.M)
     noise_twin_registration = re.compile(
         r"^\s*name:\s*BenchName\([\"']noise_twin_class_split[\"']\),\s*$",
@@ -222,11 +236,11 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     )
     require("noise twin benchmark is registered", noise_twin_registration.search(timing) is not None)
     for workflow_name, workflow in (("PR", dudect_pr), ("nightly", dudect_nightly)):
-        active_noise_twin_references = [
-            line
-            for line in workflow.splitlines()
-            if not line.lstrip().startswith("#") and noise_twin_reference.search(line)
-        ]
+        active_noise_twin_references = []
+        for line in workflow.splitlines():
+            active_line = line.split("#", 1)[0].rstrip()
+            if noise_twin_reference.search(active_line):
+                active_noise_twin_references.append(active_line)
         require(
             f"{workflow_name} dudect requires noise-twin telemetry",
             required_telemetry_assignment.search(workflow) is not None,
@@ -239,6 +253,10 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
             f"{workflow_name} dudect keeps noise-twin telemetry out of gate maps",
             len(active_noise_twin_references) == 1
             and required_telemetry_assignment.fullmatch(active_noise_twin_references[0]) is not None,
+        )
+        require(
+            f"{workflow_name} dudect runtime-rejects telemetry gate promotion",
+            runtime_guard[workflow_name].search(workflow) is not None,
         )
 
     return failures
@@ -521,6 +539,43 @@ def mutation_self_test() -> list[str]:
             "          fail = False\n",
             '          gross_regression_sentinel.setdefault("noise_twin_class_split", 0.20)\n'
             "          fail = False\n",
+            1,
+        ),
+    )
+    must_reject(
+        "PR telemetry runtime guard omits required_high",
+        "PR dudect runtime-rejects telemetry gate promotion",
+        dudect_pr=DUDECT_PR.replace(
+            "for gate in (required_high, required_low) for name in required_telemetry",
+            "for gate in (required_low,) for name in required_telemetry",
+            1,
+        ),
+    )
+    must_reject(
+        "nightly telemetry runtime guard omits gross-regression sentinel",
+        "nightly dudect runtime-rejects telemetry gate promotion",
+        dudect_nightly=DUDECT_NIGHTLY.replace(
+            "for gate in (required_high, required_low, gross_regression_sentinel) "
+            "for name in required_telemetry",
+            "for gate in (required_high, required_low) for name in required_telemetry",
+            1,
+        ),
+    )
+    must_reject(
+        "PR telemetry runtime rejection commented out",
+        "PR dudect runtime-rejects telemetry gate promotion",
+        dudect_pr=DUDECT_PR.replace(
+            '              raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")',
+            '              # raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")',
+            1,
+        ),
+    )
+    must_reject(
+        "nightly telemetry runtime rejection changed to print",
+        "nightly dudect runtime-rejects telemetry gate promotion",
+        dudect_nightly=DUDECT_NIGHTLY.replace(
+            '              raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")',
+            '              print("FAIL: required telemetry promoted to a blocking dudect gate")',
             1,
         ),
     )
