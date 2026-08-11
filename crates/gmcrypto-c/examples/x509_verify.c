@@ -8,7 +8,13 @@
  *   cc -Wall -Wextra -o x509_verify \
  *      crates/gmcrypto-c/examples/x509_verify.c \
  *      -Icrates/gmcrypto-c/include -Ltarget/release -lgmcrypto_c
- *   ./x509_verify crates/gmcrypto-core/tests/data/x509_leaf.der \
+ * Linux:
+ *   LD_LIBRARY_PATH=target/release ./x509_verify \
+ *                 crates/gmcrypto-core/tests/data/x509_leaf.der \
+ *                 crates/gmcrypto-core/tests/data/x509_ca.der
+ * macOS:
+ *   DYLD_LIBRARY_PATH=target/release ./x509_verify \
+ *                 crates/gmcrypto-core/tests/data/x509_leaf.der \
  *                 crates/gmcrypto-core/tests/data/x509_ca.der
  *
  * NOTE — this is NOT certificate validation. A PASS means exactly "the

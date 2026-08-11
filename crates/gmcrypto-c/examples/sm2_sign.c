@@ -2,9 +2,12 @@
  * Example: SM2 sign + verify via the gmcrypto-c C ABI.
  *
  * Build (Linux/macOS, dynamic):
- *   gcc -I ../include -L ../../../target/release -lgmcrypto_c \
- *       sm2_sign.c -o sm2_sign
+ *   gcc -I ../include -L ../../../target/release sm2_sign.c \
+ *       -lgmcrypto_c -o sm2_sign
+ * Linux:
  *   LD_LIBRARY_PATH=../../../target/release ./sm2_sign
+ * macOS:
+ *   DYLD_LIBRARY_PATH=../../../target/release ./sm2_sign
  *
  * Build (static):
  *   gcc -I ../include sm2_sign.c \

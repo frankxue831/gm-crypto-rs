@@ -11,9 +11,12 @@
  *   cargo build -p gmcrypto-c --release
  *
  * Build (Linux/macOS, dynamic):
- *   cc -I ../include -L ../../../target/release -lgmcrypto_c \
- *      tlcp_handshake.c -o tlcp_handshake
+ *   cc -I ../include -L ../../../target/release tlcp_handshake.c \
+ *      -lgmcrypto_c -o tlcp_handshake
+ * Linux:
  *   LD_LIBRARY_PATH=../../../target/release ./tlcp_handshake
+ * macOS:
+ *   DYLD_LIBRARY_PATH=../../../target/release ./tlcp_handshake
  *
  * Build (static):
  *   cc -I ../include tlcp_handshake.c \

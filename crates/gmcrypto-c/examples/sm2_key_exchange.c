@@ -9,9 +9,12 @@
  *   cargo build -p gmcrypto-c --release
  *
  * Build (Linux/macOS, dynamic):
- *   cc -I ../include -L ../../../target/release -lgmcrypto_c \
- *      sm2_key_exchange.c -o sm2_key_exchange
+ *   cc -I ../include -L ../../../target/release sm2_key_exchange.c \
+ *      -lgmcrypto_c -o sm2_key_exchange
+ * Linux:
  *   LD_LIBRARY_PATH=../../../target/release ./sm2_key_exchange
+ * macOS:
+ *   DYLD_LIBRARY_PATH=../../../target/release ./sm2_key_exchange
  *
  * Build (static):
  *   cc -I ../include sm2_key_exchange.c \

@@ -8,9 +8,12 @@
  *   cargo build -p gmcrypto-c --release
  *
  * Build (Linux/macOS, dynamic):
- *   cc -I ../include -L ../../../target/release -lgmcrypto_c \
- *      sm4_gcm_streaming.c -o sm4_gcm_streaming
+ *   cc -I ../include -L ../../../target/release sm4_gcm_streaming.c \
+ *      -lgmcrypto_c -o sm4_gcm_streaming
+ * Linux:
  *   LD_LIBRARY_PATH=../../../target/release ./sm4_gcm_streaming
+ * macOS:
+ *   DYLD_LIBRARY_PATH=../../../target/release ./sm4_gcm_streaming
  *
  * Build (static):
  *   cc -I ../include sm4_gcm_streaming.c \

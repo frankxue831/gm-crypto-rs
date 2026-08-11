@@ -8,9 +8,12 @@
  *   cargo build -p gmcrypto-c --release
  *
  * Build (Linux/macOS, dynamic):
- *   cc -I ../include -L ../../../target/release -lgmcrypto_c \
- *      sm4_xts_sector.c -o sm4_xts_sector
+ *   cc -I ../include -L ../../../target/release sm4_xts_sector.c \
+ *      -lgmcrypto_c -o sm4_xts_sector
+ * Linux:
  *   LD_LIBRARY_PATH=../../../target/release ./sm4_xts_sector
+ * macOS:
+ *   DYLD_LIBRARY_PATH=../../../target/release ./sm4_xts_sector
  *
  * Build (static):
  *   cc -I ../include sm4_xts_sector.c \

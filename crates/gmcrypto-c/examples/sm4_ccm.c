@@ -8,9 +8,12 @@
  *   cargo build -p gmcrypto-c --release
  *
  * Build (Linux/macOS, dynamic):
- *   cc -I ../include -L ../../../target/release -lgmcrypto_c \
- *      sm4_ccm.c -o sm4_ccm
+ *   cc -I ../include -L ../../../target/release sm4_ccm.c \
+ *      -lgmcrypto_c -o sm4_ccm
+ * Linux:
  *   LD_LIBRARY_PATH=../../../target/release ./sm4_ccm
+ * macOS:
+ *   DYLD_LIBRARY_PATH=../../../target/release ./sm4_ccm
  *
  * Build (static):
  *   cc -I ../include sm4_ccm.c \
