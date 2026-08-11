@@ -103,7 +103,7 @@ jobs:
       !contains(github.event.head_commit.message, '[skip actions]')
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Verify assurance workflow policy
         shell: bash
         run: python3 .github/scripts/check_assurance_policy.py
@@ -216,7 +216,7 @@ jobs:
       !contains(github.event.head_commit.message, '[skip actions]')
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Rust 1.85
         # `@stable` is the action's release tag (not the toolchain);
         # `toolchain:` picks the Rust version per Cargo's MSRV (1.85).
@@ -252,7 +252,7 @@ jobs:
       !contains(github.event.head_commit.message, '[skip actions]')
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -305,7 +305,7 @@ jobs:
       GMSSL_TAG: v3.2.0
       GMSSL_CACHE_EPOCH: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -314,7 +314,7 @@ jobs:
       - name: Cache GmSSL install prefix
         id: gmssl-cache
         continue-on-error: true
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/gmssl-${{ env.GMSSL_TAG }}
           key: gmssl-${{ runner.os }}-${{ runner.arch }}-${{ env.GMSSL_TAG }}-static-${{ env.GMSSL_CACHE_EPOCH }}
@@ -475,7 +475,7 @@ jobs:
       !contains(github.event.head_commit.message, '[skip actions]')
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -533,7 +533,7 @@ jobs:
       !contains(github.event.head_commit.message, '[skip actions]')
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       # Prebuilt cargo-deny binary from GitHub Releases via the curated
       # taiki-e/install-action tool list. Replaces `cargo install --locked
@@ -584,7 +584,7 @@ jobs:
       matrix:
         toolchain: [stable, "1.85"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Rust ${{ matrix.toolchain }}
         # `@stable` is the action's release tag (not the toolchain).
         uses: dtolnay/rust-toolchain@stable

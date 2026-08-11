@@ -85,7 +85,7 @@ jobs:
         # `|tau| <= 0.20` gate.
           - "sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # v0.18 W1 — PINNED (was @stable). The toolchain is the load-bearing
       # drift axis: the 2026-05-12 ubuntu-24.04 image refresh rolled Rust
       # 1.94.1 → 1.95.0 and shifted the ct_fn_invert / ct_fp_invert noise
@@ -456,7 +456,7 @@ jobs:
 
       - name: Upload raw log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dudect-nightly-log-${{ matrix.features }}
           path: dudect-nightly-*.log
