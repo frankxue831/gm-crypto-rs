@@ -164,7 +164,13 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     provision = step_named(interop, "Provision GmSSL ${{ env.GMSSL_TAG }} oracle")
     version = step_named(interop, "Assert oracle version (drift guard)")
     suite = step_named(interop, "gmssl interop suite (13 tests)")
-    report = step_named(interop, "Report GmSSL infrastructure status")
+    report = step_named(interop, "Report GmSSL interoperability status")
+    provision_script = active_run(provision)
+    report_script = active_run(report)
+    require(
+        "GmSSL check name discloses non-blocking infrastructure",
+        scalar(interop, "name", 4) == "gmssl interop (mismatch gates; infra non-blocking)",
+    )
     require(
         "GmSSL job is not globally tolerated",
         scalar(interop, "continue-on-error", 4) is None,
@@ -187,11 +193,26 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         scalar(suite, "if", 8)
         == "steps.gmssl-provision.outcome == 'success' && steps.gmssl-version.outcome == 'success'",
     )
-    report_if = scalar(report, "if", 8) or ""
-    report_script = active_run(report)
     require(
-        "GmSSL cache/provision/version degradation triggers reporting",
-        all(name in report_if for name in ("gmssl-cache.outcome", "gmssl-provision.outcome", "gmssl-version.outcome")),
+        "GmSSL repairs an unusable cache before provisioning",
+        all(
+            token in provision_script
+            for token in (
+                "cache_usable=false",
+                'cached_version="$("$oracle" version 2>/dev/null | head -n1 || true)"',
+                'if [ "$cached_version" = "$want" ]; then',
+                'rm -rf -- "$prefix" "$source_dir"',
+            )
+        ),
+    )
+    require(
+        "GmSSL status is always reported",
+        scalar(report, "if", 8) == "${{ always() }}",
+    )
+    require(
+        "GmSSL suite execution is machine-visible",
+        'echo "INTEROP_SUITE=$interop_state"' in report_script
+        and 'echo "INTEROP_SUITE=\\`$interop_state\\`"' in report_script,
     )
     require(
         "GmSSL infrastructure outcomes are summarized",
@@ -282,6 +303,10 @@ def mutation_self_test() -> list[str]:
         if not any(expected in failure for failure in found):
             failures.append(f"mutation was not rejected: {label}")
 
+    interop = job(CI, "interop-gmssl")
+    provision = step_named(interop, "Provision GmSSL ${{ env.GMSSL_TAG }} oracle")
+    report = step_named(interop, "Report GmSSL interoperability status")
+
     must_reject(
         "commented-out gitleaks command",
         "gitleaks scans committed history",
@@ -342,6 +367,34 @@ def mutation_self_test() -> list[str]:
         ci=CI.replace(
             "      - name: gmssl interop suite (13 tests)\n",
             "      - name: gmssl interop suite (13 tests)\n        continue-on-error: true\n",
+            1,
+        ),
+    )
+    must_reject(
+        "cached oracle accepted without an exact version match",
+        "GmSSL repairs an unusable cache before provisioning",
+        ci=CI.replace(
+            provision,
+            provision.replace(
+                '          if [ "$cached_version" = "$want" ]; then',
+                '          if [ -n "$cached_version" ]; then',
+                1,
+            ),
+            1,
+        ),
+    )
+    must_reject(
+        "GmSSL report restored to degradation-only execution",
+        "GmSSL status is always reported",
+        ci=CI.replace(
+            report,
+            report.replace(
+                "        if: ${{ always() }}",
+                "        if: ${{ always() && (steps.gmssl-cache.outcome != 'success' || "
+                "steps.gmssl-provision.outcome != 'success' || "
+                "steps.gmssl-version.outcome != 'success') }}",
+                1,
+            ),
             1,
         ),
     )

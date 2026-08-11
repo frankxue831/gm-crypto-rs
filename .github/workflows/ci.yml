@@ -283,7 +283,7 @@ jobs:
     # level, reported explicitly, and cause the suite to be skipped. This keeps
     # a third-party outage from blocking every PR without turning a skipped
     # suite into an interoperability pass.
-    name: gmssl interop (pinned oracle, x86_64)
+    name: gmssl interop (mismatch gates; infra non-blocking)
     runs-on: ubuntu-24.04
     if: >-
       !contains(github.event.pull_request.title, '[skip ci]') &&
@@ -327,21 +327,37 @@ jobs:
           CACHE_HIT: ${{ steps.gmssl-cache.outputs.cache-hit }}
         run: |
           set -euxo pipefail
-          if [ "$CACHE_HIT" != "true" ]; then
+          prefix="$HOME/gmssl-$GMSSL_TAG"
+          oracle="$prefix/bin/gmssl"
+          source_dir="$RUNNER_TEMP/gmssl-src"
+          want="GmSSL ${GMSSL_TAG#v}"
+          cache_usable=false
+          if [ "$CACHE_HIT" = "true" ] && [ -x "$oracle" ]; then
+            cached_version="$("$oracle" version 2>/dev/null | head -n1 || true)"
+            if [ "$cached_version" = "$want" ]; then
+              cache_usable=true
+            fi
+          fi
+          if [ "$cache_usable" != "true" ]; then
+            case "$prefix" in
+              "$HOME"/gmssl-v*) ;;
+              *) echo "::error::refusing to clean unexpected GmSSL prefix: $prefix"; exit 1 ;;
+            esac
+            rm -rf -- "$prefix" "$source_dir"
             git clone --depth 1 --branch "$GMSSL_TAG" \
-              https://github.com/guanzhi/GmSSL.git "$RUNNER_TEMP/gmssl-src"
+              https://github.com/guanzhi/GmSSL.git "$source_dir"
             # BUILD_SHARED_LIBS defaults to ON upstream, which yields a binary
             # linked against @rpath/libgmssl. Static keeps the cached artifact
             # self-contained, so a cache restore needs no LD_LIBRARY_PATH or
             # ldconfig to produce a runnable `gmssl`.
-            cmake -S "$RUNNER_TEMP/gmssl-src" -B "$RUNNER_TEMP/gmssl-src/build" \
+            cmake -S "$source_dir" -B "$source_dir/build" \
               -DCMAKE_BUILD_TYPE=Release \
               -DBUILD_SHARED_LIBS=OFF \
-              -DCMAKE_INSTALL_PREFIX="$HOME/gmssl-$GMSSL_TAG"
-            cmake --build "$RUNNER_TEMP/gmssl-src/build" --parallel
-            cmake --install "$RUNNER_TEMP/gmssl-src/build"
+              -DCMAKE_INSTALL_PREFIX="$prefix"
+            cmake --build "$source_dir/build" --parallel
+            cmake --install "$source_dir/build"
           fi
-          test -x "$HOME/gmssl-$GMSSL_TAG/bin/gmssl"
+          test -x "$oracle"
       # Needed on a cache hit as well as a fresh build; skipped only when the
       # tolerated provisioning step could not produce a usable oracle.
       - name: Put gmssl on PATH
@@ -392,41 +408,44 @@ jobs:
             echo "::error::expected 13 interop tests to pass - census drifted"
             exit 1
           fi
-      - name: Report GmSSL infrastructure status
-        if: ${{ always() && (steps.gmssl-cache.outcome != 'success' || steps.gmssl-provision.outcome != 'success' || steps.gmssl-version.outcome != 'success') }}
+      - name: Report GmSSL interoperability status
+        if: ${{ always() }}
         env:
           CACHE_OUTCOME: ${{ steps.gmssl-cache.outcome }}
           PROVISION_OUTCOME: ${{ steps.gmssl-provision.outcome }}
           VERSION_OUTCOME: ${{ steps.gmssl-version.outcome }}
           SUITE_OUTCOME: ${{ steps.gmssl-suite.outcome }}
         run: |
+          set -euo pipefail
+          if [ "$SUITE_OUTCOME" = "skipped" ]; then
+            interop_state=skipped
+          else
+            interop_state=ran
+          fi
+          echo "INTEROP_SUITE=$interop_state"
+          {
+            echo "### GmSSL interoperability status"
+            echo
+            echo "INTEROP_SUITE=\`$interop_state\`"
+            echo
+            echo "- cache: \`$CACHE_OUTCOME\`"
+            echo "- provision: \`$PROVISION_OUTCOME\`"
+            echo "- version assertion: \`$VERSION_OUTCOME\`"
+            echo "- interoperability suite: \`$SUITE_OUTCOME\`"
+          } >> "$GITHUB_STEP_SUMMARY"
           if [ "$PROVISION_OUTCOME" != "success" ] || [ "$VERSION_OUTCOME" != "success" ]; then
             echo "::warning title=GmSSL infrastructure unavailable::cache=$CACHE_OUTCOME provision=$PROVISION_OUTCOME version=$VERSION_OUTCOME suite=$SUITE_OUTCOME"
             {
-              echo "### GmSSL infrastructure unavailable"
-              echo
               echo "The interoperability suite was not run because the pinned oracle could not be prepared."
               echo
-              echo "- cache: \`$CACHE_OUTCOME\`"
-              echo "- provision: \`$PROVISION_OUTCOME\`"
-              echo "- version assertion: \`$VERSION_OUTCOME\`"
-              echo "- interoperability suite: \`$SUITE_OUTCOME\`"
-              echo
-              echo "This is non-blocking infrastructure telemetry, not a gmcrypto-core interoperability pass."
+              echo "This is non-blocking infrastructure telemetry, not an interoperability pass."
             } >> "$GITHUB_STEP_SUMMARY"
-          else
+          elif [ "$CACHE_OUTCOME" != "success" ]; then
             echo "::warning title=GmSSL cache degraded::cache=$CACHE_OUTCOME; fallback provisioning succeeded; suite=$SUITE_OUTCOME"
             {
-              echo "### GmSSL cache degraded"
-              echo
               echo "The cache step failed, but fallback provisioning and version validation succeeded."
               echo
-              echo "- cache: \`$CACHE_OUTCOME\`"
-              echo "- provision: \`$PROVISION_OUTCOME\`"
-              echo "- version assertion: \`$VERSION_OUTCOME\`"
-              echo "- interoperability suite: \`$SUITE_OUTCOME\`"
-              echo
-              echo "The suite outcome above remains authoritative; an actual mismatch is still blocking."
+              echo "Fallback provisioning recovered the cache failure; the suite outcome remains authoritative."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
