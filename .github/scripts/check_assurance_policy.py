@@ -210,14 +210,31 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "noise twin makes the selected reference opaque before timing",
         "let input = std::hint::black_box(input);" in timing,
     )
-    require("noise twin benchmark is registered", 'BenchName("noise_twin_class_split")' in timing)
-    gate_key = re.compile(r'^\s*"noise_twin_class_split"\s*:', re.M)
+    gate_key = re.compile(
+        r"^\s*(?:[\"']noise_twin_class_split[\"']\s*:|"
+        r"(?:required_high|required_low|gross_regression_sentinel)\s*\[\s*"
+        r"[\"']noise_twin_class_split[\"']\s*\]\s*=)",
+        re.M,
+    )
+    required_telemetry_assignment = re.compile(
+        r"^\s*required_telemetry\s*=\s*\[\s*[\"']noise_twin_class_split[\"']\s*\]\s*$",
+        re.M,
+    )
+    noise_twin_output = re.compile(r"^\s*print\(f[\"']NOISE-TWIN:", re.M)
+    noise_twin_registration = re.compile(
+        r"^\s*name:\s*BenchName\([\"']noise_twin_class_split[\"']\),\s*$",
+        re.M,
+    )
+    require("noise twin benchmark is registered", noise_twin_registration.search(timing) is not None)
     for workflow_name, workflow in (("PR", dudect_pr), ("nightly", dudect_nightly)):
         require(
             f"{workflow_name} dudect requires noise-twin telemetry",
-            'required_telemetry = ["noise_twin_class_split"]' in workflow,
+            required_telemetry_assignment.search(workflow) is not None,
         )
-        require(f"{workflow_name} dudect labels noise-twin output", "NOISE-TWIN:" in workflow)
+        require(
+            f"{workflow_name} dudect labels noise-twin output",
+            noise_twin_output.search(workflow) is not None,
+        )
         require(
             f"{workflow_name} dudect keeps noise-twin telemetry out of gate maps",
             gate_key.search(workflow) is None,
@@ -360,6 +377,119 @@ def mutation_self_test() -> list[str]:
         timing=TIMING.replace(
             'BenchName("noise_twin_class_split")',
             'BenchName("noise_twin_removed")',
+            1,
+        ),
+    )
+    must_reject(
+        "PR noise twin added to required_low with single quotes",
+        "PR dudect keeps noise-twin telemetry out of gate maps",
+        dudect_pr=DUDECT_PR.replace(
+            "          required_low  = {\n",
+            "          required_low  = {\n              'noise_twin_class_split': 0.20,\n",
+            1,
+        ),
+    )
+    must_reject(
+        "nightly noise twin added to required_low with single quotes",
+        "nightly dudect keeps noise-twin telemetry out of gate maps",
+        dudect_nightly=DUDECT_NIGHTLY.replace(
+            "          required_low  = {\n",
+            "          required_low  = {\n              'noise_twin_class_split': 0.20,\n",
+            1,
+        ),
+    )
+    must_reject(
+        "PR noise twin added through required_high subscript",
+        "PR dudect keeps noise-twin telemetry out of gate maps",
+        dudect_pr=DUDECT_PR.replace(
+            '          required_high = {"negative_control": 1.0}\n',
+            '          required_high = {"negative_control": 1.0}\n'
+            '          required_high["noise_twin_class_split"] = 0.20\n',
+            1,
+        ),
+    )
+    must_reject(
+        "PR noise twin added through required_low subscript",
+        "PR dudect keeps noise-twin telemetry out of gate maps",
+        dudect_pr=DUDECT_PR.replace(
+            '          matrix_features = os.environ.get("MATRIX_FEATURES", "")\n',
+            '          required_low["noise_twin_class_split"] = 0.20\n'
+            '          matrix_features = os.environ.get("MATRIX_FEATURES", "")\n',
+            1,
+        ),
+    )
+    must_reject(
+        "nightly noise twin added through required_high subscript",
+        "nightly dudect keeps noise-twin telemetry out of gate maps",
+        dudect_nightly=DUDECT_NIGHTLY.replace(
+            '          required_high = {"negative_control": 1.0}\n',
+            '          required_high = {"negative_control": 1.0}\n'
+            '          required_high["noise_twin_class_split"] = 0.20\n',
+            1,
+        ),
+    )
+    must_reject(
+        "nightly noise twin added through required_low subscript",
+        "nightly dudect keeps noise-twin telemetry out of gate maps",
+        dudect_nightly=DUDECT_NIGHTLY.replace(
+            '          matrix_features = os.environ.get("MATRIX_FEATURES", "")\n',
+            '          required_low["noise_twin_class_split"] = 0.20\n'
+            '          matrix_features = os.environ.get("MATRIX_FEATURES", "")\n',
+            1,
+        ),
+    )
+    must_reject(
+        "nightly noise twin added through gross-regression sentinel subscript",
+        "nightly dudect keeps noise-twin telemetry out of gate maps",
+        dudect_nightly=DUDECT_NIGHTLY.replace(
+            "          fail = False\n",
+            '          gross_regression_sentinel["noise_twin_class_split"] = 0.20\n'
+            "          fail = False\n",
+            1,
+        ),
+    )
+    must_reject(
+        "PR noise-twin telemetry requirement commented out",
+        "PR dudect requires noise-twin telemetry",
+        dudect_pr=DUDECT_PR.replace(
+            '          required_telemetry = ["noise_twin_class_split"]\n',
+            '          # required_telemetry = ["noise_twin_class_split"]\n',
+            1,
+        ),
+    )
+    must_reject(
+        "nightly noise-twin telemetry requirement commented out",
+        "nightly dudect requires noise-twin telemetry",
+        dudect_nightly=DUDECT_NIGHTLY.replace(
+            '          required_telemetry = ["noise_twin_class_split"]\n',
+            '          # required_telemetry = ["noise_twin_class_split"]\n',
+            1,
+        ),
+    )
+    must_reject(
+        "PR noise-twin output label commented out",
+        "PR dudect labels noise-twin output",
+        dudect_pr=DUDECT_PR.replace(
+            '              print(f"NOISE-TWIN:',
+            '              # print(f"NOISE-TWIN:',
+            1,
+        ),
+    )
+    must_reject(
+        "nightly noise-twin output label commented out",
+        "nightly dudect labels noise-twin output",
+        dudect_nightly=DUDECT_NIGHTLY.replace(
+            '              print(f"NOISE-TWIN:',
+            '              # print(f"NOISE-TWIN:',
+            1,
+        ),
+    )
+    must_reject(
+        "noise-twin benchmark registration commented out",
+        "noise twin benchmark is registered",
+        timing=TIMING.replace(
+            '            name: BenchName("noise_twin_class_split"),',
+            '            // name: BenchName("noise_twin_class_split"),',
             1,
         ),
     )
