@@ -87,7 +87,10 @@ Each protected command-bearing step now declares and uniquely retains
 `shell: bash`: the policy verifier, C compiler, GmSSL version/suite/report,
 gitleaks install/scan, and dudect producer/parser steps. Unexpected step
 environment mappings are rejected; the few required mappings must equal their
-reviewed source lines exactly.
+reviewed source lines exactly. Workflow-level environment inheritance is also
+bounded: CI retains only `CARGO_TERM_COLOR=always` and `RUSTFLAGS="-D warnings"`,
+while gitleaks retains no top-level environment. A workflow edit therefore
+cannot use `BASH_ENV` to inject functions into every later Bash process.
 
 The critical job envelope is also fixed. Build, C ABI, GmSSL interoperability,
 and PR dudect retain the complete existing folded skip-CI expression; nightly
@@ -128,6 +131,15 @@ contract, and the three command steps explicitly use `shell: bash`; an
 intermediate step cannot shadow `cargo-deny` through `GITHUB_PATH` while
 leaving the reviewed command text untouched.
 
+The complete CI build job is a separate reviewed-source boundary. Its
+fingerprint covers every nonblank raw line except whole-line comments, in
+source order; indentation, inline comments, action inputs, step metadata, and
+literal-block commands are retained byte-for-byte. This lets explanatory
+whole-line comments evolve while ensuring that inserting a post-policy
+`GITHUB_PATH` step, changing a Cargo command, or retargeting/configuring an
+action requires an explicit fingerprint and mutation-suite review. Existing
+human-readable build contracts remain in place for diagnostic labels.
+
 Deliberate mutation self-tests will prove that the verifier rejects:
 
 - promoting the noise twin into a PR or nightly gate map;
@@ -156,6 +168,10 @@ Deliberate mutation self-tests will prove that the verifier rejects:
   unreviewed top-level field to one of the seven protected jobs;
 - inserting a PATH-shadowing step after the pinned cargo-deny installer, or
   adding skip, tolerance, environment, or shell metadata to its exact steps;
+- inheriting a CI or gitleaks `BASH_ENV` function-injection path, or changing
+  the reviewed CI environment values;
+- inserting a post-policy Cargo shadow step or changing any active build-job
+  command, action, input, or metadata without updating the reviewed fingerprint;
 - adding checkout inputs or an alternate ref, skipping the pinned dudect
   toolchain, or poisoning a later shell through `GITHUB_ENV`/`BASH_ENV`;
 - retargeting a protected CI checkout away from the triggering revision, or

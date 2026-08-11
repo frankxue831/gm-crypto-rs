@@ -387,6 +387,16 @@ def active_source_lines(block: str) -> list[str]:
     return active
 
 
+def reviewed_source_fingerprint(block: str) -> str:
+    """Hash raw nonblank, non-whole-line-comment source in exact order."""
+    reviewed = "\n".join(
+        line
+        for line in block.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    )
+    return hashlib.sha256(reviewed.encode()).hexdigest()
+
+
 def contains_line_sequence(lines: list[str], expected: tuple[str, ...]) -> bool:
     """Return whether exact active lines occur contiguously in order."""
     width = len(expected)
@@ -435,6 +445,22 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
             canonical_mapping_key_syntax(source),
         )
 
+    ci_env = indented_block(ci, "env:", 0)
+    require(
+        "CI workflow environment is exact",
+        key_count(ci, "env", 0) == 1
+        and active_source_lines(ci_env)
+        == [
+            "env:",
+            "  CARGO_TERM_COLOR: always",
+            '  RUSTFLAGS: "-D warnings"',
+        ],
+    )
+    require(
+        "gitleaks workflow has no top-level environment",
+        key_count(gitleaks, "env", 0) == 0,
+    )
+
     build = job(ci, "build")
     cabi = job(ci, "cabi")
     deny = job(ci, "deny")
@@ -443,6 +469,13 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     require("cabi job key is unique", key_count(ci, "cabi", 2) == 1)
     require("GmSSL job key is unique", key_count(ci, "interop-gmssl", 2) == 1)
     require("cargo-deny job key is unique", key_count(ci, "deny", 2) == 1)
+    # Reviewed executable/configuration boundary for the complete build job.
+    # Any active source change must update this hash and its mutation coverage.
+    require(
+        "build job reviewed source fingerprint matches",
+        reviewed_source_fingerprint(build)
+        == "076a69e992bdd5a21ba6af25d078b2594daa1fadaa59961662309ca4eaaf9b86",
+    )
     for label, protected_job, expected_keys in (
         (
             "build",
@@ -3941,6 +3974,110 @@ def mutation_self_test() -> list[str]:
             "        env:\n"
             "          BASH_ENV: /tmp/fake-deny",
             "cargo-deny toolchain environment",
+        ),
+    )
+
+    must_reject(
+        "CI workflow gains a BASH_ENV function-injection path",
+        "CI workflow environment is exact",
+        ci=replace_once(
+            CI,
+            "env:\n  CARGO_TERM_COLOR: always\n",
+            "env:\n"
+            "  BASH_ENV: .github/scripts/fake-build-env\n"
+            "  CARGO_TERM_COLOR: always\n",
+            "CI workflow BASH_ENV",
+        ),
+    )
+    must_reject(
+        "gitleaks workflow gains a BASH_ENV fake-function path",
+        "gitleaks workflow has no top-level environment",
+        gitleaks=replace_once(
+            GITLEAKS,
+            "permissions:\n  contents: read\n\nconcurrency:\n",
+            "permissions:\n"
+            "  contents: read\n"
+            "\n"
+            "env:\n"
+            "  BASH_ENV: .github/scripts/fake-gitleaks-env\n"
+            "\n"
+            "concurrency:\n",
+            "gitleaks workflow BASH_ENV",
+        ),
+    )
+
+    build_job = job(CI, "build")
+    policy_step = step_named(build_job, "Verify assurance workflow policy")
+    cargo_shadow_step = (
+        "      - name: Shadow cargo after policy verification\n"
+        "        shell: bash\n"
+        "        run: |\n"
+        "          fake_dir=\"$RUNNER_TEMP/fake-cargo\"\n"
+        "          mkdir -p \"$fake_dir\"\n"
+        "          printf '#!/usr/bin/env bash\\nexit 0\\n' > \"$fake_dir/cargo\"\n"
+        "          chmod +x \"$fake_dir/cargo\"\n"
+        "          echo \"$fake_dir\" >> \"$GITHUB_PATH\"\n"
+    )
+    shadowed_build = replace_once(
+        build_job,
+        policy_step,
+        policy_step + "\n" + cargo_shadow_step.rstrip(),
+        "build cargo PATH shadow step",
+    )
+    build_fingerprint_label = "build job reviewed source fingerprint matches"
+    must_reject(
+        "build job shadows cargo through GITHUB_PATH after policy verification",
+        build_fingerprint_label,
+        ci=replace_once(CI, build_job, shadowed_build, "shadowed build job"),
+    )
+    must_reject(
+        "build job replaces workspace tests with success",
+        build_fingerprint_label,
+        ci=replace_in_step(
+            CI,
+            "build",
+            "cargo test (tests + doctests; benches excluded — see dudect-pr.yml)",
+            "        run: cargo test --workspace\n",
+            "        run: 'true'\n",
+            "build workspace test command",
+        ),
+    )
+    must_reject(
+        "build job replaces the Rust toolchain action",
+        build_fingerprint_label,
+        ci=replace_in_step(
+            CI,
+            "build",
+            "Install Rust stable",
+            "        uses: dtolnay/rust-toolchain@stable\n",
+            "        uses: attacker/rust-toolchain@v1\n",
+            "build toolchain action",
+        ),
+    )
+    must_reject(
+        "build job drops the clippy toolchain input",
+        build_fingerprint_label,
+        ci=replace_in_step(
+            CI,
+            "build",
+            "Install Rust stable",
+            "          components: rustfmt, clippy",
+            "          components: rustfmt",
+            "build toolchain input",
+        ),
+    )
+    must_reject(
+        "build cache action gains unreviewed metadata",
+        build_fingerprint_label,
+        ci=replace_in_step(
+            CI,
+            "build",
+            "Cache cargo",
+            "        uses: Swatinem/rust-cache@v2",
+            "        uses: Swatinem/rust-cache@v2\n"
+            "        with:\n"
+            "          key: attacker-controlled",
+            "build cache metadata",
         ),
     )
 
