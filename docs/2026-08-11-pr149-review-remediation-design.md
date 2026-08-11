@@ -131,14 +131,16 @@ contract, and the three command steps explicitly use `shell: bash`; an
 intermediate step cannot shadow `cargo-deny` through `GITHUB_PATH` while
 leaving the reviewed command text untouched.
 
-The complete CI build job is a separate reviewed-source boundary. Its
-fingerprint covers every nonblank raw line except whole-line comments, in
-source order; indentation, inline comments, action inputs, step metadata, and
-literal-block commands are retained byte-for-byte. This lets explanatory
-whole-line comments evolve while ensuring that inserting a post-policy
-`GITHUB_PATH` step, changing a Cargo command, or retargeting/configuring an
-action requires an explicit fingerprint and mutation-suite review. Existing
-human-readable build contracts remain in place for diagnostic labels.
+All seven complete protected jobs are also reviewed-source boundaries. A
+fixed SHA-256 dictionary covers build, C ABI, GmSSL, cargo-deny, gitleaks, and
+both dudect jobs, with a distinct failure label for each. Every fingerprint
+covers nonblank raw lines except whole-line comments, in source order;
+indentation, inline comments, action inputs, step metadata, and literal-block
+commands are retained byte-for-byte. This lets explanatory whole-line comments
+evolve while ensuring that inserting a PATH-shadow step, changing a Cargo or
+header command, or retargeting/configuring an action requires an explicit
+fingerprint and mutation-suite review. Existing human-readable contracts
+remain in place for diagnostic labels.
 
 Deliberate mutation self-tests will prove that the verifier rejects:
 
@@ -170,8 +172,9 @@ Deliberate mutation self-tests will prove that the verifier rejects:
   adding skip, tolerance, environment, or shell metadata to its exact steps;
 - inheriting a CI or gitleaks `BASH_ENV` function-injection path, or changing
   the reviewed CI environment values;
-- inserting a post-policy Cargo shadow step or changing any active build-job
-  command, action, input, or metadata without updating the reviewed fingerprint;
+- inserting a post-policy Cargo shadow step or changing any protected job's
+  active command, action, input, or metadata without updating its reviewed
+  fingerprint, including C ABI gates, GmSSL caches, and dudect uploads;
 - adding checkout inputs or an alternate ref, skipping the pinned dudect
   toolchain, or poisoning a later shell through `GITHUB_ENV`/`BASH_ENV`;
 - retargeting a protected CI checkout away from the triggering revision, or

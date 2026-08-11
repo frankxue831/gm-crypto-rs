@@ -469,13 +469,32 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     require("cabi job key is unique", key_count(ci, "cabi", 2) == 1)
     require("GmSSL job key is unique", key_count(ci, "interop-gmssl", 2) == 1)
     require("cargo-deny job key is unique", key_count(ci, "deny", 2) == 1)
-    # Reviewed executable/configuration boundary for the complete build job.
-    # Any active source change must update this hash and its mutation coverage.
-    require(
-        "build job reviewed source fingerprint matches",
-        reviewed_source_fingerprint(build)
-        == "076a69e992bdd5a21ba6af25d078b2594daa1fadaa59961662309ca4eaaf9b86",
-    )
+    # Reviewed executable/configuration boundaries for all protected jobs.
+    # Any active source change must update its hash and mutation coverage.
+    reviewed_jobs = {
+        "build": build,
+        "cabi": cabi,
+        "GmSSL": interop,
+        "cargo-deny": deny,
+        "gitleaks scan": job(gitleaks, "scan"),
+        "PR dudect": job(dudect_pr, "smoke"),
+        "nightly dudect": job(dudect_nightly, "full"),
+    }
+    reviewed_job_fingerprints = {
+        "build": "076a69e992bdd5a21ba6af25d078b2594daa1fadaa59961662309ca4eaaf9b86",
+        "cabi": "9ad9b0ea094f6890e65f302b01a5e06b17469f19bf07f87739c305e433ee4f6f",
+        "GmSSL": "4020f6c7438bcfac65ebfe007b1256de93fae9d3f5f78c1c0504496d59e904fd",
+        "cargo-deny": "94fada03aa7f3fa3a3e879ac2d758beb39c84dd93109e9ca74dce9d768ae75b0",
+        "gitleaks scan": "f9af8e35f7762194f2baa30ab69d235efa5dfd81ff9e1bb66cf805e1645357c9",
+        "PR dudect": "ab6b3c2030d48dca8dc828a697713ccf054425eb7af6dfbdf34bc6cc5897142c",
+        "nightly dudect": "4e20a8a6b198f21186a30b3faa1c97f069f323cf4fd8e8a969c1598529763680",
+    }
+    for label, expected_fingerprint in reviewed_job_fingerprints.items():
+        require(
+            f"{label} job reviewed source fingerprint matches",
+            reviewed_source_fingerprint(reviewed_jobs[label])
+            == expected_fingerprint,
+        )
     for label, protected_job, expected_keys in (
         (
             "build",
@@ -4078,6 +4097,119 @@ def mutation_self_test() -> list[str]:
             "        with:\n"
             "          key: attacker-controlled",
             "build cache metadata",
+        ),
+    )
+
+    for step_name, command in (
+        (
+            "cargo build -p gmcrypto-c --release",
+            "cargo build -p gmcrypto-c --release",
+        ),
+        (
+            "Regenerate header via cbindgen",
+            "cargo build -p gmcrypto-c --features regen-header",
+        ),
+        (
+            "Verify committed header is up-to-date",
+            "git diff --exit-code crates/gmcrypto-c/include/gmcrypto.h",
+        ),
+        ("cargo test -p gmcrypto-c", "cargo test -p gmcrypto-c"),
+    ):
+        must_reject(
+            f"cabi replaces {step_name} with success",
+            "cabi job reviewed source fingerprint matches",
+            ci=replace_in_step(
+                CI,
+                "cabi",
+                step_name,
+                f"        run: {command}",
+                "        run: 'true'",
+                f"cabi {step_name} command",
+            ),
+        )
+
+    must_reject(
+        "GmSSL cargo cache uses an unreviewed action",
+        "GmSSL job reviewed source fingerprint matches",
+        ci=replace_in_step(
+            CI,
+            "interop-gmssl",
+            "Cache cargo",
+            "        uses: Swatinem/rust-cache@v2\n",
+            "        uses: attacker/rust-cache@v1\n",
+            "GmSSL cargo cache action",
+        ),
+    )
+    must_reject(
+        "GmSSL oracle cache uses an unreviewed action",
+        "GmSSL job reviewed source fingerprint matches",
+        ci=replace_in_step(
+            CI,
+            "interop-gmssl",
+            "Cache GmSSL install prefix",
+            "        uses: actions/cache@v4\n",
+            "        uses: attacker/cache@v1\n",
+            "GmSSL oracle cache action",
+        ),
+    )
+    must_reject(
+        "GmSSL oracle cache path drifts",
+        "GmSSL job reviewed source fingerprint matches",
+        ci=replace_in_step(
+            CI,
+            "interop-gmssl",
+            "Cache GmSSL install prefix",
+            "          path: ~/gmssl-${{ env.GMSSL_TAG }}\n",
+            "          path: /tmp/fake-gmssl\n",
+            "GmSSL oracle cache path",
+        ),
+    )
+
+    must_reject(
+        "gitleaks scan job name drifts",
+        "gitleaks scan job reviewed source fingerprint matches",
+        gitleaks=replace_in_job(
+            GITLEAKS,
+            "scan",
+            "    name: gitleaks (committed history)\n",
+            "    name: secret diagnostics\n",
+            "gitleaks scan job name",
+        ),
+    )
+    must_reject(
+        "cargo-deny lockfile command gains an inline source suffix",
+        "cargo-deny job reviewed source fingerprint matches",
+        ci=replace_in_step(
+            CI,
+            "deny",
+            "Generate lockfile",
+            "        run: cargo generate-lockfile",
+            "        run: cargo generate-lockfile # reviewed-source drift",
+            "cargo-deny lockfile inline source",
+        ),
+    )
+    must_reject(
+        "PR dudect upload uses an unreviewed action",
+        "PR dudect job reviewed source fingerprint matches",
+        dudect_pr=replace_in_step(
+            DUDECT_PR,
+            "smoke",
+            "Upload raw log",
+            "        uses: actions/upload-artifact@v4\n",
+            "        uses: attacker/upload-artifact@v1\n",
+            "PR dudect upload action",
+        ),
+    )
+    must_reject(
+        "nightly dudect upload retention drifts",
+        "nightly dudect job reviewed source fingerprint matches",
+        dudect_nightly=replace_in_step(
+            DUDECT_NIGHTLY,
+            "full",
+            "Upload raw log",
+            "          retention-days: 30",
+            "          retention-days: 1",
+            "nightly dudect upload retention",
         ),
     )
 
