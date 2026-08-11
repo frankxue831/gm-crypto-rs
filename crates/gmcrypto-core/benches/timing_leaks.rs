@@ -526,7 +526,7 @@ fn ct_sm4_key_schedule(runner: &mut CtRunner, rng: &mut BenchRng) {
 ///
 /// Under `--features sm4-bitsliced` (v0.4 W3) this target measures
 /// the bitsliced S-box path; the default-features build measures the
-/// linear-scan S-box. Per Q4.10, both paths gate at `|tau| < 0.20`.
+/// linear-scan S-box. Per Q4.10, both paths gate at `|tau| <= 0.20`.
 /// The bitsliced path is constant-time-by-construction (pure-XOR /
 /// AND gates over public-bit positions); this target is the dudect
 /// regression gate on that property.
@@ -599,7 +599,7 @@ fn ct_sm4_ctr_encrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// `--features sm4-bitsliced`. Phase 2 swaps in AVX2 8-way intrinsics
 /// (runtime detect; silent fallback to single-block on non-AVX2 CPUs);
 /// phase 3 adds NEON 4-way + `Sm4CbcDecryptor` SIMD fanout. The gate
-/// stays at `|tau| < 0.20` across all three phases (Q5.14 of
+/// stays at `|tau| <= 0.20` across all three phases (Q5.14 of
 /// docs/v0.5-scope.md).
 ///
 /// The target is provisioned in phase 1 so that the CI matrix entry,
@@ -647,7 +647,7 @@ fn ct_sm4_encrypt_block_bitsliced_simd(runner: &mut CtRunner, rng: &mut BenchRng
 ///
 /// Class split by master key bytes (matching
 /// `ct_sm4_encrypt_block` / `ct_sm4_encrypt_block_bitsliced_simd`).
-/// Same `|tau| < 0.20` gate as other SM4 targets. The two classes
+/// Same `|tau| <= 0.20` gate as other SM4 targets. The two classes
 /// share identical control flow (both decrypts succeed) so only
 /// key-dependent timing differentials surface.
 #[cfg(feature = "sm4-bitsliced-simd")]
@@ -702,7 +702,7 @@ fn ct_sm4_cbc_decrypt_fanout(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// compare.
 ///
 /// Cfg-gated on `sm4-aead` so the target only compiles in CI matrix
-/// slots that exercise the AEAD path. Same `|tau| < 0.20` gate as
+/// slots that exercise the AEAD path. Same `|tau| <= 0.20` gate as
 /// the rest of the SM4 surface.
 #[cfg(feature = "sm4-aead")]
 fn ct_sm4_gcm_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
@@ -791,7 +791,7 @@ fn ct_sm4_ccm_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// exercise the partial-block GHASH accumulator path. Exercises key
 /// schedule, `H = SM4_E(key, 0^128)`, the running GHASH (rides CLMUL on
 /// `x86_64` / PMULL on `aarch64` / software Karatsuba elsewhere), GCTR,
-/// and the constant-time tag compare. `|tau| < 0.20`.
+/// and the constant-time tag compare. `|tau| <= 0.20`.
 #[cfg(feature = "sm4-aead")]
 fn ct_sm4_gcm_decrypt_buffered(runner: &mut CtRunner, rng: &mut BenchRng) {
     use gmcrypto_core::sm4::{Sm4GcmDecryptor, mode_gcm};
@@ -841,7 +841,7 @@ fn ct_sm4_gcm_decrypt_buffered(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// exercised, not just whole-block. Exercises key schedule,
 /// `T_0 = SM4_E(Key2, tweak)`, the constant-time bit-reflected α-doubling
 /// chain, the `decrypt_blocks` batch path (rides SIMD fanout under
-/// `sm4-bitsliced-simd`), and the CTS tail. `|tau| < 0.20`.
+/// `sm4-bitsliced-simd`), and the CTS tail. `|tau| <= 0.20`.
 #[cfg(feature = "sm4-xts")]
 fn ct_sm4_xts_decrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
     use gmcrypto_core::sm4::mode_xts;
@@ -1014,7 +1014,7 @@ impl TryCryptoRng for FixedEphRng {}
 /// `ct_pkcs8_decrypt` pattern — so both classes succeed via identical
 /// control flow: `t = (d + x̄·r) mod n`, the secret-scalar `mul_var`, the
 /// KDF, and both constant-time tag computations/compares all execute on
-/// every sample. Gate `|tau| < 0.20`.
+/// every sample. Gate `|tau| <= 0.20`.
 #[cfg(feature = "sm2-key-exchange")]
 fn ct_sm2_key_exchange(runner: &mut CtRunner, rng: &mut BenchRng) {
     use gmcrypto_core::sm2::key_exchange::{
@@ -1088,7 +1088,7 @@ fn ct_sm2_key_exchange(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// in `mac_equalized` must erase that timing difference; both classes reach
 /// the equalized MAC + constant-time tag compare via identical control flow.
 /// A broken equalization (the dummy-compress top-up removed) would surface
-/// here as `|tau|` ≫ gate. Gate `|tau| < 0.20`.
+/// here as `|tau|` ≫ gate. Gate `|tau| <= 0.20`.
 #[cfg(feature = "tlcp")]
 fn ct_tlcp_cbc_deprotect(runner: &mut CtRunner, rng: &mut BenchRng) {
     use gmcrypto_core::tlcp::record::{
@@ -1300,7 +1300,7 @@ fn main() {
     // v0.5 W4 — append the SIMD-packed-bitsliced target only when the
     // feature is on. Phase 1 measures the same byte sequence as
     // `ct_sm4_encrypt_block` under `sm4-bitsliced`; phase 2 / phase 3
-    // swap the inner body. The gate stays at `|tau| < 0.20` across
+    // swap the inner body. The gate stays at `|tau| <= 0.20` across
     // all three phases (Q5.14).
     #[cfg(feature = "sm4-bitsliced-simd")]
     benches.push(BenchMetadata {
@@ -1312,7 +1312,7 @@ fn main() {
     // v0.6 W6 — CBC-decrypt SIMD-fanout target (Q6.7). Measures the
     // `Sm4CbcDecryptor::decrypt_batch` path that batches
     // `SIMD_BATCH` ciphertext blocks through `sbox_x32` (x86_64) or
-    // `sbox_x16` (aarch64). Same `|tau| < 0.20` gate as the rest
+    // `sbox_x16` (aarch64). Same `|tau| <= 0.20` gate as the rest
     // of the SM4 surface; class-split by master key.
     #[cfg(feature = "sm4-bitsliced-simd")]
     benches.push(BenchMetadata {
@@ -1324,7 +1324,7 @@ fn main() {
     // v0.8 W4 — SM4-GCM / SM4-CCM decrypt targets (Q8.7). Cfg-gated
     // on `sm4-aead`; class-split by master key with valid (ct, tag)
     // pairs for both classes (no failure-path divergence). Same
-    // `|tau| < 0.20` gate as the rest of the SM4 surface.
+    // `|tau| <= 0.20` gate as the rest of the SM4 surface.
     #[cfg(feature = "sm4-aead")]
     benches.push(BenchMetadata {
         name: BenchName("ct_sm4_gcm_decrypt"),
@@ -1339,7 +1339,7 @@ fn main() {
     });
 
     // v0.9 W3 — incremental-input buffered SM4-GCM decrypt target
-    // (Q9.5). Same class-split-by-key shape + `|tau| < 0.20` gate;
+    // (Q9.5). Same class-split-by-key shape + `|tau| <= 0.20` gate;
     // drives `Sm4GcmDecryptor` (commit-on-verify) instead of the
     // single-shot `mode_gcm::decrypt`.
     #[cfg(feature = "sm4-aead")]
@@ -1351,7 +1351,7 @@ fn main() {
 
     // v0.12 W3 — SM4-XTS decrypt target (Q12.9). Cfg-gated on `sm4-xts`;
     // class-split by master key at a CTS (non-block-multiple) length so the
-    // final-pair ciphertext-stealing path gates. Same `|tau| < 0.20` gate.
+    // final-pair ciphertext-stealing path gates. Same `|tau| <= 0.20` gate.
     #[cfg(feature = "sm4-xts")]
     benches.push(BenchMetadata {
         name: BenchName("ct_sm4_xts_decrypt"),
@@ -1362,7 +1362,7 @@ fn main() {
     // v1.1 W3 — SM2 key-exchange target. Cfg-gated on `sm2-key-exchange`;
     // class-split by the initiator's static `d_A` with a per-class VALID
     // responder transcript (both classes succeed; identical control flow).
-    // Same `|tau| < 0.20` gate as the other composite targets.
+    // Same `|tau| <= 0.20` gate as the other composite targets.
     #[cfg(feature = "sm2-key-exchange")]
     benches.push(BenchMetadata {
         name: BenchName("ct_sm2_key_exchange"),
@@ -1372,7 +1372,7 @@ fn main() {
 
     // v1.7 W3 — TLCP SM4-CBC Lucky13 deprotect (Q7.8). Cfg-gated on `tlcp`;
     // class-split by recovered-fragment length (fixed key) so the equalized
-    // inner-hash compression count is what is measured. `|tau| < 0.20`.
+    // inner-hash compression count is what is measured. `|tau| <= 0.20`.
     #[cfg(feature = "tlcp")]
     benches.push(BenchMetadata {
         name: BenchName("ct_tlcp_cbc_deprotect"),

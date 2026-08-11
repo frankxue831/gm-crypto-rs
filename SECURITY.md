@@ -76,7 +76,7 @@ The in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
 + 1 cfg-gated under `sm4-xts` + 1 cfg-gated under `sm2-key-exchange`
 + 1 cfg-gated under `tlcp`)
 plus a deliberately-leaky `negative_control`. Most real targets gate on
-`|tau| < 0.20`;
+`|tau| <= 0.20`;
 `negative_control` gates the opposite direction (`|tau| > 1.0` **must**
 fire to prove harness wiring); `ct_sign_k_class`, `ct_hmac_sm3`, and the
 direct `ct_fn_invert` / `ct_fp_invert` invert diagnostics have target-specific
@@ -154,7 +154,7 @@ them is why the always-on bench vector has 16 entries against 12 `ct_*`:
 **Cfg-gated on `sm4-bitsliced-simd` (2):**
 
 - `ct_sm4_encrypt_block_bitsliced_simd` — SM4 single-block encrypt under the
-  SIMD-packed dispatch path (v0.5 W4 phase 2). Same `|tau| < 0.20` gate.
+  SIMD-packed dispatch path (v0.5 W4 phase 2). Same `|tau| <= 0.20` gate.
 - `ct_sm4_cbc_decrypt_fanout` — `Sm4CbcDecryptor`'s batched fanout
   (`decrypt_batch`) timed under load, class-split by master key (v0.6 W6).
   Exercises `sbox_x32` on `x86_64` AVX2 (8 blocks × 4 tau bytes = 32 bytes
@@ -248,7 +248,7 @@ paragraph.
   (the `ct_pkcs8_decrypt` per-class-valid pattern), so both classes succeed
   via identical control flow — `t = (d + x̄·r) mod n`, the secret-scalar
   `mul_var`, the KDF, and both constant-time tag computations/compares all
-  execute on every sample. Gate `|tau| < 0.20` on the 4th dudect matrix leg.
+  execute on every sample. Gate `|tau| <= 0.20` on the 4th dudect matrix leg.
   The v1.2 C FFI rides this target (a thin shim adds no new secret-dependent
   path — the v0.13/v0.16 precedent). **The v1.6 no-confirmation completers
   also ride it**: the initiator's `derive_without_key_confirmation` is a
@@ -266,7 +266,7 @@ paragraph.
   both classes are valid records of the same wire length but fragment
   lengths that straddle an SM3 inner-hash compression boundary, so the
   equalized inner-hash compression count is what is measured. Gate
-  `|tau| < 0.20` on the 4th dudect matrix leg (cfg `tlcp`); 20K-sample
+  `|tau| <= 0.20` on the 4th dudect matrix leg (cfg `tlcp`); 20K-sample
   smoke `|tau| ≈ 0.08`. The deprotect equalizes **three** constant-time
   surfaces — (1) the inner-hash SM3 compression count (dummy compressions
   on a throwaway state to a public upper bound, `core::hint::black_box`
@@ -378,7 +378,7 @@ This is the **settled constant-time gate posture for v1.0**, with narrow,
 explicitly-named revisit criteria (not "permanent/final", not "still an open
 hardening gap"):
 
-- **Composite dudect targets remain release-gated at `|tau| < 0.20`.** These are
+- **Composite dudect targets remain release-gated at `|tau| <= 0.20`.** These are
   the full-operation targets (sign, scalar-mult, SM4 key-schedule / encrypt /
   CTR / CBC-fanout / GCM / CCM / XTS decrypt, SM2 decrypt, PKCS#8 decrypt);
   they measure quietly and gate authoritatively.

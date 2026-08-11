@@ -2,6 +2,8 @@
 """Semantic regression checks for assurance-critical workflow wiring."""
 
 from pathlib import Path
+import ast
+import hashlib
 import re
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -56,25 +58,89 @@ def scalar(block: str, key: str, indent: int) -> str | None:
     return match.group(1) if match else None
 
 
+def key_count(block: str, key: str, indent: int) -> int:
+    """Count exact YAML mapping keys at one indentation level."""
+    prefix = " " * indent
+    return len(re.findall(rf"^{re.escape(prefix)}{re.escape(key)}:\s*", block, re.M))
+
+
 def active_run(step: str) -> str:
     """Extract active shell from a step's run key, excluding YAML comments."""
     lines = step.splitlines()
-    for index, line in enumerate(lines):
-        match = re.match(r"^ {8}run:\s*(.*)$", line)
-        if not match:
-            continue
-        value = match.group(1)
-        if value and value != "|":
-            return value
-        body: list[str] = []
-        for candidate in lines[index + 1 :]:
-            if candidate.strip() and len(candidate) - len(candidate.lstrip()) <= 8:
-                break
-            stripped = candidate.strip()
-            if stripped and not stripped.startswith("#"):
-                body.append(stripped)
-        return "\n".join(body)
-    return ""
+    matches = [
+        (index, match)
+        for index, line in enumerate(lines)
+        if (match := re.match(r"^ {8}run:\s*(.*)$", line))
+    ]
+    if len(matches) != 1:
+        return ""
+    index, match = matches[0]
+    value = match.group(1)
+    if value and value != "|":
+        return value
+    body: list[str] = []
+    for candidate in lines[index + 1 :]:
+        if candidate.strip() and len(candidate) - len(candidate.lstrip()) <= 8:
+            break
+        stripped = candidate.strip()
+        if stripped and not stripped.startswith("#"):
+            body.append(stripped)
+    return "\n".join(body)
+
+
+def literal_run_body(step: str) -> str | None:
+    """Return a literal-block run body with the YAML indentation removed."""
+    lines = step.splitlines()
+    matches = [
+        index for index, line in enumerate(lines) if re.match(r"^ {8}run:\s*", line)
+    ]
+    if len(matches) != 1 or lines[matches[0]] != "        run: |":
+        return None
+    body: list[str] = []
+    for candidate in lines[matches[0] + 1 :]:
+        if candidate.strip() and len(candidate) - len(candidate.lstrip()) <= 8:
+            break
+        if not candidate:
+            body.append("")
+        elif candidate.startswith("          "):
+            body.append(candidate[10:])
+        else:
+            return None
+    return "\n".join(body).rstrip()
+
+
+def reviewed_python_heredoc(step: str) -> tuple[str, str] | None:
+    """Check the shell envelope, then return Python source and AST fingerprint."""
+    body = literal_run_body(step)
+    if body is None:
+        return None
+    lines = body.splitlines()
+    opening = [index for index, line in enumerate(lines) if line == "python3 - <<'PY'"]
+    closing = [index for index, line in enumerate(lines) if line == "PY"]
+    if len(opening) != 1 or len(closing) != 1 or closing[0] <= opening[0]:
+        return None
+
+    def active_shell(lines_to_check: list[str]) -> list[str]:
+        return [
+            line.strip()
+            for line in lines_to_check
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+
+    if active_shell(lines[: opening[0]]) != ["set -euo pipefail"]:
+        return None
+    if active_shell(lines[closing[0] + 1 :]):
+        return None
+
+    python_source = "\n".join(lines[opening[0] + 1 : closing[0]]) + "\n"
+    try:
+        tree = ast.parse(python_source)
+    except SyntaxError:
+        return None
+    fingerprint = hashlib.sha256(
+        ast.dump(tree, include_attributes=False).encode()
+    ).hexdigest()
+    return python_source, fingerprint
 
 
 def active_source_lines(block: str) -> list[str]:
@@ -134,6 +200,14 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "policy verifier is executed by the build job",
         active_run(policy_step) == "python3 .github/scripts/check_assurance_policy.py",
     )
+    require(
+        "policy verifier execution metadata is blocking",
+        key_count(policy_step, "if", 8) == 0
+        and key_count(policy_step, "continue-on-error", 8) == 0
+        and key_count(policy_step, "shell", 8) == 0
+        and key_count(policy_step, "env", 8) == 0
+        and key_count(build, "continue-on-error", 4) == 0,
+    )
 
     c_examples = step_named(cabi, "Compile shipped C examples")
     c_script = active_run(c_examples)
@@ -153,6 +227,13 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "exit 1\n"
         "fi"
     )
+    c_canonical_script = (
+        "set -euo pipefail\n"
+        "shopt -s nullglob\n"
+        "examples=(crates/gmcrypto-c/examples/*.c)\n"
+        f"{c_empty_glob_guard}\n"
+        f"{c_compile_loop}"
+    )
     require("C examples are compiled by the cabi job", bool(c_examples))
     require(
         "C example gate uses strict syntax flags",
@@ -164,6 +245,19 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         strict_shell(c_script)
         and c_compile_loop in c_script
         and scalar(c_examples, "continue-on-error", 8) is None,
+    )
+    require(
+        "C example compile script matches reviewed canonical execution",
+        c_script == c_canonical_script,
+    )
+    require(
+        "C example execution metadata is blocking",
+        key_count(c_examples, "if", 8) == 0
+        and key_count(c_examples, "continue-on-error", 8) == 0
+        and key_count(c_examples, "shell", 8) == 1
+        and scalar(c_examples, "shell", 8) == "bash"
+        and key_count(c_examples, "env", 8) == 0
+        and key_count(cabi, "continue-on-error", 4) == 0,
     )
 
     trigger = indented_block(gitleaks, "on:", 0)
@@ -180,6 +274,21 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         f"{checksum_command}\n"
         'mkdir -p "$install_dir"\n'
         f"{extraction_command}"
+    )
+    gitleaks_install_canonical = (
+        "set -euo pipefail\n"
+        "GITLEAKS_VERSION=8.30.1\n"
+        "GITLEAKS_SHA256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb\n"
+        'archive="$RUNNER_TEMP/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"\n'
+        'install_dir="$RUNNER_TEMP/gitleaks-bin"\n'
+        "curl --fail --silent --show-error --location \\\n"
+        '--output "$archive" \\\n'
+        '"https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"\n'
+        f"{checksum_command}\n"
+        'mkdir -p "$install_dir"\n'
+        f"{extraction_command}\n"
+        '"$install_dir/gitleaks" version\n'
+        'echo "$install_dir" >> "$GITHUB_PATH"'
     )
     require("dedicated gitleaks workflow exists", bool(gitleaks))
     require(
@@ -218,6 +327,24 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     require(
         "gitleaks scans committed history",
         active_run(scan_step) == "gitleaks git --no-banner --redact --verbose",
+    )
+    require(
+        "gitleaks install script matches reviewed canonical execution",
+        install_script == gitleaks_install_canonical,
+    )
+    require(
+        "gitleaks execution metadata is blocking",
+        key_count(install, "if", 8) == 0
+        and key_count(install, "continue-on-error", 8) == 0
+        and key_count(install, "shell", 8) == 1
+        and scalar(install, "shell", 8) == "bash"
+        and key_count(install, "env", 8) == 0
+        and key_count(scan_step, "if", 8) == 0
+        and key_count(scan_step, "continue-on-error", 8) == 0
+        and key_count(scan_step, "shell", 8) == 0
+        and key_count(scan_step, "env", 8) == 0
+        and key_count(scan, "if", 4) == 0
+        and key_count(scan, "continue-on-error", 4) == 0,
     )
 
     deny_install = step_named(deny, "Install cargo-deny")
@@ -287,6 +414,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "fi"
     )
     suite_execution = f"{suite_command}\n{suite_skip_guard}\n{suite_census_guard}"
+    suite_canonical_script = f"set -euo pipefail\n{suite_execution}"
     require(
         "GmSSL interoperability suite enables oracle execution",
         scalar(suite_env, "GMCRYPTO_GMSSL", 10) == "'1'",
@@ -294,6 +422,22 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     require(
         "GmSSL interoperability command is structurally blocking",
         strict_shell(suite_script) and suite_execution in suite_script,
+    )
+    require(
+        "GmSSL interoperability script matches reviewed canonical execution",
+        suite_script == suite_canonical_script,
+    )
+    require(
+        "GmSSL interoperability suite metadata is blocking",
+        key_count(suite, "if", 8) == 1
+        and scalar(suite, "if", 8)
+        == "steps.gmssl-provision.outcome == 'success' && steps.gmssl-version.outcome == 'success'"
+        and key_count(suite, "continue-on-error", 8) == 0
+        and key_count(suite, "shell", 8) == 0
+        and key_count(suite, "env", 8) == 1
+        and key_count(interop, "continue-on-error", 4) == 0
+        and active_source_lines(suite_env)
+        == ["        env:", "          GMCRYPTO_GMSSL: '1'"],
     )
     require(
         "GmSSL interoperability suite keeps active skip and census guards",
@@ -384,9 +528,20 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         re.M,
     )
     require("noise twin benchmark is registered", noise_twin_registration.search(timing) is not None)
+    dudect_jobs = {
+        "PR": job(dudect_pr, "smoke"),
+        "nightly": job(dudect_nightly, "full"),
+    }
     parse_steps = {
-        "PR": step_named(job(dudect_pr, "smoke"), "Parse and gate"),
-        "nightly": step_named(job(dudect_nightly, "full"), "Parse and gate"),
+        workflow_name: step_named(job_text, "Parse and gate")
+        for workflow_name, job_text in dudect_jobs.items()
+    }
+    # These hashes are the reviewed executable-semantics boundary for the
+    # complete embedded Python programs. A deliberate executable change must
+    # update the workflow, this fingerprint, and the mutation suite together.
+    reviewed_ast_fingerprints = {
+        "PR": "5d293b9156867e07678c57cb1d445615af7b4d2bdc214702d979373d992236ab",
+        "nightly": "e711283e7a833ebe16eb3a6687149c1701fe9f468f3a1c57e7c49cf6fd3abd6c",
     }
     assignment = '          required_telemetry = ("noise_twin_class_split",)'
     dudect_contract = {
@@ -440,6 +595,27 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     ]
     for workflow_name, parse_step in parse_steps.items():
         contract = dudect_contract[workflow_name]
+        heredoc = reviewed_python_heredoc(parse_step)
+        parse_env = indented_block(parse_step, "env:", 8)
+        require(
+            f"{workflow_name} dudect shell wrapper matches reviewed heredoc boundary",
+            heredoc is not None,
+        )
+        require(
+            f"{workflow_name} dudect executable semantics match reviewed fingerprint",
+            heredoc is not None
+            and heredoc[1] == reviewed_ast_fingerprints[workflow_name],
+        )
+        require(
+            f"{workflow_name} dudect execution metadata is blocking",
+            key_count(parse_step, "if", 8) == 0
+            and key_count(parse_step, "continue-on-error", 8) == 0
+            and key_count(parse_step, "shell", 8) == 0
+            and key_count(parse_step, "env", 8) == 1
+            and key_count(dudect_jobs[workflow_name], "continue-on-error", 4) == 0
+            and active_source_lines(parse_env)
+            == ["        env:", "          MATRIX_FEATURES: ${{ matrix.features }}"],
+        )
         active_lines = active_source_lines(parse_step)
         active_noise_twin_references = [
             line for line in active_lines if noise_twin_reference.search(line)
@@ -486,7 +662,31 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
 def mutation_self_test() -> list[str]:
     failures: list[str] = []
 
+    baselines = {
+        "ci": CI,
+        "gitleaks": GITLEAKS,
+        "dudect_pr": DUDECT_PR,
+        "dudect_nightly": DUDECT_NIGHTLY,
+        "timing": TIMING,
+    }
+
+    def replace_once(text: str, before: str, after: str, label: str) -> str:
+        """Build one mutation only when its exact anchor is unique."""
+        count = text.count(before)
+        if count != 1:
+            failures.append(f"mutation anchor count was {count}, expected 1: {label}")
+            return text
+        mutated = text.replace(before, after, 1)
+        if mutated == text:
+            failures.append(f"mutation anchor did not change input: {label}")
+        return mutated
+
     def must_reject(label: str, expected: str, **overrides: str) -> None:
+        if not overrides or not any(
+            value != baselines.get(name) for name, value in overrides.items()
+        ):
+            failures.append(f"mutation input was unchanged: {label}")
+            return
         found = audit(
             overrides.get("ci", CI),
             overrides.get("gitleaks", GITLEAKS),
@@ -1002,6 +1202,730 @@ def mutation_self_test() -> list[str]:
             '              -I crates/gmcrypto-c/include "$example"',
             '              -I crates/gmcrypto-c/include "$example" || true',
             1,
+        ),
+    )
+
+    # Execution-boundary mutations: these model ordinary YAML/shell/Python
+    # edits that preserve the old verifier's anchor snippets while bypassing
+    # the assurance gate. Each mutation uses a unique checked anchor and must
+    # be rejected under the specific policy label named below.
+    must_reject(
+        "PR dudect required-low snapshot rebound empty",
+        "PR dudect executable semantics match reviewed fingerprint",
+        dudect_pr=replace_once(
+            DUDECT_PR,
+            "          required_low_items = tuple(required_low.items())\n",
+            "          required_low_items = tuple(required_low.items())\n"
+            "          required_low_items = ()\n",
+            "PR required-low snapshot rebind",
+        ),
+    )
+    must_reject(
+        "nightly dudect required-low snapshot rebound empty",
+        "nightly dudect executable semantics match reviewed fingerprint",
+        dudect_nightly=replace_once(
+            DUDECT_NIGHTLY,
+            "          required_low_items = tuple(required_low.items())\n",
+            "          required_low_items = tuple(required_low.items())\n"
+            "          required_low_items = ()\n",
+            "nightly required-low snapshot rebind",
+        ),
+    )
+    must_reject(
+        "nightly dudect sentinel snapshot rebound empty",
+        "nightly dudect executable semantics match reviewed fingerprint",
+        dudect_nightly=replace_once(
+            DUDECT_NIGHTLY,
+            "          gross_regression_sentinel_items = tuple(gross_regression_sentinel.items())\n",
+            "          gross_regression_sentinel_items = tuple(gross_regression_sentinel.items())\n"
+            "          gross_regression_sentinel_items = ()\n",
+            "nightly sentinel snapshot rebind",
+        ),
+    )
+    for workflow_name, source, key, completeness_header, gate_header in (
+        (
+            "PR",
+            DUDECT_PR,
+            "dudect_pr",
+            "          for name in (*required_high, *required_low, *required_telemetry):\n",
+            "          for name, upper_bound in required_low_items:\n",
+        ),
+        (
+            "nightly",
+            DUDECT_NIGHTLY,
+            "dudect_nightly",
+            "          for name in (*required_high, *required_low, *gross_regression_sentinel, *required_telemetry):\n",
+            "          for name, upper_bound in required_low_items:\n",
+        ),
+    ):
+        must_reject(
+            f"{workflow_name} dudect completeness loop short-circuited",
+            f"{workflow_name} dudect executable semantics match reviewed fingerprint",
+            **{
+                key: replace_once(
+                    source,
+                    completeness_header,
+                    completeness_header + "              continue\n",
+                    f"{workflow_name} completeness continue",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect required-low gate loop short-circuited",
+            f"{workflow_name} dudect executable semantics match reviewed fingerprint",
+            **{
+                key: replace_once(
+                    source,
+                    gate_header,
+                    gate_header + "              continue\n",
+                    f"{workflow_name} gate continue",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect failure state reset before exit",
+            f"{workflow_name} dudect executable semantics match reviewed fingerprint",
+            **{
+                key: replace_once(
+                    source,
+                    "          sys.exit(1 if fail else 0)\n",
+                    "          fail = False\n"
+                    "          sys.exit(1 if fail else 0)\n",
+                    f"{workflow_name} fail reset",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect unconditional success exit",
+            f"{workflow_name} dudect executable semantics match reviewed fingerprint",
+            **{
+                key: replace_once(
+                    source,
+                    "          sys.exit(1 if fail else 0)\n",
+                    "          sys.exit(0)\n",
+                    f"{workflow_name} sys.exit(0)",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect completeness directly gates telemetry value",
+            f"{workflow_name} dudect executable semantics match reviewed fingerprint",
+            **{
+                key: replace_once(
+                    source,
+                    completeness_header
+                    + "              got = len(findings.get(name, []))\n"
+                    + "              if got != n_runs:\n",
+                    completeness_header
+                    + "              got = len(findings.get(name, []))\n"
+                    + "              if got != n_runs or med(name) > 0.20:\n",
+                    f"{workflow_name} completeness value gate",
+                )
+            },
+        )
+        blocking_assignment = (
+            "          blocking_items = required_high_items + required_low_items\n"
+            if workflow_name == "PR"
+            else "          blocking_items = required_high_items + required_low_items + gross_regression_sentinel_items\n"
+        )
+        must_reject(
+            f"{workflow_name} dudect dynamically promotes telemetry through snapshot append",
+            f"{workflow_name} dudect executable semantics match reviewed fingerprint",
+            **{
+                key: replace_once(
+                    source,
+                    blocking_assignment,
+                    blocking_assignment
+                    + "          for name in required_telemetry:\n"
+                    + "              required_low_items += ((name, 0.20),)\n",
+                    f"{workflow_name} dynamic telemetry gate",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect dynamically clears telemetry through globals",
+            f"{workflow_name} dudect executable semantics match reviewed fingerprint",
+            **{
+                key: replace_once(
+                    source,
+                    '          required_telemetry = ("noise_twin_class_split",)\n',
+                    '          required_telemetry = ("noise_twin_class_split",)\n'
+                    '          globals()["required_telemetry"] = ()\n',
+                    f"{workflow_name} globals telemetry clear",
+                )
+            },
+        )
+
+    gmssl_command = (
+        "          cargo test -p gmcrypto-core --test interop_gmssl --features sm4-aead \\\n"
+        "            -- --nocapture 2>&1 | tee interop.txt"
+    )
+    must_reject(
+        "GmSSL suite exits successfully before execution",
+        "GmSSL interoperability script matches reviewed canonical execution",
+        ci=replace_once(
+            CI,
+            "          set -euo pipefail\n" + gmssl_command,
+            "          set -euo pipefail\n          exit 0\n" + gmssl_command,
+            "GmSSL early success exit",
+        ),
+    )
+    must_reject(
+        "GmSSL cargo pipeline hidden behind false-and",
+        "GmSSL interoperability script matches reviewed canonical execution",
+        ci=replace_once(
+            CI,
+            gmssl_command,
+            gmssl_command.replace("          cargo test", "          false && cargo test", 1),
+            "GmSSL false-and pipeline",
+        ),
+    )
+    must_reject(
+        "GmSSL suite fakes the expected census",
+        "GmSSL interoperability script matches reviewed canonical execution",
+        ci=replace_once(
+            CI,
+            gmssl_command,
+            "          printf '13 passed\\n' > interop.txt",
+            "GmSSL fake census",
+        ),
+    )
+    must_reject(
+        "GmSSL suite step skipped with false condition",
+        "GmSSL interoperability suite metadata is blocking",
+        ci=replace_once(
+            CI,
+            "        if: steps.gmssl-provision.outcome == 'success' && steps.gmssl-version.outcome == 'success'\n",
+            "        if: ${{ false }}\n",
+            "GmSSL suite if false",
+        ),
+    )
+
+    must_reject(
+        "gitleaks install exits successfully before verification",
+        "gitleaks install script matches reviewed canonical execution",
+        gitleaks=replace_once(
+            GITLEAKS,
+            "          set -euo pipefail\n          GITLEAKS_VERSION=8.30.1\n",
+            "          set -euo pipefail\n          exit 0\n          GITLEAKS_VERSION=8.30.1\n",
+            "gitleaks early success exit",
+        ),
+    )
+    must_reject(
+        "gitleaks checksum hidden behind false-and",
+        "gitleaks install script matches reviewed canonical execution",
+        gitleaks=replace_once(
+            GITLEAKS,
+            '          echo "$GITLEAKS_SHA256  $archive" | sha256sum --check --status\n',
+            '          false && echo "$GITLEAKS_SHA256  $archive" | sha256sum --check --status\n',
+            "gitleaks false-and checksum",
+        ),
+    )
+    must_reject(
+        "gitleaks checksum trusts a dynamically rebound digest",
+        "gitleaks install script matches reviewed canonical execution",
+        gitleaks=replace_once(
+            GITLEAKS,
+            '          echo "$GITLEAKS_SHA256  $archive" | sha256sum --check --status\n',
+            '          GITLEAKS_SHA256="$(sha256sum "$archive" | cut -d\' \' -f1)"\n'
+            '          echo "$GITLEAKS_SHA256  $archive" | sha256sum --check --status\n',
+            "gitleaks digest rebind",
+        ),
+    )
+
+    c_examples_assignment = "          examples=(crates/gmcrypto-c/examples/*.c)\n"
+    c_loop = (
+        '          for example in "${examples[@]}"; do\n'
+        '            echo "checking $example"\n'
+        "            cc -std=c11 -Wall -Wextra -Werror -fsyntax-only \\\n"
+        '              -I crates/gmcrypto-c/include "$example"\n'
+        "          done\n"
+    )
+    must_reject(
+        "C example list reset empty after globbing",
+        "C example compile script matches reviewed canonical execution",
+        ci=replace_once(
+            CI,
+            c_examples_assignment,
+            c_examples_assignment + "          examples=()\n",
+            "C examples reset empty",
+        ),
+    )
+    must_reject(
+        "C example compile loop hidden behind false condition",
+        "C example compile script matches reviewed canonical execution",
+        ci=replace_once(
+            CI,
+            c_loop,
+            "          if false; then\n" + c_loop + "          fi\n",
+            "C examples false wrapper",
+        ),
+    )
+
+    must_reject(
+        "policy verifier step skipped with false condition",
+        "policy verifier execution metadata is blocking",
+        ci=replace_once(
+            CI,
+            "      - name: Verify assurance workflow policy\n"
+            "        run: python3 .github/scripts/check_assurance_policy.py\n",
+            "      - name: Verify assurance workflow policy\n"
+            "        if: ${{ false }}\n"
+            "        run: python3 .github/scripts/check_assurance_policy.py\n",
+            "policy verifier if false",
+        ),
+    )
+    must_reject(
+        "policy verifier step failure tolerated",
+        "policy verifier execution metadata is blocking",
+        ci=replace_once(
+            CI,
+            "      - name: Verify assurance workflow policy\n"
+            "        run: python3 .github/scripts/check_assurance_policy.py\n",
+            "      - name: Verify assurance workflow policy\n"
+            "        continue-on-error: true\n"
+            "        run: python3 .github/scripts/check_assurance_policy.py\n",
+            "policy verifier continue-on-error",
+        ),
+    )
+    must_reject(
+        "policy verifier build job failure tolerated",
+        "policy verifier execution metadata is blocking",
+        ci=replace_once(
+            CI,
+            "  build:\n",
+            "  build:\n    continue-on-error: true\n",
+            "policy verifier job continue-on-error",
+        ),
+    )
+
+    for workflow_name, source, key, job_name in (
+        ("PR", DUDECT_PR, "dudect_pr", "smoke"),
+        ("nightly", DUDECT_NIGHTLY, "dudect_nightly", "full"),
+    ):
+        parse_header = "      - name: Parse and gate\n"
+        must_reject(
+            f"{workflow_name} dudect parse step skipped with false condition",
+            f"{workflow_name} dudect execution metadata is blocking",
+            **{
+                key: replace_once(
+                    source,
+                    parse_header,
+                    parse_header + "        if: ${{ false }}\n",
+                    f"{workflow_name} parse if false",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect parse failure tolerated",
+            f"{workflow_name} dudect execution metadata is blocking",
+            **{
+                key: replace_once(
+                    source,
+                    parse_header,
+                    parse_header + "        continue-on-error: true\n",
+                    f"{workflow_name} parse continue-on-error",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect job failure tolerated",
+            f"{workflow_name} dudect execution metadata is blocking",
+            **{
+                key: replace_once(
+                    source,
+                    f"  {job_name}:\n",
+                    f"  {job_name}:\n    continue-on-error: true\n",
+                    f"{workflow_name} job continue-on-error",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect shell wrapper gains an active command",
+            f"{workflow_name} dudect shell wrapper matches reviewed heredoc boundary",
+            **{
+                key: replace_once(
+                    source,
+                    "        run: |\n          set -euo pipefail\n          python3 - <<'PY'\n",
+                    "        run: |\n          set -euo pipefail\n          true\n          python3 - <<'PY'\n",
+                    f"{workflow_name} shell wrapper command",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect heredoc closing marker changes",
+            f"{workflow_name} dudect shell wrapper matches reviewed heredoc boundary",
+            **{
+                key: replace_once(
+                    source,
+                    "          PY\n\n      - name: Upload raw log\n",
+                    "          PY_CHANGED\n\n      - name: Upload raw log\n",
+                    f"{workflow_name} heredoc closing marker",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect parse matrix environment drifts",
+            f"{workflow_name} dudect execution metadata is blocking",
+            **{
+                key: replace_once(
+                    source,
+                    step_named(job(source, job_name), "Parse and gate"),
+                    replace_once(
+                        step_named(job(source, job_name), "Parse and gate"),
+                        "          MATRIX_FEATURES: ${{ matrix.features }}\n",
+                        "          MATRIX_FEATURES: default\n",
+                        f"{workflow_name} matrix environment field",
+                    ),
+                    f"{workflow_name} matrix environment step",
+                )
+            },
+        )
+
+    c_step_header = "      - name: Compile shipped C examples\n"
+    must_reject(
+        "C example compile step skipped with false condition",
+        "C example execution metadata is blocking",
+        ci=replace_once(CI, c_step_header, c_step_header + "        if: ${{ false }}\n", "C step if false"),
+    )
+    must_reject(
+        "C example compile step failure tolerated",
+        "C example execution metadata is blocking",
+        ci=replace_once(
+            CI,
+            c_step_header,
+            c_step_header + "        continue-on-error: true\n",
+            "C step continue-on-error",
+        ),
+    )
+    must_reject(
+        "C ABI job failure tolerated",
+        "C example execution metadata is blocking",
+        ci=replace_once(CI, "  cabi:\n", "  cabi:\n    continue-on-error: true\n", "C job continue-on-error"),
+    )
+
+    install_header = "      - name: Install gitleaks\n"
+    scan_header = "      - name: Scan committed history\n"
+    for label, header in (("install", install_header), ("scan", scan_header)):
+        must_reject(
+            f"gitleaks {label} step skipped with false condition",
+            "gitleaks execution metadata is blocking",
+            gitleaks=replace_once(
+                GITLEAKS,
+                header,
+                header + "        if: ${{ false }}\n",
+                f"gitleaks {label} if false",
+            ),
+        )
+        must_reject(
+            f"gitleaks {label} step failure tolerated",
+            "gitleaks execution metadata is blocking",
+            gitleaks=replace_once(
+                GITLEAKS,
+                header,
+                header + "        continue-on-error: true\n",
+                f"gitleaks {label} continue-on-error",
+            ),
+        )
+    must_reject(
+        "gitleaks scan job failure tolerated",
+        "gitleaks execution metadata is blocking",
+        gitleaks=replace_once(
+            GITLEAKS,
+            "  scan:\n",
+            "  scan:\n    continue-on-error: true\n",
+            "gitleaks job continue-on-error",
+        ),
+    )
+    must_reject(
+        "GmSSL interoperability job failure tolerated",
+        "GmSSL interoperability suite metadata is blocking",
+        ci=replace_once(
+            CI,
+            "  interop-gmssl:\n",
+            "  interop-gmssl:\n    continue-on-error: true\n",
+            "GmSSL job continue-on-error",
+        ),
+    )
+    must_reject(
+        "gitleaks scan job skipped with false condition",
+        "gitleaks execution metadata is blocking",
+        gitleaks=replace_once(
+            GITLEAKS,
+            "  scan:\n",
+            "  scan:\n    if: false\n",
+            "gitleaks job if false",
+        ),
+    )
+    must_reject(
+        "C example compiler shell drifts from bash",
+        "C example execution metadata is blocking",
+        ci=replace_once(
+            CI,
+            "      - name: Compile shipped C examples\n        shell: bash\n",
+            "      - name: Compile shipped C examples\n        shell: sh\n",
+            "C step custom shell",
+        ),
+    )
+    must_reject(
+        "C example compiler gains unexpected environment",
+        "C example execution metadata is blocking",
+        ci=replace_once(
+            CI,
+            "      - name: Compile shipped C examples\n        shell: bash\n",
+            "      - name: Compile shipped C examples\n"
+            "        shell: bash\n"
+            "        env:\n"
+            "          BYPASS: '1'\n",
+            "C step environment",
+        ),
+    )
+    must_reject(
+        "policy verifier gains a custom shell",
+        "policy verifier execution metadata is blocking",
+        ci=replace_once(
+            CI,
+            "      - name: Verify assurance workflow policy\n"
+            "        run: python3 .github/scripts/check_assurance_policy.py\n",
+            "      - name: Verify assurance workflow policy\n"
+            "        shell: bash\n"
+            "        run: python3 .github/scripts/check_assurance_policy.py\n",
+            "policy verifier shell",
+        ),
+    )
+    must_reject(
+        "policy verifier gains unexpected environment",
+        "policy verifier execution metadata is blocking",
+        ci=replace_once(
+            CI,
+            "      - name: Verify assurance workflow policy\n"
+            "        run: python3 .github/scripts/check_assurance_policy.py\n",
+            "      - name: Verify assurance workflow policy\n"
+            "        env:\n"
+            "          PYTHONOPTIMIZE: '1'\n"
+            "        run: python3 .github/scripts/check_assurance_policy.py\n",
+            "policy verifier environment",
+        ),
+    )
+    must_reject(
+        "gitleaks installer gains unexpected environment",
+        "gitleaks execution metadata is blocking",
+        gitleaks=replace_once(
+            GITLEAKS,
+            "      - name: Install gitleaks\n        shell: bash\n",
+            "      - name: Install gitleaks\n"
+            "        shell: bash\n"
+            "        env:\n"
+            "          GITLEAKS_SHA256: bypass\n",
+            "gitleaks install environment",
+        ),
+    )
+    must_reject(
+        "gitleaks installer shell drifts from bash",
+        "gitleaks execution metadata is blocking",
+        gitleaks=replace_once(
+            GITLEAKS,
+            "      - name: Install gitleaks\n        shell: bash\n",
+            "      - name: Install gitleaks\n        shell: sh\n",
+            "gitleaks install shell",
+        ),
+    )
+    must_reject(
+        "gitleaks scan gains a custom shell",
+        "gitleaks execution metadata is blocking",
+        gitleaks=replace_once(
+            GITLEAKS,
+            "      - name: Scan committed history\n"
+            "        run: gitleaks git --no-banner --redact --verbose\n",
+            "      - name: Scan committed history\n"
+            "        shell: bash\n"
+            "        run: gitleaks git --no-banner --redact --verbose\n",
+            "gitleaks scan shell",
+        ),
+    )
+    must_reject(
+        "gitleaks scan gains unexpected environment",
+        "gitleaks execution metadata is blocking",
+        gitleaks=replace_once(
+            GITLEAKS,
+            "      - name: Scan committed history\n"
+            "        run: gitleaks git --no-banner --redact --verbose\n",
+            "      - name: Scan committed history\n"
+            "        env:\n"
+            "          GITLEAKS_CONFIG: /dev/null\n"
+            "        run: gitleaks git --no-banner --redact --verbose\n",
+            "gitleaks scan environment",
+        ),
+    )
+    for workflow_name, source, key, job_name in (
+        ("PR", DUDECT_PR, "dudect_pr", "smoke"),
+        ("nightly", DUDECT_NIGHTLY, "dudect_nightly", "full"),
+    ):
+        parse_step = step_named(job(source, job_name), "Parse and gate")
+        must_reject(
+            f"{workflow_name} dudect parse gains a custom shell",
+            f"{workflow_name} dudect execution metadata is blocking",
+            **{
+                key: replace_once(
+                    source,
+                    parse_step,
+                    replace_once(
+                        parse_step,
+                        "      - name: Parse and gate\n",
+                        "      - name: Parse and gate\n        shell: bash\n",
+                        f"{workflow_name} parse shell field",
+                    ),
+                    f"{workflow_name} parse shell step",
+                )
+            },
+        )
+    must_reject(
+        "GmSSL suite gains a custom shell",
+        "GmSSL interoperability suite metadata is blocking",
+        ci=replace_once(
+            CI,
+            "      - name: gmssl interop suite (13 tests)\n",
+            "      - name: gmssl interop suite (13 tests)\n        shell: bash\n",
+            "GmSSL suite shell",
+        ),
+    )
+    for label, source, source_key, job_name, step_name, expected in (
+        (
+            "policy verifier",
+            CI,
+            "ci",
+            "build",
+            "Verify assurance workflow policy",
+            "policy verifier is executed by the build job",
+        ),
+        (
+            "C example compiler",
+            CI,
+            "ci",
+            "cabi",
+            "Compile shipped C examples",
+            "C example compile script matches reviewed canonical execution",
+        ),
+        (
+            "GmSSL suite",
+            CI,
+            "ci",
+            "interop-gmssl",
+            "gmssl interop suite (13 tests)",
+            "GmSSL interoperability script matches reviewed canonical execution",
+        ),
+        (
+            "gitleaks installer",
+            GITLEAKS,
+            "gitleaks",
+            "scan",
+            "Install gitleaks",
+            "gitleaks install script matches reviewed canonical execution",
+        ),
+        (
+            "gitleaks scanner",
+            GITLEAKS,
+            "gitleaks",
+            "scan",
+            "Scan committed history",
+            "gitleaks scans committed history",
+        ),
+    ):
+        target_step = step_named(job(source, job_name), step_name)
+        must_reject(
+            f"{label} gains a duplicate run key",
+            expected,
+            **{
+                source_key: replace_once(
+                    source,
+                    target_step,
+                    target_step + "\n        run: 'true'",
+                    f"{label} duplicate run",
+                )
+            },
+        )
+    for workflow_name, source, key, job_name in (
+        ("PR", DUDECT_PR, "dudect_pr", "smoke"),
+        ("nightly", DUDECT_NIGHTLY, "dudect_nightly", "full"),
+    ):
+        parse_step = step_named(job(source, job_name), "Parse and gate")
+        must_reject(
+            f"{workflow_name} dudect parser gains a duplicate run key",
+            f"{workflow_name} dudect shell wrapper matches reviewed heredoc boundary",
+            **{
+                key: replace_once(
+                    source,
+                    parse_step,
+                    parse_step + "\n        run: 'true'",
+                    f"{workflow_name} parser duplicate run",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect parser gains a duplicate environment key",
+            f"{workflow_name} dudect execution metadata is blocking",
+            **{
+                key: replace_once(
+                    source,
+                    parse_step,
+                    replace_once(
+                        parse_step,
+                        "          MATRIX_FEATURES: ${{ matrix.features }}\n",
+                        "          MATRIX_FEATURES: ${{ matrix.features }}\n"
+                        "        env:\n"
+                        "          MATRIX_FEATURES: default\n",
+                        f"{workflow_name} parser duplicate env field",
+                    ),
+                    f"{workflow_name} parser duplicate env step",
+                )
+            },
+        )
+    must_reject(
+        "C example compiler gains a duplicate shell key",
+        "C example execution metadata is blocking",
+        ci=replace_once(
+            CI,
+            "      - name: Compile shipped C examples\n        shell: bash\n",
+            "      - name: Compile shipped C examples\n"
+            "        shell: bash\n"
+            "        shell: sh\n",
+            "C duplicate shell",
+        ),
+    )
+    must_reject(
+        "gitleaks installer gains a duplicate shell key",
+        "gitleaks execution metadata is blocking",
+        gitleaks=replace_once(
+            GITLEAKS,
+            "      - name: Install gitleaks\n        shell: bash\n",
+            "      - name: Install gitleaks\n"
+            "        shell: bash\n"
+            "        shell: sh\n",
+            "gitleaks duplicate shell",
+        ),
+    )
+    must_reject(
+        "GmSSL suite gains a duplicate false condition",
+        "GmSSL interoperability suite metadata is blocking",
+        ci=replace_once(
+            CI,
+            "        if: steps.gmssl-provision.outcome == 'success' && steps.gmssl-version.outcome == 'success'\n",
+            "        if: steps.gmssl-provision.outcome == 'success' && steps.gmssl-version.outcome == 'success'\n"
+            "        if: ${{ false }}\n",
+            "GmSSL duplicate if",
+        ),
+    )
+    must_reject(
+        "GmSSL suite gains a duplicate oracle environment",
+        "GmSSL interoperability suite metadata is blocking",
+        ci=replace_once(
+            CI,
+            "        env:\n          GMCRYPTO_GMSSL: '1'\n",
+            "        env:\n"
+            "          GMCRYPTO_GMSSL: '1'\n"
+            "        env:\n"
+            "          GMCRYPTO_GMSSL: '0'\n",
+            "GmSSL duplicate env",
         ),
     )
     return failures

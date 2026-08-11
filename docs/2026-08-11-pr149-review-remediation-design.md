@@ -45,28 +45,54 @@ skipped suite is visibly classified as non-passing infrastructure telemetry.
 
 The policy verifier will require the repair-first cache-health checks, the
 transparent job name, and the unconditional final execution-state report. It
-also binds each exact dudect `Parse and gate` step to an immutable one-element
-`required_telemetry` tuple. Immediately before the first blocking gate, every
-gate map is frozen into an immutable item tuple, the combined blocking items
-are checked for telemetry overlap, and each gate loop must consume only its
-validated snapshot. The verifier fixes the ordered set of active
-`required_telemetry` uses and requires the output loop to contain only the
-non-blocking `NOISE-TWIN:` print.
+also binds each exact dudect `Parse and gate` step to its complete executable
+semantics. A dedicated extractor requires exactly one
+`python3 - <<'PY'` heredoc, a fail-fast `set -euo pipefail` shell preamble, the
+exact closing marker, and no additional active shell command before or after
+the heredoc. The entire embedded Python program is parsed with `ast.parse`;
+the SHA-256 fingerprint of its attribute-free `ast.dump` must match a
+hard-coded, reviewed PR or nightly fingerprint. This is an intentional
+execution boundary: a legitimate control-flow change must update the workflow,
+the reviewed fingerprint, and mutation coverage together. The previous
+semantic diagnostics remain for useful failure labels, including the immutable
+one-element `required_telemetry` tuple, immutable gate-map snapshots, overlap
+rejection, snapshot-only gate loops, and print-only `NOISE-TWIN:` output.
 
-The verifier also checks the active C-example, gitleaks-checksum, and GmSSL
-suite command structures at their named steps: strict shell mode, exact
-blocking command pipelines, required environment wiring and failure guards,
-and no local or step-level tolerance.
+For the three short assurance scripts—the C-example compiler, the gitleaks
+installer, and the GmSSL interoperability suite—the verifier compares
+`active_run()` with the complete reviewed canonical script, not selected
+snippets. Whole-line comments remain free to evolve, but every active shell
+line, its order, and every guard are fixed. The gitleaks scan command remains
+an exact single-command step. Critical execution metadata is also locked: the
+policy verifier, C compiler, gitleaks install/scan, and dudect parse steps may
+not add an `if` or `continue-on-error`; their jobs may not become tolerated;
+the C compiler and gitleaks installer retain an exact `shell: bash`, while the
+policy verifier, gitleaks scanner, dudect parser, and GmSSL suite may not add a
+custom shell. The policy verifier and gitleaks install/scan steps may not add
+an environment mapping; each dudect parse step must expose only the exact
+`MATRIX_FEATURES: ${{ matrix.features }}` mapping. The GmSSL suite retains its
+one approved readiness condition and exact oracle environment, without step
+or job tolerance. Exact key-count checks reject duplicate `run`, `if`, `env`,
+or `shell` mappings that could otherwise make the verifier inspect one YAML
+value while the workflow engine executes another.
 
 Deliberate mutation self-tests will prove that the verifier rejects:
 
 - promoting the noise twin into a PR or nightly gate map;
-- gating its measured value directly, through an effective union, or after
-  clearing the telemetry membership before the overlap check;
+- rebinding any PR/nightly gate snapshot, the nightly sentinel snapshot, or
+  the final failure state; short-circuiting completeness or gate loops; or
+  replacing the conditional process exit with unconditional success;
+- gating the noise-twin value through completeness, a dynamic snapshot append,
+  an effective union, or after dynamically clearing telemetry membership;
 - removing `required_telemetry` from either workflow;
 - removing the `NOISE-TWIN:` output from either workflow;
 - deregistering `BenchName("noise_twin_class_split")`;
-- replacing or tolerating the GmSSL, gitleaks checksum, or C compile command;
+- adding early success, false-condition wrappers, fabricated output, digest
+  rebinding, or any other active line to the GmSSL, gitleaks, or C scripts;
+- skipping or tolerating the policy verifier, C compiler, gitleaks install or
+  scan, or either dudect parse step/job through execution metadata;
+- adding duplicate execution or metadata keys whose last value could override
+  the reviewed first value;
 - weakening cache repair or unconditional interop status reporting.
 
 ## C example documentation
@@ -84,6 +110,10 @@ policy verifier with mutation self-tests, actionlint for changed workflows,
 YAML parsing, strict compilation of all nine C examples, real GmSSL 3.2.0
 13/13 interoperability, Rust formatting/tests/clippy, header drift, gitleaks,
 and a clean branch.
+
+The dudect implementation continues to fail only when a measured value is
+strictly greater than `0.20`; equality therefore passes. Current maintenance
+comments and job names describe the unchanged contract as `|tau| <= 0.20`.
 
 After pushing, PR #149 must be non-conflicting and every required GitHub check
 must succeed. The Draft PR is marked ready only after those conditions hold;

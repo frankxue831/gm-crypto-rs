@@ -38,7 +38,7 @@ permissions:
 
 jobs:
   full:
-    name: timing-leak nightly (100K×5 median, |tau|<0.20, features=${{ matrix.features }})
+    name: timing-leak nightly (100K×5 median, |tau|<=0.20, features=${{ matrix.features }})
     # v0.18 W1 — pinned `ubuntu-24.04` (OS-label pin, was `ubuntu-latest`):
     # freezes the OS-major axis against the future `ubuntu-latest`→26.04 roll.
     # The load-bearing drift fix is the exact toolchain pin below; the
@@ -59,22 +59,22 @@ jobs:
       fail-fast: false
       matrix:
         # v0.4 W3 — second matrix entry under `sm4-bitsliced` exercises
-        # the bitsliced S-box gate sequence. Same `|tau| < 0.20` gate
+        # the bitsliced S-box gate sequence. Same `|tau| <= 0.20` gate
         # applies to both configurations.
         # v0.5 W4 (phase 1) — third entry under `sm4-bitsliced-simd`
         # exercises the SIMD-packed-bitsliced dispatch (phase 1:
         # transparent delegate to the single-block bitslice; phase 2 /
         # phase 3 swap in AVX2 / NEON intrinsics). The new
         # `ct_sm4_encrypt_block_bitsliced_simd` target gates at
-        # `|tau| < 0.20`.
+        # `|tau| <= 0.20`.
         # v0.8 W4 — fourth entry under `sm4-bitsliced-simd,sm4-aead`
         # exercises SM4-GCM / SM4-CCM under the SIMD-packed cipher
         # path. The new `ct_sm4_gcm_decrypt` and `ct_sm4_ccm_decrypt`
-        # targets are cfg-gated on `sm4-aead`; same `|tau| < 0.20`
+        # targets are cfg-gated on `sm4-aead`; same `|tau| <= 0.20`
         # gate at the 100K-sample budget.
         # v0.12 W3 — the fourth entry also carries `sm4-xts`, gating the
         # `ct_sm4_xts_decrypt` target (cfg-gated on `sm4-xts`) at a CTS
-        # data-unit length; same `|tau| < 0.20` gate.
+        # data-unit length; same `|tau| <= 0.20` gate.
         features:
           - "default"
           - "sm4-bitsliced"
@@ -82,7 +82,7 @@ jobs:
         # v1.1 W3 — the fourth pass also carries `sm2-key-exchange`, gating
         # the `ct_sm2_key_exchange` target. v1.7 W3 adds `tlcp`, gating
         # `ct_tlcp_cbc_deprotect` (the Lucky13 residual guard). Same
-        # `|tau| < 0.20` gate.
+        # `|tau| <= 0.20` gate.
           - "sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp"
     steps:
       - uses: actions/checkout@v4
@@ -168,6 +168,7 @@ jobs:
           # gates (sm4-bitsliced-simd / sm4-aead / sm4-xts) would never fire.
           MATRIX_FEATURES: ${{ matrix.features }}
         run: |
+          set -euo pipefail
           python3 - <<'PY'
           # v0.18 W1 — multi-run median gate (same shape as the PR-smoke job;
           # nightly loops N=5 at 100K). Reads dudect-nightly-1.log..N.log,

@@ -84,22 +84,22 @@ run that proved nothing about them.
 Verify:
 - `negative_control` reports `|tau| > 1.0` (huge — usually 25+). It MUST fire
   on every run; that is what proves the harness is wired up.
-- `ct_mul_g`, `ct_mul_var`, `ct_sign` each report `|tau| < 0.20`.
+- `ct_mul_g`, `ct_mul_var`, `ct_sign` each report `|tau| <= 0.20`.
 - For SM4 work: `ct_sm4_key_schedule`, `ct_sm4_encrypt_block`,
-  `ct_sm4_ctr_encrypt` each `|tau| < 0.20`. Under
+  `ct_sm4_ctr_encrypt` each `|tau| <= 0.20`. Under
   `--features sm4-bitsliced-simd`, also
   `ct_sm4_encrypt_block_bitsliced_simd` and
   `ct_sm4_cbc_decrypt_fanout`.
-- For PBKDF2 / encrypted-PKCS#8 work: `ct_pkcs8_decrypt` `|tau| < 0.20`.
-- For SM2 envelope encryption work: `ct_sm2_decrypt` `|tau| < 0.20`.
+- For PBKDF2 / encrypted-PKCS#8 work: `ct_pkcs8_decrypt` `|tau| <= 0.20`.
+- For SM2 envelope encryption work: `ct_sm2_decrypt` `|tau| <= 0.20`.
 - For SM4-GCM / SM4-CCM AEAD work (`--features sm4-aead`):
   `ct_sm4_gcm_decrypt`, `ct_sm4_ccm_decrypt`, and
-  `ct_sm4_gcm_decrypt_buffered` each `|tau| < 0.20`.
-- For SM4-XTS work (`--features sm4-xts`): `ct_sm4_xts_decrypt` `|tau| < 0.20`.
+  `ct_sm4_gcm_decrypt_buffered` each `|tau| <= 0.20`.
+- For SM4-XTS work (`--features sm4-xts`): `ct_sm4_xts_decrypt` `|tau| <= 0.20`.
 - For SM2 key-exchange work (`--features sm2-key-exchange`):
-  `ct_sm2_key_exchange` `|tau| < 0.20`.
+  `ct_sm2_key_exchange` `|tau| <= 0.20`.
 - For TLCP record work (`--features tlcp`): `ct_tlcp_cbc_deprotect`
-  `|tau| < 0.20` — the Lucky13 residual guard.
+  `|tau| <= 0.20` — the Lucky13 residual guard.
 - **Four targets do NOT gate at 0.20** and must not be read as failures at the
   PR-smoke budget: `ct_fn_invert` and `ct_fp_invert` (since the 2026-05-12
   runner recalibration), `ct_sign_k_class` (2026-06-07), and `ct_hmac_sm3`
