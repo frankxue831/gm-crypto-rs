@@ -47,7 +47,7 @@ env:
   CARGO_TERM_COLOR: always
   # Pinned for reproducibility — same version as fuzz-nightly.yml (W0 codex
   # finding; the cbindgen 0.29 / cargo-deny 0.19 pinning posture).
-  CARGO_FUZZ_VERSION: '0.13.1'
+  CARGO_FUZZ_VERSION: '0.13.2'
 
 permissions:
   contents: read
@@ -66,7 +66,7 @@ jobs:
       !contains(github.event.pull_request.title, '[no ci]') &&
       !contains(github.event.pull_request.title, '[skip actions]')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Hosted runners start clean — libFuzzer needs the nightly compiler's
       # sanitizer support (same as fuzz-nightly.yml).
@@ -91,7 +91,7 @@ jobs:
       # equivalent; addresses the v1.0.1 ci-gate-review CG-13 recompile-cost
       # note for the PR cadence).
       - name: Cache cargo-fuzz binary
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/cargo-fuzz
           key: cargo-fuzz-bin-${{ runner.os }}-${{ env.CARGO_FUZZ_VERSION }}
