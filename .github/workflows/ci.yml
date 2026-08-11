@@ -327,6 +327,10 @@ jobs:
           CACHE_HIT: ${{ steps.gmssl-cache.outputs.cache-hit }}
         run: |
           set -euxo pipefail
+          if [[ ! "$GMSSL_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::invalid GMSSL_TAG: $GMSSL_TAG"
+            exit 1
+          fi
           prefix="$HOME/gmssl-$GMSSL_TAG"
           oracle="$prefix/bin/gmssl"
           source_dir="$RUNNER_TEMP/gmssl-src"
@@ -339,6 +343,9 @@ jobs:
             fi
           fi
           if [ "$cache_usable" != "true" ]; then
+            if [ "$CACHE_HIT" = "true" ]; then
+              echo "::warning title=Unusable GmSSL cache::repairing this run only because exact caches are immutable; bump GMSSL_CACHE_EPOCH to replace it"
+            fi
             case "$prefix" in
               "$HOME"/gmssl-v*) ;;
               *) echo "::error::refusing to clean unexpected GmSSL prefix: $prefix"; exit 1 ;;
@@ -417,11 +424,12 @@ jobs:
           SUITE_OUTCOME: ${{ steps.gmssl-suite.outcome }}
         run: |
           set -euo pipefail
-          if [ "$SUITE_OUTCOME" = "skipped" ]; then
-            interop_state=skipped
-          else
-            interop_state=ran
-          fi
+          case "$SUITE_OUTCOME" in
+            success|failure) interop_state=ran ;;
+            skipped) interop_state=skipped ;;
+            cancelled) interop_state=cancelled ;;
+            *) interop_state=unknown ;;
+          esac
           echo "INTEROP_SUITE=$interop_state"
           {
             echo "### GmSSL interoperability status"

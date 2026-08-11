@@ -193,30 +193,71 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         scalar(suite, "if", 8)
         == "steps.gmssl-provision.outcome == 'success' && steps.gmssl-version.outcome == 'success'",
     )
+    tag_validation = (
+        '          if [[ ! "$GMSSL_TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then\n'
+        '            echo "::error::invalid GMSSL_TAG: $GMSSL_TAG"\n'
+        "            exit 1\n"
+        "          fi"
+    )
+    prefix_assignment = '          prefix="$HOME/gmssl-$GMSSL_TAG"'
+    tag_validation_index = provision.find(tag_validation)
+    prefix_assignment_index = provision.find(prefix_assignment)
+    require(
+        "GmSSL validates its tag before constructing cleanup paths",
+        tag_validation_index >= 0
+        and prefix_assignment_index >= 0
+        and tag_validation_index < prefix_assignment_index,
+    )
+    repair_decision = (
+        "          cache_usable=false\n"
+        '          if [ "$CACHE_HIT" = "true" ] && [ -x "$oracle" ]; then\n'
+        '            cached_version="$("$oracle" version 2>/dev/null | head -n1 || true)"\n'
+        '            if [ "$cached_version" = "$want" ]; then\n'
+        "              cache_usable=true\n"
+        "            fi\n"
+        "          fi\n"
+        '          if [ "$cache_usable" != "true" ]; then'
+    )
     require(
         "GmSSL repairs an unusable cache before provisioning",
-        all(
-            token in provision_script
-            for token in (
-                "cache_usable=false",
-                'cached_version="$("$oracle" version 2>/dev/null | head -n1 || true)"',
-                'if [ "$cached_version" = "$want" ]; then',
-                'rm -rf -- "$prefix" "$source_dir"',
-            )
-        ),
+        repair_decision in provision and 'rm -rf -- "$prefix" "$source_dir"' in provision_script,
+    )
+    require(
+        "GmSSL explains immutable exact-cache repair",
+        "repairing this run only because exact caches are immutable; "
+        "bump GMSSL_CACHE_EPOCH to replace it" in provision_script,
     )
     require(
         "GmSSL status is always reported",
         scalar(report, "if", 8) == "${{ always() }}",
+    )
+    suite_outcome_mapping = (
+        '          case "$SUITE_OUTCOME" in\n'
+        "            success|failure) interop_state=ran ;;\n"
+        "            skipped) interop_state=skipped ;;\n"
+        "            cancelled) interop_state=cancelled ;;\n"
+        "            *) interop_state=unknown ;;\n"
+        "          esac"
+    )
+    require(
+        "GmSSL suite outcome mapping is explicit",
+        suite_outcome_mapping in report,
     )
     require(
         "GmSSL suite execution is machine-visible",
         'echo "INTEROP_SUITE=$interop_state"' in report_script
         and 'echo "INTEROP_SUITE=\\`$interop_state\\`"' in report_script,
     )
+    outcome_summary = (
+        'echo "- cache: \\`$CACHE_OUTCOME\\`"',
+        'echo "- provision: \\`$PROVISION_OUTCOME\\`"',
+        'echo "- version assertion: \\`$VERSION_OUTCOME\\`"',
+        'echo "- interoperability suite: \\`$SUITE_OUTCOME\\`"',
+    )
     require(
         "GmSSL infrastructure outcomes are summarized",
         all(name in report for name in ("CACHE_OUTCOME:", "PROVISION_OUTCOME:", "VERSION_OUTCOME:", "SUITE_OUTCOME:"))
+        and all(line in report_script for line in outcome_summary)
         and "GITHUB_STEP_SUMMARY" in report_script,
     )
 
@@ -371,6 +412,32 @@ def mutation_self_test() -> list[str]:
         ),
     )
     must_reject(
+        "GmSSL tag validation weakened to a non-empty check",
+        "GmSSL validates its tag before constructing cleanup paths",
+        ci=CI.replace(
+            provision,
+            provision.replace(
+                '          if [[ ! "$GMSSL_TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then',
+                '          if [ -z "$GMSSL_TAG" ]; then',
+                1,
+            ),
+            1,
+        ),
+    )
+    must_reject(
+        "cached oracle executable guard removed",
+        "GmSSL repairs an unusable cache before provisioning",
+        ci=CI.replace(
+            provision,
+            provision.replace(
+                '          if [ "$CACHE_HIT" = "true" ] && [ -x "$oracle" ]; then',
+                '          if [ "$CACHE_HIT" = "true" ]; then',
+                1,
+            ),
+            1,
+        ),
+    )
+    must_reject(
         "cached oracle accepted without an exact version match",
         "GmSSL repairs an unusable cache before provisioning",
         ci=CI.replace(
@@ -378,6 +445,32 @@ def mutation_self_test() -> list[str]:
             provision.replace(
                 '          if [ "$cached_version" = "$want" ]; then',
                 '          if [ -n "$cached_version" ]; then',
+                1,
+            ),
+            1,
+        ),
+    )
+    must_reject(
+        "cached oracle usability assignment moved outside exact equality",
+        "GmSSL repairs an unusable cache before provisioning",
+        ci=CI.replace(
+            provision,
+            provision.replace(
+                "              cache_usable=true\n            fi",
+                "            fi\n            cache_usable=true",
+                1,
+            ),
+            1,
+        ),
+    )
+    must_reject(
+        "GmSSL rebuild condition polarity flipped",
+        "GmSSL repairs an unusable cache before provisioning",
+        ci=CI.replace(
+            provision,
+            provision.replace(
+                '          if [ "$cache_usable" != "true" ]; then',
+                '          if [ "$cache_usable" = "true" ]; then',
                 1,
             ),
             1,
@@ -395,6 +488,28 @@ def mutation_self_test() -> list[str]:
                 "steps.gmssl-version.outcome != 'success') }}",
                 1,
             ),
+            1,
+        ),
+    )
+    must_reject(
+        "skipped GmSSL suite misreported as ran",
+        "GmSSL suite outcome mapping is explicit",
+        ci=CI.replace(
+            report,
+            report.replace(
+                "            skipped) interop_state=skipped ;;",
+                "            skipped) interop_state=ran ;;",
+                1,
+            ),
+            1,
+        ),
+    )
+    must_reject(
+        "GmSSL cache outcome omitted from the emitted summary",
+        "GmSSL infrastructure outcomes are summarized",
+        ci=CI.replace(
+            report,
+            report.replace('            echo "- cache: \\`$CACHE_OUTCOME\\`"\n', "", 1),
             1,
         ),
     )
