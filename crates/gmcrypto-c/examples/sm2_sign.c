@@ -2,18 +2,20 @@
  * Example: SM2 sign + verify via the gmcrypto-c C ABI.
  *
  * Build (Linux/macOS, dynamic):
- *   gcc -I ../include -L ../../../target/release -lgmcrypto_c \
- *       sm2_sign.c -o sm2_sign
+ *   gcc -I ../include -L ../../../target/release sm2_sign.c \
+ *       -lgmcrypto_c -o sm2_sign
+ * Linux:
  *   LD_LIBRARY_PATH=../../../target/release ./sm2_sign
+ * macOS:
+ *   DYLD_LIBRARY_PATH=../../../target/release ./sm2_sign
  *
  * Build (static):
  *   gcc -I ../include sm2_sign.c \
  *       ../../../target/release/libgmcrypto_c.a -o sm2_sign-static
  *   ./sm2_sign-static
  *
- * Per v0.4 W4 / Q4.14, this example is documentation-only; CI does
- * not build C examples (no C toolchain pinned in the workflow). Run
- * locally to confirm the FFI surface works end-to-end from C.
+ * CI syntax-checks this example. Link and run it locally to confirm the
+ * SM2 signing FFI works end-to-end from C.
  */
 
 #include <stdio.h>

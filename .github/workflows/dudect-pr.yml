@@ -34,7 +34,7 @@ permissions:
 
 jobs:
   smoke:
-    name: timing-leak smoke (10K×3 median, |tau|<0.20, features=${{ matrix.features }})
+    name: timing-leak smoke (10K×3 median, |tau|<=0.20, features=${{ matrix.features }})
     # v0.18 W1 — pinned `ubuntu-24.04` (OS-label pin, was `ubuntu-latest`):
     # freezes the OS-major axis against the future `ubuntu-latest`→26.04 roll.
     # The load-bearing drift fix is the exact toolchain pin below; the
@@ -63,21 +63,21 @@ jobs:
         # v0.4 W3 — second pass under `sm4-bitsliced` exercises the
         # bitsliced S-box gate sequence. `ct_sm4_encrypt_block` and
         # `ct_sm4_key_schedule` swap to the bitsliced path under this
-        # feature; the same `|tau| < 0.20` gate applies.
+        # feature; the same `|tau| <= 0.20` gate applies.
         # v0.5 W4 (phase 1) — third pass under `sm4-bitsliced-simd`
         # exercises the SIMD-packed-bitsliced dispatch path. Phase 1
         # transparently delegates to the single-block bitslice
         # (byte-identical output); phase 2 / phase 3 swap in AVX2 /
         # NEON intrinsics. The new `ct_sm4_encrypt_block_bitsliced_simd`
-        # target is feature-gated and gates at `|tau| < 0.20`.
+        # target is feature-gated and gates at `|tau| <= 0.20`.
         # v0.8 W4 — fourth pass under `sm4-bitsliced-simd,sm4-aead`
         # exercises the most-demanding cipher-stack combination:
         # SIMD-packed-bitsliced SM4 under SM4-GCM and SM4-CCM. New
         # targets `ct_sm4_gcm_decrypt` and `ct_sm4_ccm_decrypt` are
-        # cfg-gated on `sm4-aead`; same `|tau| < 0.20` gate.
+        # cfg-gated on `sm4-aead`; same `|tau| <= 0.20` gate.
         # v0.12 W3 — the fourth pass also carries `sm4-xts`, gating the
         # `ct_sm4_xts_decrypt` target (cfg-gated on `sm4-xts`) at a CTS
-        # data-unit length; same `|tau| < 0.20` gate.
+        # data-unit length; same `|tau| <= 0.20` gate.
         features:
           - "default"
           - "sm4-bitsliced"
@@ -85,7 +85,7 @@ jobs:
         # v1.1 W3 — the fourth pass also carries `sm2-key-exchange`, gating
         # the `ct_sm2_key_exchange` target. v1.7 W3 adds `tlcp`, gating
         # `ct_tlcp_cbc_deprotect` (the Lucky13 residual guard). Same
-        # `|tau| < 0.20` gate.
+        # `|tau| <= 0.20` gate.
           - "sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp"
     steps:
       - uses: actions/checkout@v4
@@ -140,6 +140,7 @@ jobs:
           cargo -V
 
       - name: Run dudect harness (smoke budget, 3 runs for median)
+        shell: bash
         env:
           DUDECT_SAMPLES: "10000"
           DUDECT_RUNS: "3"
@@ -167,12 +168,14 @@ jobs:
           done
 
       - name: Parse and gate
+        shell: bash
         env:
           # Must be re-declared here: `env` is step-scoped, so without this the
           # parse step sees an empty MATRIX_FEATURES and the feature-conditional
           # gates (sm4-bitsliced-simd / sm4-aead / sm4-xts) would never fire.
           MATRIX_FEATURES: ${{ matrix.features }}
         run: |
+          set -euo pipefail
           python3 - <<'PY'
           # v0.18 W1 — multi-run median gate. Reads dudect-1.log..dudect-N.log
           # (one process per file, one `max tau` per target each), accumulates
@@ -348,35 +351,47 @@ jobs:
           # comment above + docs/v0.5-dudect-recalibration.md).
           telemetry_only = ["ct_fn_invert", "ct_fp_invert", "ct_sign_k_class",
                             "ct_hmac_sm3"]
+          # 2026-08-10 — the class-split noise-twin value is non-blocking until
+          # hosted-runner calibration exists, but its PRESENCE is required in
+          # every run so a rename/removal cannot silently erase the telemetry.
+          required_telemetry = ("noise_twin_class_split",)
 
           fail = False
-          # Completeness: every REQUIRED target must be measured in EVERY run.
+          # Completeness: every REQUIRED target/telemetry reference must be
+          # measured in EVERY run.
           # A target missing from one numbered log (e.g. a malformed line the
           # regex skipped) must FAIL — never silently gate the median/min over
           # a reduced (< n_runs) sample set. WARN above stays for the
           # non-required telemetry targets.
-          for name in list(required_high) + list(required_low):
+          for name in (*required_high, *required_low, *required_telemetry):
               got = len(findings.get(name, []))
               if got != n_runs:
                   print(f"FAIL: {name} measured {got}/{n_runs} runs (incomplete) — expected all {n_runs}")
                   fail = True
+          required_high_items = tuple(required_high.items())
+          required_low_items = tuple(required_low.items())
+          blocking_items = required_high_items + required_low_items
+          if any(name in required_telemetry for name, _ in blocking_items):
+              raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")
           # required_high: gate on MIN (must fire every run).
-          for name, lower_bound in required_high.items():
+          for name, lower_bound in required_high_items:
               v = mn(name)
               if v is None: print(f"FAIL: {name} not measured"); fail = True
               elif v <= lower_bound:
                   print(f"FAIL: {name} min|tau|={v:.4f} <= {lower_bound} — harness broken ({telem(name)})"); fail = True
               else: print(f"OK:   {name} min|tau|={v:.4f} (> {lower_bound}) ({telem(name)})")
           # required_low: gate on MEDIAN (robust to single-run noise).
-          for name, upper_bound in required_low.items():
+          for name, upper_bound in required_low_items:
               v = med(name)
               if v is None: print(f"FAIL: {name} not measured"); fail = True
               elif v > upper_bound:
                   print(f"FAIL: {name} median|tau|={v:.4f} > {upper_bound} — timing leak ({telem(name)})"); fail = True
-              else: print(f"OK:   {name} median|tau|={v:.4f} (< {upper_bound}) ({telem(name)})")
+              else: print(f"OK:   {name} median|tau|={v:.4f} (<= {upper_bound}) ({telem(name)})")
           # Telemetry-only: print median + all runs, no pass/fail gate.
           for name in telemetry_only:
               print(f"TELEMETRY: {name} {telem(name)} (non-blocking)")
+          for name in required_telemetry:
+              print(f"NOISE-TWIN: {name} {telem(name)} (required measurement; non-blocking value)")
 
           # v0.19 — relative-gate TELEMETRY (non-blocking). The matched fix-vs-fix
           # probe approach was FALSIFIED at the 100K nightly (W3, 2026-05-30): the
@@ -386,7 +401,8 @@ jobs:
           # everywhere; ct_fn_invert / ct_fp_invert remain in `telemetry_only`
           # above (PR) and on the @0.55 sentinel (nightly). The probes + ratio are
           # printed as a longitudinal diagnostic that documents the class-split
-          # noise for a future v0.20 class-split-aware reference. The probes are
+          # noise alongside the current required `noise_twin_class_split`
+          # reference. The probes are
           # non-gating (a missing one is reported, not failed). See
           # docs/v0.5-dudect-recalibration.md (v0.19 resolution).
           REL_K = 4.0

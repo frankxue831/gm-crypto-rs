@@ -57,8 +57,10 @@ allow = [
     # docs/v0.4-scope.md, these are pulled ONLY when the
     # `digest-traits` / `cipher-traits` feature flags are enabled by
     # the consumer; default-features build pulls none of them in.
-    # CI runs `cargo deny check --exclude-dev` (default features) AND
-    # `cargo deny check --all-features --exclude-dev` (this path).
+    # CI runs `cargo deny --exclude-dev check` (default features) AND an
+    # explicit `--features gmcrypto-core/... --exclude-dev check` runtime
+    # profile. It deliberately excludes gmcrypto-c's `regen-header` build-tool
+    # feature; cbindgen and its transitive tree never reach runtime consumers.
     # Migrated to the digest 0.11 / cipher 0.5 line in v0.11 (the
     # crypto-common 0.2 / hybrid-array generation).
     { name = "digest" },

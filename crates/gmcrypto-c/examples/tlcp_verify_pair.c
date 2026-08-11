@@ -5,19 +5,31 @@
  * the two leaf-first chains, and asks gmcrypto_tlcp_verify_pair whether the
  * pair links to the trusted root and is usable for its TLCP roles.
  *
- *   cc -I ../include -L ../../../target/release -lgmcrypto_c \
- *      tlcp_verify_pair.c -o tlcp_verify_pair
+ * Build (Linux/macOS, dynamic):
+ *   cc -I ../include -L ../../../target/release tlcp_verify_pair.c \
+ *      -lgmcrypto_c -o tlcp_verify_pair
+ * Linux:
  *   LD_LIBRARY_PATH=../../../target/release ./tlcp_verify_pair \
+ *      sign.der enc.der int.der root.der
+ * macOS:
+ *   DYLD_LIBRARY_PATH=../../../target/release ./tlcp_verify_pair \
  *      sign.der enc.der int.der root.der
  *
  * With the committed gmssl fixtures (run from this directory):
- *   ./tlcp_verify_pair \
+ * Linux:
+ *   LD_LIBRARY_PATH=../../../target/release ./tlcp_verify_pair \
+ *      ../../gmcrypto-core/tests/data/x509_chain_sign.der \
+ *      ../../gmcrypto-core/tests/data/x509_chain_enc.der \
+ *      ../../gmcrypto-core/tests/data/x509_chain_int.der \
+ *      ../../gmcrypto-core/tests/data/x509_chain_root.der
+ * macOS:
+ *   DYLD_LIBRARY_PATH=../../../target/release ./tlcp_verify_pair \
  *      ../../gmcrypto-core/tests/data/x509_chain_sign.der \
  *      ../../gmcrypto-core/tests/data/x509_chain_enc.der \
  *      ../../gmcrypto-core/tests/data/x509_chain_int.der \
  *      ../../gmcrypto-core/tests/data/x509_chain_root.der
  *
- * Documentation-only (Q4.14): CI does not build C examples.
+ * CI syntax-checks this example; link and run it locally for functional use.
  *
  * *** READ THIS ***: a `1` here is STRUCTURAL trust — each chain links to the
  * trusted root and each leaf is usable for its TLCP role. It is NOT endpoint

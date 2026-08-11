@@ -8,9 +8,10 @@ name: CI
 # `simd-x86` (`ubuntu-latest`) exercises the AVX2 / PCLMULQDQ paths the
 # aarch64 hosts can't reach (F17), and `interop-gmssl` (`ubuntu-24.04`,
 # OS label pinned because a from-source build's reproducibility rides the
-# runner's compiler) cross-validates the wire format against a pinned
-# GmSSL build (F16). GitHub Actions on standard runners is free for
-# public repositories.
+# runner's compiler) cross-validates the wire format against a pinned GmSSL
+# build (F16). The separate `gitleaks.yml` workflow scans all eligible PRs and
+# main pushes, including doc-only pushes skipped by this workflow. GitHub
+# Actions on standard runners is free for public repositories.
 #
 # History: through v0.16 these ran on a self-hosted macOS runner to dodge
 # GitHub Pro's private-repo minute cap. That runner was retired at the
@@ -19,7 +20,7 @@ name: CI
 # docs/pre-opensource-audit.md (item C1).
 #
 # The dudect workflows (`dudect-pr.yml`, `dudect-nightly.yml`) run on
-# `ubuntu-latest` and DO NOT move — their `|tau|` gates were empirically
+# `ubuntu-24.04` and DO NOT move — their `|tau|` gates were empirically
 # calibrated against the GitHub Actions `ubuntu-24.04` runner image's
 # noise floor (see CLAUDE.md dudect table / docs/v0.5-dudect-recalibration.md).
 # Moving them would invalidate the calibration.
@@ -78,9 +79,6 @@ env:
 # return null and `contains(null, ...)` is false, so the gate is a
 # no-op there (GitHub's native skip already handled it).
 #
-# Drop into a YAML anchor so all jobs share the same expression
-# without duplicating it five times.
-#
 # YAML anchors don't work inside GitHub Actions `if:` directly, so the
 # expression is repeated per-job below. Keep them in lock-step.
 
@@ -106,6 +104,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Verify assurance workflow policy
+        shell: bash
+        run: python3 .github/scripts/check_assurance_policy.py
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -278,15 +279,13 @@ jobs:
     # is an aarch64 Homebrew build is deliberate: two independent instances of
     # the reference implementation agreeing is stronger evidence than one.
     #
-    # NON-GATING for now (`continue-on-error: true`) — a third-party source
-    # build is a brand-new failure surface (upstream availability, cmake drift
-    # on the image, cache eviction), and making it required on day one would
-    # let any of those block every PR in the repo. Flip to enforced once it has
-    # a green track record, the way cargo-semver-checks was informational until
-    # #86. See docs/v1.10-scope.md.
-    name: gmssl interop (pinned oracle, x86_64)
+    # A real wire mismatch is gating. Oracle infrastructure is not: cache,
+    # acquisition/build, and version-drift failures are tolerated at the STEP
+    # level, reported explicitly, and cause the suite to be skipped. This keeps
+    # a third-party outage from blocking every PR without turning a skipped
+    # suite into an interoperability pass.
+    name: gmssl interop (mismatch gates; infra non-blocking)
     runs-on: ubuntu-24.04
-    continue-on-error: true
     if: >-
       !contains(github.event.pull_request.title, '[skip ci]') &&
       !contains(github.event.pull_request.title, '[ci skip]') &&
@@ -314,6 +313,7 @@ jobs:
           shared-key: interop-gmssl
       - name: Cache GmSSL install prefix
         id: gmssl-cache
+        continue-on-error: true
         uses: actions/cache@v4
         with:
           path: ~/gmssl-${{ env.GMSSL_TAG }}
@@ -321,26 +321,61 @@ jobs:
           # NO `restore-keys`, deliberately. A fuzzy/prefix restore would
           # satisfy the cache with a WRONG-VERSION binary — precisely the
           # failure this job exists to prevent.
-      - name: Build GmSSL ${{ env.GMSSL_TAG }} from source (static)
-        if: steps.gmssl-cache.outputs.cache-hit != 'true'
+      - name: Provision GmSSL ${{ env.GMSSL_TAG }} oracle
+        id: gmssl-provision
+        continue-on-error: true
+        env:
+          CACHE_HIT: ${{ steps.gmssl-cache.outputs.cache-hit }}
         run: |
           set -euxo pipefail
-          git clone --depth 1 --branch "$GMSSL_TAG" \
-            https://github.com/guanzhi/GmSSL.git "$RUNNER_TEMP/gmssl-src"
-          # BUILD_SHARED_LIBS defaults to ON upstream, which yields a binary
-          # linked against @rpath/libgmssl. Static keeps the cached artifact
-          # self-contained, so a cache restore needs no LD_LIBRARY_PATH or
-          # ldconfig to produce a runnable `gmssl`.
-          cmake -S "$RUNNER_TEMP/gmssl-src" -B "$RUNNER_TEMP/gmssl-src/build" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DCMAKE_INSTALL_PREFIX="$HOME/gmssl-$GMSSL_TAG"
-          cmake --build "$RUNNER_TEMP/gmssl-src/build" --parallel
-          cmake --install "$RUNNER_TEMP/gmssl-src/build"
-      # Unconditional — needed on a cache HIT as well as a fresh build.
+          if [[ ! "$GMSSL_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::invalid GMSSL_TAG: $GMSSL_TAG"
+            exit 1
+          fi
+          prefix="$HOME/gmssl-$GMSSL_TAG"
+          oracle="$prefix/bin/gmssl"
+          source_dir="$RUNNER_TEMP/gmssl-src"
+          want="GmSSL ${GMSSL_TAG#v}"
+          cache_usable=false
+          if [ "$CACHE_HIT" = "true" ] && [ -x "$oracle" ]; then
+            cached_version="$("$oracle" version 2>/dev/null | head -n1 || true)"
+            if [ "$cached_version" = "$want" ]; then
+              cache_usable=true
+            fi
+          fi
+          if [ "$cache_usable" != "true" ]; then
+            if [ "$CACHE_HIT" = "true" ]; then
+              echo "::warning title=Unusable GmSSL cache::repairing this run only because exact caches are immutable; bump GMSSL_CACHE_EPOCH to replace it"
+            fi
+            case "$prefix" in
+              "$HOME"/gmssl-v*) ;;
+              *) echo "::error::refusing to clean unexpected GmSSL prefix: $prefix"; exit 1 ;;
+            esac
+            rm -rf -- "$prefix" "$source_dir"
+            git clone --depth 1 --branch "$GMSSL_TAG" \
+              https://github.com/guanzhi/GmSSL.git "$source_dir"
+            # BUILD_SHARED_LIBS defaults to ON upstream, which yields a binary
+            # linked against @rpath/libgmssl. Static keeps the cached artifact
+            # self-contained, so a cache restore needs no LD_LIBRARY_PATH or
+            # ldconfig to produce a runnable `gmssl`.
+            cmake -S "$source_dir" -B "$source_dir/build" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DCMAKE_INSTALL_PREFIX="$prefix"
+            cmake --build "$source_dir/build" --parallel
+            cmake --install "$source_dir/build"
+          fi
+          test -x "$oracle"
+      # Needed on a cache hit as well as a fresh build; skipped only when the
+      # tolerated provisioning step could not produce a usable oracle.
       - name: Put gmssl on PATH
+        if: steps.gmssl-provision.outcome == 'success'
         run: echo "$HOME/gmssl-$GMSSL_TAG/bin" >> "$GITHUB_PATH"
       - name: Assert oracle version (drift guard)
+        id: gmssl-version
+        if: steps.gmssl-provision.outcome == 'success'
+        continue-on-error: true
+        shell: bash
         run: |
           set -euo pipefail
           want="GmSSL ${GMSSL_TAG#v}"
@@ -359,6 +394,9 @@ jobs:
       # default-features run sees: the two SM4-GCM interop tests are cfg-gated
       # on that feature.
       - name: gmssl interop suite (13 tests)
+        id: gmssl-suite
+        if: steps.gmssl-provision.outcome == 'success' && steps.gmssl-version.outcome == 'success'
+        shell: bash
         env:
           GMCRYPTO_GMSSL: '1'
         run: |
@@ -379,6 +417,48 @@ jobs:
           if ! grep -qE '13 passed' interop.txt; then
             echo "::error::expected 13 interop tests to pass - census drifted"
             exit 1
+          fi
+      - name: Report GmSSL interoperability status
+        if: ${{ always() }}
+        shell: bash
+        env:
+          CACHE_OUTCOME: ${{ steps.gmssl-cache.outcome }}
+          PROVISION_OUTCOME: ${{ steps.gmssl-provision.outcome }}
+          VERSION_OUTCOME: ${{ steps.gmssl-version.outcome }}
+          SUITE_OUTCOME: ${{ steps.gmssl-suite.outcome }}
+        run: |
+          set -euo pipefail
+          case "$SUITE_OUTCOME" in
+            success|failure) interop_state=ran ;;
+            skipped) interop_state=skipped ;;
+            cancelled) interop_state=cancelled ;;
+            *) interop_state=unknown ;;
+          esac
+          echo "INTEROP_SUITE=$interop_state"
+          {
+            echo "### GmSSL interoperability status"
+            echo
+            echo "INTEROP_SUITE=\`$interop_state\`"
+            echo
+            echo "- cache: \`$CACHE_OUTCOME\`"
+            echo "- provision: \`$PROVISION_OUTCOME\`"
+            echo "- version assertion: \`$VERSION_OUTCOME\`"
+            echo "- interoperability suite: \`$SUITE_OUTCOME\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PROVISION_OUTCOME" != "success" ] || [ "$VERSION_OUTCOME" != "success" ]; then
+            echo "::warning title=GmSSL infrastructure unavailable::cache=$CACHE_OUTCOME provision=$PROVISION_OUTCOME version=$VERSION_OUTCOME suite=$SUITE_OUTCOME"
+            {
+              echo "The interoperability suite was not run because the pinned oracle could not be prepared."
+              echo
+              echo "This is non-blocking infrastructure telemetry, not an interoperability pass."
+            } >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$CACHE_OUTCOME" != "success" ]; then
+            echo "::warning title=GmSSL cache degraded::cache=$CACHE_OUTCOME; fallback provisioning succeeded; suite=$SUITE_OUTCOME"
+            {
+              echo "The cache step failed, but fallback provisioning and version validation succeeded."
+              echo
+              echo "Fallback provisioning recovered the cache failure; the suite outcome remains authoritative."
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
   cabi:
@@ -417,9 +497,27 @@ jobs:
       # cryptographic-correctness gate (Rust-equivalence on every
       # entry point). As of v0.23 W3 (A-1) the AEAD (SM4-GCM/CCM) +
       # SM4-XTS FFI is always compiled into the C ABI, so the default
-      # build runs all 65 c_smoke tests (no per-feature invocation).
+      # build runs all 97 c_smoke tests (no per-feature invocation).
       - name: cargo test -p gmcrypto-c
         run: cargo test -p gmcrypto-c
+      # Compile every shipped translation unit against the committed header.
+      # Syntax-only avoids platform-specific linker/loader noise while still
+      # catching malformed examples and stale declarations before release.
+      - name: Compile shipped C examples
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          examples=(crates/gmcrypto-c/examples/*.c)
+          if (( ${#examples[@]} == 0 )); then
+            echo "::error::no shipped C examples found"
+            exit 1
+          fi
+          for example in "${examples[@]}"; do
+            echo "checking $example"
+            cc -std=c11 -Wall -Wextra -Werror -fsyntax-only \
+              -I crates/gmcrypto-c/include "$example"
+          done
 
   deny:
     name: cargo-deny (no forbidden runtime deps)
@@ -443,16 +541,18 @@ jobs:
       - name: Install cargo-deny
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny@0.19
+          tool: cargo-deny@0.20.2
       # Cargo.lock is gitignored (lib-crate policy), so generate a fresh
       # lockfile for a reproducible, fully-resolved dependency graph before
       # the deny passes (per the documented recipe in CLAUDE.md).
       - name: Generate lockfile
+        shell: bash
         run: cargo generate-lockfile
       # Default deny pass — gates the zero-runtime-deps surface of the
       # default-features build.
       - name: Run cargo-deny (default features, excluding dev-deps)
-        run: cargo deny check --exclude-dev
+        shell: bash
+        run: cargo deny --exclude-dev check
       # v0.4 W2 / Q4.5 + v0.8 W2-W3 — second pass with the runtime opt-in
       # feature flags a downstream consumer might enable (digest/cipher
       # traits, bitsliced, SIMD, AEAD, scalar). gmcrypto-c's build-time
@@ -463,7 +563,8 @@ jobs:
       # transitive deps). Uses --features on the workspace-default crate
       # (`gmcrypto-core`).
       - name: Run cargo-deny (runtime opt-in features, excluding dev-deps)
-        run: cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509,gmcrypto-core/tlcp,gmcrypto-core/aead-traits check --exclude-dev
+        shell: bash
+        run: cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509,gmcrypto-core/tlcp,gmcrypto-core/aead-traits --exclude-dev check
 
   wasm32:
     name: build wasm32-unknown-unknown (Rust ${{ matrix.toolchain }})

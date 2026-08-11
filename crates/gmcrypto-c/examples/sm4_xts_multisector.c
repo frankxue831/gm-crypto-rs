@@ -14,17 +14,20 @@
  *   cargo build -p gmcrypto-c --release
  *
  * Build (Linux/macOS, dynamic):
- *   cc -I ../include -L ../../../target/release -lgmcrypto_c \
- *      sm4_xts_multisector.c -o sm4_xts_multisector
+ *   cc -I ../include -L ../../../target/release sm4_xts_multisector.c \
+ *      -lgmcrypto_c -o sm4_xts_multisector
+ * Linux:
  *   LD_LIBRARY_PATH=../../../target/release ./sm4_xts_multisector
+ * macOS:
+ *   DYLD_LIBRARY_PATH=../../../target/release ./sm4_xts_multisector
  *
  * Build (static):
  *   cc -I ../include sm4_xts_multisector.c \
  *      ../../../target/release/libgmcrypto_c.a -o sm4_xts_multisector-static
  *   ./sm4_xts_multisector-static
  *
- * Per v0.4 W4 / Q4.14, this example is documentation-only; CI does not build
- * C examples. Run locally to confirm the SM4-XTS sector FFI works end-to-end.
+ * CI syntax-checks this example. Link and run it locally to confirm the
+ * SM4-XTS sector FFI works end-to-end.
  *
  * Notes:
  *   - The key is 32 bytes = Key1 || Key2 (two distinct 128-bit keys;

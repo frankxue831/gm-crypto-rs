@@ -5,10 +5,10 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-**2026-08-06 maintenance batch** — the three open `good first issue`s plus two
-defects found while fixing them (#140–#147). No crate *code* change and no
-publish; the example-file changes below ship with the next `gmcrypto-c`
-package.
+**2026-08-06–10 maintenance batch** — the three open `good first issue`s, two
+defects found while fixing them (#140–#147), and a follow-up assurance-hardening
+pass. No production cryptographic code, public API, C ABI, or release version
+change; the example-file changes below ship with the next `gmcrypto-c` package.
 
 ### Added
 
@@ -18,6 +18,11 @@ package.
   GCM get wrong) → decrypt round-trip → three rejection demonstrations
   (tampered tag, tampered ciphertext byte, modified AAD), since an AEAD example
   that only shows the happy path teaches the wrong lesson.
+- **Class-split dudect noise-twin telemetry** — a sixteenth base target feeds
+  two distinct fixed inputs through one data-independent fixed-work body. PR
+  and nightly workflows require it to be measured in every run, but its
+  `|tau|` remains non-blocking until hosted-runner calibration establishes
+  whether it tracks the known two-input noise. No existing threshold changed.
 
 ### Fixed
 
@@ -26,10 +31,9 @@ package.
   carried a nested `/* … */` inside the header block comment, so the inner `*/`
   closed the header early and everything below parsed as code. The stale claim
   that nested comment was patching ("requires the `sm4-aead` feature" —
-  removed in v0.23) is corrected by the same edit. CI does not build C examples
-  (v0.4 W4 / Q4.14), which is how this shipped unnoticed; all nine examples now
-  pass a `cc -fsyntax-only -Wall -Wextra` sweep and the touched ones run to
-  exit 0.
+  removed in v0.23) is corrected by the same edit. The former CI gap is now
+  closed: all nine shipped examples must pass a C11
+  `cc -fsyntax-only -Wall -Wextra -Werror` sweep against the committed header.
 
 ### Changed
 
@@ -40,6 +44,14 @@ package.
   any `coverage-build-failed` line (a target that produced no coverage data at
   all; a profdata that merely failed to render reports `profdata OK` and does
   not trip it). The coverage *percentage* remains ungated.
+- **GmSSL failure classification:** an actual mismatch in the pinned 13-test
+  interoperability suite is now blocking. Cache failure is reported separately
+  while fallback provisioning proceeds; acquisition/build or oracle-version
+  failure remains a non-blocking infrastructure event that skips the suite.
+- **cargo-deny aligned to pinned `0.20.2`:** CI and contributor commands use
+  the current option order for the default and explicit runtime-feature
+  profiles. The optional `regen-header`/cbindgen build-tool tree remains
+  deliberately outside the downstream runtime-dependency policy.
 
 ### Security
 
@@ -52,8 +64,9 @@ package.
   regex AND `targetRules` per entry, never a whole file or tree) and
   re-established the clean scan `docs/pre-opensource-audit.md` claims, with a
   planted-canary negative test proving the new entries do not suppress a real
-  key in the same files. Nothing in CI runs gitleaks, so the clean-scan claim
-  is point-in-time and decays — re-run both modes before relying on it.
+  key in the same files. CI now checks the full committed history on every PR
+  and main push with pinned gitleaks 8.30.1; generated working-tree artifacts
+  remain outside that publication-relevant scan.
 
 ## [1.11.0] - 2026-08-01
 

@@ -8,17 +8,20 @@
  *   cargo build -p gmcrypto-c --release
  *
  * Build (Linux/macOS, dynamic):
- *   cc -I ../include -L ../../../target/release -lgmcrypto_c \
- *      sm4_ccm.c -o sm4_ccm
+ *   cc -I ../include -L ../../../target/release sm4_ccm.c \
+ *      -lgmcrypto_c -o sm4_ccm
+ * Linux:
  *   LD_LIBRARY_PATH=../../../target/release ./sm4_ccm
+ * macOS:
+ *   DYLD_LIBRARY_PATH=../../../target/release ./sm4_ccm
  *
  * Build (static):
  *   cc -I ../include sm4_ccm.c \
  *      ../../../target/release/libgmcrypto_c.a -o sm4_ccm-static
  *   ./sm4_ccm-static
  *
- * Per v0.4 W4 / Q4.14, this example is documentation-only; CI does not
- * build C examples. Run locally to confirm the SM4-CCM FFI works end-to-end.
+ * CI syntax-checks this example. Link and run it locally to confirm the
+ * SM4-CCM FFI works end-to-end from C.
  *
  * How CCM differs from the SM4-GCM examples next door:
  *   - It is SINGLE-SHOT only. There is no incremental encryptor/decryptor

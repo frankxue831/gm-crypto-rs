@@ -67,7 +67,7 @@ always-on + 2 cfg-gated under `sm4-bitsliced-simd` + 3 cfg-gated under
 `sm4-aead` + 1 cfg-gated under `sm4-xts` + 1 cfg-gated under
 `sm2-key-exchange` + 1 cfg-gated under `tlcp`) plus a deliberately-leaky
 `negative_control` that proves
-the harness can detect leaks. Most real targets gate at `|tau| < 0.20`; four
+the harness can detect leaks. Most real targets gate at `|tau| <= 0.20`; four
 (`ct_fn_invert`, `ct_fp_invert`, `ct_sign_k_class`, `ct_hmac_sm3`) carry
 target-specific gate policy after the 2026-05-12 / 06-07 / 06-17
 recalibrations — see [`SECURITY.md`](SECURITY.md) and

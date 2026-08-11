@@ -9,18 +9,20 @@
  *   cargo build -p gmcrypto-c --release
  *
  * Build (Linux/macOS, dynamic):
- *   cc -I ../include -L ../../../target/release -lgmcrypto_c \
- *      sm2_key_exchange.c -o sm2_key_exchange
+ *   cc -I ../include -L ../../../target/release sm2_key_exchange.c \
+ *      -lgmcrypto_c -o sm2_key_exchange
+ * Linux:
  *   LD_LIBRARY_PATH=../../../target/release ./sm2_key_exchange
+ * macOS:
+ *   DYLD_LIBRARY_PATH=../../../target/release ./sm2_key_exchange
  *
  * Build (static):
  *   cc -I ../include sm2_key_exchange.c \
  *      ../../../target/release/libgmcrypto_c.a -o sm2_key_exchange-static
  *   ./sm2_key_exchange-static
  *
- * Per v0.4 W4 / Q4.14, this example is documentation-only; CI does not
- * build C examples. Run locally to confirm the key-exchange FFI works
- * end-to-end from C.
+ * CI syntax-checks this example. Link and run it locally to confirm the
+ * SM2 key-exchange FFI works end-to-end from C.
  *
  * Handle lifecycle to note:
  *  - the initiator handle is created ALREADY holding its ephemeral

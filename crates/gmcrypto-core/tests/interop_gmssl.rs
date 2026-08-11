@@ -1,9 +1,9 @@
-//! Cross-validation against the gmssl v3.1.1 CLI.
+//! Cross-validation against the `GmSSL` 3.2.0 CLI.
 //!
-//! Skipped silently when `GMCRYPTO_GMSSL=1` is not set. No CI workflow
-//! currently sets it (gmssl is not installed on the GitHub-hosted runners),
-//! so this suite is maintainer-run locally, not a CI gate; the committed KAT
-//! fixtures are the in-CI wire-format guard.
+//! Skipped silently when `GMCRYPTO_GMSSL=1` is not set. CI prepares a pinned
+//! `GmSSL` oracle, sets the flag, and treats an actual interoperability mismatch
+//! as blocking. Oracle infrastructure failure remains visible but non-blocking
+//! and prevents the suite from running rather than reporting an interop pass.
 //!
 //! # v0.3 scope (W3)
 //!

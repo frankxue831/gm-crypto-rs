@@ -38,7 +38,7 @@ permissions:
 
 jobs:
   full:
-    name: timing-leak nightly (100K×5 median, |tau|<0.20, features=${{ matrix.features }})
+    name: timing-leak nightly (100K×5 median, |tau|<=0.20, features=${{ matrix.features }})
     # v0.18 W1 — pinned `ubuntu-24.04` (OS-label pin, was `ubuntu-latest`):
     # freezes the OS-major axis against the future `ubuntu-latest`→26.04 roll.
     # The load-bearing drift fix is the exact toolchain pin below; the
@@ -59,22 +59,22 @@ jobs:
       fail-fast: false
       matrix:
         # v0.4 W3 — second matrix entry under `sm4-bitsliced` exercises
-        # the bitsliced S-box gate sequence. Same `|tau| < 0.20` gate
+        # the bitsliced S-box gate sequence. Same `|tau| <= 0.20` gate
         # applies to both configurations.
         # v0.5 W4 (phase 1) — third entry under `sm4-bitsliced-simd`
         # exercises the SIMD-packed-bitsliced dispatch (phase 1:
         # transparent delegate to the single-block bitslice; phase 2 /
         # phase 3 swap in AVX2 / NEON intrinsics). The new
         # `ct_sm4_encrypt_block_bitsliced_simd` target gates at
-        # `|tau| < 0.20`.
+        # `|tau| <= 0.20`.
         # v0.8 W4 — fourth entry under `sm4-bitsliced-simd,sm4-aead`
         # exercises SM4-GCM / SM4-CCM under the SIMD-packed cipher
         # path. The new `ct_sm4_gcm_decrypt` and `ct_sm4_ccm_decrypt`
-        # targets are cfg-gated on `sm4-aead`; same `|tau| < 0.20`
+        # targets are cfg-gated on `sm4-aead`; same `|tau| <= 0.20`
         # gate at the 100K-sample budget.
         # v0.12 W3 — the fourth entry also carries `sm4-xts`, gating the
         # `ct_sm4_xts_decrypt` target (cfg-gated on `sm4-xts`) at a CTS
-        # data-unit length; same `|tau| < 0.20` gate.
+        # data-unit length; same `|tau| <= 0.20` gate.
         features:
           - "default"
           - "sm4-bitsliced"
@@ -82,7 +82,7 @@ jobs:
         # v1.1 W3 — the fourth pass also carries `sm2-key-exchange`, gating
         # the `ct_sm2_key_exchange` target. v1.7 W3 adds `tlcp`, gating
         # `ct_tlcp_cbc_deprotect` (the Lucky13 residual guard). Same
-        # `|tau| < 0.20` gate.
+        # `|tau| <= 0.20` gate.
           - "sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp"
     steps:
       - uses: actions/checkout@v4
@@ -135,6 +135,7 @@ jobs:
           cargo -V
 
       - name: Run dudect harness (nightly budget, 5 runs for median)
+        shell: bash
         env:
           DUDECT_SAMPLES: "100000"
           DUDECT_RUNS: "5"
@@ -162,12 +163,14 @@ jobs:
           done
 
       - name: Parse and gate
+        shell: bash
         env:
           # Must be re-declared here: `env` is step-scoped, so without this the
           # parse step sees an empty MATRIX_FEATURES and the feature-conditional
           # gates (sm4-bitsliced-simd / sm4-aead / sm4-xts) would never fire.
           MATRIX_FEATURES: ${{ matrix.features }}
         run: |
+          set -euo pipefail
           python3 - <<'PY'
           # v0.18 W1 — multi-run median gate (same shape as the PR-smoke job;
           # nightly loops N=5 at 100K). Reads dudect-nightly-1.log..N.log,
@@ -226,8 +229,9 @@ jobs:
               # stayed at 0.0053 / 0.0115 (no real leak). The direct diagnostics
               # remain the invert-leak guards; the honest trade is that a medium
               # k-only full-sign leak in [0.25, 0.55] is no longer
-              # authoritatively gated until a class-split-aware "noise-twin"
-              # exists. See docs/v0.5-dudect-recalibration.md (2026-06-07).
+              # authoritatively gated until the class-split-aware noise twin is
+              # calibrated and validated with injected-leak controls. See
+              # docs/v0.5-dudect-recalibration.md (2026-08-10).
               #
               # v0.5 W4 phase 2 prep — `ct_fn_invert` and `ct_fp_invert`
               # moved out of `required_low` and into
@@ -356,10 +360,14 @@ jobs:
               # path). Codex+Grok-reviewed. docs/v0.5-dudect-recalibration.md.
               "ct_hmac_sm3": 0.55,
           }
+          # 2026-08-10 — value is non-blocking pending hosted-runner
+          # calibration, but presence in every run is required.
+          required_telemetry = ("noise_twin_class_split",)
 
           fail = False
-          # Completeness: every REQUIRED + SENTINEL target must be measured in
-          # EVERY run. A target missing from one numbered log (e.g. a malformed
+          # Completeness: every REQUIRED + SENTINEL target and the required
+          # telemetry reference must be measured in EVERY run. A target
+          # missing from one numbered log (e.g. a malformed
           # line the regex skipped) must FAIL — never silently gate the
           # median/min over a reduced (< n_runs) sample set. v1.0.x (2026-06-07)
           # added the sentinel dict here: the sentinel loop below prints-without-
@@ -367,25 +375,31 @@ jobs:
           # target (e.g. ct_sign_k_class) that went missing/renamed would pass
           # green — completeness is what guards that. (Pure telemetry — the
           # noise_floor_* probes — is intentionally NOT completeness-gated.)
-          for name in list(required_high) + list(required_low) + list(gross_regression_sentinel):
+          for name in (*required_high, *required_low, *gross_regression_sentinel, *required_telemetry):
               got = len(findings.get(name, []))
               if got != n_runs:
                   print(f"FAIL: {name} measured {got}/{n_runs} runs (incomplete) — expected all {n_runs}")
                   fail = True
+          required_high_items = tuple(required_high.items())
+          required_low_items = tuple(required_low.items())
+          gross_regression_sentinel_items = tuple(gross_regression_sentinel.items())
+          blocking_items = required_high_items + required_low_items + gross_regression_sentinel_items
+          if any(name in required_telemetry for name, _ in blocking_items):
+              raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")
           # required_high: gate on MIN (must fire every run).
-          for name, lower_bound in required_high.items():
+          for name, lower_bound in required_high_items:
               v = mn(name)
               if v is None: print(f"FAIL: {name} not measured"); fail = True
               elif v <= lower_bound:
                   print(f"FAIL: {name} min|tau|={v:.4f} <= {lower_bound} — harness broken ({telem(name)})"); fail = True
               else: print(f"OK:   {name} min|tau|={v:.4f} (> {lower_bound}) ({telem(name)})")
           # required_low: gate on MEDIAN (robust to single-run noise).
-          for name, upper_bound in required_low.items():
+          for name, upper_bound in required_low_items:
               v = med(name)
               if v is None: print(f"FAIL: {name} not measured"); fail = True
               elif v > upper_bound:
                   print(f"FAIL: {name} median|tau|={v:.4f} > {upper_bound} — timing leak ({telem(name)})"); fail = True
-              else: print(f"OK:   {name} median|tau|={v:.4f} (< {upper_bound}) ({telem(name)})")
+              else: print(f"OK:   {name} median|tau|={v:.4f} (<= {upper_bound}) ({telem(name)})")
 
           # v0.19 (Q19.1) — self-calibrating RELATIVE gate for the two direct-
           # invert diagnostics, gated against a MATCHED-SENSITIVITY fix-vs-fix
@@ -426,7 +440,7 @@ jobs:
           # values that would indicate a real cryptographic leak rather than
           # runner-image noise. Prefix `SENTINEL:` so log readers can
           # distinguish from the primary gating lines above.
-          for name, upper_bound in gross_regression_sentinel.items():
+          for name, upper_bound in gross_regression_sentinel_items:
               v = med(name)
               if v is None:
                   print(f"SENTINEL: {name} not measured")
@@ -435,6 +449,8 @@ jobs:
                   fail = True
               else:
                   print(f"SENTINEL: {name} median|tau|={v:.4f} (non-blocking; gross-regression gate at {upper_bound}) ({telem(name)})")
+          for name in required_telemetry:
+              print(f"NOISE-TWIN: {name} {telem(name)} (required measurement; non-blocking value)")
           sys.exit(1 if fail else 0)
           PY
 

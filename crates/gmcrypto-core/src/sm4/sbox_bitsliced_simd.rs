@@ -55,7 +55,7 @@
 //! - Constant-time-by-construction. The sibling's AVX2 path uses
 //!   `_mm256_*` intrinsics with publicly-fixed loop counts; no
 //!   table lookups, no secret-dependent branches. The dudect target
-//!   `ct_sm4_encrypt_block_bitsliced_simd` (gate `|tau| < 0.20`,
+//!   `ct_sm4_encrypt_block_bitsliced_simd` (gate `|tau| <= 0.20`,
 //!   Q5.14) measures the SIMD path end-to-end under the
 //!   `sm4-bitsliced-simd` feature on CI's AVX2-capable
 //!   `ubuntu-24.04` runner.
