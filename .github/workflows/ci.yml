@@ -105,6 +105,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify assurance workflow policy
+        shell: bash
         run: python3 .github/scripts/check_assurance_policy.py
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -374,6 +375,7 @@ jobs:
         id: gmssl-version
         if: steps.gmssl-provision.outcome == 'success'
         continue-on-error: true
+        shell: bash
         run: |
           set -euo pipefail
           want="GmSSL ${GMSSL_TAG#v}"
@@ -394,6 +396,7 @@ jobs:
       - name: gmssl interop suite (13 tests)
         id: gmssl-suite
         if: steps.gmssl-provision.outcome == 'success' && steps.gmssl-version.outcome == 'success'
+        shell: bash
         env:
           GMCRYPTO_GMSSL: '1'
         run: |
@@ -417,6 +420,7 @@ jobs:
           fi
       - name: Report GmSSL interoperability status
         if: ${{ always() }}
+        shell: bash
         env:
           CACHE_OUTCOME: ${{ steps.gmssl-cache.outcome }}
           PROVISION_OUTCOME: ${{ steps.gmssl-provision.outcome }}

@@ -52,30 +52,80 @@ def step_uses(job_text: str, action: str) -> str:
     return indented_block(job_text, f"- uses: {action}", 6)
 
 
+def mapping_key_re(key: str, indent: int | None = None) -> re.Pattern[str]:
+    """Recognize one YAML mapping key regardless of safe key spelling.
+
+    Assurance metadata may use a plain, single-quoted, or double-quoted key,
+    and YAML permits whitespace before ``:``.  Every scalar/count check below
+    shares this parser so alternate spelling cannot bypass uniqueness checks.
+    """
+    escaped = re.escape(key)
+    key_source = rf"(?:{escaped}|'(?:{escaped})'|\"(?:{escaped})\")"
+    prefix = re.escape(" " * indent) if indent is not None else r"[ ]*"
+    return re.compile(
+        rf"^{prefix}{key_source}[ \t]*:[ \t]*(.*?)[ \t]*$",
+        re.M,
+    )
+
+
+def mapping_values(block: str, key: str, indent: int | None = None) -> list[str]:
+    """Return all values for one YAML mapping key at the selected indentation."""
+    return [match.group(1) for match in mapping_key_re(key, indent).finditer(block)]
+
+
 def scalar(block: str, key: str, indent: int) -> str | None:
-    prefix = " " * indent
-    match = re.search(rf"^{re.escape(prefix)}{re.escape(key)}:\s*(.*?)\s*$", block, re.M)
-    return match.group(1) if match else None
+    """Return a scalar only when its mapping key occurs exactly once."""
+    values = mapping_values(block, key, indent)
+    return values[0] if len(values) == 1 else None
 
 
-def key_count(block: str, key: str, indent: int) -> int:
-    """Count exact YAML mapping keys at one indentation level."""
-    prefix = " " * indent
-    return len(re.findall(rf"^{re.escape(prefix)}{re.escape(key)}:\s*", block, re.M))
+def key_count(block: str, key: str, indent: int | None = None) -> int:
+    """Count YAML mapping keys using the unified key recognizer."""
+    return len(mapping_values(block, key, indent))
+
+
+def mapping_block(block: str, key: str, indent: int) -> list[str]:
+    """Return active source lines for one unique scalar and its folded body."""
+    lines = block.splitlines()
+    matches = [
+        index
+        for index, line in enumerate(lines)
+        if mapping_key_re(key, indent).fullmatch(line)
+    ]
+    if len(matches) != 1:
+        return []
+    start = matches[0]
+    selected = [lines[start].split("#", 1)[0].rstrip()]
+    for line in lines[start + 1 :]:
+        source = line.split("#", 1)[0].rstrip()
+        if not source.strip():
+            continue
+        if len(source) - len(source.lstrip()) <= indent:
+            break
+        selected.append(source)
+    return selected
+
+
+def step_headers(job_text: str) -> tuple[str, ...]:
+    """Return the exact ordered list of active top-level step headers."""
+    return tuple(
+        line[6:]
+        for line in active_source_lines(job_text)
+        if line.startswith("      - ")
+    )
 
 
 def active_run(step: str) -> str:
     """Extract active shell from a step's run key, excluding YAML comments."""
     lines = step.splitlines()
     matches = [
-        (index, match)
+        (index, match.group(1))
         for index, line in enumerate(lines)
-        if (match := re.match(r"^ {8}run:\s*(.*)$", line))
+        if (match := mapping_key_re("run", 8).fullmatch(line))
     ]
     if len(matches) != 1:
         return ""
-    index, match = matches[0]
-    value = match.group(1)
+    index, value = matches[0]
     if value and value != "|":
         return value
     body: list[str] = []
@@ -92,12 +142,15 @@ def literal_run_body(step: str) -> str | None:
     """Return a literal-block run body with the YAML indentation removed."""
     lines = step.splitlines()
     matches = [
-        index for index, line in enumerate(lines) if re.match(r"^ {8}run:\s*", line)
+        (index, match.group(1))
+        for index, line in enumerate(lines)
+        if (match := mapping_key_re("run", 8).fullmatch(line))
     ]
-    if len(matches) != 1 or lines[matches[0]] != "        run: |":
+    if len(matches) != 1 or matches[0][1] != "|":
         return None
+    run_index = matches[0][0]
     body: list[str] = []
-    for candidate in lines[matches[0] + 1 :]:
+    for candidate in lines[run_index + 1 :]:
         if candidate.strip() and len(candidate) - len(candidate.lstrip()) <= 8:
             break
         if not candidate:
@@ -195,19 +248,77 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     deny = job(ci, "deny")
     interop = job(ci, "interop-gmssl")
 
+    skip_ci_if = [
+        "    if: >-",
+        "      !contains(github.event.pull_request.title, '[skip ci]') &&",
+        "      !contains(github.event.pull_request.title, '[ci skip]') &&",
+        "      !contains(github.event.pull_request.title, '[no ci]') &&",
+        "      !contains(github.event.pull_request.title, '[skip actions]') &&",
+        "      !contains(github.event.head_commit.message, '[skip ci]') &&",
+        "      !contains(github.event.head_commit.message, '[ci skip]') &&",
+        "      !contains(github.event.head_commit.message, '[no ci]') &&",
+        "      !contains(github.event.head_commit.message, '[skip actions]')",
+    ]
+    require(
+        "workflow defaults cannot alter assurance commands",
+        all(key_count(source, "defaults", 0) == 0 for source in (ci, gitleaks, dudect_pr, dudect_nightly)),
+    )
+    build_contract = (
+        key_count(build, "if", 4) == 1
+        and mapping_block(build, "if", 4) == skip_ci_if
+        and key_count(build, "continue-on-error", 4) == 0
+        and key_count(build, "defaults", 4) == 0
+        and key_count(build, "env", 4) == 0
+    )
+    require("build job contract is exact", build_contract)
+    require(
+        "build step prefix is exact",
+        step_headers(build)[:2]
+        == (
+            "- uses: actions/checkout@v4",
+            "- name: Verify assurance workflow policy",
+        ),
+    )
+    cabi_contract = (
+        key_count(cabi, "if", 4) == 1
+        and mapping_block(cabi, "if", 4) == skip_ci_if
+        and key_count(cabi, "continue-on-error", 4) == 0
+        and key_count(cabi, "defaults", 4) == 0
+        and key_count(cabi, "env", 4) == 0
+    )
+    require("cabi job contract is exact", cabi_contract)
+    require(
+        "cabi step sequence is exact",
+        step_headers(cabi)
+        == (
+            "- uses: actions/checkout@v4",
+            "- uses: dtolnay/rust-toolchain@stable",
+            "- uses: Swatinem/rust-cache@v2",
+            "- name: cargo build -p gmcrypto-c --release",
+            "- name: Regenerate header via cbindgen",
+            "- name: Verify committed header is up-to-date",
+            "- name: cargo test -p gmcrypto-c",
+            "- name: Compile shipped C examples",
+        ),
+    )
+
     policy_step = step_named(build, "Verify assurance workflow policy")
     require(
         "policy verifier is executed by the build job",
         active_run(policy_step) == "python3 .github/scripts/check_assurance_policy.py",
     )
-    require(
-        "policy verifier execution metadata is blocking",
+    policy_metadata = (
         key_count(policy_step, "if", 8) == 0
         and key_count(policy_step, "continue-on-error", 8) == 0
-        and key_count(policy_step, "shell", 8) == 0
+        and key_count(policy_step, "shell", 8) == 1
+        and scalar(policy_step, "shell", 8) == "bash"
         and key_count(policy_step, "env", 8) == 0
-        and key_count(build, "continue-on-error", 4) == 0,
+        and key_count(policy_step, "run", 8) == 1
+        and key_count(policy_step, "name", 8) == 0
+        and key_count(build, "continue-on-error", 4) == 0
     )
+    require("policy verifier metadata is exact", policy_metadata)
+    require("policy verifier execution metadata is blocking", policy_metadata)
 
     c_examples = step_named(cabi, "Compile shipped C examples")
     c_script = active_run(c_examples)
@@ -250,15 +361,18 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "C example compile script matches reviewed canonical execution",
         c_script == c_canonical_script,
     )
-    require(
-        "C example execution metadata is blocking",
+    c_metadata = (
         key_count(c_examples, "if", 8) == 0
         and key_count(c_examples, "continue-on-error", 8) == 0
         and key_count(c_examples, "shell", 8) == 1
         and scalar(c_examples, "shell", 8) == "bash"
         and key_count(c_examples, "env", 8) == 0
-        and key_count(cabi, "continue-on-error", 4) == 0,
+        and key_count(c_examples, "run", 8) == 1
+        and key_count(c_examples, "name", 8) == 0
+        and key_count(cabi, "continue-on-error", 4) == 0
     )
+    require("C example metadata is exact", c_metadata)
+    require("C example execution metadata is blocking", c_metadata)
 
     trigger = indented_block(gitleaks, "on:", 0)
     push_trigger = indented_block(trigger, "push:", 2)
@@ -292,6 +406,17 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     )
     require("dedicated gitleaks workflow exists", bool(gitleaks))
     require(
+        "gitleaks triggers are exact",
+        key_count(gitleaks, "on", 0) == 1
+        and key_count(trigger, "push", 2) == 1
+        and key_count(trigger, "pull_request", 2) == 1
+        and key_count(trigger, "workflow_dispatch", 2) == 1
+        and scalar(push_trigger, "branches", 4) == "[main]"
+        and scalar(pull_request_trigger, "branches", 4) == "[main]"
+        and key_count(trigger, "paths") == 0
+        and key_count(trigger, "paths-ignore") == 0,
+    )
+    require(
         "gitleaks workflow scans main pushes",
         scalar(push_trigger, "branches", 4) == "[main]",
     )
@@ -301,9 +426,27 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     )
     require(
         "gitleaks workflow has no path exclusions",
-        "paths:" not in trigger and "paths-ignore:" not in trigger,
+        key_count(trigger, "paths") == 0 and key_count(trigger, "paths-ignore") == 0,
     )
-    require("gitleaks checkout has full history", scalar(checkout, "fetch-depth", 10) == "0")
+    checkout_metadata = (
+        key_count(checkout, "fetch-depth", 10) == 1
+        and scalar(checkout, "fetch-depth", 10) == "0"
+        and key_count(checkout, "if", 8) == 0
+        and key_count(checkout, "continue-on-error", 8) == 0
+        and key_count(checkout, "shell", 8) == 0
+        and key_count(checkout, "env", 8) == 0
+    )
+    require("gitleaks checkout metadata is exact", checkout_metadata)
+    require("gitleaks checkout has full history", checkout_metadata)
+    require(
+        "gitleaks step sequence is exact",
+        step_headers(scan)
+        == (
+            "- uses: actions/checkout@v4",
+            "- name: Install gitleaks",
+            "- name: Scan committed history",
+        ),
+    )
     require(
         "gitleaks installs the pinned official release",
         "GITLEAKS_VERSION=8.30.1" in install_script
@@ -332,19 +475,38 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "gitleaks install script matches reviewed canonical execution",
         install_script == gitleaks_install_canonical,
     )
-    require(
-        "gitleaks execution metadata is blocking",
+    install_metadata = (
         key_count(install, "if", 8) == 0
         and key_count(install, "continue-on-error", 8) == 0
         and key_count(install, "shell", 8) == 1
         and scalar(install, "shell", 8) == "bash"
         and key_count(install, "env", 8) == 0
-        and key_count(scan_step, "if", 8) == 0
+        and key_count(install, "run", 8) == 1
+        and key_count(install, "name", 8) == 0
+    )
+    scan_metadata = (
+        key_count(scan_step, "if", 8) == 0
         and key_count(scan_step, "continue-on-error", 8) == 0
-        and key_count(scan_step, "shell", 8) == 0
+        and key_count(scan_step, "shell", 8) == 1
+        and scalar(scan_step, "shell", 8) == "bash"
         and key_count(scan_step, "env", 8) == 0
-        and key_count(scan, "if", 4) == 0
-        and key_count(scan, "continue-on-error", 4) == 0,
+        and key_count(scan_step, "run", 8) == 1
+        and key_count(scan_step, "name", 8) == 0
+    )
+    scan_job_contract = (
+        key_count(scan, "if", 4) == 0
+        and key_count(scan, "continue-on-error", 4) == 0
+        and key_count(scan, "defaults", 4) == 0
+        and key_count(scan, "env", 4) == 0
+        and scalar(scan, "runs-on", 4) == "ubuntu-24.04"
+        and scalar(scan, "timeout-minutes", 4) == "10"
+    )
+    require("gitleaks install metadata is exact", install_metadata)
+    require("gitleaks scan metadata is exact", scan_metadata)
+    require("gitleaks scan job contract is exact", scan_job_contract)
+    require(
+        "gitleaks execution metadata is blocking",
+        install_metadata and scan_metadata and scan_job_contract,
     )
 
     deny_install = step_named(deny, "Install cargo-deny")
@@ -367,10 +529,180 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     version = step_named(interop, "Assert oracle version (drift guard)")
     suite = step_named(interop, "gmssl interop suite (13 tests)")
     report = step_named(interop, "Report GmSSL interoperability status")
+    put_path = step_named(interop, "Put gmssl on PATH")
+    interop_env = indented_block(interop, "env:", 4)
+    provision_env = indented_block(provision, "env:", 8)
     suite_env = indented_block(suite, "env:", 8)
+    report_env = indented_block(report, "env:", 8)
     provision_script = active_run(provision)
+    version_script = active_run(version)
     suite_script = active_run(suite)
     report_script = active_run(report)
+    interop_job_contract = (
+        scalar(interop, "name", 4) == "gmssl interop (mismatch gates; infra non-blocking)"
+        and scalar(interop, "runs-on", 4) == "ubuntu-24.04"
+        and scalar(interop, "timeout-minutes", 4) == "25"
+        and key_count(interop, "if", 4) == 1
+        and mapping_block(interop, "if", 4) == skip_ci_if
+        and key_count(interop, "continue-on-error", 4) == 0
+        and key_count(interop, "defaults", 4) == 0
+        and key_count(interop, "env", 4) == 1
+        and active_source_lines(interop_env)
+        == [
+            "    env:",
+            "      GMSSL_TAG: v3.2.0",
+            "      GMSSL_CACHE_EPOCH: '1'",
+        ]
+    )
+    require("GmSSL job contract is exact", interop_job_contract)
+    require(
+        "GmSSL step sequence is exact",
+        step_headers(interop)
+        == (
+            "- uses: actions/checkout@v4",
+            "- uses: dtolnay/rust-toolchain@stable",
+            "- name: Cache cargo",
+            "- name: Cache GmSSL install prefix",
+            "- name: Provision GmSSL ${{ env.GMSSL_TAG }} oracle",
+            "- name: Put gmssl on PATH",
+            "- name: Assert oracle version (drift guard)",
+            "- name: gmssl interop suite (13 tests)",
+            "- name: Report GmSSL interoperability status",
+        ),
+    )
+    cache_metadata = (
+        scalar(cache, "id", 8) == "gmssl-cache"
+        and scalar(cache, "continue-on-error", 8) == "true"
+        and key_count(cache, "if", 8) == 0
+        and key_count(cache, "shell", 8) == 0
+        and key_count(cache, "env", 8) == 0
+    )
+    provision_metadata = (
+        scalar(provision, "id", 8) == "gmssl-provision"
+        and scalar(provision, "continue-on-error", 8) == "true"
+        and key_count(provision, "if", 8) == 0
+        and key_count(provision, "shell", 8) == 0
+        and key_count(provision, "env", 8) == 1
+        and key_count(provision, "run", 8) == 1
+        and active_source_lines(provision_env)
+        == [
+            "        env:",
+            "          CACHE_HIT: ${{ steps.gmssl-cache.outputs.cache-hit }}",
+        ]
+    )
+    version_metadata = (
+        scalar(version, "id", 8) == "gmssl-version"
+        and scalar(version, "if", 8) == "steps.gmssl-provision.outcome == 'success'"
+        and scalar(version, "continue-on-error", 8) == "true"
+        and scalar(version, "shell", 8) == "bash"
+        and key_count(version, "env", 8) == 0
+        and key_count(version, "run", 8) == 1
+        and key_count(version, "name", 8) == 0
+    )
+    suite_metadata = (
+        scalar(suite, "id", 8) == "gmssl-suite"
+        and scalar(suite, "if", 8)
+        == "steps.gmssl-provision.outcome == 'success' && steps.gmssl-version.outcome == 'success'"
+        and key_count(suite, "continue-on-error", 8) == 0
+        and scalar(suite, "shell", 8) == "bash"
+        and key_count(suite, "env", 8) == 1
+        and key_count(suite, "run", 8) == 1
+        and key_count(suite, "name", 8) == 0
+        and active_source_lines(suite_env)
+        == ["        env:", "          GMCRYPTO_GMSSL: '1'"]
+    )
+    report_metadata = (
+        scalar(report, "if", 8) == "${{ always() }}"
+        and key_count(report, "continue-on-error", 8) == 0
+        and scalar(report, "shell", 8) == "bash"
+        and key_count(report, "env", 8) == 1
+        and key_count(report, "run", 8) == 1
+        and key_count(report, "id", 8) == 0
+        and key_count(report, "name", 8) == 0
+        and active_source_lines(report_env)
+        == [
+            "        env:",
+            "          CACHE_OUTCOME: ${{ steps.gmssl-cache.outcome }}",
+            "          PROVISION_OUTCOME: ${{ steps.gmssl-provision.outcome }}",
+            "          VERSION_OUTCOME: ${{ steps.gmssl-version.outcome }}",
+            "          SUITE_OUTCOME: ${{ steps.gmssl-suite.outcome }}",
+        ]
+    )
+    require(
+        "GmSSL step ids are exact",
+        cache_metadata and provision_metadata and version_metadata and suite_metadata,
+    )
+    require("GmSSL version metadata is exact", version_metadata)
+    require("GmSSL suite metadata is exact", suite_metadata)
+    require("GmSSL report metadata is exact", report_metadata)
+    version_canonical_script = (
+        "set -euo pipefail\n"
+        'want="GmSSL ${GMSSL_TAG#v}"\n'
+        'got="$(gmssl version | head -n1)"\n'
+        'if [ "$got" != "$want" ]; then\n'
+        'echo "::error::ORACLE DRIFT - NOT a gmcrypto-core regression."\n'
+        'echo "  expected: $want"\n'
+        'echo "  found:    $got"\n'
+        'echo "This job pins its reference implementation. A mismatch means the"\n'
+        'echo "GmSSL tag, cache, or build moved - not that our wire output changed."\n'
+        'echo "Fix: correct GMSSL_TAG, or bump GMSSL_CACHE_EPOCH, or re-baseline."\n'
+        "exit 1\n"
+        "fi\n"
+        'echo "oracle: $got"'
+    )
+    report_canonical_script = (
+        "set -euo pipefail\n"
+        'case "$SUITE_OUTCOME" in\n'
+        "success|failure) interop_state=ran ;;\n"
+        "skipped) interop_state=skipped ;;\n"
+        "cancelled) interop_state=cancelled ;;\n"
+        "*) interop_state=unknown ;;\n"
+        "esac\n"
+        'echo "INTEROP_SUITE=$interop_state"\n'
+        "{\n"
+        'echo "### GmSSL interoperability status"\n'
+        "echo\n"
+        'echo "INTEROP_SUITE=\\`$interop_state\\`"\n'
+        "echo\n"
+        'echo "- cache: \\`$CACHE_OUTCOME\\`"\n'
+        'echo "- provision: \\`$PROVISION_OUTCOME\\`"\n'
+        'echo "- version assertion: \\`$VERSION_OUTCOME\\`"\n'
+        'echo "- interoperability suite: \\`$SUITE_OUTCOME\\`"\n'
+        '} >> "$GITHUB_STEP_SUMMARY"\n'
+        'if [ "$PROVISION_OUTCOME" != "success" ] || [ "$VERSION_OUTCOME" != "success" ]; then\n'
+        'echo "::warning title=GmSSL infrastructure unavailable::cache=$CACHE_OUTCOME '
+        'provision=$PROVISION_OUTCOME version=$VERSION_OUTCOME suite=$SUITE_OUTCOME"\n'
+        "{\n"
+        'echo "The interoperability suite was not run because the pinned oracle could not be prepared."\n'
+        "echo\n"
+        'echo "This is non-blocking infrastructure telemetry, not an interoperability pass."\n'
+        '} >> "$GITHUB_STEP_SUMMARY"\n'
+        'elif [ "$CACHE_OUTCOME" != "success" ]; then\n'
+        'echo "::warning title=GmSSL cache degraded::cache=$CACHE_OUTCOME; '
+        'fallback provisioning succeeded; suite=$SUITE_OUTCOME"\n'
+        "{\n"
+        'echo "The cache step failed, but fallback provisioning and version validation succeeded."\n'
+        "echo\n"
+        'echo "Fallback provisioning recovered the cache failure; the suite outcome remains authoritative."\n'
+        '} >> "$GITHUB_STEP_SUMMARY"\n'
+        "fi"
+    )
+    require(
+        "GmSSL version script matches reviewed canonical execution",
+        version_script == version_canonical_script,
+    )
+    require(
+        "GmSSL report script matches reviewed canonical execution",
+        report_script == report_canonical_script,
+    )
+    require(
+        "GmSSL path step metadata is exact",
+        scalar(put_path, "if", 8) == "steps.gmssl-provision.outcome == 'success'"
+        and key_count(put_path, "continue-on-error", 8) == 0
+        and key_count(put_path, "shell", 8) == 0
+        and key_count(put_path, "env", 8) == 0
+        and key_count(put_path, "run", 8) == 1,
+    )
     require(
         "GmSSL check name discloses non-blocking infrastructure",
         scalar(interop, "name", 4) == "gmssl interop (mismatch gates; infra non-blocking)",
@@ -429,15 +761,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     )
     require(
         "GmSSL interoperability suite metadata is blocking",
-        key_count(suite, "if", 8) == 1
-        and scalar(suite, "if", 8)
-        == "steps.gmssl-provision.outcome == 'success' && steps.gmssl-version.outcome == 'success'"
-        and key_count(suite, "continue-on-error", 8) == 0
-        and key_count(suite, "shell", 8) == 0
-        and key_count(suite, "env", 8) == 1
-        and key_count(interop, "continue-on-error", 4) == 0
-        and active_source_lines(suite_env)
-        == ["        env:", "          GMCRYPTO_GMSSL: '1'"],
+        suite_metadata and interop_job_contract,
     )
     require(
         "GmSSL interoperability suite keeps active skip and census guards",
@@ -536,6 +860,118 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         workflow_name: step_named(job_text, "Parse and gate")
         for workflow_name, job_text in dudect_jobs.items()
     }
+    dudect_producer_names = {
+        "PR": "Run dudect harness (smoke budget, 3 runs for median)",
+        "nightly": "Run dudect harness (nightly budget, 5 runs for median)",
+    }
+    producer_steps = {
+        workflow_name: step_named(job_text, dudect_producer_names[workflow_name])
+        for workflow_name, job_text in dudect_jobs.items()
+    }
+    dudect_job_config = {
+        "PR": {
+            "name": "timing-leak smoke (10K×3 median, |tau|<=0.20, features=${{ matrix.features }})",
+            "timeout": "10",
+            "samples": '"10000"',
+            "runs": '"3"',
+            "has_skip_if": True,
+        },
+        "nightly": {
+            "name": "timing-leak nightly (100K×5 median, |tau|<=0.20, features=${{ matrix.features }})",
+            "timeout": "40",
+            "samples": '"100000"',
+            "runs": '"5"',
+            "has_skip_if": False,
+        },
+    }
+    dudect_matrix = [
+        "      matrix:",
+        "        features:",
+        '          - "default"',
+        '          - "sm4-bitsliced"',
+        '          - "sm4-bitsliced-simd"',
+        '          - "sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp"',
+    ]
+    dudect_producer_canonical = (
+        "set -euxo pipefail\n"
+        'if [ "$MATRIX_FEATURES" = "default" ]; then\n'
+        'FEATURES="crypto-bigint-scalar"\n'
+        "else\n"
+        'FEATURES="$MATRIX_FEATURES,crypto-bigint-scalar"\n'
+        "fi\n"
+        'for i in $(seq 1 "$DUDECT_RUNS"); do\n'
+        'echo "=== dudect run $i/$DUDECT_RUNS (features=$FEATURES) ==="\n'
+        'cargo bench --bench timing_leaks --features "$FEATURES" 2>&1 | tee "dudect-$i.log"\n'
+        "done"
+    )
+    for workflow_name, dudect_job in dudect_jobs.items():
+        config = dudect_job_config[workflow_name]
+        producer = producer_steps[workflow_name]
+        producer_env = indented_block(producer, "env:", 8)
+        matrix_block = indented_block(dudect_job, "matrix:", 6)
+        expected_headers = (
+            "- uses: actions/checkout@v4",
+            "- uses: dtolnay/rust-toolchain@1.95.0",
+            "- uses: Swatinem/rust-cache@v2",
+            "- name: Capture runner environment (for noise-floor correlation)",
+            f"- name: {dudect_producer_names[workflow_name]}",
+            "- name: Parse and gate",
+            "- name: Upload raw log",
+        )
+        has_exact_if = (
+            key_count(dudect_job, "if", 4) == 1
+            and mapping_block(dudect_job, "if", 4) == skip_ci_if
+            if config["has_skip_if"]
+            else key_count(dudect_job, "if", 4) == 0
+        )
+        job_contract = (
+            scalar(dudect_job, "name", 4) == config["name"]
+            and scalar(dudect_job, "runs-on", 4) == "ubuntu-24.04"
+            and scalar(dudect_job, "timeout-minutes", 4) == config["timeout"]
+            and has_exact_if
+            and key_count(dudect_job, "continue-on-error", 4) == 0
+            and key_count(dudect_job, "defaults", 4) == 0
+            and key_count(dudect_job, "env", 4) == 0
+        )
+        require(f"{workflow_name} dudect job contract is exact", job_contract)
+        require(
+            f"{workflow_name} dudect step sequence is exact",
+            step_headers(dudect_job) == expected_headers,
+        )
+        require(
+            f"{workflow_name} dudect matrix is exact",
+            key_count(dudect_job, "matrix", 6) == 1
+            and active_source_lines(matrix_block) == dudect_matrix,
+        )
+        producer_contract = (
+            key_count(producer, "if", 8) == 0
+            and key_count(producer, "continue-on-error", 8) == 0
+            and scalar(producer, "shell", 8) == "bash"
+            and key_count(producer, "env", 8) == 1
+            and key_count(producer, "run", 8) == 1
+            and key_count(producer, "name", 8) == 0
+            and active_source_lines(producer_env)
+            == [
+                "        env:",
+                f"          DUDECT_SAMPLES: {config['samples']}",
+                f"          DUDECT_RUNS: {config['runs']}",
+                "          MATRIX_FEATURES: ${{ matrix.features }}",
+            ]
+        )
+        require(f"{workflow_name} dudect producer contract is exact", producer_contract)
+        require(f"{workflow_name} dudect producer metadata is exact", producer_contract)
+        require(
+            f"{workflow_name} dudect producer script is exact",
+            active_run(producer)
+            == (
+                dudect_producer_canonical
+                if workflow_name == "PR"
+                else dudect_producer_canonical.replace(
+                    'tee "dudect-$i.log"',
+                    'tee "dudect-nightly-$i.log"',
+                )
+            ),
+        )
     # These hashes are the reviewed executable-semantics boundary for the
     # complete embedded Python programs. A deliberate executable change must
     # update the workflow, this fingerprint, and the mutation suite together.
@@ -606,15 +1042,21 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
             heredoc is not None
             and heredoc[1] == reviewed_ast_fingerprints[workflow_name],
         )
-        require(
-            f"{workflow_name} dudect execution metadata is blocking",
+        parse_metadata = (
             key_count(parse_step, "if", 8) == 0
             and key_count(parse_step, "continue-on-error", 8) == 0
-            and key_count(parse_step, "shell", 8) == 0
+            and scalar(parse_step, "shell", 8) == "bash"
             and key_count(parse_step, "env", 8) == 1
+            and key_count(parse_step, "run", 8) == 1
+            and key_count(parse_step, "name", 8) == 0
             and key_count(dudect_jobs[workflow_name], "continue-on-error", 4) == 0
             and active_source_lines(parse_env)
-            == ["        env:", "          MATRIX_FEATURES: ${{ matrix.features }}"],
+            == ["        env:", "          MATRIX_FEATURES: ${{ matrix.features }}"]
+        )
+        require(f"{workflow_name} dudect parse metadata is exact", parse_metadata)
+        require(
+            f"{workflow_name} dudect execution metadata is blocking",
+            parse_metadata,
         )
         active_lines = active_source_lines(parse_step)
         active_noise_twin_references = [
@@ -681,6 +1123,36 @@ def mutation_self_test() -> list[str]:
             failures.append(f"mutation anchor did not change input: {label}")
         return mutated
 
+    def replace_in_job(
+        text: str,
+        job_name: str,
+        before: str,
+        after: str,
+        label: str,
+    ) -> str:
+        target = job(text, job_name)
+        mutated = replace_once(target, before, after, f"{label} field")
+        return replace_once(text, target, mutated, f"{label} job")
+
+    def replace_in_step(
+        text: str,
+        job_name: str,
+        step_name: str,
+        before: str,
+        after: str,
+        label: str,
+    ) -> str:
+        target_job = job(text, job_name)
+        target_step = step_named(target_job, step_name)
+        mutated_step = replace_once(target_step, before, after, f"{label} field")
+        mutated_job = replace_once(
+            target_job,
+            target_step,
+            mutated_step,
+            f"{label} step",
+        )
+        return replace_once(text, target_job, mutated_job, f"{label} job")
+
     def must_reject(label: str, expected: str, **overrides: str) -> None:
         if not overrides or not any(
             value != baselines.get(name) for name, value in overrides.items()
@@ -715,10 +1187,13 @@ def mutation_self_test() -> list[str]:
         "gitleaks scans committed history",
         gitleaks=GITLEAKS.replace(
             "      - name: Scan committed history\n"
+            "        shell: bash\n"
             "        run: gitleaks git --no-banner --redact --verbose",
             "      - name: Scan committed history\n"
+            "        shell: bash\n"
             "        run: 'true'\n"
             "      - name: Unrelated diagnostic\n"
+            "        shell: bash\n"
             "        run: gitleaks git --no-banner --redact --verbose",
             1,
         ),
@@ -1468,9 +1943,11 @@ def mutation_self_test() -> list[str]:
         ci=replace_once(
             CI,
             "      - name: Verify assurance workflow policy\n"
+            "        shell: bash\n"
             "        run: python3 .github/scripts/check_assurance_policy.py\n",
             "      - name: Verify assurance workflow policy\n"
             "        if: ${{ false }}\n"
+            "        shell: bash\n"
             "        run: python3 .github/scripts/check_assurance_policy.py\n",
             "policy verifier if false",
         ),
@@ -1481,9 +1958,11 @@ def mutation_self_test() -> list[str]:
         ci=replace_once(
             CI,
             "      - name: Verify assurance workflow policy\n"
+            "        shell: bash\n"
             "        run: python3 .github/scripts/check_assurance_policy.py\n",
             "      - name: Verify assurance workflow policy\n"
             "        continue-on-error: true\n"
+            "        shell: bash\n"
             "        run: python3 .github/scripts/check_assurance_policy.py\n",
             "policy verifier continue-on-error",
         ),
@@ -1686,9 +2165,10 @@ def mutation_self_test() -> list[str]:
         ci=replace_once(
             CI,
             "      - name: Verify assurance workflow policy\n"
+            "        shell: bash\n"
             "        run: python3 .github/scripts/check_assurance_policy.py\n",
             "      - name: Verify assurance workflow policy\n"
-            "        shell: bash\n"
+            "        shell: bash {0} || true\n"
             "        run: python3 .github/scripts/check_assurance_policy.py\n",
             "policy verifier shell",
         ),
@@ -1699,8 +2179,10 @@ def mutation_self_test() -> list[str]:
         ci=replace_once(
             CI,
             "      - name: Verify assurance workflow policy\n"
+            "        shell: bash\n"
             "        run: python3 .github/scripts/check_assurance_policy.py\n",
             "      - name: Verify assurance workflow policy\n"
+            "        shell: bash\n"
             "        env:\n"
             "          PYTHONOPTIMIZE: '1'\n"
             "        run: python3 .github/scripts/check_assurance_policy.py\n",
@@ -1736,9 +2218,10 @@ def mutation_self_test() -> list[str]:
         gitleaks=replace_once(
             GITLEAKS,
             "      - name: Scan committed history\n"
+            "        shell: bash\n"
             "        run: gitleaks git --no-banner --redact --verbose\n",
             "      - name: Scan committed history\n"
-            "        shell: bash\n"
+            "        shell: bash {0} || true\n"
             "        run: gitleaks git --no-banner --redact --verbose\n",
             "gitleaks scan shell",
         ),
@@ -1749,8 +2232,10 @@ def mutation_self_test() -> list[str]:
         gitleaks=replace_once(
             GITLEAKS,
             "      - name: Scan committed history\n"
+            "        shell: bash\n"
             "        run: gitleaks git --no-banner --redact --verbose\n",
             "      - name: Scan committed history\n"
+            "        shell: bash\n"
             "        env:\n"
             "          GITLEAKS_CONFIG: /dev/null\n"
             "        run: gitleaks git --no-banner --redact --verbose\n",
@@ -1926,6 +2411,509 @@ def mutation_self_test() -> list[str]:
             "        env:\n"
             "          GMCRYPTO_GMSSL: '0'\n",
             "GmSSL duplicate env",
+        ),
+    )
+
+    # Metadata spelling mutations: YAML mapping keys may be plain or quoted,
+    # and whitespace before the colon is insignificant.  Each mutation below
+    # must be rejected by the same unique-key contract as its plain spelling.
+    for label, mutated, expected, source_key in (
+        (
+            "policy verifier quoted continue-on-error key",
+            replace_in_step(
+                CI,
+                "build",
+                "Verify assurance workflow policy",
+                "      - name: Verify assurance workflow policy\n",
+                "      - name: Verify assurance workflow policy\n"
+                '        "continue-on-error" : true\n',
+                "policy quoted continue",
+            ),
+            "policy verifier metadata is exact",
+            "ci",
+        ),
+        (
+            "C compiler quoted false condition",
+            replace_in_step(
+                CI,
+                "cabi",
+                "Compile shipped C examples",
+                "      - name: Compile shipped C examples\n",
+                "      - name: Compile shipped C examples\n"
+                "        'if' : false\n",
+                "C quoted if",
+            ),
+            "C example metadata is exact",
+            "ci",
+        ),
+        (
+            "GmSSL suite quoted continue-on-error key",
+            replace_in_step(
+                CI,
+                "interop-gmssl",
+                "gmssl interop suite (13 tests)",
+                "      - name: gmssl interop suite (13 tests)\n",
+                "      - name: gmssl interop suite (13 tests)\n"
+                '        "continue-on-error" : true\n',
+                "GmSSL quoted continue",
+            ),
+            "GmSSL suite metadata is exact",
+            "ci",
+        ),
+        (
+            "PR dudect parser quoted false condition",
+            replace_in_step(
+                DUDECT_PR,
+                "smoke",
+                "Parse and gate",
+                "      - name: Parse and gate\n",
+                "      - name: Parse and gate\n        'if' : false\n",
+                "PR parser quoted if",
+            ),
+            "PR dudect parse metadata is exact",
+            "dudect_pr",
+        ),
+        (
+            "gitleaks scanner quoted continue-on-error key",
+            replace_in_step(
+                GITLEAKS,
+                "scan",
+                "Scan committed history",
+                "      - name: Scan committed history\n",
+                "      - name: Scan committed history\n"
+                '        "continue-on-error" : true\n',
+                "gitleaks quoted continue",
+            ),
+            "gitleaks scan metadata is exact",
+            "gitleaks",
+        ),
+    ):
+        must_reject(label, expected, **{source_key: mutated})
+
+    # Duplicate first/last values exercise unique-key enforcement instead of
+    # relying on whichever duplicate the old first-match regex happened to see.
+    must_reject(
+        "gitleaks fetch depth has a malicious trailing duplicate",
+        "gitleaks checkout metadata is exact",
+        gitleaks=replace_once(
+            GITLEAKS,
+            "          fetch-depth: 0\n",
+            "          fetch-depth: 0\n          fetch-depth: 1\n",
+            "duplicate fetch depth",
+        ),
+    )
+    must_reject(
+        "gitleaks push branches have a malicious trailing duplicate",
+        "gitleaks triggers are exact",
+        gitleaks=replace_once(
+            GITLEAKS,
+            "  push:\n    branches: [main]\n",
+            "  push:\n    branches: [main]\n    branches: [develop]\n",
+            "duplicate push branches",
+        ),
+    )
+    must_reject(
+        "GmSSL suite id has a malicious trailing duplicate",
+        "GmSSL step ids are exact",
+        ci=replace_in_step(
+            CI,
+            "interop-gmssl",
+            "gmssl interop suite (13 tests)",
+            "        id: gmssl-suite\n",
+            "        id: gmssl-suite\n        id: bypass-suite\n",
+            "duplicate suite id",
+        ),
+    )
+    must_reject(
+        "GmSSL report condition has a malicious trailing duplicate",
+        "GmSSL report metadata is exact",
+        ci=replace_in_step(
+            CI,
+            "interop-gmssl",
+            "Report GmSSL interoperability status",
+            "        if: ${{ always() }}\n",
+            "        if: ${{ always() }}\n        if: false\n",
+            "duplicate report if",
+        ),
+    )
+    must_reject(
+        "GmSSL job name has a malicious trailing duplicate",
+        "GmSSL job contract is exact",
+        ci=replace_in_job(
+            CI,
+            "interop-gmssl",
+            "    name: gmssl interop (mismatch gates; infra non-blocking)\n",
+            "    name: gmssl interop (mismatch gates; infra non-blocking)\n"
+            "    name: misleading-success\n",
+            "duplicate GmSSL job name",
+        ),
+    )
+
+    skip_if = (
+        "    if: >-\n"
+        "      !contains(github.event.pull_request.title, '[skip ci]') &&\n"
+        "      !contains(github.event.pull_request.title, '[ci skip]') &&\n"
+        "      !contains(github.event.pull_request.title, '[no ci]') &&\n"
+        "      !contains(github.event.pull_request.title, '[skip actions]') &&\n"
+        "      !contains(github.event.head_commit.message, '[skip ci]') &&\n"
+        "      !contains(github.event.head_commit.message, '[ci skip]') &&\n"
+        "      !contains(github.event.head_commit.message, '[no ci]') &&\n"
+        "      !contains(github.event.head_commit.message, '[skip actions]')\n"
+    )
+    must_reject(
+        "build job is forced off",
+        "build job contract is exact",
+        ci=replace_in_job(CI, "build", skip_if, "    if: ${{ false }}\n", "build never-if"),
+    )
+    must_reject(
+        "build job gains a duplicate false condition",
+        "build job contract is exact",
+        ci=replace_in_job(
+            CI,
+            "build",
+            skip_if,
+            skip_if + "    'if' : false\n",
+            "build duplicate if",
+        ),
+    )
+    must_reject(
+        "nightly dudect job is forced off",
+        "nightly dudect job contract is exact",
+        dudect_nightly=replace_in_job(
+            DUDECT_NIGHTLY,
+            "full",
+            "  full:\n",
+            "  full:\n    if: false\n",
+            "nightly never-if",
+        ),
+    )
+    must_reject(
+        "workflow defaults wrap assurance commands",
+        "workflow defaults cannot alter assurance commands",
+        ci=replace_once(
+            CI,
+            "permissions:\n",
+            "defaults:\n  run:\n    shell: bash {0} || true\n\npermissions:\n",
+            "workflow defaults shell",
+        ),
+    )
+    must_reject(
+        "build job defaults wrap assurance commands",
+        "build job contract is exact",
+        ci=replace_in_job(
+            CI,
+            "build",
+            "  build:\n",
+            "  build:\n    defaults:\n      run:\n        shell: bash {0} || true\n",
+            "build defaults shell",
+        ),
+    )
+    must_reject(
+        "build job gains unexpected environment",
+        "build job contract is exact",
+        ci=replace_in_job(
+            CI,
+            "build",
+            "  build:\n",
+            "  build:\n    env:\n      PYTHONOPTIMIZE: '1'\n",
+            "build job env",
+        ),
+    )
+    must_reject(
+        "interop cache epoch drifts",
+        "GmSSL job contract is exact",
+        ci=replace_in_job(
+            CI,
+            "interop-gmssl",
+            "      GMSSL_CACHE_EPOCH: '1'\n",
+            "      GMSSL_CACHE_EPOCH: '0'\n",
+            "GmSSL cache epoch",
+        ),
+    )
+
+    full_features = '          - "sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp"\n'
+    for workflow_name, source, source_key, job_name, producer_name, runs, samples in (
+        (
+            "PR",
+            DUDECT_PR,
+            "dudect_pr",
+            "smoke",
+            "Run dudect harness (smoke budget, 3 runs for median)",
+            "3",
+            "10000",
+        ),
+        (
+            "nightly",
+            DUDECT_NIGHTLY,
+            "dudect_nightly",
+            "full",
+            "Run dudect harness (nightly budget, 5 runs for median)",
+            "5",
+            "100000",
+        ),
+    ):
+        must_reject(
+            f"{workflow_name} dudect producer runs only once",
+            f"{workflow_name} dudect producer contract is exact",
+            **{
+                source_key: replace_in_step(
+                    source,
+                    job_name,
+                    producer_name,
+                    f'          DUDECT_RUNS: "{runs}"\n',
+                    '          DUDECT_RUNS: "1"\n',
+                    f"{workflow_name} producer runs",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect producer exits before the loop",
+            f"{workflow_name} dudect producer script is exact",
+            **{
+                source_key: replace_in_step(
+                    source,
+                    job_name,
+                    producer_name,
+                    "        run: |\n",
+                    "        run: |\n          exit 0\n",
+                    f"{workflow_name} producer early exit",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect producer gains quoted tolerance",
+            f"{workflow_name} dudect producer metadata is exact",
+            **{
+                source_key: replace_in_step(
+                    source,
+                    job_name,
+                    producer_name,
+                    f"      - name: {producer_name}\n",
+                    f"      - name: {producer_name}\n"
+                    "        'continue-on-error' : true\n",
+                    f"{workflow_name} producer quoted continue",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect producer gains custom shell",
+            f"{workflow_name} dudect producer metadata is exact",
+            **{
+                source_key: replace_in_step(
+                    source,
+                    job_name,
+                    producer_name,
+                    f"      - name: {producer_name}\n",
+                    f"      - name: {producer_name}\n        shell: bash {{0}} || true\n",
+                    f"{workflow_name} producer custom shell",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect full feature leg is removed",
+            f"{workflow_name} dudect matrix is exact",
+            **{
+                source_key: replace_once(
+                    source,
+                    full_features,
+                    "",
+                    f"{workflow_name} full feature leg",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect full feature leg is replaced",
+            f"{workflow_name} dudect matrix is exact",
+            **{
+                source_key: replace_once(
+                    source,
+                    full_features,
+                    '          - "sm4-bitsliced-simd"\n',
+                    f"{workflow_name} replaced full feature leg",
+                )
+            },
+        )
+        must_reject(
+            f"{workflow_name} dudect sample budget drifts",
+            f"{workflow_name} dudect producer contract is exact",
+            **{
+                source_key: replace_in_step(
+                    source,
+                    job_name,
+                    producer_name,
+                    f'          DUDECT_SAMPLES: "{samples}"\n',
+                    '          DUDECT_SAMPLES: "1"\n',
+                    f"{workflow_name} producer samples",
+                )
+            },
+        )
+
+    must_reject(
+        "PR dudect runner drifts",
+        "PR dudect job contract is exact",
+        dudect_pr=replace_in_job(
+            DUDECT_PR,
+            "smoke",
+            "    runs-on: ubuntu-24.04\n",
+            "    runs-on: ubuntu-latest\n",
+            "PR runner",
+        ),
+    )
+    must_reject(
+        "nightly dudect timeout shrinks",
+        "nightly dudect job contract is exact",
+        dudect_nightly=replace_in_job(
+            DUDECT_NIGHTLY,
+            "full",
+            "    timeout-minutes: 40\n",
+            "    timeout-minutes: 4\n",
+            "nightly timeout",
+        ),
+    )
+    must_reject(
+        "PR dudect toolchain drifts",
+        "PR dudect step sequence is exact",
+        dudect_pr=replace_in_job(
+            DUDECT_PR,
+            "smoke",
+            "      - uses: dtolnay/rust-toolchain@1.95.0\n",
+            "      - uses: dtolnay/rust-toolchain@stable\n",
+            "PR toolchain",
+        ),
+    )
+
+    must_reject(
+        "gitleaks gains a second checkout",
+        "gitleaks step sequence is exact",
+        gitleaks=replace_once(
+            GITLEAKS,
+            "      - name: Install gitleaks\n",
+            "      - uses: actions/checkout@v4\n      - name: Install gitleaks\n",
+            "gitleaks second checkout",
+        ),
+    )
+    must_reject(
+        "PR dudect inserts checkout before parse",
+        "PR dudect step sequence is exact",
+        dudect_pr=replace_once(
+            DUDECT_PR,
+            "      - name: Parse and gate\n",
+            "      - uses: actions/checkout@v4\n      - name: Parse and gate\n",
+            "PR second checkout",
+        ),
+    )
+    must_reject(
+        "interop gains a second checkout",
+        "GmSSL step sequence is exact",
+        ci=replace_in_job(
+            CI,
+            "interop-gmssl",
+            "      - uses: dtolnay/rust-toolchain@stable\n",
+            "      - uses: actions/checkout@v4\n"
+            "      - uses: dtolnay/rust-toolchain@stable\n",
+            "interop second checkout",
+        ),
+    )
+    must_reject(
+        "cabi gains a second checkout",
+        "cabi step sequence is exact",
+        ci=replace_in_job(
+            CI,
+            "cabi",
+            "      - uses: dtolnay/rust-toolchain@stable\n",
+            "      - uses: actions/checkout@v4\n"
+            "      - uses: dtolnay/rust-toolchain@stable\n",
+            "cabi second checkout",
+        ),
+    )
+    must_reject(
+        "build inserts a step before checkout",
+        "build step prefix is exact",
+        ci=replace_in_job(
+            CI,
+            "build",
+            "      - uses: actions/checkout@v4\n",
+            "      - name: Tamper environment\n        run: 'true'\n"
+            "      - uses: actions/checkout@v4\n",
+            "build first step",
+        ),
+    )
+
+    must_reject(
+        "gitleaks trigger gains quoted path exclusions",
+        "gitleaks triggers are exact",
+        gitleaks=replace_once(
+            GITLEAKS,
+            "    branches: [main]\n  workflow_dispatch:\n",
+            "    branches: [main]\n    'paths-ignore' : ['docs/**']\n  workflow_dispatch:\n",
+            "quoted paths-ignore",
+        ),
+    )
+
+    version_step = step_named(interop, "Assert oracle version (drift guard)")
+    must_reject(
+        "GmSSL version assertion becomes a no-op",
+        "GmSSL version script matches reviewed canonical execution",
+        ci=replace_once(
+            CI,
+            version_step,
+            "      - name: Assert oracle version (drift guard)\n"
+            "        id: gmssl-version\n"
+            "        if: steps.gmssl-provision.outcome == 'success'\n"
+            "        continue-on-error: true\n"
+            "        shell: bash\n"
+            "        run: 'true'",
+            "GmSSL version step",
+        ),
+    )
+    must_reject(
+        "GmSSL report hard-codes suite success",
+        "GmSSL report metadata is exact",
+        ci=replace_in_step(
+            CI,
+            "interop-gmssl",
+            "Report GmSSL interoperability status",
+            "          SUITE_OUTCOME: ${{ steps.gmssl-suite.outcome }}\n",
+            "          SUITE_OUTCOME: success\n",
+            "GmSSL report outcome",
+        ),
+    )
+    must_reject(
+        "GmSSL report failure is tolerated",
+        "GmSSL report metadata is exact",
+        ci=replace_in_step(
+            CI,
+            "interop-gmssl",
+            "Report GmSSL interoperability status",
+            "      - name: Report GmSSL interoperability status\n",
+            "      - name: Report GmSSL interoperability status\n"
+            "        continue-on-error: true\n",
+            "GmSSL report continue",
+        ),
+    )
+    must_reject(
+        "GmSSL report gains a custom shell",
+        "GmSSL report metadata is exact",
+        ci=replace_in_step(
+            CI,
+            "interop-gmssl",
+            "Report GmSSL interoperability status",
+            "      - name: Report GmSSL interoperability status\n",
+            "      - name: Report GmSSL interoperability status\n"
+            "        shell: bash {0} || true\n",
+            "GmSSL report shell",
+        ),
+    )
+    must_reject(
+        "GmSSL report is forced off",
+        "GmSSL report metadata is exact",
+        ci=replace_in_step(
+            CI,
+            "interop-gmssl",
+            "Report GmSSL interoperability status",
+            "        if: ${{ always() }}\n",
+            "        if: false\n",
+            "GmSSL report if false",
         ),
     )
     return failures

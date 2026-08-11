@@ -135,6 +135,7 @@ jobs:
           cargo -V
 
       - name: Run dudect harness (nightly budget, 5 runs for median)
+        shell: bash
         env:
           DUDECT_SAMPLES: "100000"
           DUDECT_RUNS: "5"
@@ -162,6 +163,7 @@ jobs:
           done
 
       - name: Parse and gate
+        shell: bash
         env:
           # Must be re-declared here: `env` is step-scoped, so without this the
           # parse step sees an empty MATRIX_FEATURES and the feature-conditional

@@ -45,4 +45,5 @@ jobs:
           "$install_dir/gitleaks" version
           echo "$install_dir" >> "$GITHUB_PATH"
       - name: Scan committed history
+        shell: bash
         run: gitleaks git --no-banner --redact --verbose

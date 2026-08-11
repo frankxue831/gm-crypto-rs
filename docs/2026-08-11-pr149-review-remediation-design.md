@@ -58,23 +58,36 @@ semantic diagnostics remain for useful failure labels, including the immutable
 one-element `required_telemetry` tuple, immutable gate-map snapshots, overlap
 rejection, snapshot-only gate loops, and print-only `NOISE-TWIN:` output.
 
-For the three short assurance scripts—the C-example compiler, the gitleaks
-installer, and the GmSSL interoperability suite—the verifier compares
-`active_run()` with the complete reviewed canonical script, not selected
-snippets. Whole-line comments remain free to evolve, but every active shell
-line, its order, and every guard are fixed. The gitleaks scan command remains
-an exact single-command step. Critical execution metadata is also locked: the
-policy verifier, C compiler, gitleaks install/scan, and dudect parse steps may
-not add an `if` or `continue-on-error`; their jobs may not become tolerated;
-the C compiler and gitleaks installer retain an exact `shell: bash`, while the
-policy verifier, gitleaks scanner, dudect parser, and GmSSL suite may not add a
-custom shell. The policy verifier and gitleaks install/scan steps may not add
-an environment mapping; each dudect parse step must expose only the exact
-`MATRIX_FEATURES: ${{ matrix.features }}` mapping. The GmSSL suite retains its
-one approved readiness condition and exact oracle environment, without step
-or job tolerance. Exact key-count checks reject duplicate `run`, `if`, `env`,
-or `shell` mappings that could otherwise make the verifier inspect one YAML
-value while the workflow engine executes another.
+The verifier compares `active_run()` with the complete reviewed canonical
+script for the C-example compiler, gitleaks installer, GmSSL version assertion,
+GmSSL interoperability suite, GmSSL report, and both dudect producers. The
+gitleaks scan remains an exact single-command step. Whole-line comments remain
+free to evolve, but every active shell line, its order, and every guard in
+these boundaries are fixed. Dudect parsing remains protected separately by the
+complete embedded-Python AST fingerprint described above.
+
+All protected YAML metadata keys use one mapping-key recognizer. It treats
+plain, single-quoted, and double-quoted spellings—and whitespace before the
+colon—as the same key, then requires a unique value or an exact zero count.
+This closes first-value/last-value disagreement for `branches`, `fetch-depth`,
+job names, step IDs, `if`, `continue-on-error`, `shell`, `env`, and `run`.
+Each protected command-bearing step now declares and uniquely retains
+`shell: bash`: the policy verifier, C compiler, GmSSL version/suite/report,
+gitleaks install/scan, and dudect producer/parser steps. Unexpected step
+environment mappings are rejected; the few required mappings must equal their
+reviewed source lines exactly.
+
+The critical job envelope is also fixed. Build, C ABI, GmSSL interoperability,
+and PR dudect retain the complete existing folded skip-CI expression; nightly
+dudect and gitleaks retain no job condition. None may add job or workflow
+`defaults`, job tolerance, or an unexpected job environment. The interop job
+environment remains exactly `GMSSL_TAG=v3.2.0` plus cache epoch `1`. Dudect
+retains `ubuntu-24.04`, Rust `1.95.0`, the 10/40 minute timeouts, the exact four
+feature legs, and the 10K×3 / 100K×5 producer budgets. Ordered step-header
+contracts prevent a second checkout or an environment-tampering step from
+being inserted into build, C ABI, interop, gitleaks, or dudect execution.
+Finally, the gitleaks trigger requires unique `main` push and pull-request
+branches and rejects any spelling of `paths` or `paths-ignore` within `on`.
 
 Deliberate mutation self-tests will prove that the verifier rejects:
 
@@ -93,6 +106,13 @@ Deliberate mutation self-tests will prove that the verifier rejects:
   scan, or either dudect parse step/job through execution metadata;
 - adding duplicate execution or metadata keys whose last value could override
   the reviewed first value;
+- quoting or spacing protected keys to skip metadata checks; adding workflow
+  or job defaults, false job conditions, unexpected environments, custom
+  shells, or extra checkout steps;
+- shrinking either dudect run/sample budget, deleting a feature leg, changing
+  the pinned runner/toolchain/timeout, or bypassing the complete producer loop;
+- replacing the GmSSL version assertion with success, hard-coding the reported
+  suite outcome, or skipping/tolerating the final report;
 - weakening cache repair or unconditional interop status reporting.
 
 ## C example documentation
