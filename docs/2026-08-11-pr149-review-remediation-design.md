@@ -94,13 +94,18 @@ or Unicode-escaped duplicate cannot replace the job that the verifier read.
 
 Checkout action steps are complete source contracts: gitleaks retains only
 `fetch-depth: 0`, while both dudect checkouts retain no `with` mapping or
-alternate `ref`. Dudect also fixes the Rust toolchain and rust-cache action
-metadata. A top-level list marker written as a dash on its own line is counted
-as a step header, preventing an otherwise invisible command from being placed
-between reviewed steps. Before the dudect producer runs, the workflow
-environment and runner-capture script are fixed exactly; this prevents an
-ordinary workflow edit from persisting `BASH_ENV` through `GITHUB_ENV` and
-changing the producer or parser shell boundary.
+alternate `ref`. The CI build/policy, C ABI, GmSSL, and cargo-deny jobs likewise
+retain exactly one metadata-free checkout of the triggering revision. The
+cargo-deny checkout is included because the verifier directly claims its
+pinned installer and both dependency-policy commands; MSRV, SIMD, and wasm
+jobs are not silently promoted into this assurance scope. Dudect also fixes
+the Rust toolchain and rust-cache action metadata. A top-level list marker
+written as a dash on its own line is counted as a step header, preventing an
+otherwise invisible command from being placed between reviewed steps. Before
+the dudect producer runs, the workflow environment and runner-capture script
+are fixed exactly; this prevents an ordinary workflow edit from persisting
+`BASH_ENV` through `GITHUB_ENV` and changing the producer or parser shell
+boundary.
 
 Deliberate mutation self-tests will prove that the verifier rejects:
 
@@ -126,6 +131,8 @@ Deliberate mutation self-tests will prove that the verifier rejects:
   duplicate critical jobs, or inserting a dash-alone step;
 - adding checkout inputs or an alternate ref, skipping the pinned dudect
   toolchain, or poisoning a later shell through `GITHUB_ENV`/`BASH_ENV`;
+- retargeting a protected CI checkout away from the triggering revision, or
+  overriding that action through quoted metadata;
 - shrinking either dudect run/sample budget, deleting a feature leg, changing
   the pinned runner/toolchain/timeout, or bypassing the complete producer loop;
 - replacing the GmSSL version assertion with success, hard-coding the reported

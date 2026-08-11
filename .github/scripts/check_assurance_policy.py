@@ -186,6 +186,14 @@ def step_headers(job_text: str) -> tuple[str, ...]:
     )
 
 
+def exact_action_step(job_text: str, action: str, expected: list[str]) -> bool:
+    """Require one action step and its complete active source contract."""
+    return (
+        step_headers(job_text).count(f"- uses: {action}") == 1
+        and active_source_lines(step_uses(job_text, action)) == expected
+    )
+
+
 def active_run(step: str) -> str:
     """Extract active shell from a step's run key, excluding YAML comments."""
     lines = step.splitlines()
@@ -325,6 +333,21 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     require("build job key is unique", key_count(ci, "build", 2) == 1)
     require("cabi job key is unique", key_count(ci, "cabi", 2) == 1)
     require("GmSSL job key is unique", key_count(ci, "interop-gmssl", 2) == 1)
+    require("cargo-deny job key is unique", key_count(ci, "deny", 2) == 1)
+    for label, protected_job in (
+        ("build", build),
+        ("cabi", cabi),
+        ("GmSSL", interop),
+        ("cargo-deny", deny),
+    ):
+        require(
+            f"{label} checkout step is exact",
+            exact_action_step(
+                protected_job,
+                "actions/checkout@v4",
+                ["      - uses: actions/checkout@v4"],
+            ),
+        )
 
     skip_ci_if = [
         "    if: >-",
@@ -3445,6 +3468,87 @@ def mutation_self_test() -> list[str]:
             "        env:\n"
             "          BASH_ENV: /tmp/bypass\n",
             "PR rust cache BASH_ENV",
+        ),
+    )
+
+    for label, expected, job_name in (
+        ("build checkout pins main", "build checkout step is exact", "build"),
+        ("C ABI checkout pins main", "cabi checkout step is exact", "cabi"),
+        ("GmSSL checkout pins main", "GmSSL checkout step is exact", "interop-gmssl"),
+        ("cargo-deny checkout pins main", "cargo-deny checkout step is exact", "deny"),
+    ):
+        must_reject(
+            label,
+            expected,
+            ci=replace_in_uses(
+                CI,
+                job_name,
+                "actions/checkout@v4",
+                "      - uses: actions/checkout@v4",
+                "      - uses: actions/checkout@v4\n"
+                "        with:\n"
+                "          ref: main",
+                f"{label} field",
+            ),
+        )
+
+    for label, expected, job_name, injected in (
+        (
+            "build checkout gains quoted duplicate uses",
+            "build checkout step is exact",
+            "build",
+            '        "uses" : attacker/checkout@v1\n',
+        ),
+        (
+            "C ABI checkout gains Unicode-escaped duplicate uses",
+            "cabi checkout step is exact",
+            "cabi",
+            '        "u\\u0073es" : attacker/checkout@v1\n',
+        ),
+        (
+            "GmSSL checkout gains Unicode-escaped false condition",
+            "GmSSL checkout step is exact",
+            "interop-gmssl",
+            '        "i\\u0066" : false\n',
+        ),
+        (
+            "build checkout gains environment metadata",
+            "build checkout step is exact",
+            "build",
+            "        env:\n          BASH_ENV: /tmp/bypass\n",
+        ),
+        (
+            "C ABI checkout becomes tolerated",
+            "cabi checkout step is exact",
+            "cabi",
+            "        continue-on-error: true\n",
+        ),
+    ):
+        must_reject(
+            label,
+            expected,
+            ci=replace_in_uses(
+                CI,
+                job_name,
+                "actions/checkout@v4",
+                "      - uses: actions/checkout@v4",
+                "      - uses: actions/checkout@v4\n" + injected.rstrip(),
+                f"{label} field",
+            ),
+        )
+
+    must_reject(
+        "cargo-deny job has a trailing duplicate",
+        "cargo-deny job key is unique",
+        ci=replace_once(
+            CI,
+            "\n  wasm32:\n",
+            "\n  deny:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - run: 'true'\n"
+            "\n  wasm32:\n",
+            "duplicate cargo-deny job",
         ),
     )
     return failures
