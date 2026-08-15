@@ -228,6 +228,15 @@ cargo +nightly fuzz run fuzz_pem fuzz/corpus/fuzz_pem fuzz/seeds/fuzz_pem -- \
 # seeds SECOND (committed, read-only). A crash → fuzz/artifacts/<target>/;
 # minimize with `cargo +nightly fuzz tmin <target> <crash>` and commit the
 # minimized input under fuzz/seeds/<target>/ as a regression seed.
+
+# 2026-08-15 — disclosure boundary (the NON-secret counterpart to gitleaks).
+# Stdlib-only, so no install step. Policy: docs/disclosure-boundary.md
+python3 .github/scripts/check_disclosure_boundary.py --self-test   # rules still fire
+python3 .github/scripts/check_disclosure_boundary.py --worktree    # the gate
+python3 .github/scripts/check_disclosure_boundary.py --range origin/main..HEAD
+# Audit sweep only — NOT wired to CI (history can't be fixed without a rewrite,
+# so it would be permanently red on findings nobody intends to change).
+python3 .github/scripts/check_disclosure_boundary.py --history --strict
 ```
 
 ## Dudect harness gate
@@ -491,6 +500,7 @@ fuzz/                       # v0.14 — cargo-fuzz (libFuzzer) harness. ITS OWN 
 .github/workflows/
   ci.yml                    # 7 jobs (v0.17+). FIVE on GitHub-hosted macos-14 (aarch64): build/test (stable, full) + msrv (1.85, build-only) + cabi + cargo-deny + wasm32 matrix. TWO on Linux/x86_64: simd-x86 (ubuntu-latest, F17 — the AVX2/PCLMULQDQ paths aarch64 can't reach) + interop-gmssl (ubuntu-24.04, F16 — v1.10; mismatch-gating with cache/acquisition/build/version infrastructure classified non-blocking). Per-feature clippy passes (digest-traits, cipher-traits, sm4-bitsliced, sm4-bitsliced-simd, crypto-bigint-scalar). concurrency: cancel-in-progress. UNAFFECTED by fuzz/ (excluded).
   gitleaks.yml              # pinned 8.30.1 committed-history scan on every eligible main PR/push, isolated from ci.yml's doc-only push exclusion; no path filters
+  disclosure-boundary.yml   # 2026-08-15 — the NON-secret counterpart to gitleaks: home dirs, OS account names, private host addrs, handles into private systems, private-sibling internals. Same no-path-filter posture (prose is the highest-risk surface, not the lowest). Runs .github/scripts/check_disclosure_boundary.py: --self-test FIRST (a silently-stale rule makes the green check false assurance), then --worktree, then --range base..head on PRs, per-commit (a leak added then removed in the same PR is invisible to a squashed diff but permanent in history — this repo has real instances). P1 gates, P2 reports to the job summary. Policy: docs/disclosure-boundary.md
   dudect-pr.yml             # 10K samples on ubuntu-24.04 (v0.18 pin), |tau| gate, matrix on features=[default, sm4-bitsliced, sm4-bitsliced-simd, "sm4-bitsliced-simd,sm4-aead,sm4-xts"] (4 legs; the 4th gates the AEAD/XTS CT targets), path-allowlisted (incl. gmcrypto-simd/src/**), concurrency: cancel-in-progress
   dudect-nightly.yml        # 100K samples on ubuntu-24.04 (v0.18 pin), same gate + matrix, 30-day artifact retention; concurrency: cancel-in-progress=false (a partial 100K run is wasted compute). PR #38 drops the push:main trigger in favour of cron-only (regression watch) + workflow_dispatch (manual reruns).
   fuzz-nightly.yml          # v0.14 — capped cargo-fuzz sweep over all 33 targets (v0.20: FUZZ_TARGETS env is the single source of truth — MUST name every fuzz/Cargo.toml [[bin]], see the fuzz/ entry above) on GitHub-hosted ubuntu-latest (v0.17+; cron 06:00 UTC + workflow_dispatch w/ max_total_time input; installs nightly + pinned cargo-fuzz 0.13.2 per run; -max_total_time/-rss_limit_mb/-timeout caps; crash-artifact upload 30d; concurrency cancel-in-progress=false). NOT a PR gate. v0.20 adds a SEPARATE `coverage` job: cargo +nightly fuzz coverage per target over committed seeds → llvm-cov TOTALS SUMMARY.txt artifact (report-as-deliverable, **still no %-gate**). #121 made that report VISIBLE and partially gating: the table is also appended to `$GITHUB_STEP_SUMMARY` (an artifact nobody downloads is not a report — this file said `coverage-build-failed` for both `fuzz_tlcp_*_deprotect` targets for 44 nights unread), and the step then FAILS on any `coverage-build-failed` line, which means a target produced no coverage data at all. A merely-unrenderable profdata reports `profdata OK` and does NOT trip it; the percentage is never thresholded. Order is load-bearing — the step summary is written BEFORE the exit 1, so the table renders on the failing run.
@@ -568,6 +578,19 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
 ## Don't
 
 - Don't add a `Cargo.toml` `authors` field (privacy — removed at `982a2fc`).
+- **Don't commit a session working document into `docs/`.** Plans, remediation
+  runbooks and review scratch are written mid-task and carry local context —
+  absolute paths, tracker IDs, tool layouts. Everything under the repo root is
+  presumed public; working notes belong in a scratch dir OUTSIDE the repo. This
+  is not hypothetical: the 2026-08-11 remediation plan shipped a home-directory
+  path into an agent-plugin cache, and the 2026-08-10 plan shipped a private
+  tracker's page ID. Both are in permanent public history. See
+  `docs/disclosure-boundary.md`; the gate now catches the mechanical classes,
+  but it cannot catch "this whole document is internal".
+- **Don't cite an absolute local path as evidence provenance.** A KAT sourced
+  "verified against `/tmp/<dir>/page-01.png`" is *weaker* than one citing the
+  standard's section, because no auditor can open the former. Cite the standard,
+  or the in-repo sourcing doc.
 - **Don't add per-version scope sections or verbose history-table rows to
   README.md.** The pre-v1.4 accretion pattern (a new "## vX.Y scope" section
   + a multi-sentence roadmap row every release) grew the README to ~900

@@ -1,0 +1,62 @@
+name: Disclosure boundary
+
+# The complement to the secret scan. `gitleaks.yml` asks "is there a CREDENTIAL
+# here?"; this asks "is there information here that is not a credential, but
+# that a public repository has no reason to carry?" — home directories, OS
+# account names, private host addresses, handles into private systems, the
+# internals of private sibling repositories.
+#
+# Kept separate from ci.yml for the same reason gitleaks.yml is: that workflow
+# intentionally skips doc-only pushes, and prose is the HIGHEST-risk surface for
+# this class, not the lowest. Every P1 the 2026-08-15 audit found was in a
+# document. So: no path filters, on every eligible PR and push.
+#
+# Policy: docs/disclosure-boundary.md
+# Rules:  .github/scripts/check_disclosure_boundary.py
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: disclosure-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: disclosure boundary (P1 gates; P2 reported)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history: the per-commit range scan below needs the PR's base.
+          fetch-depth: 0
+
+      # First, and deliberately so. A rule that has silently stopped matching
+      # turns this whole job into false assurance, so prove the rules fire
+      # before trusting anything they say about the tree.
+      - name: Self-test (prove every rule still fires)
+        run: python3 .github/scripts/check_disclosure_boundary.py --self-test
+
+      - name: Scan the working tree
+        run: python3 .github/scripts/check_disclosure_boundary.py --worktree
+
+      # A leak added in one commit and removed in the next is invisible to a
+      # squashed base...head diff, but is permanent in public history once
+      # merged. This repository has real instances of exactly that, so the
+      # range scan walks each commit's added lines individually.
+      - name: Scan each commit's added lines (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          base='${{ github.event.pull_request.base.sha }}'
+          head='${{ github.event.pull_request.head.sha }}'
+          echo "range: $base..$head"
+          python3 .github/scripts/check_disclosure_boundary.py --range "$base..$head"
