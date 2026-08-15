@@ -896,6 +896,17 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
 - **Stacked PRs**: `gh pr create --base <unmerged-branch>` targets an
   open PR's head. After the parent merges, GitHub auto-retargets the
   stacked PR to `main`. Used by v0.3 W2→W3 and the release-prep chain.
+  **But that auto-retarget only happens if the parent's branch SURVIVES the
+  merge.** Merging the parent with `--delete-branch` instead **CLOSES** the
+  stacked PR, and GitHub then refuses to reopen it (`Could not open the pull
+  request`) or to retarget it (`Cannot change the base branch of a closed pull
+  request`) — the only recovery is opening a NEW PR for the same branch, losing
+  the old PR's review thread. So while a stack is live, merge parents WITHOUT
+  `--delete-branch`, retarget the child to `main` first, and delete the branch
+  after. (Cost this session: #155 had to be reopened as #157.) Note the child's
+  commits also need `git rebase --onto main <parent-tip> <child-branch>` after a
+  SQUASH merge, since the squash gives the parent's content a new SHA that the
+  child's history does not contain.
 - **`pub(crate) const` inside a `pub(crate) mod`** trips
   clippy::pub-in-priv. Use plain `pub` on the inner items — the outer
   module's `pub(crate)` already gates visibility.
