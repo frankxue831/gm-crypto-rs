@@ -267,15 +267,21 @@ ALLOWLIST = [
     {
         "rules": ["agent-tooling"],
         "paths": [r"^\.gitignore$"],
-        "reason": "A protective ignore entry. Removing it would make a leak MORE likely, not less.",
+        "reason": (
+            "A protective ignore entry: removing it would make a leak MORE likely, not "
+            "less. DECIDED (D7, docs/disclosure-boundary.md §7.2) — the comments were "
+            "genericized; the patterns must keep the names to keep working, an honest "
+            "and irreducible residue."
+        ),
     },
     {
         "rules": ["agent-tooling"],
         "paths": [r"^CHANGELOG\.md$"],
         "reason": (
             "One historical entry records REMOVING two internal scratch-path ignore "
-            "rules, so it names them. Whether the changelog should narrate local "
-            "tooling at all is an open decision in the 2026-08-15 audit."
+            "rules, so it names them. DECIDED (D7, docs/disclosure-boundary.md §7.2): "
+            "the changelog is a record and stays as written; only the live .gitignore "
+            "comments were genericized."
         ),
     },
     {
@@ -284,22 +290,12 @@ ALLOWLIST = [
         "regexes": [r"^\.claude/$"],
         "reason": "A packaging checklist asserting the published .crate does NOT contain that directory.",
     },
-    {
-        "rules": ["agent-tooling"],
-        "paths": [
-            r"^docs/2026-08-10-assurance-hardening-implementation-plan\.md$",
-            r"^docs/2026-08-11-pr149-review-remediation-plan\.md$",
-            r"^docs/v1\.1-sm2-key-exchange-plan\.md$",
-            r"^docs/v1\.3-x509-sm2-plan\.md$",
-        ],
-        "reason": (
-            "Four historical plan documents carry an agent-directive header. Recorded "
-            "as an OPEN DECISION in docs/2026-08-15-disclosure-audit.md rather than "
-            "silently rewritten: they are part of the project record, and whether that "
-            "record should narrate its own tooling is the maintainer's call. Allowlisted "
-            "by exact path so any NEW occurrence still reports."
-        ),
-    },
+    # NOTE: an entry allowlisting `agent-tooling` on the four plan documents that
+    # carried a `REQUIRED SUB-SKILL` header was DELETED once decision D2 removed
+    # those headers. Leaving it would have been worse than useless: with nothing
+    # left to allow, it only suppressed the rule across four whole files, so the
+    # NEXT agent-tooling reference in them would have passed silently. A resolved
+    # decision must retire its allowlist entry, or the entry becomes the hole.
     {
         "rules": ["private-repo"],
         "paths": [
@@ -316,8 +312,11 @@ ALLOWLIST = [
             "crates, including unpublished ones; the gate-evidence docs record runs "
             "against the downstream suite. Allowlisted by exact path so the rule still "
             "functions as a drift detector: a NEW file naming a private sibling reports "
-            "and forces a decision. How MUCH downstream internal detail those existing "
-            "files should carry is an open decision in the 2026-08-15 audit."
+            "and forces a decision. How much downstream internal detail these files "
+            "carry is DECIDED (D1, docs/disclosure-boundary.md §7.2): the charter states "
+            "obligations and no longer names private script paths; the evidence docs keep "
+            "the commands they actually ran, because deleting one would make the PASS "
+            "beside it unverifiable (§7.1)."
         ),
     },
 ]
