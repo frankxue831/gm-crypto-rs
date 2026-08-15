@@ -26,14 +26,16 @@ fuzz/artifacts/
 flamegraph.svg
 perf.data*
 
-# CCD / Claude Code session metadata (worktrees, etc.)
+# Local agent-session metadata (worktrees, etc.)
 .claude/
 
-# Superpowers/Codex isolated implementation worktrees.
+# Isolated implementation worktrees created by local tooling.
 .worktrees/
 
-# Superpowers plan/spec scratch (local working notes; not published)
+# Local plan/spec scratch. Working notes are deliberately not published —
+# see docs/disclosure-boundary.md §4; this pattern is the backstop for the
+# times the convention is forgotten.
 docs/superpowers/
 
-# RepoLens scan output (derived data: packs, session state, wiki index)
+# Local scan output (derived data: packs, session state, index).
 .repolens/

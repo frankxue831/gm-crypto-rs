@@ -591,6 +591,15 @@ Added to `deny.toml`'s allowlist with a comment pointing back to Q7.8.
   "verified against `/tmp/<dir>/page-01.png`" is *weaker* than one citing the
   standard's section, because no auditor can open the former. Cite the standard,
   or the in-repo sourcing doc.
+- **Don't restate the private sibling's file layout in `docs/ECOSYSTEM.md`.**
+  The charter states *obligations* ("its public-API snapshot must show no
+  unreviewed core types"); the script that discharges each one lives in the
+  private repo and is not this repo's to publish (decision D1,
+  `docs/disclosure-boundary.md` §7.2). The pull is real, because the gate-**evidence**
+  docs DO name those commands — deliberately, since deleting a command from an
+  evidence table would make the PASS beside it unverifiable (§7.1: fix the
+  normative doc, leave the record). So don't "restore consistency" by copying
+  them back into the charter; the asymmetry is the decision.
 - **Don't add per-version scope sections or verbose history-table rows to
   README.md.** The pre-v1.4 accretion pattern (a new "## vX.Y scope" section
   + a multi-sentence roadmap row every release) grew the README to ~900

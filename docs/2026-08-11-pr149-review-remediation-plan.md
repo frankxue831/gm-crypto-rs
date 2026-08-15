@@ -1,7 +1,5 @@
 # PR #149 Review Remediation Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Resolve all five open PR #149 review threads, prove the changes locally and in GitHub Actions, and merge only after a fresh readiness audit.
 
 **Architecture:** Keep `.github/scripts/check_assurance_policy.py` as the executable contract for workflow structure. Repair unusable GmSSL caches before running the independently pinned version guard, make suite execution state visible on every run, and encode the noise twin's telemetry-only status plus completeness wiring as mutation-tested invariants. Limit non-workflow edits to the five stale C-example banners and the review-remediation documentation.
