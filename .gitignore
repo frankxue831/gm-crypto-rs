@@ -39,3 +39,7 @@ docs/superpowers/
 
 # Local scan output (derived data: packs, session state, index).
 .repolens/
+
+# Python bytecode (a .pyc embeds the absolute path it was compiled from).
+__pycache__/
+*.py[co]
