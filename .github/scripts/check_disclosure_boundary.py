@@ -500,7 +500,10 @@ def self_test() -> int:
         ("private-host", "connect to 192.168." + "1.44 for the oracle"),
         ("credential-url", "https://user:hunter2" + "@internal.example.com/repo.git"),
         ("session-artifact", "/private/tmp/" + "claude-502/scratch/notes.md"),
-        ("external-record-id", "Project " + "page: `35ca01fccd2b811ab179e824f1d5ca15`"),
+        # SYNTHETIC id. Never use a real one here: the fixture is committed, so
+        # a real value would republish the exact thing the rule exists to keep
+        # out — which is precisely what happened on the first draft of this file.
+        ("external-record-id", "Project " + "page: `0123456789abcdef0123456789abcdef`"),
         ("external-record-id", "see https://www." + "notion.so/Some-Private-Page-abc123"),
         ("local-scratch-path", "verified against /private/" + "tmp/sm2pdf/params-hi-01.png"),
         ("agent-tooling", "python3 ~/." + "codex/plugins/cache/run.py"),
