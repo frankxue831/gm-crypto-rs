@@ -400,7 +400,9 @@ git commit -m "docs: record assurance hardening and dudect monitoring"
 ### Task 5: Synchronize Notion project state
 
 **External records:**
-- Project page: `35ca01fccd2b811ab179e824f1d5ca15`
+- Project page: the project-tracker page for this repository (private workspace;
+  its page ID was redacted 2026-08-15 — a resolvable handle to a private record
+  is of no use to a reader here)
 - Existing O2 work item, dudect monitoring risk, fuzz-coverage narrative, and interop/gitleaks work items discovered from the project page and its related data sources
 
 - [ ] **Step 1: Fetch current records immediately before mutation**

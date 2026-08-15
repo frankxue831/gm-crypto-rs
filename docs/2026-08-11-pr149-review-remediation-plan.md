@@ -386,8 +386,14 @@ git push origin codex/assurance-hardening
 - [ ] **Step 2: Re-fetch thread-aware comments**
 
 ```bash
-python3 /Users/fengxiang/.codex/plugins/cache/openai-curated-remote/github/0.1.8-2841cf9749ae/skills/gh-address-comments/scripts/fetch_comments.py
+python3 "$AGENT_PLUGIN_DIR"/skills/gh-address-comments/scripts/fetch_comments.py
 ```
+
+Redacted 2026-08-15: this step was originally written as an absolute path into a
+local agent-plugin cache on the maintainer's machine, which disclosed a home
+directory and a local tool layout for no reader benefit. Only the machine-specific
+prefix is elided; the step is unchanged. Any equivalent thread-aware comment fetch
+satisfies it — `gh api repos/{owner}/{repo}/pulls/149/comments` is the tool-free form.
 
 Expected: the same five threads may remain unresolved because no reply/resolve write was authorized, but their anchors are current or outdated and every requested code change is present in the branch.
 

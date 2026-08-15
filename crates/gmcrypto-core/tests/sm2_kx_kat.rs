@@ -4,8 +4,9 @@
 //! reproduce here; see docs/v1.1-sm2kx-kat-sourcing.md).
 //!
 //! Human-gated values transcribed from the recommended-curve worked example
-//! (maintainer-verified against /private/tmp/sm2pdf/params-hi-01.png + -02.png,
-//! 2026-06-10). cfg-gated on `sm2-key-exchange`.
+//! and maintainer-verified against the rendered standard pages on 2026-06-10;
+//! see docs/v1.1-sm2kx-kat-sourcing.md for the sourcing decision.
+//! cfg-gated on `sm2-key-exchange`.
 #![cfg(feature = "sm2-key-exchange")]
 
 use gmcrypto_core::sm2::key_exchange::{
