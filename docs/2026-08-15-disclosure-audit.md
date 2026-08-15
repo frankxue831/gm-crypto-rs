@@ -101,6 +101,21 @@ Six distinct P1 items are permanent in reachable history:
 | `/Users/<runner-account>` | `CLAUDE.md` (historical), `docs/pre-opensource-audit.md` (current, deliberate) | **Accept.** A retired throwaway service account, already reasoned about in that audit. |
 | Tracker page ID | `docs/2026-08-10-…-plan.md` | **Accept.** Addresses a private record that still requires authentication to read. |
 
+A seventh was added on 2026-08-15, *after* this audit, by the work applying its
+own decisions: a `__pycache__/*.pyc` swept into a commit by `git add -A` and
+merged in #160. A `.pyc` embeds the absolute path of the source it was compiled
+from, so it carried a home directory and an account name — the P1 class this
+whole document is about, introduced by the process meant to remove it. **Accept**,
+same as the rows above: not a secret, nothing to rotate, and one file in history
+does not justify a rewrite. Fixed at HEAD in #161, which also closes the two gaps
+that let it past the gate (the NUL-byte skip and the absence of any path-based
+rule) — see `docs/disclosure-boundary.md` §3.5.
+
+The lesson is narrower than "be careful with `git add -A`". The gate scanned that
+file and reported it clean, because a NUL byte in the first 8 KB made it skip the
+contents entirely. A scanner that silently declines to look is worse than one that
+reports nothing: both print zero.
+
 **No history rewrite.** Per `docs/disclosure-boundary.md` §5: rewriting a public
 repository's history invalidates every fork and clone, breaks every PR ref and
 commit link, and does not touch the published archives or anyone's existing copy.

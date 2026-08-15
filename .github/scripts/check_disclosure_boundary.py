@@ -378,6 +378,45 @@ def scan_text(text: str, path: str, line_offset_labels=None):
     return findings
 
 
+def printable_runs(raw: bytes, minimum: int = 6) -> str:
+    """Extract printable ASCII runs from a binary blob, one per line.
+
+    The `strings(1)` idea. The 2026-08-15 audit ran that sweep over the .der/.pem
+    fixtures BY HAND, once; doing it here makes it run on every commit instead.
+    """
+    return "\n".join(
+        run.decode("ascii")
+        for run in re.findall(rb"[\x20-\x7e]{%d,}" % minimum, raw)
+    )
+
+
+# Paths that must never be tracked, matched on the PATH rather than the content.
+# Content matching cannot be relied on here: a build artifact is binary, and the
+# home path it embeds sits behind a NUL byte.
+PATH_RULES = [
+    {
+        "id": "build-artifact",
+        "severity": BLOCKING,
+        "description": "Tracked build artifact (embeds the absolute path it was built from)",
+        "pattern": re.compile(r"(?:^|/)(?:__pycache__/|.+\.py[co]$)"),
+    },
+]
+
+
+def scan_path(path: str):
+    """Rules that judge the PATH itself, independent of file contents."""
+    findings = []
+    for rule in PATH_RULES:
+        if not rule["pattern"].search(path):
+            continue
+        if allowlisted(rule["id"], path, path):
+            continue
+        findings.append(
+            Finding(rule["severity"], rule["id"], path, 0, path, path)
+        )
+    return findings
+
+
 def git(*args, binary=False):
     out = subprocess.run(
         ["git", *args], capture_output=True, check=True
@@ -392,6 +431,7 @@ def tracked_files():
 def scan_worktree():
     findings = []
     for path in tracked_files():
+        findings.extend(scan_path(path))
         if path.endswith(BINARY_SUFFIXES):
             continue
         try:
@@ -400,6 +440,11 @@ def scan_worktree():
         except OSError:
             continue
         if b"\0" in raw[:8192]:
+            # NOT skipped. A NUL byte means "not a text file", not "carries no
+            # disclosure": a .pyc embeds the absolute path of the source it was
+            # compiled from, and exactly that reached public main on 2026-08-15.
+            # Scan the printable runs, the way a `strings` sweep would.
+            findings.extend(scan_text(printable_runs(raw), path))
             continue
         findings.extend(scan_text(raw.decode("utf-8", "replace"), path))
     return findings
@@ -561,10 +606,52 @@ def self_test() -> int:
             f"a session path should fire only 'session-artifact', fired {session_rules}"
         )
 
+    # Path rules judge the PATH, not the contents, because a build artifact's
+    # embedded home path sits behind a NUL byte where content matching cannot
+    # reach it.
+    BAD_PATHS = [
+        ("build-artifact", ".github/scripts/__pycache__/check.cpython-313.pyc"),
+        ("build-artifact", "tools/helper.pyo"),
+    ]
+    GOOD_PATHS = [
+        ".github/scripts/check_disclosure_boundary.py",
+        "crates/gmcrypto-core/src/sm3.rs",
+        "docs/pycache-notes.md",
+    ]
+    for rule_id, fixture in BAD_PATHS:
+        if not [f for f in scan_path(fixture) if f.rule_id == rule_id]:
+            failures.append(
+                f"path rule {rule_id!r} did NOT fire on its known-bad path "
+                f"({fixture!r}) — the rule is stale or was silently broken"
+            )
+    for fixture in GOOD_PATHS:
+        hits = scan_path(fixture)
+        if hits:
+            failures.append(
+                f"known-good path ({fixture!r}) produced {[h.rule_id for h in hits]}"
+            )
+
+    # A NUL byte means "not a text file", not "carries no disclosure". The
+    # 2026-08-15 regression: a committed .pyc embedded the absolute path of the
+    # source it was compiled from, and the old NUL check skipped the file whole.
+    blob = b"\x00\x01" + (U + "alice/proj/mod.py").encode() + b"\x00\xff\xfe"
+    if not [
+        f for f in scan_text(printable_runs(blob), "fixture.pyc")
+        if f.rule_id == "home-path"
+    ]:
+        failures.append(
+            "printable_runs() did not surface a home path from a NUL-containing "
+            "blob — binary files would again be scanned as though empty"
+        )
+
     covered = {rule_id for rule_id, _ in BAD}
     for rule in RULES:
         if rule["id"] not in covered:
             failures.append(f"rule {rule['id']!r} has NO known-bad fixture — add one")
+    covered_paths = {rule_id for rule_id, _ in BAD_PATHS}
+    for rule in PATH_RULES:
+        if rule["id"] not in covered_paths:
+            failures.append(f"path rule {rule['id']!r} has NO known-bad fixture — add one")
 
     for entry in ALLOWLIST:
         if not entry.get("reason"):
@@ -580,7 +667,9 @@ def self_test() -> int:
         return 1
     print(
         f"disclosure-boundary self-test: ok "
-        f"({len(RULES)} rules, {len(BAD)} positive + {len(GOOD)} negative fixtures)"
+        f"({len(RULES)} content + {len(PATH_RULES)} path rules, "
+        f"{len(BAD) + len(BAD_PATHS)} positive + {len(GOOD) + len(GOOD_PATHS)} "
+        f"negative fixtures)"
     )
     return 0
 

@@ -163,6 +163,27 @@ full of 32-hex KAT vectors, so the external-record-id rule is anchored on
 adjacent context rather than on hex shape alone, and a bare vector is a fixture
 asserting it stays quiet.
 
+### 3.5 What the rules look at
+
+Three surfaces, because the first one alone missed a real P1 on 2026-08-15.
+
+**File contents**, for text. The ordinary case.
+
+**File contents, for binaries too.** A NUL byte means "not a text file" — it does
+not mean "carries no disclosure". The scanner originally skipped any file with a
+NUL in its first 8 KB, and a committed `.pyc` slipped through carrying the
+absolute path of the source it was compiled from, home directory and account name
+included. Binary files now have their printable runs extracted and scanned, which
+is the `strings(1)` sweep the audit ran by hand — run on every commit instead of
+once. The `.der`/`.pem` fixtures produce no findings under it.
+
+**The path itself.** Some things are disqualified by *where they are*, and cannot
+be caught any other way: the home path inside that `.pyc` sat behind a NUL byte,
+so no content rule could reach it. `build-artifact` rejects tracked `__pycache__/`
+and `*.py[co]` outright. Path rules carry the same self-test obligation as content
+rules — known-bad path, known-good path, and a completeness check that fails if a
+rule has no fixture.
+
 ## 4. The review protocol
 
 ### Phase 1 — automated sweep (recall)
