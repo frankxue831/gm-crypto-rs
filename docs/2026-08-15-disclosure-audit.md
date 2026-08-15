@@ -10,6 +10,12 @@ Twelve items are recorded below as open decisions (§6): they are not defects, b
 they are choices that were never made explicitly, and the audit's real product is
 that list.
 
+> **Resolved 2026-08-15.** Every §6 item has since been ruled on. The decisions —
+> and the rule that governs editing a record versus a normative document — are
+> recorded in `docs/disclosure-boundary.md` §7, which is now the authoritative
+> place to answer "was this decided?". §6 below is kept as the analysis that
+> produced them, unchanged.
+
 ## 1. Scope and method
 
 | Corpus | Files | Method |

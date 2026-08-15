@@ -17,7 +17,7 @@ Use staged enforcement:
 - Immediately gate deterministic, repository-owned checks: C example compilation, committed-history secret scanning, and the existing cargo-deny runtime profiles.
 - Make a genuine GmSSL interoperability mismatch blocking while treating oracle acquisition, build, cache, or version drift as non-blocking infrastructure failures that remain visible in the job summary.
 - Add a class-split-aware dudect noise twin as required telemetry only. Its presence is enforced, but its measured `|tau|` does not affect pass/fail until several GitHub-hosted nightly runs establish whether it tracks the observed class-split noise.
-- Reconcile repository and Notion documentation with the resulting state without claiming unmerged changes have landed.
+- Reconcile repository and project-tracker documentation with the resulting state without claiming unmerged changes have landed.
 
 The rejected alternatives are a minimal CI-only change, which leaves the known class-split measurement question untouched, and immediate relative dudect enforcement, which lacks calibration evidence and could turn runner noise into an unreliable gate.
 
@@ -68,7 +68,7 @@ Both PR and nightly parsers will require one measurement per harness run for the
 
 The August 7 SIMD CBC fanout event will be recorded with its five measurements, `0.2008` median, `0.20` threshold, and the three subsequent same-commit passes. No leak or false-positive conclusion will be asserted; it remains a monitoring event.
 
-## Notion changes
+## Project-tracker changes
 
 The current project page and related work/risk records will be fetched immediately before mutation. Updates will:
 
@@ -91,7 +91,7 @@ Configuration behavior will use red/green policy assertions: before edits, focus
 - run the GmSSL 3.2.0 suite with `GMCRYPTO_GMSSL=1` and verify 13 tests execute;
 - build and execute the dudect harness at a bounded smoke budget, verifying the new target is measured and parsed;
 - run formatting, workspace tests, the relevant feature tests, and clippy with warnings denied;
-- re-fetch changed Notion records to verify exact resulting content and status.
+- re-fetch the changed tracker records to verify exact resulting content and status.
 
 ## Non-goals
 
@@ -103,4 +103,4 @@ Configuration behavior will use red/green policy assertions: before edits, focus
 
 ## Completion criteria
 
-The work is complete when every repository change above is present on the implementation branch, all validation commands pass with fresh evidence, Notion reflects the local/pending-merge state accurately, and the final diff contains no unrelated modifications.
+The work is complete when every repository change above is present on the implementation branch, all validation commands pass with fresh evidence, the project tracker reflects the local/pending-merge state accurately, and the final diff contains no unrelated modifications.

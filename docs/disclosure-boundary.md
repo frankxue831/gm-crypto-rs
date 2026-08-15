@@ -73,6 +73,10 @@ them would make the assurance claims dishonest. The rule is not "suppress"; it
 is **decide once, in writing, and apply consistently**. A reader should be able
 to tell the difference between deliberate transparency and an unreviewed leak.
 
+The decisions themselves are recorded in **§7**. That register is the point of
+this class: an item that appears there has been ruled on and does not need to be
+re-argued by the next review.
+
 ### 2.3 Qualified — publish freely
 
 Anything derivable from the code itself; standards references and published test
@@ -255,3 +259,103 @@ python3 .github/scripts/check_disclosure_boundary.py --history --strict
 A P1 in your PR means: remove the content. If it is deliberate, add a scoped
 allowlist entry with a reason — and expect the reason to be reviewed, since it
 is the only thing standing between the rule and the next real finding.
+
+## 7. Decisions on record
+
+Every §2.2 item the 2026-08-15 audit raised, ruled on. IDs are stable and match
+`docs/2026-08-15-disclosure-audit.md` §6, so a future review that re-raises one
+can be answered with a reference instead of a re-argument. A decision is not
+permanent — it is *recorded*, which means changing it requires saying so here.
+
+### 7.1 The rule for editing existing documents
+
+Applying these decisions meant editing documents that are records of past work,
+so the boundary had to be drawn explicitly. It is the same one `docs/ECOSYSTEM.md`
+§3 draws about published archives, and §5 above draws about history:
+
+| Change to a record | Allowed? |
+|---|---|
+| Altering a **claim** it makes, or the evidence for one | **No.** That is falsifying the record. Correct forward, by addendum. |
+| Renaming a **referent** — the same thing, a different word for it | Yes. The record still says what it said. |
+| Removing a **tooling handle** that asserts nothing (a workflow slug, a run ID) | Yes. Nothing is claimed, so nothing is lost. |
+| Removing **operator-addressed scaffolding** | Yes, and often overdue — it is usually stale as well. |
+
+So: a command in a gate-evidence table stays, because deleting it would make the
+PASS beside it unverifiable. A private repository's script path in the *charter*
+goes, because the charter states obligations rather than another repository's
+file layout — and the charter is what causes the next evidence document to name
+those paths again. **Fix the normative document; leave the record.**
+
+### 7.2 The register
+
+**D1 — Private-sibling internals. Decided: keep the crate name and every
+verification obligation; drop the private file layout.** `docs/ECOSYSTEM.md` §2,
+§5 and §8 now state what must be verified rather than which script in the
+private repository does it, and §8's narration of a downstream tool's confusing
+error message is gone — the operational constraint it was attached to (the
+`[patch]` override path must be relative) stays, and now cites §2.1 as the reason.
+Two things were deliberately **kept**: the `release_documents` exclusion, because
+naming the one excluded target *is* the normative content; and §8's explanation
+that the automation lives downstream because only that direction needs no
+credential — that is security-design reasoning about *this* repository, the same
+class as D4. The gate-evidence documents were left intact per §7.1.
+
+**D2 — AI-assisted development disclosure. Decided: keep attributions and model
+versions; drop machine-addressed scaffolding, tooling handles, and session
+mechanics.** Attribution is real provenance for an assurance project, and "reviewed
+by X version Y" is stronger provenance than "reviewed by X" — `CASE-STUDY.md`
+already makes the assisted-development story explicit on purpose. What went: the
+`REQUIRED SUB-SKILL` headers on four plan documents (addressed to automated
+workers, not readers), the internal workflow slugs and `wf_…` run IDs in the eight
+audit records, and the stale "working-tree artifact; commit/track at your
+discretion" clause — those documents have been committed for months. The read-only
+assurances and orchestrator re-verification notes in those same footers stayed:
+they are claims about the audit, not mechanics.
+
+One deliberate exception. The release-readiness synthesis records that its first
+run was interrupted and resumed from cached extracts. That reads as session
+mechanics, but it is a caveat about the evidence — the synthesis was not one clean
+pass, and a reader weighing it should know. Kept.
+
+**D3 — Private tracker as a system of record. Decided: genericize to "the project
+tracker".** Applied across eight documents. The product name was never the
+information — "the milestone is logged in the tracker" says everything a reader
+needs — and naming it is a standing invitation to paste an ID next to it, which is
+exactly how the audit's second P1 finding happened.
+
+**D4 — Retired self-hosted-runner detail. Decided: keep, unchanged.** The
+infrastructure is retired, so nothing is exposed, and the runner label, the
+service account and the precise fork-PR RCE path are the reasoning behind a real
+security decision. It is the most instructive item in `docs/pre-opensource-audit.md`.
+
+**D5 — Other private projects. Decided: genericize the domain; keep the rule that
+names the prototype.** `docs/v0.1.0-release-review.md` no longer names a product
+domain the README must stay out of. But CLAUDE.md's "don't reference the
+`gm-crypto-lite-java` prototype" **keeps the name**, on review of what removing it
+would achieve: the name is what makes the rule checkable, the repository is named
+nowhere else as a *reference*, and it is already permanent in public history. A
+rule that cannot be checked is worse than the disclosure it avoids.
+
+**D6 — Published assurance gaps. Decided: keep, emphatically, and this entry is
+the record that settles it.** Two workflows and several documents state precisely
+which timing-leak magnitudes CI does not catch — the demoted `ct_sign_k_class` and
+`ct_hmac_sm3` sentinels, the falsified v0.19 relative gate, the blind composite
+window behind the still-open F21. Publishing that is not a leak; it is what makes
+the rest of the assurance claims believable, and `SECURITY.md` depends on it. A
+future reviewer flagging this should be pointed here.
+
+**D7 — Internal tool names in ignore-file comments. Decided: genericize the
+comments; keep the patterns, and accept the residue.** `.gitignore` comments no
+longer name local tooling. The *patterns* cannot be genericized without breaking
+what they ignore, so the names remain visible there — an honest, irreducible
+residue, and the protection is worth more than the disclosure. The changelog entry
+recording their removal is a record and stays per §7.1.
+
+**D8 — Session documents in `docs/`. Decided: keep the records; strip the
+scaffolding.** Handled with D2 above. The prevention half is the CLAUDE.md
+convention added alongside the gate: working documents belong outside the
+repository. The rule is the backstop, not the fix — the gate cannot detect "this
+entire document is an internal working note".
+
+**D9 — Third-party contributor handle. Decided: keep.** Already public via the
+merged PR, and crediting contributors is correct.

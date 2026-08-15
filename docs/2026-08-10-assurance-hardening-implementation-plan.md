@@ -1,14 +1,12 @@
 # Assurance Hardening Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
-**Goal:** Add deterministic CI gates, correctly classify GmSSL infrastructure failures, introduce required-but-nonblocking class-split dudect telemetry, and synchronize repository/Notion project state.
+**Goal:** Add deterministic CI gates, correctly classify GmSSL infrastructure failures, introduce required-but-nonblocking class-split dudect telemetry, and synchronize repository and project-tracker state.
 
 **Architecture:** Keep repository-owned checks blocking. The C and dependency gates live in the existing `CI` workflow; committed-history secret scanning lives in a dedicated workflow with no path exclusions, because `ci.yml` intentionally skips doc-only main pushes. Classify GmSSL failures within one stable job by using step-level `continue-on-error` plus `steps.<id>.outcome`; only the actual interoperability suite remains uncompensated. Add one telemetry-only dudect target and require measurement completeness without changing any statistical threshold.
 
 **Post-review amendment (2026-08-10):** The implementation extracts gitleaks into `.github/workflows/gitleaks.yml`, reports cache degradation independently from oracle unavailability, uses indentation-scoped semantic policy checks with deliberate mutation self-tests, and puts the noise twin behind opaque, materialized inputs plus a non-inlined fixed-work helper. These decisions supersede the illustrative first-draft snippets below where they differ.
 
-**Tech Stack:** GitHub Actions YAML, Python 3 standard library, Rust benchmark harness, C11 compiler, gitleaks 8.30.1, cargo-deny 0.20.2, Notion connector.
+**Tech Stack:** GitHub Actions YAML, Python 3 standard library, Rust benchmark harness, C11 compiler, gitleaks 8.30.1, cargo-deny 0.20.2, the project-tracker connector.
 
 ---
 
@@ -397,7 +395,7 @@ git add CHANGELOG.md CLAUDE.md docs/v0.5-dudect-recalibration.md docs/2026-08-10
 git commit -m "docs: record assurance hardening and dudect monitoring"
 ```
 
-### Task 5: Synchronize Notion project state
+### Task 5: Synchronize project-tracker state
 
 **External records:**
 - Project page: the project-tracker page for this repository (private workspace;
