@@ -16,9 +16,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=GMCRYPTO_C_REGEN_HEADER");
 
     let regen_via_feature = cfg!(feature = "regen-header");
-    let regen_via_env = std::env::var("GMCRYPTO_C_REGEN_HEADER")
-        .ok()
-        .is_some_and(|v| !v.is_empty() && v != "0");
+    let regen_via_env =
+        std::env::var("GMCRYPTO_C_REGEN_HEADER").is_ok_and(|v| !v.is_empty() && v != "0");
 
     if regen_via_feature || regen_via_env {
         regenerate_header();
