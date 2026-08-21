@@ -5,11 +5,19 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-**2026-08-06–11 maintenance batch** — the three open `good first issue`s, two
-defects found while fixing them (#140–#147), a follow-up assurance-hardening
-pass (#149), and a records-correction + actions-version follow-up (#150–#152).
-No production cryptographic code, public API, C ABI, or release version
-change; the example-file changes below ship with the next `gmcrypto-c` package.
+**2026-08-06–15 maintenance** — two batches, still no production cryptographic
+code, public API, C ABI, or release version change. The example-file changes
+below ship with the next `gmcrypto-c` package.
+
+**2026-08-06–11** — the three open `good first issue`s, two defects found while
+fixing them (#140–#147), a follow-up assurance-hardening pass (#149), and a
+records-correction + actions-version follow-up (#150–#152).
+
+**2026-08-15 disclosure-boundary batch** (#154–#161) — the non-secret
+counterpart to gitleaks: a normative policy, an executable gate, the first
+full audit, twelve recorded decisions, and two self-inflicted follow-ups
+found by verifying a green check. Nothing found required rotation, and
+nothing found justifies a history rewrite.
 
 ### Added
 
@@ -24,6 +32,17 @@ change; the example-file changes below ship with the next `gmcrypto-c` package.
   and nightly workflows require it to be measured in every run, but its
   `|tau|` remains non-blocking until hosted-runner calibration establishes
   whether it tracks the known two-input noise. No existing threshold changed.
+- **Disclosure-boundary policy and gate** (#157, audit record #156) —
+  `docs/disclosure-boundary.md` plus `.github/scripts/check_disclosure_boundary.py`
+  and its own workflow. The gate asks a different question from gitleaks: is
+  there information here that is not a credential, but that a public
+  repository has no reason to carry (home-directory paths, OS account names,
+  private-host addresses, handles into private systems, private-sibling
+  internals). CI runs `--self-test` first — a silently stale rule would make
+  the green check false assurance — then `--worktree`, then `--range` on PRs
+  so a leak added and removed in the same squash is still visible. P1 blocks;
+  P2 reports to the job summary. The history sweep is audit-only and is
+  **not** wired to CI, because history cannot be fixed without a rewrite.
 
 ### Fixed
 
@@ -49,6 +68,29 @@ change; the example-file changes below ship with the next `gmcrypto-c` package.
   are byte-identical to it, so ECOSYSTEM §8's "preserve the exact tested
   commits" is materially satisfied for 1.11.0. Every gate result in §§1–6
   stands as run.
+- **A local toolchain path in the #149 remediation plan** (#154): the
+  working document named an absolute path into a local tool cache. Removed
+  from HEAD; history accepted per the new policy. This was one of the five
+  P1 findings in the 2026-08-15 audit — two of the five were found by a
+  person reading for meaning, not by pattern matching.
+- **Record-ID self-test fixture used a resolvable private-system identifier**
+  (#158): the gate's own positive-control fixture embedded a real record ID
+  from a private tracker. Replaced with a synthetic ID so the self-test
+  still fires without publishing a handle into a private system.
+- **An allowlist entry that outlived its finding became a hole** (#160):
+  applying decision D2 (drop machine-addressed scaffolding) left an
+  allowlist row with nothing left to allow, so it only suppressed a rule
+  across four whole files. Retired. A correct entry outliving its finding
+  is how a scanner quietly grows to permit more than intended — the same
+  shape as the dead gitleaks paths in #140.
+- **A compiled Python cache file reached `main`, and the gate reported
+  clean** (#161): `git add -A` swept a `__pycache__/*.pyc` onto the public
+  tree. A `.pyc` embeds the absolute path it was compiled from, so a home
+  directory and account name shipped — and the scanner skipped the file
+  whole because of a NUL byte. Both gaps closed: binary files now get a
+  `strings`-style scan, and a new `build-artifact` path rule rejects
+  `__pycache__` / `*.pyc`. Each fix was verified with a positive control
+  against the real failure. History accepted, not rewritten.
 
 ### Changed
 
@@ -84,6 +126,19 @@ change; the example-file changes below ship with the next `gmcrypto-c` package.
   `dtolnay/rust-toolchain@1.95.0`) are byte-identical; a post-merge
   `dudect-nightly` dispatch sanity-checks the medians against the
   recent-nights envelope.
+- **Twelve disclosure-boundary decisions recorded** (#159): the audit
+  deliberately surfaced twelve §2.2 "decide explicitly" items rather than
+  ruling on them. All are now decided in `docs/disclosure-boundary.md` §7
+  with stable IDs. Charter impact (D1): `docs/ECOSYSTEM.md` §2, §5 and §8
+  now state verification **obligations** rather than naming a private
+  sibling's internal script paths. Gate-evidence documents keep the
+  commands they actually ran — deleting a command from an evidence table
+  would make the PASS beside it unverifiable (policy §7.1: fix the
+  normative document, leave the record). Also decided: keep AI-review
+  attributions and model versions (real provenance); keep published
+  assurance gaps emphatically (`SECURITY.md` depends on them); keep the
+  retired-runner RCE reasoning; drop machine-addressed scaffolding,
+  tooling run IDs, and the tracker product name.
 
 ### Security
 
@@ -99,6 +154,12 @@ change; the example-file changes below ship with the next `gmcrypto-c` package.
   key in the same files. CI now checks the full committed history on every PR
   and main push with pinned gitleaks 8.30.1; generated working-tree artifacts
   remain outside that publication-relevant scan.
+- **Disclosure boundary sits beside gitleaks, not inside it.** The 2026-08-15
+  audit found five P1 items in a repository whose secret scan had been green
+  the entire time those items were introduced. gitleaks was never wrong; it
+  was answering a different question. The new gate is the mechanical half of
+  that second question; the decisions register in
+  `docs/disclosure-boundary.md` §7 is the other half.
 
 ## [1.11.0] - 2026-08-01
 
