@@ -305,6 +305,7 @@ ALLOWLIST = [
             r"^docs/v1\.9\.1-release-review\.md$",
             r"^docs/version-history\.md$",
             r"^CLAUDE\.md$",
+            r"^AGENTS\.md$",  # symlink to CLAUDE.md — same content, second path
             r"^CHANGELOG\.md$",
         ],
         "reason": (
