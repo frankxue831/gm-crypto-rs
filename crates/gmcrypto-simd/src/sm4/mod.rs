@@ -12,6 +12,12 @@
 //!   `aarch64` (4 SM4 blocks × 4 `tau` bytes per round = 16 bytes).
 //!   Compile-time baseline; no runtime CPU detect.
 //!
+//! Issue #163 added:
+//! - [`sbox_x4::sbox_x4`] — four-byte serial-`tau` adapter. `AArch64`
+//!   reuses one NEON x16 invocation; `x86_64` production is four
+//!   scalar calls (AVX2 not selected: 10% rule unmeasured);
+//!   [`sbox_x8`] is kept as an internal candidate / test surface.
+//!
 //! The scalar primitives (Boyar-Peralta Itoh-Tsujii gate sequence)
 //! live in `scalar` and serve as the fallback path for every SIMD
 //! entry point on targets without the relevant intrinsics. The
@@ -29,4 +35,5 @@ pub(crate) mod neon;
 
 pub mod sbox_x16;
 pub mod sbox_x32;
+pub mod sbox_x4;
 pub mod sbox_x8;

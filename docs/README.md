@@ -55,6 +55,7 @@ The "what is this and how does it break down" layer — the TLCP arc map plus pe
 - [tlcp-decomposition.md](tlcp-decomposition.md) — the arc-opening map: GB/T 38636 TLCP wire anatomy, gap analysis G1–G5, the derived chain/pair profile (NOT server auth), record-CT API constraints, cycle map v1.6→v1.9, D-1…D-12 verification items.
 - [v1.1-sm2-key-exchange-design.md](v1.1-sm2-key-exchange-design.md) — SM2-KX (GM/T 0003.3) design doc — role state-machines, typestate, key-confirmation flow — backing the v1.1 plan.
 - [v1.3-x509-sm2-design.md](v1.3-x509-sm2-design.md) — X.509-with-SM2 leaf-cert design doc — strict in-repo DER profile, no-trust-decisions boundary — backing the v1.3 plan.
+- [sm4-single-block-simd-repair-design.md](sm4-single-block-simd-repair-design.md) — issue #163 design record: replace the wasteful one-byte-to-x8 adapter with a four-byte internal S-box dispatch, preserve the x16/x32 batch paths, and gate the repair with cross-architecture correctness, constant-time, portability, and performance evidence.
 
 ## Implementation plans & executed reviews
 

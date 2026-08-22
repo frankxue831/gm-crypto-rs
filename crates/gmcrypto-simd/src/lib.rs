@@ -36,6 +36,13 @@
 //!   baseline on aarch64 (Q5.12 / Q6.3 of the v0.5 / v0.6 scope
 //!   docs); compile-time gated, no runtime detect.
 //!
+//! # Issue #163 — serial `tau` repair
+//!
+//! - [`sm4::sbox_x4::sbox_x4`]: four independent S-box bytes for
+//!   single-block / key-schedule `tau`. `AArch64` reuses one NEON x16
+//!   invocation; other targets use four scalar calls. The one-byte
+//!   `sbox_x8` broadcast adapter in `gmcrypto-core` is removed.
+//!
 //! [`gmcrypto-c`]: https://docs.rs/gmcrypto-c
 
 #![no_std]

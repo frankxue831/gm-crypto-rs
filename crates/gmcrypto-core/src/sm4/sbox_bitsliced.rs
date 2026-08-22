@@ -36,11 +36,12 @@
 //!
 //! # Throughput
 //!
-//! Linear-scan baseline: ~1-2M blocks/sec single-threaded.
-//! Itoh-Tsujii bitsliced: ~7 squarings + 6 multiplications per
-//! S-box invocation, each multiplication ~8 conditional XOR-and-
-//! shift ops. Empirical speedup on x86-64 release-mode: TBD,
-//! measure via `cargo bench` on the W3 PR.
+//! Linear-scan baseline, Apple M1 Pro, rustc 1.94.1, release
+//! (2026-08-22): ~3.1×10⁴ blocks/s pre-keyed `encrypt_block`.
+//! Itoh-Tsujii bitsliced on the same host: ~5.2×10⁴ blocks/s (~1.7×);
+//! SM4-CCM 1 MiB invalid-tag decrypt ~0.39 MiB/s vs ~0.24 MiB/s on
+//! the linear scan. The previous "empirical speedup: TBD" note is
+//! replaced by these figures (issue #163).
 //!
 //! # Per Q4.10 / Q4.11 (docs/v0.4-scope.md)
 //!

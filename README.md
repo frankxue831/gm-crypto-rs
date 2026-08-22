@@ -226,7 +226,7 @@ Three crates, released together at one lockstep version:
 | `x509` | X.509-with-SM2 leaf parse + signature verify; v1.8 adds linear `verify_chain` + keyUsage/basicConstraints readers. **Structural trust only — NOT endpoint authentication.** |
 | `tlcp` | TLCP (GB/T 38636-2020) crypto toolkit: key schedule (P_SM3 PRF, master secret, key block, Finished) + **record protection** (SM4-CBC Lucky13-hardened deprotect; SM4-GCM record with `sm4-aead`) + **certificate-pair verification** (`tlcp::chain::verify_pair`, with `x509`). **Not a protocol implementation.** |
 | `sm4-bitsliced` | Table-less, gate-only SM4 S-box (constant-time by construction; byte-identical output). |
-| `sm4-bitsliced-simd` | AVX2 (x86_64) / NEON (aarch64) packed bitsliced SM4 batches; runtime detection, scalar fallback. |
+| `sm4-bitsliced-simd` | AVX2 (x86_64) / NEON (aarch64) packed bitsliced SM4 batches, plus a four-byte serial-`tau` path so CCM CBC-MAC is not routed through wasted x8 lanes. Runtime AVX2 detection; scalar fallback off those targets. |
 | `digest-traits` / `cipher-traits` | RustCrypto trait fit (`digest 0.11` / `cipher 0.5`) for `Sm3` / `HmacSm3` / `Sm4Cipher`. |
 | `aead-traits` | RustCrypto trait fit (`aead 0.6`) for SM4-GCM / SM4-CCM: `Sm4Gcm` (12-byte nonce, 16-byte tag) and `Sm4Ccm<M, N>` (tag/nonce sizes as type parameters). Implies `sm4-aead`. |
 | `crypto-bigint-scalar` | `Sm2PrivateKey::from_scalar(U256)` — the documented `crypto-bigint 0.7` escape hatch. |
