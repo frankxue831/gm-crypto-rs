@@ -6,7 +6,10 @@ use core::convert::TryInto;
 
 use zeroize::Zeroize;
 
-const IV: [u32; 8] = [
+/// SM3 initial state (GB/T 32905-2016 §4.1). `pub(crate)` so the TLCP
+/// Lucky13 path can drive [`compress`] directly over a fixed block count
+/// (`tlcp::record::mac_ct`); not public API.
+pub(crate) const IV: [u32; 8] = [
     0x7380_166f,
     0x4914_b2b9,
     0x1724_42d7,

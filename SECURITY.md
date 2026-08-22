@@ -267,19 +267,30 @@ paragraph.
   **recovered-fragment (post-strip plaintext) length** with a FIXED key:
   both classes are valid records of the same wire length but fragment
   lengths that straddle an SM3 inner-hash compression boundary, so the
-  equalized inner-hash compression count is what is measured. Gate
-  `|tau| <= 0.20` on the 4th dudect matrix leg (cfg `tlcp`); 20K-sample
-  smoke `|tau| ≈ 0.08`. The deprotect equalizes **three** constant-time
-  surfaces — (1) the inner-hash SM3 compression count (dummy compressions
-  on a throwaway state to a public upper bound, `core::hint::black_box`
-  against elision), (2) a fixed `min(256, body)`-byte pad-validity scan
-  (no early return, no padlen-bounded loop), (3) a data-independent MAC
-  extraction at the secret offset — and a bad-padding record still runs
-  the full MAC, with a single final `pad_ok & mac_ok` merge, single `None`,
-  no plaintext on failure. The dudect target is the **residual guard**; it
-  does NOT certify the equalization (a hard impl MUST), so a `pub(crate)`
-  equivalence test pins that the constant-blocks MAC equals an ordinary
-  `HmacSm3` on a public-length input. `sm3::compress` is widened to
+  length-independent inner-HMAC path is what is measured. Gate
+  `|tau| <= 0.20` on the 4th dudect matrix leg (cfg `tlcp`). The deprotect
+  equalizes **three** constant-time surfaces — (1) the inner-hash HMAC-SM3
+  (`tlcp::record::mac_ct`: a fixed, public block schedule, every byte
+  chosen by `subtle` selection among message / `0x80` / zero / length
+  field, the digest state selected at the secret final-block index by
+  masks), (2) a fixed `min(256, body)`-byte pad-validity scan (no early
+  return, no padlen-bounded loop), (3) a data-independent MAC extraction
+  at the secret offset — and a bad-padding record still runs the full MAC,
+  with a single final `pad_ok & mac_ok` merge, single `None`, no plaintext
+  on failure. **History of surface (1):** v1.7 – v1.11.0 used the streaming
+  `HmacSm3` plus dummy compressions to a public upper bound. That equalizes
+  the compression *count* but leaves the hasher's length-dependent buffer
+  copy and its one- vs two-block finalize-padding branch; the residual sat
+  under the gate on the EPYC 7763 runners the gate was calibrated on
+  (`|tau|` 0.06–0.13) but read **≈ 0.30 at 100K samples on Zen 4 / Xeon
+  8573C** once the v1.11.1 SM4 repair made the surrounding window cheaper
+  (`docs/v1.11.1-release-review.md`, dudect note). v1.11.1 replaced it
+  with the fixed-schedule construction above; the block count is
+  unchanged, so the fix adds no SM3 work. The dudect target is the
+  **residual guard**; it does NOT certify the equalization (a hard impl
+  MUST), so `pub(crate)` tests pin that `mac_ct` equals an ordinary
+  `HmacSm3` for every length under every bound and that its schedule
+  depends only on the public bound. `sm3::compress` and `sm3::IV` are
   `pub(crate)` (not public API / not SemVer) so the single audited
   compression loop is reused rather than duplicated.
 
