@@ -78,8 +78,9 @@ u32 SM4 word
   -> L or L' transform
 ```
 
-The current single-byte SIMD adapter is removed or rewritten so production
-`tau` cannot regress to four x8 calls.
+The current single-byte SIMD adapter is removed outright — not rewritten — so
+production `tau` cannot regress to four x8 calls. The core-and-modes test plan
+below assumes this removal.
 
 ### Architecture dispatch
 
@@ -244,8 +245,9 @@ Measure separately:
 - feature configurations `sm4-aead`, `sm4-aead,sm4-bitsliced`, and
   `sm4-aead,sm4-bitsliced-simd`.
 
-Merge acceptance on each affected architecture uses at least five repeated
-samples per case:
+Merge acceptance on each measured architecture — for this patch, AArch64 and
+x86_64 with AVX2; unmeasured targets take the four-scalar-call branch by
+construction — uses at least five repeated samples per case:
 
 1. Key construction, pre-keyed single-block encryption, and CCM encrypt/valid
    decrypt/invalid-tag decrypt at 1 KiB and 256 KiB under
@@ -273,7 +275,18 @@ harness paths and full raw output remain outside the repository.
 Update only current, reader-facing material:
 
 - `crates/gmcrypto-core/src/sm4/sbox_bitsliced_simd.rs`;
-- the `tau` dispatch comments in `cipher.rs`;
+- the `tau` dispatch comments in `cipher.rs`, plus the module-header
+  linear-scan throughput estimate there, replaced with figures from this
+  patch's measurements (issue #163 shows the current estimate is far off on
+  AArch64);
+- the `TBD` empirical-speedup note in
+  `crates/gmcrypto-core/src/sm4/sbox_bitsliced.rs`, replaced with the measured
+  `sm4-bitsliced` figures this patch's evidence produces (issue #163's
+  "measured rather than TBD" expectation);
+- the affected dudect target comments in
+  `crates/gmcrypto-core/benches/timing_leaks.rs` (comment-only; the
+  assurance-policy script checks semantic anchors in that file, not a file
+  hash — run its self-test after the edit regardless);
 - `crates/gmcrypto-simd/src/lib.rs` and `src/sm4/mod.rs`;
 - relevant Cargo feature comments;
 - `.github/workflows/ci.yml` and `CLAUDE.md` for the two wasm32 feature builds;
@@ -319,9 +332,15 @@ therefore deferred.
 The transform is infallible and introduces no new error path. If a SIMD branch
 fails correctness, assembly, timing, or performance acceptance, that branch is
 not selected for production; `sbox_x4` uses exactly four scalar calls on that
-architecture. Full-batch behavior remains independently unchanged. This
-fallback still removes the original 8-for-1 scalar amplification and preserves
-all API and wire compatibility.
+architecture. If even that four-scalar-call composition fails acceptance
+criterion 1 on a measured architecture (for example, if the cross-crate hop
+and the cached capability load cost a repeatable median regression versus
+`sm4-bitsliced`), core `tau` routes the single-word path on that architecture
+to four calls into its own `sbox_bitsliced::sbox` instead of the sibling
+entry point. The structural guard survives either way: the x8 byte-replication
+adapter no longer exists, so neither fallback can reintroduce the 8-for-1
+scalar amplification. Full-batch behavior remains independently unchanged, and
+all API and wire compatibility is preserved.
 
 ## Final acceptance checklist
 
@@ -336,7 +355,9 @@ all API and wire compatibility.
 - The selected x86 branch records the required CPU, compiler, medians,
   threshold, and decision next to the implementation.
 - Full-batch throughput remains within the accepted tolerance.
-- Current documentation accurately describes the repaired path.
+- Current documentation accurately describes the repaired path, and the stale
+  performance prose named by issue #163 (`cipher.rs` throughput estimate,
+  `sbox_bitsliced.rs` TBD note) carries measured figures.
 - Disclosure, API, packaging, license, and assurance-policy gates pass.
 - No version, publish, tag, protected performance workflow, or deferred backend
   work is included.
