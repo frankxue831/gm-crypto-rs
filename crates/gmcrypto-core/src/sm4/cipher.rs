@@ -12,9 +12,11 @@
 //! bitsliced fast-path is deferred to v0.4 alongside the C-ABI / wasm
 //! work.
 //!
-//! Throughput on the linear-scan S-box is ~1-2M blocks/sec
-//! single-threaded on modern x86 (vs. ~150M for an LUT impl). Document
-//! this on every callsite that cares about throughput.
+//! Throughput on the linear-scan S-box is host-dependent. Measured
+//! 2026-08-22 on Apple M1 Pro, rustc 1.94.1, release, pre-keyed
+//! `encrypt_block`: ~3.1×10⁴ blocks/s (~0.49 MB/s). The ~1–2M
+//! blocks/s (~16–32 MB/s) figure is an x86-oriented estimate and
+//! does not describe this `AArch64` host (issue #163).
 //!
 //! # Single-shot API
 //!
@@ -495,7 +497,7 @@ fn crypt(block: &mut [u8; BLOCK_SIZE], rk: &[u32; 32], reverse: bool) {
 /// packed into one `__m256i` and S-boxed in a single
 /// [`gmcrypto_simd::sm4::sbox_x32::sbox_x32`] call. 32× fewer SIMD
 /// dispatches per batch vs 8 sequential [`crypt`] calls × 32 rounds
-/// × 4 S-box bytes per round = 1024 single-byte `sbox_x8` dispatches.
+/// × one four-byte `sbox_x4` per round.
 ///
 /// The L transform (`l_round`) and the round-state shift stay
 /// per-block — they're per-u32 bit rotations / XORs, not naturally
@@ -637,11 +639,9 @@ fn sbox_ct(x: u8) -> u8 {
 /// `--features sm4-bitsliced` (v0.4 W3) this dispatches to the
 /// table-less Itoh-Tsujii bitsliced S-box in
 /// [`crate::sm4::sbox_bitsliced`]. Under
-/// `--features sm4-bitsliced-simd` (v0.5 W4) it further dispatches to
-/// [`crate::sm4::sbox_bitsliced_simd`] — in phase 1 a transparent
-/// delegate to the single-block bitslice (byte-identical output);
-/// phase 2 / phase 3 swap in AVX2 / NEON intrinsics behind the same
-/// path.
+/// `--features sm4-bitsliced-simd` (v0.5 W4 / issue #163) it
+/// dispatches once into `sbox_bitsliced_simd::sbox_word` — four
+/// independent S-box bytes, no one-byte-to-x8 broadcast.
 // Under `sm4-bitsliced` the bitsliced S-box is `const fn`, which
 // would let `tau` be const too — but the default linear-scan path
 // uses runtime `subtle` ops that aren't const-eligible. Suppress the
@@ -668,12 +668,7 @@ fn tau(a: u32) -> u32 {
         crate::sm4::sbox_bitsliced::sbox(a_bytes[3]),
     ];
     #[cfg(feature = "sm4-bitsliced-simd")]
-    let b = [
-        crate::sm4::sbox_bitsliced_simd::sbox(a_bytes[0]),
-        crate::sm4::sbox_bitsliced_simd::sbox(a_bytes[1]),
-        crate::sm4::sbox_bitsliced_simd::sbox(a_bytes[2]),
-        crate::sm4::sbox_bitsliced_simd::sbox(a_bytes[3]),
-    ];
+    let b = crate::sm4::sbox_bitsliced_simd::sbox_word(a_bytes);
     u32::from_be_bytes(b)
 }
 
@@ -803,6 +798,34 @@ mod tests {
                 S_BOX[x as usize],
                 "sbox_ct mismatch at x={x:#04x}"
             );
+        }
+    }
+
+    /// Issue #163: `tau` under `sm4-bitsliced-simd` is one four-byte
+    /// sibling call (plus endian conversions), byte-identical to four
+    /// `sbox_bitsliced::sbox` evaluations.
+    #[cfg(feature = "sm4-bitsliced-simd")]
+    #[test]
+    fn tau_simd_matches_four_bitsliced_sboxes() {
+        const SENTINELS: [u8; 4] = [0x00, 0x55, 0xAA, 0xFF];
+        assert_eq!(tau(0x0001_0203), 0xd690_e9fe, "published S-box pin");
+
+        for b in 0u8..=255 {
+            for lane in 0..4 {
+                let mut bytes = SENTINELS;
+                bytes[lane] = b;
+                let repaired = tau(u32::from_be_bytes(bytes));
+                let reference = u32::from_be_bytes([
+                    crate::sm4::sbox_bitsliced::sbox(bytes[0]),
+                    crate::sm4::sbox_bitsliced::sbox(bytes[1]),
+                    crate::sm4::sbox_bitsliced::sbox(bytes[2]),
+                    crate::sm4::sbox_bitsliced::sbox(bytes[3]),
+                ]);
+                assert_eq!(
+                    repaired, reference,
+                    "tau mismatch at lane {lane} byte 0x{b:02x} input {bytes:02x?}",
+                );
+            }
         }
     }
 }

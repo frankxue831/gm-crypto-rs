@@ -633,3 +633,10 @@ jobs:
       # no_std; only its `alloc` feature is enabled, which we already have).
       - name: cargo +${{ matrix.toolchain }} build --target wasm32-unknown-unknown --features aead-traits
         run: cargo +${{ matrix.toolchain }} build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features --features aead-traits
+      # Issue #163 — sm4-bitsliced-simd must compile on wasm32 (scalar
+      # sbox_x4 fallback; cpufeatures is target-gated off wasm). Portability
+      # only; not a performance gate.
+      - name: cargo +${{ matrix.toolchain }} build --target wasm32-unknown-unknown --features sm4-bitsliced-simd
+        run: cargo +${{ matrix.toolchain }} build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features --features sm4-bitsliced-simd
+      - name: cargo +${{ matrix.toolchain }} build --target wasm32-unknown-unknown --features sm4-aead,sm4-bitsliced-simd
+        run: cargo +${{ matrix.toolchain }} build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features --features sm4-aead,sm4-bitsliced-simd

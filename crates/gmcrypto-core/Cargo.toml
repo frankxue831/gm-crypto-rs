@@ -118,24 +118,11 @@ sm4-bitsliced = []
 # 4 (NEON) blocks in parallel. Default-off (Q5.15 in
 # docs/v0.5-scope.md).
 #
-# v0.5.0 ships **phase 1 scaffolding only**: enabling this feature
-# in v0.5.0 transparently delegates to the v0.4 single-block
-# bitslice — no SIMD intrinsics, no throughput win, byte-identical
-# output. The W4 phase 2 (AVX2 8-way on `x86_64`) and phase 3
-# (NEON 4-way on `aarch64` + `Sm4CbcDecryptor` SIMD fanout)
-# intrinsic implementations are deferred to v0.5.x patch releases
-# or v0.6 (see CHANGELOG.md `[0.5.0]` "Scope retrospective" for the
-# rationale). The feature-flag name is stable across the rollout;
-# callers enabling `sm4-bitsliced-simd` in v0.5.0 will transparently
-# pick up the AVX2 / NEON fast paths when v0.5.x lands them, with
-# no source change required.
-# v0.5 W4 phase 2 — `sm4-bitsliced-simd` activates the
-# `gmcrypto-simd` sibling crate. Phase 1 was a transparent
-# delegate; phase 2 routes through the sibling's AVX2-or-scalar
-# dispatch with runtime CPU detection via `cpufeatures`. See
-# `crates/gmcrypto-core/src/sm4/sbox_bitsliced_simd.rs` for the
-# in-tree wire-up and `docs/v0.5-scope.md` Q5.11 addendum for the
-# architectural rationale.
+# `sm4-bitsliced-simd` pulls `gmcrypto-simd`. Serial `tau` uses the
+# four-byte `sbox_x4` entry (issue #163); full batches use `sbox_x16`
+# / `sbox_x32`. The one-byte-to-x8 adapter is removed. See
+# `crates/gmcrypto-core/src/sm4/sbox_bitsliced_simd.rs` and
+# `docs/sm4-single-block-simd-repair-design.md`.
 sm4-bitsliced-simd = ["sm4-bitsliced", "dep:gmcrypto-simd"]
 # v0.8 W2 / W3 — AEAD modes: SM4-GCM (mode_gcm) + SM4-CCM (mode_ccm)
 # single-shot, per docs/v0.7-aead-scope.md. Default-off (additive;

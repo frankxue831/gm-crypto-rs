@@ -591,23 +591,19 @@ fn ct_sm4_ctr_encrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
     }
 }
 
-/// SM4 encrypt-block diagnostic — SIMD-packed bitsliced path (v0.5 W4).
+/// SM4 encrypt-block diagnostic — SIMD-packed bitsliced path (v0.5 W4 /
+/// issue #163).
 ///
-/// Cfg-gated under `feature = "sm4-bitsliced-simd"`. Phase 1
-/// transparently delegates to the v0.4 single-block bitslice, so the
-/// measured byte sequence is identical to `ct_sm4_encrypt_block` under
-/// `--features sm4-bitsliced`. Phase 2 swaps in AVX2 8-way intrinsics
-/// (runtime detect; silent fallback to single-block on non-AVX2 CPUs);
-/// phase 3 adds NEON 4-way + `Sm4CbcDecryptor` SIMD fanout. The gate
-/// stays at `|tau| <= 0.20` across all three phases (Q5.14 of
-/// docs/v0.5-scope.md).
+/// Cfg-gated under `feature = "sm4-bitsliced-simd"`. Serial `tau` uses
+/// the four-byte `sbox_x4` sibling entry (`AArch64`: one NEON x16 with
+/// public-zero filler lanes; x86_64 production: four scalar calls —
+/// AVX2 not selected unless the 10% rule is met). Full-batch paths
+/// still use `sbox_x32` (AVX2) / `sbox_x16` (NEON). The gate stays at
+/// `|tau| <= 0.20` (Q5.14 of docs/v0.5-scope.md).
 ///
-/// The target is provisioned in phase 1 so that the CI matrix entry,
-/// gate threshold, and 100K-sample nightly-budget timing data have a
-/// landing pad before the SIMD body lands. The bench function and its
-/// `BenchMetadata` entry only compile when the feature is enabled, so
-/// there's no overhead on the default-features / `sm4-bitsliced` build
-/// paths.
+/// The bench function and its `BenchMetadata` entry only compile when
+/// the feature is enabled, so there's no overhead on the
+/// default-features / `sm4-bitsliced` build paths.
 #[cfg(feature = "sm4-bitsliced-simd")]
 fn ct_sm4_encrypt_block_bitsliced_simd(runner: &mut CtRunner, rng: &mut BenchRng) {
     let key_left: [u8; 16] = [

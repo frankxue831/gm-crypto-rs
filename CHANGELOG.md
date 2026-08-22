@@ -46,6 +46,16 @@ nothing found justifies a history rewrite.
 
 ### Fixed
 
+- **`sm4-bitsliced-simd` made serial SM4 (CCM CBC-MAC) slower** (#163):
+  `tau` called the one-byte-to-x8 adapter four times per word, so AArch64
+  paid 32 scalar S-box evaluations instead of four. Serial `tau` now uses
+  a four-byte `sbox_x4` entry (one NEON x16 on AArch64; four scalar calls
+  on x86_64 — AVX2 not selected, 10% rule unmeasured on the implementation
+  host). Full-batch `sbox_x16`/`sbox_x32` paths are unchanged. wasm32 CI
+  builds `sm4-bitsliced-simd` and `sm4-aead,sm4-bitsliced-simd`. On Apple
+  M1 Pro / rustc 1.94.1 / release, 1 MiB CCM invalid-tag decrypt is
+  ~1.64 MiB/s under `sm4-aead,sm4-bitsliced-simd` vs ~0.39 MiB/s
+  `sm4-bitsliced` and ~0.24 MiB/s linear-scan.
 - **Three shipped C examples did not compile** (#144, closes #143):
   `sm4_gcm_streaming.c`, `sm4_xts_sector.c` and `sm4_xts_multisector.c` each
   carried a nested `/* … */` inside the header block comment, so the inner `*/`

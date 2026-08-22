@@ -55,11 +55,10 @@ pub mod gcm_streaming;
 // `tau` can swap to it when the feature is on; not in the public API.
 //
 // When `sm4-bitsliced-simd` is also enabled, `tau` dispatches into
-// `sbox_bitsliced_simd::sbox` instead (which calls the sibling
-// crate). The v0.4 W3 module then becomes dead code at the
-// non-test build path, but its `tests::bitsliced_matches_table` is
-// still useful as an algorithmic correctness gate and as a
-// reference for `sbox_bitsliced_simd::tests::simd_sbox_matches_single_block`.
+// `sbox_bitsliced_simd::sbox_word` (one four-byte sibling call). The
+// v0.4 W3 module then becomes dead code at the non-test build path,
+// but its `tests::bitsliced_matches_table` is still the reference
+// for the `tau` differential under `sm4-bitsliced-simd`.
 // v0.12 — SM4-XTS single-shot tweakable mode (GB/T 17964-2021 / GM-T OID
 // 1.2.156.10197.1.104.10) behind the `sm4-xts` feature. Pure-core; full
 // ciphertext stealing; byte-identical to OpenSSL 3.x EVP SM4-XTS
@@ -71,12 +70,10 @@ pub mod mode_xts;
 #[cfg_attr(feature = "sm4-bitsliced-simd", allow(dead_code))]
 pub(crate) mod sbox_bitsliced;
 
-// v0.5 W4 — Multi-block SIMD-packed bitsliced SM4 S-box behind the
-// `sm4-bitsliced-simd` feature flag (Q5.10–Q5.15 of
-// docs/v0.5-scope.md). Phase 1 ships scaffolding only — the module
-// delegates transparently to `sbox_bitsliced` so the cfg-dispatch
-// path, dudect target, and CI matrix entry land before the AVX2
-// (phase 2) / NEON (phase 3) intrinsic implementations.
+// v0.5 W4 / issue #163 — SIMD-packed bitsliced SM4 S-box behind
+// `sm4-bitsliced-simd`. Serial `tau` uses the four-byte sibling
+// entry `sbox_x4`; full batches use `sbox_x16` / `sbox_x32`. The
+// one-byte-to-x8 adapter is gone.
 #[cfg(feature = "sm4-bitsliced-simd")]
 pub(crate) mod sbox_bitsliced_simd;
 

@@ -153,8 +153,10 @@ them is why the always-on bench vector has 16 entries against 12 `ct_*`:
 
 **Cfg-gated on `sm4-bitsliced-simd` (2):**
 
-- `ct_sm4_encrypt_block_bitsliced_simd` — SM4 single-block encrypt under the
-  SIMD-packed dispatch path (v0.5 W4 phase 2). Same `|tau| <= 0.20` gate.
+- `ct_sm4_encrypt_block_bitsliced_simd` — SM4 single-block encrypt under
+  `sm4-bitsliced-simd` (issue #163: four-byte `sbox_x4` for `tau`; AArch64
+  NEON x16, x86_64 four scalar calls unless AVX2 meets the 10% rule). Same
+  `|tau| <= 0.20` gate.
 - `ct_sm4_cbc_decrypt_fanout` — `Sm4CbcDecryptor`'s batched fanout
   (`decrypt_batch`) timed under load, class-split by master key (v0.6 W6).
   Exercises `sbox_x32` on `x86_64` AVX2 (8 blocks × 4 tau bytes = 32 bytes

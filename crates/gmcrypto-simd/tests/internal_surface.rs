@@ -9,6 +9,7 @@
 #[test]
 fn internal_entry_points_exist() {
     // Packed bitsliced S-box dispatchers.
+    let _ = gmcrypto_simd::sm4::sbox_x4::sbox_x4(&[0u8; 4]);
     let _ = gmcrypto_simd::sm4::sbox_x8::sbox_x8(&[0u8; 8]);
     let _ = gmcrypto_simd::sm4::sbox_x16::sbox_x16(&[0u8; 16]);
     let _ = gmcrypto_simd::sm4::sbox_x32::sbox_x32(&[0u8; 32]);

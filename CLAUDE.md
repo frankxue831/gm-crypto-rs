@@ -121,6 +121,8 @@ cargo build -p gmcrypto-core --no-default-features
 # wasm32: caller-supplied RNG; these features are pure-core/no_std.
 cargo build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features
 cargo build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features --features sm4-xts,sm2-key-exchange,x509,tlcp,aead-traits
+cargo build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features --features sm4-bitsliced-simd
+cargo build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features --features sm4-aead,sm4-bitsliced-simd
 
 # C ABI: AEAD/XTS FFI is always-on (no --features). regen-header must not drift.
 cargo build -p gmcrypto-c --release

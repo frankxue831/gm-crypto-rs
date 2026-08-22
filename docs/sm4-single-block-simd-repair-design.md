@@ -53,6 +53,14 @@ This validates the AArch64 design only; it is not evidence for x86 AVX2.
 
 ## Decision
 
+Issue #163 item 2 ("keep `encrypt_block` / `tau` on scalar bitsliced;
+accelerate `encrypt_blocks` only") is **superseded** by this design.
+Serial `tau` is in scope for `sbox_x4`. Four scalar gate-circuit calls
+are the fallback (and the unmeasured-target production path), not the
+AArch64 production path. The packed four-byte path is what closes the
+CCM CBC-MAC regression; a scalar-only `tau` would leave the measured
+AArch64 NEON gain unused.
+
 ### Cross-crate interface
 
 Add a doc-hidden internal entry point following the existing lane-oriented
@@ -99,6 +107,19 @@ below assumes this removal.
 - **x86_64 without AVX2:** exactly four scalar gate-circuit calls. This branch
   must not call the public x8 dispatcher, whose fallback performs eight calls.
 - **Other targets:** exactly four scalar gate-circuit calls.
+
+`sbox_x4` must `cfg`-gate the NEON x16 staging to `target_arch = "aarch64"`
+and must never call the public `sbox_x16` or `sbox_x8` dispatchers on any
+other target. A cfg-generic `sbox_x16(&[b0, b1, b2, b3, 0, …])` is sixteen
+scalar evaluations on x86/wasm — worse than the regression being fixed.
+The no-AVX2 / unselected-AVX2 path calls `sbox_x4_scalar` (four
+`sbox_byte` evaluations), not `sbox_x8`.
+
+Keep `sbox_x8` as an internal AVX2 candidate and test surface (Q6.9).
+Removing the core one-byte adapter does not delete that module. If
+production `sbox_x4` on x86_64 uses four scalar calls, `sbox_x8`
+remains for `sbox_x32` comments, lane-equivalence tests, and an
+`sbox_x4_avx2` candidate that tests may call directly.
 
 The AVX2 choice is a build-time implementation decision backed by recorded
 same-host evidence, not a secret- or input-dependent runtime benchmark. Runtime
