@@ -10,23 +10,33 @@ the project follows [Semantic Versioning](https://semver.org/).
 **A patch for two defects, one of which the other exposed.**
 
 1. Enabling the opt-in `sm4-bitsliced-simd` feature on 1.11.0 makes serial
-   SM4 — the CCM CBC-MAC path — *slower* than the scalar build (#163, fixed
-   in #165, evidenced in #166). Only callers who enabled that feature compile
-   the changed code; `gmcrypto-c` and `sm4-aead`-only downstreams do not.
+   SM4 — the CCM CBC-MAC path — *slower* than the scalar build on the
+   measured AArch64 host (#163, fixed in #165, evidenced in #166). The
+   repaired serial path **executes** only when `sm4-bitsliced-simd` is
+   selected. `sm4-aead` (and so `gmcrypto-c` and `sm4-aead`-only downstreams)
+   pulls `gmcrypto-simd` and *compiles* its `sbox_x4` module but never selects
+   that path. **x86_64 throughput is unmeasured**: the repair is
+   correctness-, KAT- and fuzz-covered on x86_64 CI, and no "no longer
+   slower" claim is made for it (see *Fixed*).
 2. The TLCP SM4-CBC deprotect's Lucky13 inner-HMAC was length-*count*
    equalized but not length-*independent*: the streaming hasher's buffer copy
    and finalize-padding branch still depended on the secret fragment length
    (since v1.7.0). Fix 1 made that residual measurable above the dudect gate
    on Zen 4 / Xeon 8573C runners, so this patch was **held** at its first cut
    and re-cut with the inner-HMAC rewritten as a fixed-schedule,
-   constant-time construction (#169). Every `tlcp` user gets this; MAC values
-   and wire bytes are unchanged. See *Security* below.
+   constant-time construction (#169). This **executes in every build that
+   enables `tlcp`** — including **`gmcrypto-c`** and every C-ABI consumer of
+   the CBC deprotect. MAC values and wire bytes are unchanged. See *Security*
+   below.
 
 No public API, C ABI, wire-format, MSRV, or dependency change;
-`cargo-semver-checks` clean against 1.11.0. The **default build is
-wire-identical to 1.11.0**; its only behavioural change is that
-`tlcp::record::deprotect_cbc` now does length-independent work (same SM3 block
-count, plus per-byte constant-time selection).
+`cargo-semver-checks` clean against 1.11.0. Scope of the behavioural change,
+stated precisely: default `gmcrypto-core` (`default = []`) enables neither
+feature and is **behaviour- and timing-identical** to 1.11.0;
+`tlcp`-enabled builds are **wire-identical** and their `deprotect_cbc` timing
+deliberately changes (same SM3 block count, plus per-byte constant-time
+selection); `sm4-bitsliced-simd` builds additionally get the serial-SM4
+repair.
 
 Everything below accumulated on `main` since 1.11.0 and ships with this patch.
 Apart from the two fixes, it is assurance, CI, records, and C example-file
