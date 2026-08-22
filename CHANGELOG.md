@@ -43,6 +43,23 @@ nothing found justifies a history rewrite.
   so a leak added and removed in the same squash is still visible. P1 blocks;
   P2 reports to the job summary. The history sweep is audit-only and is
   **not** wired to CI, because history cannot be fixed without a rewrite.
+- **`sm4-bitsliced-simd` composition evidence** (#163 follow-up; no code
+  change). The #165 repair was unit-tested in `gmcrypto-simd` and core-tested
+  on AArch64 only; the x86_64 `sbox_x4` branch (four scalar circuit calls —
+  a different path from the NEON x16 staging) had no core-level coverage and
+  no fuzz target reached it. Three additions, all CI-only: (1) the `simd-x86`
+  job now also runs `cargo test -p gmcrypto-core` under `sm4-bitsliced-simd`
+  and `sm4-aead,sm4-bitsliced-simd`, so `tau` → `sbox_x4`, key schedule,
+  modes and `cpufeatures` dispatch are tested on x86_64; (2) the GB/T 32907
+  A.1 million-round KAT — `#[ignore]`d in the default sweep — runs in
+  release under the feature on both macos-14 (NEON) and the x86_64 job;
+  (3) the fuzz crate gains an opt-in `simd` feature
+  (`gmcrypto-core/sm4-bitsliced-simd`) and `fuzz-nightly.yml` a parallel
+  `fuzz-simd` job that re-sweeps the seventeen SM4-touching targets under it
+  (`FUZZ_SIMD_TARGETS`, preflight-checked as a subset of `FUZZ_TARGETS`);
+  `fuzz-build.yml` compiles both profiles on PRs. Kept opt-in rather than
+  always-on because features are additive — always-on would have silently
+  stopped fuzzing the portable S-box that the default build ships.
 
 ### Fixed
 

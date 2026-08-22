@@ -8,9 +8,11 @@ name: fuzz nightly (cargo-fuzz)
 #
 # Runner: GitHub-hosted `ubuntu-latest`. libFuzzer is native on Linux
 # and the targets fuzz platform-agnostic decode/decrypt logic (the
-# fuzz crate enables sm4-aead + sm4-xts but not SIMD), so host arch is
-# irrelevant. Moved off the self-hosted macOS runner at the v0.17 public
-# flip — a self-hosted runner on a PUBLIC repo is remote code execution,
+# fuzz crate enables sm4-aead + sm4-xts; SIMD only in the separate
+# `fuzz-simd` job below, where the x86_64 host IS the point), so host
+# arch is irrelevant to the main sweep. Moved off the self-hosted macOS
+# runner at the v0.17 public flip — a self-hosted runner on a PUBLIC
+# repo is remote code execution,
 # and fuzzing runs adversarial native code by design, so it must not run
 # on a personal machine. See docs/pre-opensource-audit.md (C1) and
 # docs/v0.14-scope.md Q14.8.
@@ -70,6 +72,21 @@ env:
     fuzz_sm4_gcm_encrypt fuzz_sm4_ccm_encrypt fuzz_sm4_xts_encrypt fuzz_x509
     fuzz_tlcp_cbc_deprotect fuzz_tlcp_gcm_deprotect fuzz_x509_chain
     fuzz_sm4_xts_sectors fuzz_sm4_gcm_tag_len_roundtrip fuzz_sm4_aead_traits
+  # Issue #163 follow-up (L0 evidence) — the subset of FUZZ_TARGETS that
+  # reaches SM4 (`Sm4Cipher` directly, a mode, the TLCP record layer,
+  # PKCS#8 SM4-CBC decrypt, or the C ABI). The `fuzz-simd` job re-sweeps
+  # exactly these under the fuzz crate's `simd` feature
+  # (= gmcrypto-core/sm4-bitsliced-simd), so the repaired `tau` →
+  # `sbox_x4` composition and the `sbox_x16`/`sbox_x32` batch paths are
+  # fuzzed on an x86_64 host. MUST be a subset of FUZZ_TARGETS (preflight
+  # below enforces it); a new SM4-touching target goes in BOTH lists.
+  FUZZ_SIMD_TARGETS: >-
+    fuzz_pkcs8_decrypt fuzz_sm4_cbc_decrypt fuzz_sm4_gcm_decrypt
+    fuzz_sm4_ccm_decrypt fuzz_sm4_xts_decrypt fuzz_sm4_cbc_streaming_decrypt
+    fuzz_sm4_gcm_streaming_decrypt fuzz_c_abi fuzz_sm4_cbc_encrypt
+    fuzz_sm4_gcm_encrypt fuzz_sm4_ccm_encrypt fuzz_sm4_xts_encrypt
+    fuzz_tlcp_cbc_deprotect fuzz_tlcp_gcm_deprotect fuzz_sm4_xts_sectors
+    fuzz_sm4_gcm_tag_len_roundtrip fuzz_sm4_aead_traits
 
 permissions:
   contents: read
@@ -178,6 +195,100 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: fuzz-artifacts
+          path: fuzz/artifacts/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # Issue #163 follow-up (L0 evidence) — the same capped sweep, restricted to
+  # FUZZ_SIMD_TARGETS and built with the fuzz crate's `simd` feature. A
+  # SEPARATE job, parallel to `fuzz`, for two reasons: (1) features are
+  # additive, so folding the flag into the main sweep would stop fuzzing
+  # the portable S-box that the default build ships; (2) seventeen extra
+  # targets at the default budget would push the main job past its
+  # timeout. Same preflights, same crash semantics, own artifact name.
+  fuzz-simd:
+    name: cargo-fuzz nightly sweep (sm4-bitsliced-simd profile)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust nightly
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustc +nightly --version
+
+      - name: Install pinned cargo-fuzz
+        run: |
+          if ! cargo fuzz --version 2>/dev/null | grep -q "$CARGO_FUZZ_VERSION"; then
+            cargo install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
+          fi
+          cargo fuzz --version
+
+      - name: Build all fuzz targets (--features simd)
+        run: cargo +nightly fuzz build --features simd
+
+      # FUZZ_SIMD_TARGETS ⊆ FUZZ_TARGETS, and every listed target must exist
+      # as a [[bin]] (a typo here would otherwise surface as a cargo error
+      # inside the sweep and read like a crash). Same config-drift-is-not-
+      # a-crash posture as the main job's preflights.
+      - name: Preflight — FUZZ_SIMD_TARGETS is a subset of FUZZ_TARGETS and of [[bin]]s
+        run: |
+          bins=" $(grep -A1 '^\[\[bin\]\]' fuzz/Cargo.toml \
+                   | sed -n 's/^name = "\(.*\)"/\1/p' | tr '\n' ' ') "
+          missing=""
+          for t in $FUZZ_SIMD_TARGETS; do
+            case " $FUZZ_TARGETS " in *" $t "*) ;; *) missing="$missing $t(not-in-FUZZ_TARGETS)" ;; esac
+            case "$bins" in *" $t "*) ;; *) missing="$missing $t(no-[[bin]])" ;; esac
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::config drift, NOT a crash — FUZZ_SIMD_TARGETS entries:$missing"
+            exit 1
+          fi
+          echo "FUZZ_SIMD_TARGETS: $(echo $FUZZ_SIMD_TARGETS | wc -w) targets, all in FUZZ_TARGETS and fuzz/Cargo.toml"
+
+      - name: Preflight — every SIMD target has a seeds dir
+        run: |
+          missing=""
+          for t in $FUZZ_SIMD_TARGETS; do
+            [ -d "fuzz/seeds/$t" ] || missing="$missing $t"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::config drift, NOT a crash — missing fuzz/seeds/<target>/ for:$missing"
+            exit 1
+          fi
+          echo "seeds dir present for all $(echo $FUZZ_SIMD_TARGETS | wc -w) SIMD targets"
+
+      - name: Fuzz each SIMD target (capped, --features simd)
+        run: |
+          BUDGET="${{ github.event.inputs.max_total_time || '120' }}"
+          failed=""
+          for t in $FUZZ_SIMD_TARGETS; do
+            echo "::group::$t (simd)"
+            mkdir -p "fuzz/corpus/$t"
+            dirs="fuzz/corpus/$t"
+            [ -d "fuzz/seeds/$t" ] && dirs="$dirs fuzz/seeds/$t"
+            # shellcheck disable=SC2086
+            if cargo +nightly fuzz run --features simd "$t" $dirs -- \
+                 -max_len=16384 -rss_limit_mb=2048 -timeout=25 \
+                 -max_total_time="$BUDGET"; then
+              echo "PASS $t (simd)"
+            else
+              echo "CRASH $t (simd)"
+              failed="$failed $t"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::fuzz crash(es) under --features simd in:$failed"
+            exit 1
+          fi
+
+      - name: Upload crash artifacts (simd)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-artifacts-simd
           path: fuzz/artifacts/
           retention-days: 30
           if-no-files-found: ignore

@@ -481,7 +481,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "nightly dudect": job(dudect_nightly, "full"),
     }
     reviewed_job_fingerprints = {
-        "build": "85462b6ff58a6497e0360a5cf7c057097818b9fb6c2aeb761de9248425ecc956",
+        "build": "637d188f176673a1513f2641b27c0f581bfd7c672eef9bc69658a51aafcdfb70",
         "cabi": "4ff7eccfa333d3858ef97ceb3e517c043c44a962e7333976d21896cf1b404c31",
         "GmSSL": "796eafa03285b30a7b70389b5c4ddab6f064fae0339f3b898de0210a4601ab79",
         "cargo-deny": "efc9a2787bc8b48022d35d3419af0e9987c6a11c3a5c44959fc93b1d33be9174",
