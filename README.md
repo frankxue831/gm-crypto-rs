@@ -235,8 +235,10 @@ Three crates, released together at one lockstep version:
 
 The line graduated to **1.0 (stable)** with the **1.0.0** release; the current release is
 **1.11.1** (a patch: the opt-in `sm4-bitsliced-simd` feature no longer makes serial
-SM4 — the CCM CBC-MAC path — slower than the scalar build, issue #163; the default
-build is behaviour-identical to 1.11.0. **1.11.0** was the RustCrypto `aead` 0.6
+SM4 — the CCM CBC-MAC path — slower than the scalar build, issue #163; and the TLCP
+SM4-CBC deprotect's Lucky13 inner-HMAC is now length-independent by construction, a
+residual the first fix made measurable on Zen 4 / Xeon runners. Wire-identical to
+1.11.0. **1.11.0** was the RustCrypto `aead` 0.6
 trait fit; **1.9.0** the TLCP toolkit C FFI that closed the TLCP arc). crates.io history
 goes **0.16.0 → 1.0.0 → 1.0.1 → 1.1.0 → 1.2.0 → 1.3.0 → 1.4.0 → 1.6.0 → 1.7.0 → 1.8.0 → 1.9.0 → 1.11.0 → 1.11.1**, skipping 0.17.0–0.23.0,
 1.5.0, 1.9.1 and 1.10.0 (the 0.x run was the assurance +

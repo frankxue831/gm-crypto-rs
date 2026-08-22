@@ -22,9 +22,9 @@ agent that never reads it break something?* If not, it is history — file it.
 
 | | |
 |---|---|
-| Workspace version | `1.11.1` (sibling pins `=1.11.1`) — **prepped at `8cb4aac`, NOT published, publish BLOCKED pending maintainer decision**: nightly dudect slot 4 fails `ct_tlcp_cbc_deprotect` (0.30 @100K on Intel 8573C / 0.32–0.42 @10K on EPYC 9V74; 0.12 pre-#165 on the same CPU class). See `docs/v1.11.1-release-review.md` "dudect note" + correction. Don't publish `8cb4aac` on the strength of the green PR |
+| Workspace version | `1.11.1` (sibling pins `=1.11.1`) — **re-cut, prepped, not yet published.** First cut `8cb4aac` was held (nightly dudect `ct_tlcp_cbc_deprotect` 0.30 on Xeon 8573C / 0.32–0.42 on EPYC 9V74); fixed by #169 (`tlcp::record::mac_ct`); **publish from the squash SHA of the re-cut release PR, never from `8cb4aac`** |
 | Live on crates.io | **`1.11.0`** — all three crates, 2026-08-01 from `613f619` (tag `v1.11.0`) |
-| 1.11.1 patch | Fixes #163 (`sm4-bitsliced-simd` made serial SM4 / CCM slower than scalar on 1.11.0). Default build behaviour-identical to 1.11.0. Audience: Rust callers who enabled that feature on 1.11.0 — `gmcrypto-c` and `sm4-aead`-only downstreams never compile the changed path |
+| 1.11.1 patch | Two fixes: #163 (`sm4-bitsliced-simd` made serial SM4 / CCM slower than scalar; opt-in path only) and #169 (TLCP CBC deprotect's Lucky13 inner-HMAC now length-independent by construction; every `tlcp` user). Default build **wire-identical** to 1.11.0, not timing-identical. Hosted `ubuntu-24.04` dudect runners are heterogeneous (EPYC 7763 / 9V74 / Xeon 8573C / 6973P-C) — **record the `Model name` of every dudect run before calling a red slot noise** |
 | crates.io skips | `1.10.0` (non-publishing assurance) and **`1.9.1`** (licence-text patch superseded by 1.11.0). Record: `docs/v1.9.1-release-review.md`. **1.11.0 is the first published release carrying licence text**; 1.9.0 and earlier stay without it |
 | Runbook / gate | `docs/v1.11.1-release-review.md`, `docs/v1.11.1-gate1-evidence.md`. Previous: `docs/v1.11.0-release-review.md`, `docs/v1.11.0-gate1-evidence.md` (PASS) |
 

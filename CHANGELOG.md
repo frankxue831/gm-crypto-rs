@@ -7,20 +7,30 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [1.11.1] - 2026-08-22
 
-**A patch for one published defect.** Enabling the opt-in `sm4-bitsliced-simd`
-feature on 1.11.0 makes serial SM4 — the CCM CBC-MAC path — *slower* than the
-scalar build (#163, fixed in #165). Callers who enabled that feature on 1.11.0
-should upgrade; nobody else is affected: the **default build is
-behaviour-identical to 1.11.0** (the only non-comment source change sits on the
-`#[cfg(feature = "sm4-bitsliced-simd")]` path), and neither `gmcrypto-c` nor any
-downstream that selects only `sm4-aead` compiles the changed code. No public
-API, C ABI, wire-format, MSRV, or dependency change; `cargo-semver-checks`
-clean against 1.11.0.
+**A patch for two defects, one of which the other exposed.**
+
+1. Enabling the opt-in `sm4-bitsliced-simd` feature on 1.11.0 makes serial
+   SM4 — the CCM CBC-MAC path — *slower* than the scalar build (#163, fixed
+   in #165, evidenced in #166). Only callers who enabled that feature compile
+   the changed code; `gmcrypto-c` and `sm4-aead`-only downstreams do not.
+2. The TLCP SM4-CBC deprotect's Lucky13 inner-HMAC was length-*count*
+   equalized but not length-*independent*: the streaming hasher's buffer copy
+   and finalize-padding branch still depended on the secret fragment length
+   (since v1.7.0). Fix 1 made that residual measurable above the dudect gate
+   on Zen 4 / Xeon 8573C runners, so this patch was **held** at its first cut
+   and re-cut with the inner-HMAC rewritten as a fixed-schedule,
+   constant-time construction (#169). Every `tlcp` user gets this; MAC values
+   and wire bytes are unchanged. See *Security* below.
+
+No public API, C ABI, wire-format, MSRV, or dependency change;
+`cargo-semver-checks` clean against 1.11.0. The **default build is
+wire-identical to 1.11.0**; its only behavioural change is that
+`tlcp::record::deprotect_cbc` now does length-independent work (same SM3 block
+count, plus per-byte constant-time selection).
 
 Everything below accumulated on `main` since 1.11.0 and ships with this patch.
-Apart from the #163 fix, it is assurance, CI, records, and C example-file
-work — nothing changes what a consumer's build does. Sibling pins move to
-`=1.11.1`.
+Apart from the two fixes, it is assurance, CI, records, and C example-file
+work. Sibling pins move to `=1.11.1`.
 
 **2026-08-06–15 maintenance** — two batches, no production cryptographic
 code, public API, or C ABI change. The example-file changes below ship with
