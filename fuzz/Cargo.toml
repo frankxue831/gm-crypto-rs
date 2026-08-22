@@ -32,6 +32,21 @@ aead = { version = "0.6.1", default-features = false, features = ["alloc"] }
 path = "../crates/gmcrypto-core"
 features = ["sm4-aead", "sm4-xts", "sm2-key-exchange", "x509", "tlcp", "aead-traits"]
 
+# Issue #163 follow-up (L0 evidence) — a SECOND fuzz profile, opt-in.
+# `sm4-bitsliced-simd` routes serial `tau` through gmcrypto-simd's
+# `sbox_x4` and full batches through `sbox_x16`/`sbox_x32`; before this
+# feature existed every fuzz target exercised only the portable S-box,
+# so the repaired composition was never fuzzed. It is deliberately NOT in
+# the always-on list above: Cargo features are additive, so turning it on
+# unconditionally would silently STOP fuzzing the portable path — the one
+# the default build actually ships. fuzz-nightly.yml runs the SM4-touching
+# targets under both profiles; fuzz-build.yml compiles both.
+#
+#   cargo +nightly fuzz build --features simd
+#   cargo +nightly fuzz run --features simd fuzz_sm4_ccm_decrypt <dirs> -- ...
+[features]
+simd = ["gmcrypto-core/sm4-bitsliced-simd"]
+
 # The C ABI shim, pulled in via its `rlib` crate-type so the `fuzz_c_abi`
 # target can drive the `extern "C"` entry points directly (raw pointers +
 # caller-owned buffers) exactly as a C caller would.

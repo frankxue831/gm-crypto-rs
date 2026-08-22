@@ -153,6 +153,14 @@ jobs:
         run: cargo test -p gmcrypto-core --features sm4-aead
       - name: cargo test --features sm4-aead,sm4-bitsliced-simd
         run: cargo test -p gmcrypto-core --features sm4-aead,sm4-bitsliced-simd
+      # Issue #163 follow-up (L0 evidence) — the GB/T 32907 A.1 million-round
+      # KAT is `#[ignore]`d in the default sweep (debug-build cost). Under
+      # `sm4-bitsliced-simd` on this AArch64 host, serial `tau` takes the
+      # NEON `sbox_x4` staging path; running the KAT in release here makes
+      # the end-to-end cipher composition a CI fact on the arch the repair
+      # was measured on. The x86_64 twin lives in the `simd-x86` job.
+      - name: GB/T 32907 A.1 million-round KAT under sm4-bitsliced-simd (AArch64, release)
+        run: cargo test -p gmcrypto-core --release --lib --features sm4-bitsliced-simd gbt32907_one_million_rounds -- --ignored
 
       # v1.1 — SM2 key exchange (GM/T 0003.3). Pure-core opt-in; the KAT
       # integration test (sm2_kx_kat) is cfg-gated on the feature.
@@ -239,6 +247,19 @@ jobs:
     # NEON/PMULL paths. This job runs gmcrypto-simd's correctness tests
     # (lane-equivalence, lane-position, ghash-KAT, software-vs-CLMUL) on an
     # x86_64 host so the AVX2/CLMUL code is gated in CI, not just nightly-fuzzed.
+    #
+    # Issue #163 follow-up (L0 evidence) — the three core-level steps below
+    # are the ONLY x86_64 coverage of the `sm4-bitsliced-simd` COMPOSITION:
+    # `tau` → `sbox_x4` (four scalar circuit calls on x86_64, a different
+    # branch from the NEON x16 staging that macos-14 tests), key schedule,
+    # CBC/GCM/CCM/XTS modes, and runtime dispatch via `cpufeatures`.
+    # `cargo test -p gmcrypto-simd` alone tests the primitive, not the
+    # cipher built on it. The million-round KAT (GB/T 32907 A.1) is
+    # `#[ignore]`d in the default sweep; run here in release under the
+    # feature, it is the strongest single sentinel that exactly four
+    # S-box evaluations per `tau`, in the right byte order, compose into
+    # the standard cipher 32M times over. The job name is unchanged
+    # deliberately (it may be referenced by branch protection).
     name: gmcrypto-simd tests (x86_64)
     runs-on: ubuntu-latest
     if: >-
@@ -250,7 +271,10 @@ jobs:
       !contains(github.event.head_commit.message, '[ci skip]') &&
       !contains(github.event.head_commit.message, '[no ci]') &&
       !contains(github.event.head_commit.message, '[skip actions]')
-    timeout-minutes: 15
+    # Was 15 when the job ran only the simd crate's tests; the two core
+    # debug test passes plus one release lib build need headroom on a
+    # cold cache.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -260,6 +284,12 @@ jobs:
           shared-key: simd-x86
       - name: cargo test -p gmcrypto-simd (x86_64 AVX2 / CLMUL paths)
         run: cargo test -p gmcrypto-simd
+      - name: cargo test -p gmcrypto-core --features sm4-bitsliced-simd (x86_64 composition)
+        run: cargo test -p gmcrypto-core --features sm4-bitsliced-simd
+      - name: cargo test -p gmcrypto-core --features sm4-aead,sm4-bitsliced-simd (x86_64 composition)
+        run: cargo test -p gmcrypto-core --features sm4-aead,sm4-bitsliced-simd
+      - name: GB/T 32907 A.1 million-round KAT under sm4-bitsliced-simd (x86_64, release)
+        run: cargo test -p gmcrypto-core --release --lib --features sm4-bitsliced-simd gbt32907_one_million_rounds -- --ignored
 
   interop-gmssl:
     # F16 — the gmssl cross-validation suite is the project's headline wire

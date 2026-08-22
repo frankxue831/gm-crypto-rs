@@ -58,6 +58,28 @@ cargo +nightly fuzz run fuzz_pem fuzz/corpus/fuzz_pem fuzz/seeds/fuzz_pem -- \
 cargo +nightly fuzz build
 ```
 
+## Second profile: `--features simd` (issue #163 follow-up)
+
+The crate's always-on core features cover the **portable** SM4 S-box — the
+one the default build ships. The opt-in `simd` feature
+(= `gmcrypto-core/sm4-bitsliced-simd`) routes serial `tau` through
+`gmcrypto-simd`'s `sbox_x4` and full batches through `sbox_x16`/`sbox_x32`,
+so the repaired single-block composition is fuzzed too. It is deliberately
+**not** always-on: Cargo features are additive, so turning it on
+unconditionally would silently stop fuzzing the portable path.
+
+```bash
+cargo +nightly fuzz build --features simd
+cargo +nightly fuzz run --features simd fuzz_sm4_ccm_decrypt \
+    fuzz/corpus/fuzz_sm4_ccm_decrypt fuzz/seeds/fuzz_sm4_ccm_decrypt -- \
+    -max_len=16384 -rss_limit_mb=2048 -timeout=25 -max_total_time=60
+```
+
+`fuzz-nightly.yml` sweeps `FUZZ_SIMD_TARGETS` (the SM4-touching subset of
+`FUZZ_TARGETS`) under this profile in its own `fuzz-simd` job; a new
+SM4-touching target goes in **both** lists. `fuzz-build.yml` compiles both
+profiles on PRs.
+
 ## Coverage report (v0.20)
 
 The nightly workflow renders per-target `llvm-cov` region/line coverage over the

@@ -143,6 +143,7 @@ GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl --features sm4-aead
 # Fuzz: separate workspace (parent exclude=["fuzz"]). Nightly. Run from repo root.
 # cargo fuzz run WRITES into the FIRST dir — corpus (gitignored) first, seeds second.
 cargo +nightly fuzz build
+cargo +nightly fuzz build --features simd   # second profile = sm4-bitsliced-simd
 cargo +nightly fuzz run fuzz_pem fuzz/corpus/fuzz_pem fuzz/seeds/fuzz_pem -- \
   -max_len=16384 -rss_limit_mb=2048 -timeout=25 -max_total_time=60
 
@@ -275,7 +276,10 @@ no_std comb-table lazy init — not `LazyLock`/`OnceLock` (both `std`).
 - Don't fold `rustcrypto_aead_traits` into `rustcrypto_traits.rs` (would
   silently unwire that CI leg).
 - Fuzz `FUZZ_TARGETS` in `fuzz-nightly.yml` must name every `fuzz/Cargo.toml`
-  `[[bin]]`; every target needs a `fuzz/seeds/<target>/` dir. Don't add
+  `[[bin]]`; every target needs a `fuzz/seeds/<target>/` dir. A target that
+  touches SM4 also goes in `FUZZ_SIMD_TARGETS` (the `fuzz-simd` job re-sweeps
+  it under the fuzz crate's opt-in `simd` feature — don't make that feature
+  always-on; additive features would un-fuzz the portable S-box). Don't add
   `fuzz-build.yml` to branch protection while it keeps a `paths:` filter.
 - GCM decryptor / TLCP CBC deprotect / X.509 parse: public inputs or already
   covered by existing dudect targets — don't add a target "because the cycle

@@ -108,3 +108,10 @@ jobs:
       # builds all 18 [[bin]] targets declared in fuzz/Cargo.toml.
       - name: Build all fuzz targets
         run: cargo +nightly fuzz build
+
+      # Issue #163 follow-up (L0 evidence) — the fuzz crate's opt-in `simd`
+      # feature (= gmcrypto-core/sm4-bitsliced-simd) is a second profile that
+      # fuzz-nightly.yml sweeps. Compile it here too, so a change that breaks
+      # the SIMD composition's fuzz build fails at PR time, not ~24h later.
+      - name: Build all fuzz targets (--features simd)
+        run: cargo +nightly fuzz build --features simd
