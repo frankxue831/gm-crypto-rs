@@ -39,7 +39,7 @@
 //! # Issue #163 — serial `tau` repair
 //!
 //! - [`sm4::sbox_x4::sbox_x4`]: four independent S-box bytes for
-//!   single-block / key-schedule `tau`. AArch64 reuses one NEON x16
+//!   single-block / key-schedule `tau`. `AArch64` reuses one NEON x16
 //!   invocation; other targets use four scalar calls. The one-byte
 //!   `sbox_x8` broadcast adapter in `gmcrypto-core` is removed.
 //!

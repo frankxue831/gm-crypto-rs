@@ -596,7 +596,7 @@ fn ct_sm4_ctr_encrypt(runner: &mut CtRunner, rng: &mut BenchRng) {
 ///
 /// Cfg-gated under `feature = "sm4-bitsliced-simd"`. Serial `tau` uses
 /// the four-byte `sbox_x4` sibling entry (`AArch64`: one NEON x16 with
-/// public-zero filler lanes; x86_64 production: four scalar calls —
+/// public-zero filler lanes; `x86_64` production: four scalar calls —
 /// AVX2 not selected unless the 10% rule is met). Full-batch paths
 /// still use `sbox_x32` (AVX2) / `sbox_x16` (NEON). The gate stays at
 /// `|tau| <= 0.20` (Q5.14 of docs/v0.5-scope.md).

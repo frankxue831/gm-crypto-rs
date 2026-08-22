@@ -13,8 +13,8 @@
 //!   Compile-time baseline; no runtime CPU detect.
 //!
 //! Issue #163 added:
-//! - [`sbox_x4::sbox_x4`] — four-byte serial-`tau` adapter. AArch64
-//!   reuses one NEON x16 invocation; x86_64 production is four
+//! - [`sbox_x4::sbox_x4`] — four-byte serial-`tau` adapter. `AArch64`
+//!   reuses one NEON x16 invocation; `x86_64` production is four
 //!   scalar calls (AVX2 not selected: 10% rule unmeasured);
 //!   [`sbox_x8`] is kept as an internal candidate / test surface.
 //!

@@ -14,9 +14,9 @@
 //!   outputs. NEON is compile-time baseline; no runtime detect.
 //!   Must not go through [`super::sbox_x16::sbox_x16`] on any other
 //!   target (that dispatcher is 16 scalar calls off-aarch64).
-//! - **x86_64:** exactly four scalar gate-circuit calls. AVX2 is
+//! - **`x86_64`:** exactly four scalar gate-circuit calls. AVX2 is
 //!   not the production branch: the 10% improvement rule could not
-//!   be measured on the AArch64 implementation host. The AVX2
+//!   be measured on the `AArch64` implementation host. The AVX2
 //!   candidate remains [`sbox_x4_avx2`] for tests. Must not call
 //!   [`super::sbox_x8::sbox_x8`] (its non-AVX2 fallback is eight
 //!   scalar calls).
