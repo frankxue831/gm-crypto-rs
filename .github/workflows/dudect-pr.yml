@@ -195,6 +195,24 @@ jobs:
           logs = sorted(glob.glob("dudect-*.log"))
           assert logs, "no dudect-*.log files found — bench loop did not run"
 
+          # Runner CPU class is the variable that explained both the 2026-08-07
+          # and the 2026-08-22 ct_sm4_cbc_decrypt_fanout gate failures (EPYC
+          # 9V74 on each, unexplained at the time because this line did not
+          # exist). Hosted ubuntu-24.04 draws a heterogeneous pool and composite
+          # -window targets read materially higher on some SKUs, so the verdicts
+          # below are only interpretable next to the model name. See
+          # docs/v0.5-dudect-recalibration.md, 2026-08-23.
+          cpu = "unknown"
+          try:
+              with open("/proc/cpuinfo") as fh:
+                  for line in fh:
+                      if line.startswith("model name"):
+                          cpu = line.split(":", 1)[1].strip()
+                          break
+          except OSError:
+              pass
+          print(f"RUNNER-CPU: {cpu}")
+
           findings = {}
           for path in logs:
               text = open(path).read()

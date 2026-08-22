@@ -486,8 +486,8 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "GmSSL": "796eafa03285b30a7b70389b5c4ddab6f064fae0339f3b898de0210a4601ab79",
         "cargo-deny": "efc9a2787bc8b48022d35d3419af0e9987c6a11c3a5c44959fc93b1d33be9174",
         "gitleaks scan": "c7889df5e874f1a5cee871c24cd49cc539d845c0627861e49b1a9e6335d1c15f",
-        "PR dudect": "529beff9f3cd6bc507a64c121f142f1cbcc67b3874117ff972cd2a3fdadaac80",
-        "nightly dudect": "a4ae0fa1c1a36c943d7917703b9f29022bbc34e6e1af8e2021957d4a422a4422",
+        "PR dudect": "e7ad979d796c871e94b807272232d4559a7a5648684626ce21f39242ce86934e",
+        "nightly dudect": "2f85f70082d9e350a89939468c4f054c7106196a33b6284a801a57d6590eb48d",
     }
     for label, expected_fingerprint in reviewed_job_fingerprints.items():
         require(
@@ -1435,8 +1435,8 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     # complete embedded Python programs. A deliberate executable change must
     # update the workflow, this fingerprint, and the mutation suite together.
     reviewed_ast_fingerprints = {
-        "PR": "5d293b9156867e07678c57cb1d445615af7b4d2bdc214702d979373d992236ab",
-        "nightly": "e711283e7a833ebe16eb3a6687149c1701fe9f468f3a1c57e7c49cf6fd3abd6c",
+        "PR": "b6c6dc3db6cef840b5a177fc159de0571afb721d896ef2164af291fe7ca64e5d",
+        "nightly": "4216634b0e751a7a5ab6c306584d2e9937a3b4b4297f9ea5185cae2cf8e51bd6",
     }
     assignment = '          required_telemetry = ("noise_twin_class_split",)'
     dudect_contract = {
