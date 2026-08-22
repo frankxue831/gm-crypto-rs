@@ -5,9 +5,26 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-**2026-08-06–15 maintenance** — two batches, still no production cryptographic
-code, public API, C ABI, or release version change. The example-file changes
-below ship with the next `gmcrypto-c` package.
+## [1.11.1] - 2026-08-22
+
+**A patch for one published defect.** Enabling the opt-in `sm4-bitsliced-simd`
+feature on 1.11.0 makes serial SM4 — the CCM CBC-MAC path — *slower* than the
+scalar build (#163, fixed in #165). Callers who enabled that feature on 1.11.0
+should upgrade; nobody else is affected: the **default build is
+behaviour-identical to 1.11.0** (the only non-comment source change sits on the
+`#[cfg(feature = "sm4-bitsliced-simd")]` path), and neither `gmcrypto-c` nor any
+downstream that selects only `sm4-aead` compiles the changed code. No public
+API, C ABI, wire-format, MSRV, or dependency change; `cargo-semver-checks`
+clean against 1.11.0.
+
+Everything below accumulated on `main` since 1.11.0 and ships with this patch.
+Apart from the #163 fix, it is assurance, CI, records, and C example-file
+work — nothing changes what a consumer's build does. Sibling pins move to
+`=1.11.1`.
+
+**2026-08-06–15 maintenance** — two batches, no production cryptographic
+code, public API, or C ABI change. The example-file changes below ship with
+this `gmcrypto-c` package.
 
 **2026-08-06–11** — the three open `good first issue`s, two defects found while
 fixing them (#140–#147), a follow-up assurance-hardening pass (#149), and a
@@ -43,7 +60,7 @@ nothing found justifies a history rewrite.
   so a leak added and removed in the same squash is still visible. P1 blocks;
   P2 reports to the job summary. The history sweep is audit-only and is
   **not** wired to CI, because history cannot be fixed without a rewrite.
-- **`sm4-bitsliced-simd` composition evidence** (#163 follow-up; no code
+- **`sm4-bitsliced-simd` composition evidence** (#166, #163 follow-up; no code
   change). The #165 repair was unit-tested in `gmcrypto-simd` and core-tested
   on AArch64 only; the x86_64 `sbox_x4` branch (four scalar circuit calls —
   a different path from the NEON x16 staging) had no core-level coverage and

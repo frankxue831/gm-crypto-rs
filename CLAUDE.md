@@ -22,10 +22,11 @@ agent that never reads it break something?* If not, it is history — file it.
 
 | | |
 |---|---|
-| Workspace version | `1.11.0` (sibling pins `=1.11.0`) |
-| Live on crates.io | **`1.11.0`** — all three crates, 2026-08-01 from `613f619` |
+| Workspace version | `1.11.1` (sibling pins `=1.11.1`) — **prepped, not yet published** |
+| Live on crates.io | **`1.11.0`** — all three crates, 2026-08-01 from `613f619` (tag `v1.11.0`) |
+| 1.11.1 patch | Fixes #163 (`sm4-bitsliced-simd` made serial SM4 / CCM slower than scalar on 1.11.0). Default build behaviour-identical to 1.11.0. Audience: Rust callers who enabled that feature on 1.11.0 — `gmcrypto-c` and `sm4-aead`-only downstreams never compile the changed path |
 | crates.io skips | `1.10.0` (non-publishing assurance) and **`1.9.1`** (licence-text patch superseded by 1.11.0). Record: `docs/v1.9.1-release-review.md`. **1.11.0 is the first published release carrying licence text**; 1.9.0 and earlier stay without it |
-| Runbook / gate | `docs/v1.11.0-release-review.md`, `docs/v1.11.0-gate1-evidence.md` (PASS) |
+| Runbook / gate | `docs/v1.11.1-release-review.md`, `docs/v1.11.1-gate1-evidence.md`. Previous: `docs/v1.11.0-release-review.md`, `docs/v1.11.0-gate1-evidence.md` (PASS) |
 
 `cargo publish` and the SSH-signed tag are the **maintainer's authenticated
 call** — the agent path is branch + PR. The 1.11.0 publish was a recorded
