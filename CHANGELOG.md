@@ -194,6 +194,28 @@ nothing found justifies a history rewrite.
 
 ### Security
 
+- **TLCP SM4-CBC deprotect: the Lucky13 inner-HMAC is now length-independent
+  by construction** (`tlcp::record::mac_ct`, feature `tlcp`). Since v1.7 the
+  deprotect equalized the inner-hash SM3 *compression count* with dummy
+  compressions, but computed the real MAC with the streaming `HmacSm3` — whose
+  `update` copies a secret-length tail into its buffer and whose `finalize`
+  branches on `buffer_len > 56` for the one- vs two-block padding path. That
+  residual sat under the `ct_tlcp_cbc_deprotect` gate on the EPYC 7763 runners
+  the gate was calibrated on (`|tau|` 0.06–0.13) but read **0.30 at 100K
+  samples on an Intel Xeon 8573C and 0.32–0.42 at 10K on EPYC 9V74** once the
+  `sbox_x4` repair made the SM4 inside the window ~8× cheaper under
+  `sm4-bitsliced-simd` on x86 (same CPU class, pre-repair: 0.12). The residual
+  is in every release since 1.7.0 including 1.11.0; this patch was held at
+  `8cb4aac` until it was fixed rather than shipped with its own CT gate red.
+  The inner HMAC is now computed over a fixed, public block schedule with every
+  byte chosen by `subtle` selection (message / `0x80` / zero / length field)
+  and the digest state selected at the secret final-block index by masks —
+  the shape of OpenSSL's `ssl3_cbc_digest_record`. The schedule equals what the
+  dummy compressions already paid, so no extra SM3 work. Two `pub(crate)` tests
+  pin equivalence with `HmacSm3` for every length under every bound and that
+  the schedule depends only on the public bound; `sm3::IV` joins
+  `sm3::compress` as `pub(crate)` (not public API). MAC values and wire format
+  are unchanged. Record: `docs/v1.11.1-release-review.md`, dudect note.
 - **gitleaks allowlist re-tightened in both directions.** #140 (closes #123)
   removed two dead scratch-path entries (`^docs/superpowers/`, `^\.repolens/`)
   whose directories do not exist — stale allowlist entries are how a secret

@@ -32,11 +32,14 @@
 //! [`deprotect_cbc`] is a single operation that is constant-time over BOTH
 //! the TLS padding validity AND the MAC comparison. The secret post-strip
 //! plaintext length is never allowed to influence the work done: the
-//! inner-HMAC SM3 compression count is equalized (dummy compressions to a
-//! public upper bound), the pad-validity scan covers a fixed window, and the
-//! MAC is extracted at its secret offset by a data-independent scan. A
-//! bad-padding record still runs the full MAC. There is a single failure
-//! mode (`None`) and no plaintext escapes on failure.
+//! inner-HMAC SM3 is computed over a fixed, public block schedule with every
+//! byte chosen by constant-time selection (`mac_ct` — not the streaming
+//! hasher plus dummy compressions, which left length-dependent buffering and
+//! padding branches; see its doc), the pad-validity scan covers a fixed
+//! window, and the MAC is extracted at its secret offset by a
+//! data-independent scan. A bad-padding record still runs the full MAC.
+//! There is a single failure mode (`None`) and no plaintext escapes on
+//! failure.
 //!
 //! # Misuse warning — `(key, seq)` uniqueness is the caller's contract
 //!
@@ -53,7 +56,9 @@ use crate::sm4::cipher::Sm4Cipher;
 use crate::tlcp::key_schedule::TlcpRole;
 use alloc::vec::Vec;
 use rand_core::TryCryptoRng;
-use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, ConstantTimeGreater};
+use subtle::{
+    Choice, ConditionallySelectable, ConstantTimeEq, ConstantTimeGreater, ConstantTimeLess,
+};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// TLCP record version on the wire (GB/T 38636: TLS-1.1-style `0x0101`).
@@ -270,44 +275,134 @@ pub fn deprotect_gcm(
 /// `K'⊕ipad(64) ‖ header(13) ‖ plaintext(P)`, then SM3 finalize appends
 /// `0x80` + an 8-byte length (≥ 9 pad bytes; an extra block when the partial
 /// fill is `≥ 56`, matching `sm3::finalize`'s `buffer_len > 56` rule).
+///
+/// Test-only since the v1.11.1 rewrite: it pins that [`mac_ct`]'s fixed
+/// schedule (`1 + ct_inner_blocks(13 + max)`) equals the count the v1.7
+/// dummy-compression equalization already paid.
+#[cfg(test)]
 #[inline]
 fn inner_blocks(plaintext_len: usize) -> usize {
     let n = SM3_BLOCK + HEADER_LEN + plaintext_len;
     n / SM3_BLOCK + 1 + usize::from(n % SM3_BLOCK >= SM3_BLOCK - 8)
 }
 
-/// HMAC-SM3 over `header ‖ plaintext` (Lucky13 surface #1).
-///
-/// The inner-hash compression count is EQUALIZED (via dummy compressions on a
-/// throwaway state) to the count for `max_plaintext_len` — a public **safe
-/// upper bound** that MUST NOT be reduced toward a secret value. The real MAC
-/// value is unchanged (true length); only the timing is equalized.
-pub(crate) fn mac_equalized(
-    mac_key: &[u8; 32],
-    header: &[u8; 13],
-    plaintext: &[u8],
-    max_plaintext_len: usize,
-) -> [u8; 32] {
-    let mut h = crate::hmac::HmacSm3::new(mac_key);
-    h.update(header);
-    h.update(plaintext);
-    let tag = h.finalize();
+/// SM3 blocks after the `K'⊕ipad` block needed to absorb a `msg_len`-byte
+/// message plus its padding (`0x80`, zeros, 8-byte bit length): `⌈(L+9)/64⌉`.
+/// Called on the PUBLIC bound only.
+#[inline]
+const fn ct_inner_blocks(msg_len: usize) -> usize {
+    (msg_len + 9).div_ceil(SM3_BLOCK)
+}
 
-    // Top the real inner-hash compression count up to the public maximum.
-    let actual = inner_blocks(plaintext.len());
-    let target = inner_blocks(max_plaintext_len);
-    let dummy = target.saturating_sub(actual);
-    let mut scratch = [0u32; 8];
-    let block = [0u8; 64];
-    let n = core::hint::black_box(dummy);
-    for _ in 0..n {
-        // black_box both the state and the block each iteration so the
-        // optimizer cannot hoist/CSE/vectorize the loop body away.
-        core::hint::black_box(&mut scratch);
-        crate::sm3::compress(&mut scratch, core::hint::black_box(&block));
+/// HMAC-SM3 over `header ‖ data[..plaintext_len]` in constant time with
+/// respect to the SECRET `plaintext_len` (Lucky13 surface #1).
+///
+/// `data` is the public-length candidate region (`body[..max_plaintext_len]`
+/// in [`deprotect_cbc`]); `plaintext_len ≤ data.len()` is the caller's
+/// contract (a violation cannot panic — it yields a wrong MAC, so the record
+/// fails closed). The MAC value equals ordinary `HmacSm3` over the true-length
+/// message; only the *work* is made length-independent.
+///
+/// # Why not `HmacSm3` + dummy compressions (v1.7 – v1.11.0)
+///
+/// Topping the compression *count* up to the public bound leaves
+/// [`crate::sm3::Sm3`]'s streaming path secret-dependent: `update` copies a
+/// secret-length tail into its buffer and branches on the fill, and
+/// `finalize` takes the one- or two-block padding path on `buffer_len > 56`.
+/// That residual sat under the dudect gate on the EPYC 7763 runners the gate
+/// was calibrated on, but read `|tau| ≈ 0.30` at 100K samples on Zen 4 / Xeon
+/// 8573C once the v1.11.1 SM4 repair shrank the window around it
+/// (`docs/v1.11.1-release-review.md`, dudect note). This is the standard
+/// remedy (the shape of OpenSSL's `ssl3_cbc_digest_record`): process a
+/// FIXED, public number of blocks; build every byte by constant-time
+/// selection (message / `0x80` / zero / length field); select the digest
+/// state at the secret final-block index with masks. The block schedule
+/// equals what the dummy-compression version already paid, so the fix adds
+/// no SM3 work — only the per-byte selects.
+///
+/// All control flow depends on public quantities (`header`, `data.len()`,
+/// block and byte indices). Every use of `plaintext_len` goes through
+/// `subtle` (`ct_lt` / `ct_eq` / `conditional_select`) or a shift.
+#[allow(clippy::cast_possible_truncation, clippy::cast_lossless)]
+pub(crate) fn mac_ct(
+    mac_key: &[u8; 32],
+    header: &[u8; HEADER_LEN],
+    data: &[u8],
+    plaintext_len: usize,
+) -> [u8; 32] {
+    // ---- key schedule: fixed cost (the MAC key is exactly 32 bytes) ----
+    let mut ipad = [0x36u8; SM3_BLOCK];
+    let mut opad = [0x5cu8; SM3_BLOCK];
+    for i in 0..mac_key.len() {
+        ipad[i] ^= mac_key[i];
+        opad[i] ^= mac_key[i];
     }
-    let _ = core::hint::black_box(&scratch);
-    tag
+    let mut state = crate::sm3::IV;
+    crate::sm3::compress(&mut state, &ipad);
+    ipad.zeroize();
+
+    // ---- public schedule ----
+    let max_len = HEADER_LEN + data.len();
+    let blocks = ct_inner_blocks(max_len);
+
+    // ---- secret quantities, touched only through CT ops ----
+    let msg_len = (HEADER_LEN + plaintext_len) as u64;
+    // Block (0-based, after the ipad block) that carries the length field:
+    // ⌊(L + 8) / 64⌋ — a shift, no division on a secret.
+    let final_block = (msg_len + 8) >> 6;
+    // SM3 length field counts the ipad block too.
+    let len_bytes = ((SM3_BLOCK as u64 + msg_len) << 3).to_be_bytes();
+
+    let mut result = [0u32; 8];
+    let mut block = [0u8; SM3_BLOCK];
+    for b in 0..blocks {
+        let is_final = (b as u64).ct_eq(&final_block);
+        for i in 0..SM3_BLOCK {
+            let p = b * SM3_BLOCK + i;
+            // Public candidate byte at position `p`: header, then the
+            // candidate region, then zero. Branches here are on PUBLIC values.
+            let cand = if p < HEADER_LEN {
+                header[p]
+            } else if p - HEADER_LEN < data.len() {
+                data[p - HEADER_LEN]
+            } else {
+                0
+            };
+            let pu = p as u64;
+            let in_msg = pu.ct_lt(&msg_len);
+            let at_end = pu.ct_eq(&msg_len);
+            let mut byte = u8::conditional_select(&0u8, &cand, in_msg);
+            byte = u8::conditional_select(&byte, &0x80u8, at_end);
+            if i >= SM3_BLOCK - 8 {
+                // Length field occupies the last 8 bytes of the final block.
+                // It never collides with the 0x80 byte: when L % 64 ≥ 56 the
+                // final block is the NEXT one (the +8 above), so the 0x80
+                // sits in the previous block.
+                byte = u8::conditional_select(&byte, &len_bytes[i - (SM3_BLOCK - 8)], is_final);
+            }
+            block[i] = byte;
+        }
+        crate::sm3::compress(&mut state, &block);
+        for (r, s) in result.iter_mut().zip(state.iter()) {
+            *r = u32::conditional_select(r, s, is_final);
+        }
+    }
+    block.zeroize();
+    state.zeroize();
+
+    let mut inner = [0u8; 32];
+    for (w, v) in result.iter().enumerate() {
+        inner[w * 4..(w + 1) * 4].copy_from_slice(&v.to_be_bytes());
+    }
+    result.zeroize();
+
+    // ---- outer hash: fixed-length input, so no secret-dependent path ----
+    let mut outer = crate::sm3::Sm3::new();
+    outer.update(&opad);
+    outer.update(&inner);
+    opad.zeroize();
+    inner.zeroize();
+    outer.finalize()
 }
 
 /// Constant-time TLS pad-validity check (Lucky13 surface #2).
@@ -493,8 +588,10 @@ pub fn deprotect_cbc(
     let len16 = eff_len as u16;
     let hdr = record_header(seq, content_type, version, len16);
 
-    // ---- surface #1: equalized MAC; surface #3: CT MAC extraction ----
-    let computed = mac_equalized(&keys.mac_key, &hdr, &body[..eff_len], max_plaintext_len);
+    // ---- surface #1: constant-time MAC; surface #3: CT MAC extraction ----
+    // The candidate region is the PUBLIC-length prefix; the secret `eff_len`
+    // enters `mac_ct` only through constant-time selection.
+    let computed = mac_ct(&keys.mac_key, &hdr, &body[..max_plaintext_len], eff_len);
     let received = extract_mac_ct(&body, eff_len);
     let mac_ok = computed.ct_eq(&received);
 
@@ -580,25 +677,70 @@ mod tests {
     }
 
     #[test]
-    fn equalized_mac_matches_hmac_and_count_is_constant() {
+    fn ct_mac_matches_hmac_for_every_length_under_every_bound() {
+        // The constant-time inner hash must reproduce ordinary HMAC-SM3 over
+        // `header ‖ data[..plen]` for EVERY secret length `plen` ≤ the public
+        // bound, including every `plen % 64` (both sides of the SM3 padding
+        // spill at a 56-byte partial fill) and the `plen == max` edge.
         let mac_key = [0x2bu8; 32];
-        for plen in [0usize, 1, 13, 42, 43, 44, 55, 56, 57, 100, 256, 1000] {
-            let hdr = record_header(9, 0x17, TLCP_RECORD_VERSION, plen as u16);
-            let pt: Vec<u8> = (0..plen).map(|i| i as u8).collect();
+        for max in [
+            0usize, 1, 42, 43, 50, 51, 55, 56, 57, 64, 127, 128, 200, 300,
+        ] {
+            let data: Vec<u8> = (0..max).map(|i| (i * 7 + 3) as u8).collect();
+            for plen in 0..=max {
+                let hdr = record_header(9, 0x17, TLCP_RECORD_VERSION, plen as u16);
+                let mut h = crate::hmac::HmacSm3::new(&mac_key);
+                h.update(&hdr);
+                h.update(&data[..plen]);
+                let want = h.finalize();
+                let got = mac_ct(&mac_key, &hdr, &data, plen);
+                assert_eq!(got, want, "ct MAC must equal HMAC, max={max} plen={plen}");
+            }
+        }
+        // A large bound with sampled lengths (the 2^14 ceiling region).
+        let max = MAX_PLAINTEXT;
+        let data: Vec<u8> = (0..max).map(|i| (i * 13 + 1) as u8).collect();
+        for plen in [0usize, 1, 63, 64, 4095, 4096, 16000, max - 1, max] {
+            let hdr = record_header(7, 0x17, TLCP_RECORD_VERSION, plen as u16);
             let mut h = crate::hmac::HmacSm3::new(&mac_key);
             h.update(&hdr);
-            h.update(&pt);
-            let want = h.finalize();
-            let max = plen + 300;
-            let got = mac_equalized(&mac_key, &hdr, &pt, max);
+            h.update(&data[..plen]);
             assert_eq!(
-                got, want,
-                "equalized MAC must equal ordinary HMAC, plen={plen}"
+                mac_ct(&mac_key, &hdr, &data, plen),
+                h.finalize(),
+                "plen={plen}"
             );
-            // Equalization invariant: actual + dummy == target (constant for `max`).
-            assert!(
-                inner_blocks(plen) + (inner_blocks(max) - inner_blocks(plen)) == inner_blocks(max),
-                "equalization invariant, plen={plen}"
+        }
+    }
+
+    #[test]
+    fn ct_mac_block_count_depends_only_on_the_public_bound() {
+        // The fixed block schedule is `1 (ipad) + ct_inner_blocks(max)`, and it
+        // must equal `inner_blocks(max)` — the count the v1.7 dummy-compression
+        // equalization already paid — for every bound, so the CT rewrite costs
+        // no extra SM3 work. It must not depend on `plen` at all (it is computed
+        // from the public bound alone; this pins the arithmetic).
+        for max in [
+            0usize,
+            1,
+            42,
+            43,
+            50,
+            51,
+            55,
+            56,
+            57,
+            64,
+            100,
+            127,
+            128,
+            1000,
+            MAX_PLAINTEXT,
+        ] {
+            assert_eq!(
+                1 + ct_inner_blocks(HEADER_LEN + max),
+                inner_blocks(max),
+                "block schedule for max={max}"
             );
         }
     }
