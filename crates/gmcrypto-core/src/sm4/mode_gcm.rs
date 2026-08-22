@@ -50,6 +50,14 @@
 //! the tag *before* running CTR decryption, so no plaintext buffer
 //! ever materializes on the failure path — no zeroize required.
 //!
+//! # Throughput
+//!
+//! GCM encrypt is CTR plus GHASH. Forged decrypt is GHASH-then-reject
+//! and does not take the serial SM4 path, so `sm4-bitsliced-simd` does
+//! not accelerate it. Measured 1 MiB figures for `sm4-aead` /
+//! `sm4-aead,sm4-bitsliced` / `sm4-aead,sm4-bitsliced-simd` are in
+//! CHANGELOG Unreleased (issue #163).
+//!
 //! # API
 //!
 //! ```rust

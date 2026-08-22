@@ -12,9 +12,11 @@
 //! it.
 //!
 //! Measured 2026-08-22 on Apple M1 Pro, rustc 1.94.1, release:
-//! pre-keyed `encrypt_block` ~1.4×10⁵ blocks/s; SM4-CCM 1 MiB
-//! invalid-tag decrypt ~1.64 MiB/s (vs ~0.39 MiB/s `sm4-bitsliced`
-//! and ~0.24 MiB/s linear-scan on the same host).
+//! pre-keyed `encrypt_block` ~1.4×10⁵ blocks/s. The 1 MiB CCM/GCM
+//! success-encrypt vs forged-decrypt matrix (three `sm4-aead*`
+//! feature sets) is in CHANGELOG Unreleased. GCM forged decrypt is
+//! GHASH-bound (~36 MiB/s on all three); SIMD moves CCM forged from
+//! ~0.39 MiB/s (`sm4-bitsliced`) to ~1.66 MiB/s.
 //!
 //! [`sbox_x4`]: gmcrypto_simd::sm4::sbox_x4::sbox_x4
 //! [`sbox_x8`]: gmcrypto_simd::sm4::sbox_x8::sbox_x8

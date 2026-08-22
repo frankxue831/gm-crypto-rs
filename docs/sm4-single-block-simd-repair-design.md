@@ -262,6 +262,8 @@ Measure separately:
 - pre-keyed single-block encrypt and decrypt;
 - exact SIMD batches and batch-plus-tail shapes;
 - CCM encrypt, valid decrypt, and invalid-tag decrypt;
+- GCM success encrypt and forged (invalid-tag) decrypt — the issue #163
+  discriminating pair (GHASH-then-reject vs CCM's two SM4 passes);
 - message lengths 0, 1, 15, 16, 17 bytes, 1 KiB, 256 KiB, and 1 MiB;
 - feature configurations `sm4-aead`, `sm4-aead,sm4-bitsliced`, and
   `sm4-aead,sm4-bitsliced-simd`.
@@ -270,9 +272,12 @@ Merge acceptance on each measured architecture — for this patch, AArch64 and
 x86_64 with AVX2; unmeasured targets take the four-scalar-call branch by
 construction — uses at least five repeated samples per case:
 
-1. Key construction, pre-keyed single-block encryption, and CCM encrypt/valid
-   decrypt/invalid-tag decrypt at 1 KiB and 256 KiB under
-   `sm4-bitsliced-simd` are not slower than `sm4-bitsliced` by repeated median.
+1. Key construction, pre-keyed single-block encryption, CCM
+   encrypt/valid decrypt/invalid-tag decrypt, and GCM success encrypt
+   at 1 KiB and 256 KiB under `sm4-bitsliced-simd` are not slower than
+   `sm4-bitsliced` by repeated median. GCM forged decrypt is
+   GHASH-bound: the three feature-set medians must agree within 10%
+   rather than showing an SM4-path win.
 2. Existing full-batch throughput remains within 10% of the pre-change median;
    an inconclusive result is repeated with at least 15 samples. If it remains
    inconclusive, acceptance fails rather than treating noise as a pass.
@@ -290,6 +295,14 @@ The x4 API and removal of the byte-replication adapter provide the structural
 guard against this exact regression class. The essential AVX2 selection record
 is nevertheless committed beside the branch as specified above; only transient
 harness paths and full raw output remain outside the repository.
+
+The named in-repo home for the three-feature × two-mode (CCM and GCM)
+× success-encrypt / forged-decrypt table is the Unreleased `Fixed`
+entry in `CHANGELOG.md`. `mode_ccm` and `mode_gcm` module docs point
+at that table. AArch64 is measured on the implementation host. x86_64
+rows record the production path (four scalar `sbox_x4` calls when the
+AVX2 10% rule is unmet or unmeasured) rather than inventing numbers
+from a host that cannot run AVX2.
 
 ## Documentation changes
 
@@ -311,7 +324,12 @@ Update only current, reader-facing material:
 - `crates/gmcrypto-simd/src/lib.rs` and `src/sm4/mod.rs`;
 - relevant Cargo feature comments;
 - `.github/workflows/ci.yml` and `CLAUDE.md` for the two wasm32 feature builds;
-- the Unreleased `Fixed` section of `CHANGELOG.md` with issue #163;
+- the Unreleased `Fixed` section of `CHANGELOG.md` with issue #163,
+  including the three-feature CCM/GCM success-encrypt and forged-decrypt
+  table (AArch64 measured; x86_64 production path recorded);
+- `mode_ccm.rs` and `mode_gcm.rs` module docs pointing at that table;
+- the `README.md` feature-table line for `sm4-bitsliced-simd` (serial
+  `tau` is in scope, not batches only);
 - the current SIMD timing-target description in `SECURITY.md`;
 - the internal-surface existence test.
 
@@ -330,10 +348,12 @@ maintainer-authorized work.
 
 ### Scalar single-block plus SIMD batches
 
-Always route four-byte serial work through four scalar gate calls and retain
-SIMD only for full batches. This is the conservative fallback and measured
-about 6.9 times faster than the current AArch64 path, but leaves substantial
-NEON performance unused.
+This is issue #163 item 2's code fix: keep sequential `encrypt_block` /
+`tau` on scalar bitsliced (or the scan) and accelerate `encrypt_blocks`
+only. It is a valid repair of the x8-amplification bug and measured
+about 6.9 times faster than the pre-change AArch64 path, but leaves
+substantial NEON performance unused. This design rejects it in favour
+of packed `sbox_x4` for serial `tau`.
 
 ### Packed four-byte path — selected
 
@@ -378,7 +398,8 @@ all API and wire compatibility is preserved.
 - Full-batch throughput remains within the accepted tolerance.
 - Current documentation accurately describes the repaired path, and the stale
   performance prose named by issue #163 (`cipher.rs` throughput estimate,
-  `sbox_bitsliced.rs` TBD note) carries measured figures.
+  `sbox_bitsliced.rs` TBD note) carries measured figures. CHANGELOG
+  Unreleased holds the CCM/GCM success-vs-forged table.
 - Disclosure, API, packaging, license, and assurance-policy gates pass.
 - No version, publish, tag, protected performance workflow, or deferred backend
   work is included.

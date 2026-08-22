@@ -67,6 +67,15 @@
 //! No distinguishing variants per the workspace failure-mode
 //! invariant (`CLAUDE.md` "Hard constraints").
 //!
+//! # Throughput
+//!
+//! CCM encrypt and forged decrypt each pay two serial SM4 passes
+//! (CBC-MAC then CTR). `sm4-bitsliced-simd` accelerates that serial
+//! `tau` path with a four-byte packed S-box. Measured 1 MiB figures
+//! for `sm4-aead` / `sm4-aead,sm4-bitsliced` /
+//! `sm4-aead,sm4-bitsliced-simd` are in CHANGELOG Unreleased (issue
+//! #163).
+//!
 //! # KAT sourcing
 //!
 //! gmssl 3.1.1 does not ship `sm4 -ccm`. KAT vectors for this module
