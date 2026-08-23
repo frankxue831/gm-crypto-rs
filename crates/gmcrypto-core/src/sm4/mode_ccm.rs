@@ -86,7 +86,8 @@
 //! # API
 //!
 //! ```rust
-//! # #[cfg(feature = "sm4-aead")] {
+//! # #[cfg(feature = "sm4-aead")]
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use gmcrypto_core::sm4::{KEY_SIZE, mode_ccm};
 //!
 //! let key: [u8; KEY_SIZE] = [0x42; KEY_SIZE];
@@ -96,12 +97,14 @@
 //! let tag_len = 16;
 //!
 //! let ct_with_tag = mode_ccm::encrypt(&key, nonce, aad, plaintext, tag_len)
-//!     .expect("inputs valid");
+//!     .ok_or("nonce or tag length outside RFC 3610 §2.1")?;
 //! assert_eq!(ct_with_tag.len(), plaintext.len() + tag_len);
 //!
-//! let recovered = mode_ccm::decrypt(&key, nonce, aad, &ct_with_tag, tag_len);
-//! assert_eq!(recovered.as_deref(), Some(plaintext.as_slice()));
-//! # }
+//! let recovered = mode_ccm::decrypt(&key, nonce, aad, &ct_with_tag, tag_len)
+//!     .ok_or("authentication failed")?;
+//! assert_eq!(recovered, plaintext);
+//! # Ok(()) }
+//! # #[cfg(not(feature = "sm4-aead"))] fn main() {}
 //! ```
 
 // The CCM control bytes (flags, q, q-1, length encodings) are

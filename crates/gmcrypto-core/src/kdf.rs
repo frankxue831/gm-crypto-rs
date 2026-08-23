@@ -34,19 +34,21 @@
 //! // runtime of this crate's doctest suite.
 //! const ITERATIONS: u32 = 100_000;
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut key = [0u8; 32];
 //! pbkdf2_hmac_sm3(b"correct horse battery staple", b"per-user salt", ITERATIONS, &mut key)
-//!     .expect("non-zero iterations and a non-empty buffer");
+//!     .ok_or("zero iterations or an empty output buffer")?;
 //!
 //! // The salt is what makes two users with the same password derive
 //! // different keys. It is not a secret, but it must be per-user.
 //! let mut other = [0u8; 32];
 //! pbkdf2_hmac_sm3(b"correct horse battery staple", b"other salt", ITERATIONS, &mut other)
-//!     .unwrap();
+//!     .ok_or("zero iterations or an empty output buffer")?;
 //! assert_ne!(key, other);
 //!
 //! key.zeroize();
 //! other.zeroize();
+//! # Ok(()) }
 //! ```
 
 use crate::hmac::hmac_sm3;

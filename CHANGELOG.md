@@ -37,6 +37,10 @@ It exists because crates.io metadata and docs.rs renders are baked into a
   a `# Usage` section, and a runnable example that compiles under default
   features. `tlcp` was described under *Crate features* but missing from the
   module list.
+- **Module landing pages** for `sm2`, `sm3`, `kdf` and `asn1` — previously
+  1, 3, 4 and 6 lines — each with a runnable example. The `sm2` example
+  verifies a signature under a *different* signer ID and asserts it fails;
+  the `sm3` example uses the GB/T 32905-2016 §A.1 vector as its expected value.
 - **An Installation section in the README**, above the quick-start, stating
   that `default = []` and that the examples need a caller-supplied RNG.
 - **TLCP and chain-verification rows in the `gmcrypto-c` README.** Its
@@ -45,6 +49,30 @@ It exists because crates.io metadata and docs.rs renders are baked into a
 
 ### Changed
 
+- **The README is rewritten as a landing page**, not a changelog. It is the
+  crates.io page for `gmcrypto-core`, and it opened with 34 lines of notices
+  before saying what the crate does, put a competitor comparison before
+  "What this is", and reached its first runnable code at line 166 of 465.
+  Now: one-liner, badges, a three-line "for whom", a 12-line sign/verify
+  example at **line 17**, then the unchanged not-audited notice, then
+  Installation. 309 lines. The dudect coverage — a 1,726-character paragraph
+  — is a table of target / secret it splits on / gate. The 131 version
+  references and the release-history narrative are gone; `CHANGELOG.md`
+  holds them. The personal-project and ecosystem-charter notices moved to the
+  footer by the licence. Every word of the security posture is retained.
+- **Crate-level docs de-jargoned.** `# Crate features` carried 17 internal
+  cycle tags (`v0.4 W3`, `v0.5 W5 scaffolding`) meaningless to a reader, and
+  two were stale: `sm4-bitsliced-simd` said its intrinsics "land in v0.5.x",
+  `tlcp` said it shipped "the key schedule so far". Rewritten as capability /
+  implementation / trait-fit groups; the module list is a table; a
+  `# Release notes` section links `CHANGELOG.md` (API guideline C-RELNOTES).
+  A "v0.5 W5 migration" block on `Sm2PrivateKey` — a pre-1.0 rename — is
+  removed.
+- **Every doctest uses `?`, none `unwrap` or `expect`** (API guideline
+  C-QUESTION-MARK: readers copy examples, and an example that suppresses
+  errors teaches suppression). Nine sites across six modules, with hidden
+  `fn main() -> Result<…>` boilerplate. The crate-root example now mirrors
+  the README's and is the compiled form of it.
 - `gmcrypto-core` keywords: `sm4` added — it was missing from a crate that
   implements it — displacing self-coined `gm-crypto` and `no-std`, which
   duplicates a declared category.
