@@ -28,16 +28,16 @@ Official ecosystem membership, layering, versioning, and compatibility gates are
 > project with no support SLA. Review the code and **use at your own risk.** See
 > [`SECURITY.md`](SECURITY.md) for the threat model and disclosure process.
 
-**Status:** actively maintained as of July 2026. The 1.x line is feature-complete
-for its stated scope — v1.9.0 closed the TLCP arc — so commit volume is low by
-design rather than by neglect. Issues and PRs get a response.
+**Status:** actively maintained as of August 2026. The 1.x line is
+feature-complete for its stated scope — v1.9.0 closed the TLCP arc — so commit
+volume is low by design rather than by neglect. Issues and PRs get a response.
 
 ## Why this rather than the alternatives
 
 | | gm-crypto-rs | `libsm` | RustCrypto `sm2` / `sm4` |
 |---|---|---|---|
 | SM2 + SM3 + SM4 in one crate | ✅ | ✅ | separate crates |
-| Timing-leak harness in CI | ✅ 20 `dudect` targets, gated | — | — |
+| Timing-leak harness in CI | ✅ 20 `dudect` targets, 15 blocking | — | — |
 | Fuzzing | ✅ 33 targets, nightly | — | — |
 | C ABI | ✅ 104 entry points | — | — |
 | TLCP (GB/T 38636) toolkit | ✅ | — | — |
@@ -67,10 +67,14 @@ always-on + 2 cfg-gated under `sm4-bitsliced-simd` + 3 cfg-gated under
 `sm4-aead` + 1 cfg-gated under `sm4-xts` + 1 cfg-gated under
 `sm2-key-exchange` + 1 cfg-gated under `tlcp`) plus a deliberately-leaky
 `negative_control` that proves
-the harness can detect leaks. Most real targets gate at `|tau| <= 0.20`; four
+the harness can detect leaks. Fifteen of the 20 block a merge at `|tau| <= 0.20`. Four
 (`ct_fn_invert`, `ct_fp_invert`, `ct_sign_k_class`, `ct_hmac_sm3`) carry
-target-specific gate policy after the 2026-05-12 / 06-07 / 06-17
-recalibrations — see [`SECURITY.md`](SECURITY.md) and
+target-specific policy after the 2026-05-12 / 06-07 / 06-17 recalibrations:
+they measure a composite window whose class split reads as noise on some
+hosted-runner CPUs, so they report as telemetry and only a `0.55`
+gross-regression sentinel fires. The twentieth,
+`ct_sm4_gcm_decrypt_buffered`, currently reports without a threshold. See
+[`SECURITY.md`](SECURITY.md) and
 [`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md).
 
 The harness reports timing-leak detection events. **It does not prove
@@ -131,6 +135,31 @@ the design intent in isolation.
 - Not constant-time on CPUs with data-dependent multiply latencies (some older
   x86, some embedded).
 - Not a comprehensive SM-crypto library yet — see the roadmap below.
+
+## Installation
+
+```bash
+cargo add gmcrypto-core
+```
+
+```toml
+[dependencies]
+gmcrypto-core = "1.11"
+```
+
+`default = []`: the base build is SM2, SM3, SM4-ECB/CBC/CTR, HMAC-SM3,
+PBKDF2-HMAC-SM3 and the DER/PEM/PKCS#8 codecs, with no optional dependency.
+Everything else in this README — AEAD, XTS, key exchange, X.509, TLCP, the
+RustCrypto trait fits, the SIMD backend — is behind a feature flag; see
+[Crates & features](#crates--features). The examples below also need an RNG,
+which this crate deliberately does not pull in:
+
+```toml
+getrandom = { version = "0.4", default-features = false, features = ["sys_rng"] }
+```
+
+C / C++ / Python / Go / Zig callers want `gmcrypto-c` instead; `gmcrypto-simd`
+is an internal backend and should not be depended on directly.
 
 ## Quick-start
 
@@ -200,11 +229,13 @@ never "this is the peer I dialed").
 
 The same surfaces are reachable from C / C++ / Python / Go / Zig through
 `gmcrypto-c` — see [`crates/gmcrypto-c/README.md`](crates/gmcrypto-c/README.md)
-and the doc-only examples under
+and the examples under
 [`crates/gmcrypto-c/examples/`](crates/gmcrypto-c/examples/)
 (`sm2_sign.c`, `sm4_gcm_streaming.c`, `sm4_ccm.c`, `sm4_xts_sector.c`,
 `sm4_xts_multisector.c`, `sm2_key_exchange.c`, `x509_verify.c`,
-`tlcp_handshake.c`, `tlcp_verify_pair.c`).
+`tlcp_handshake.c`, `tlcp_verify_pair.c`). All nine are syntax-checked in CI
+against the committed header with `-Wall -Wextra -Werror`, so a stale
+declaration fails the build rather than the reader.
 
 ## Crates & features
 
@@ -294,7 +325,7 @@ signatures / ciphertexts, SM4 mode bytes) is byte-identical to 0.16.0.
   `mode_gcm::{encrypt, encrypt_with_tag_len}` return `Option<…>`, rejecting plaintext
   past the `2^36 − 32`-byte GCM counter ceiling (matching the streaming path and
   `decrypt`).
-- **Features are additive** (`default = []`; all 10 are opt-in) and the build is
+- **Features are additive** (`default = []`; all 11 are opt-in) and the build is
   `no_std` + `alloc`-only with `unsafe_code = "forbid"` on the core.
 - **MSRV is 1.85** (edition 2024); an MSRV bump is treated as a minor, not a patch.
 - **`crypto-bigint` decoupling (v0.22):** the **always-on** (default-features) public
@@ -332,9 +363,11 @@ A C client can run a full handshake end-to-end — key exchange, key schedule,
 record protection, certificate verification. What it is *not* is a protocol
 implementation: there is no handshake state machine, no record framing, and
 no transport I/O, and adding them is a separate decision (a sans-I/O engine in
-its own crate) that has **not** been committed to. Smaller parked items —
-RustCrypto `aead` trait fit, AVX-512 `sbox_x64`, CCM buffered input, and a
-class-split-aware dudect noise-twin — are tracked in the scope docs.
+its own crate) that has **not** been committed to. Smaller parked items — AVX-512
+`sbox_x64` and CCM buffered input — are tracked in the scope docs. (The
+RustCrypto `aead` trait fit shipped in v1.11; the class-split-aware dudect
+noise-twin landed as required non-blocking telemetry, and becoming a relative
+gate is still pending runner calibration.)
 
 **How it was built:** for the verification-first development method behind
 this library — pre-registered scope, multi-model adversarial review,
@@ -400,9 +433,9 @@ let mut rng = SysRng; // wasm_js-backed when targeting wasm32
 let sig = sign_with_id(&priv_key, DEFAULT_SIGNER_ID, b"msg", &mut rng).unwrap();
 ```
 
-A `wasm-bindgen-test`-driven test runner (running KAT vectors under
-Node or a headless browser) is post-v0.4 — v0.4 ships the build-target
-gate only.
+CI gates the wasm32 build target on every PR. There is no
+`wasm-bindgen-test` runner executing KAT vectors under Node or a headless
+browser; adding one has not been committed to.
 
 ## License
 

@@ -1,7 +1,11 @@
 [package]
 name = "gmcrypto-core"
 description = "Constant-time-designed pure-Rust SM2/SM3/SM4 primitives (no_std + alloc) with an in-CI dudect timing-leak regression harness"
-keywords = ["sm2", "sm3", "gm-crypto", "no-std", "constant-time"]
+# v1.11.2 — `sm4` was missing from a crate that implements it, at the 5-keyword
+# cap. Dropped: `gm-crypto` (self-coined, one crate carries it) and `no-std`
+# (already declared as a category). `shangmi` is the term RustCrypto's own
+# sm2/sm9 crates index under.
+keywords = ["sm2", "sm3", "sm4", "shangmi", "constant-time"]
 categories = ["cryptography", "no-std"]
 readme = "../../README.md"
 documentation = "https://docs.rs/gmcrypto-core"
@@ -9,7 +13,6 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 rust-version.workspace = true
 
 # v0.4 — docs.rs builds with default features only by default. The
@@ -20,6 +23,11 @@ rust-version.workspace = true
 # optional deps for docs.rs has no runtime impact.
 [package.metadata.docs.rs]
 all-features = true
+# v1.11.2 — sets the `docsrs` cfg that turns on `feature(doc_cfg)` in lib.rs,
+# which is what makes docs.rs badge every gated item with the feature that
+# unlocks it. Without this line `all-features` documents the gated API but
+# says nothing about how to reach it. See the comment at the attribute.
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 crypto-bigint.workspace = true
@@ -46,7 +54,7 @@ aead = { version = "0.6.1", default-features = false, features = ["alloc"], opti
 # can keep `unsafe_code = "forbid"`. Mirrors the established
 # `gmcrypto-c` precedent for FFI primitives. Only pulled in when
 # `sm4-bitsliced-simd` is enabled — default builds never touch it.
-gmcrypto-simd = { path = "../gmcrypto-simd", version = "=1.11.1", default-features = false, optional = true }
+gmcrypto-simd = { path = "../gmcrypto-simd", version = "=1.11.2", default-features = false, optional = true }
 
 [dev-dependencies]
 hex-literal.workspace = true

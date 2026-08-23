@@ -1,6 +1,6 @@
 [package]
 name = "gmcrypto-c"
-description = "C ABI for gmcrypto-core — cdylib + staticlib exposing SM2/SM3/SM4/HMAC/PBKDF2 to C / C++ / Python / Go / Zig callers via opaque handles"
+description = "C ABI for gmcrypto-core — cdylib + staticlib exposing SM2/SM3/SM4/AEAD/XTS/X.509/TLCP to C / C++ / Python / Go / Zig callers"
 keywords = ["sm2", "sm3", "sm4", "ffi", "c-abi"]
 categories = ["cryptography", "api-bindings"]
 readme = "README.md"
@@ -9,9 +9,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 rust-version.workspace = true
 
+# Deliberately NO `[package.metadata.docs.rs]`: docs.rs already builds this
+# crate exactly as intended (default features, complete C ABI). Do not add
+# `all-features = true` here — it would switch on `regen-header`, whose
+# build script runs cbindgen, giving the docs build the one way it could
+# fail in exchange for nothing. (v1.11.2)
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
 
@@ -37,7 +41,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 # no-confirm KX, record protect/deprotect, chain/pair verify) is always-on;
 # tlcp::chain needs all(tlcp,x509) and the GCM record carrier needs sm4-aead,
 # both already present, so no regen-header IMPLY hack and gmcrypto.h == default.
-gmcrypto-core = { path = "../gmcrypto-core", version = "=1.11.1", features = ["sm4-aead", "sm4-xts", "sm2-key-exchange", "x509", "tlcp"] }
+gmcrypto-core = { path = "../gmcrypto-core", version = "=1.11.2", features = ["sm4-aead", "sm4-xts", "sm2-key-exchange", "x509", "tlcp"] }
 getrandom.workspace = true
 rand_core.workspace = true
 

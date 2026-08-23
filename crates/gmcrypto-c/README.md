@@ -23,11 +23,12 @@ Output artifacts land in `target/release/`:
 - `libgmcrypto_c.a` (Linux/macOS) / `gmcrypto_c.lib` (Windows) —
   static library.
 
-## Cipher-mode coverage (complete, always-on)
+## Coverage (complete, always-on)
 
 The C ABI is **complete and always-on**: a default `cargo build -p gmcrypto-c`
 exports the full surface — SM2 / SM3 / SM4-ECB+CBC / HMAC-SM3 / PBKDF2-HMAC-SM3
-**plus** the symmetric-cipher modes below. As of **v0.23** the AEAD/XTS symbols
+**plus** everything in the table below: the remaining SM4 modes, SM2 key
+exchange, X.509 parse and chain verification, and the TLCP toolkit. As of **v0.23** the AEAD/XTS symbols
 are no longer behind opt-in cargo features (the former `sm4-aead` / `sm4-xts`
 forwarding features were removed), so the committed
 [`include/gmcrypto.h`](include/gmcrypto.h) matches the default build exactly —
@@ -38,7 +39,11 @@ no feature flags are needed.
 | SM4-GCM / SM4-CCM AEAD (single-shot + streaming SM4-GCM) | `gmcrypto_sm4_gcm_*` / `gmcrypto_sm4_ccm_*` | [`examples/sm4_gcm_streaming.c`](examples/sm4_gcm_streaming.c), [`examples/sm4_ccm.c`](examples/sm4_ccm.c) |
 | SM4-XTS tweakable disk/sector mode (GB/T 17964-2021): single-shot + in-place multi-sector | `gmcrypto_sm4_xts_{encrypt,decrypt}` / `gmcrypto_sm4_xts_{encrypt,decrypt}_sectors` | [`examples/sm4_xts_sector.c`](examples/sm4_xts_sector.c), [`examples/sm4_xts_multisector.c`](examples/sm4_xts_multisector.c) |
 | SM2 key exchange (GM/T 0003.3) with key confirmation (v1.2): two opaque role handles; `_confirm`/`_finish` consume + free; `_with_rng` variants for caller-supplied randomness | `gmcrypto_sm2_kx_initiator_{new,new_with_rng,confirm,free}` / `gmcrypto_sm2_kx_responder_{new,respond,respond_with_rng,finish,free}` | [`examples/sm2_key_exchange.c`](examples/sm2_key_exchange.c) |
-| X.509-with-SM2 leaf certificate parse + signature verify (v1.4): one immutable opaque handle; **NO trust decisions** (no chains / clock / extension interpretation / revocation) | `gmcrypto_x509_certificate_{from_der, free, verify_signature, verify_signature_with_id, tbs_raw, serial_raw, issuer_raw, subject_raw, extensions_raw, not_before, not_after, is_self_issued, subject_public_key}` + `gmcrypto_x509_time_t` | [`examples/x509_verify.c`](examples/x509_verify.c) |
+| X.509-with-SM2 leaf certificate parse + signature verify (v1.4): one immutable opaque handle; the parse layer itself makes **no trust decisions** (no clock comparison, no extension interpretation, no revocation) | `gmcrypto_x509_certificate_{from_der, free, verify_signature, verify_signature_with_id, tbs_raw, serial_raw, issuer_raw, subject_raw, extensions_raw, not_before, not_after, is_self_issued, subject_public_key}` + `gmcrypto_x509_time_t` | [`examples/x509_verify.c`](examples/x509_verify.c) |
+| Certificate-chain verification (v1.8): one linear, leaf-first chain against caller-supplied anchors, optional validity window. **Structural trust only** — never endpoint authentication | `gmcrypto_x509_verify_chain` + `GMCRYPTO_X509_MAX_CHAIN_DEPTH` | [`examples/tlcp_verify_pair.c`](examples/tlcp_verify_pair.c) |
+| TLCP (GB/T 38636-2020) key schedule (v1.9): `P_SM3` PRF outputs — master secret, key block, Finished `verify_data` | `gmcrypto_tlcp_derive_master_secret` / `gmcrypto_tlcp_derive_key_block` / `gmcrypto_tlcp_finished_verify_data` | [`examples/tlcp_handshake.c`](examples/tlcp_handshake.c) |
+| TLCP record protection (v1.9): SM4-CBC (Lucky13-hardened deprotect) and SM4-GCM, behind opaque per-direction key handles | `gmcrypto_tlcp_record_keys_{cbc,gcm}_{new,free}` / `gmcrypto_tlcp_protect_cbc{,_with_rng}` / `gmcrypto_tlcp_protect_gcm` / `gmcrypto_tlcp_deprotect_{cbc,gcm}` + `GMCRYPTO_TLCP_{CBC,GCM}_KEY_BLOCK_LEN` | [`examples/tlcp_handshake.c`](examples/tlcp_handshake.c) |
+| TLCP `[sign, enc]` double-certificate pair verification (v1.9): both chains to trusted anchors, role usability, one shared identity | `gmcrypto_tlcp_verify_pair` | [`examples/tlcp_verify_pair.c`](examples/tlcp_verify_pair.c) |
 
 **SM2 key exchange** notes: the initiator handle is created already holding
 its ephemeral (`_new` writes `R_A`); the agreed key is written to caller
@@ -57,6 +62,20 @@ absent); `subject_public_key` returns a normal `gmcrypto_sm2_pubkey_t` the
 caller frees — chain leaf-vs-CA manually by extracting the issuer cert's
 subject key. `is_self_issued` uses an out-param so the universal
 "`0` = success" status convention stays intact.
+
+**TLCP** notes: this is the GB/T 38636 crypto toolkit, **not a protocol
+implementation** — there is no handshake state machine, no record framing, and
+no transport I/O; sequencing and I/O stay the caller's. The deprotect entries
+compute the post-strip plaintext length internally and never take it as a
+parameter, because that length is secret; the CBC path's inner HMAC is
+length-independent by construction (`ct_tlcp_cbc_deprotect` gates it). Record
+key handles are per-direction and freed by the caller.
+
+**Chain and pair verification** are **structural** trust only. A `1` from
+`gmcrypto_x509_verify_chain` or `gmcrypto_tlcp_verify_pair` means the chain
+links to an anchor you supplied — it does **not** mean the certificate belongs
+to the endpoint you dialed. Binding an identity to a peer is the caller's
+decision, permanently.
 
 ```bash
 cargo build -p gmcrypto-c --release   # the complete ABI — no feature flags

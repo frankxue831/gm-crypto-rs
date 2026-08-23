@@ -1,17 +1,23 @@
 [package]
 name = "gmcrypto-simd"
-description = "SIMD backends for gmcrypto-core — AVX2 (x86_64) and NEON (aarch64) packed bitsliced SM4 S-box, quarantined to keep `gmcrypto-core` `unsafe_code = forbid`"
+description = "Internal SIMD backend for gmcrypto-core: AVX2/NEON packed bitsliced SM4 S-box and GHASH. Use gmcrypto-core instead."
 keywords = ["sm4", "simd", "avx2", "bitsliced"]
 categories = ["cryptography", "no-std"]
-readme = "../../README.md"
+# v1.11.2 — its own README, not the workspace one. A crates.io search for
+# "sm4" ranks this crate above gmcrypto-core, so the page it renders is a
+# front door: the workspace README opened with gmcrypto-core badges and
+# said nothing about this being an internal rlib nobody should depend on.
+readme = "README.md"
 documentation = "https://docs.rs/gmcrypto-simd"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 rust-version.workspace = true
 
+# No `[package.metadata.docs.rs]`: this crate declares no cargo features, so
+# `all-features` would be a no-op, and every public item is `#[doc(hidden)]`
+# — the rendered page is intentionally near-empty. (v1.11.2)
 [lib]
 # v0.5 W4 phase 2 — rlib-only. `gmcrypto-c` stays the single C-ABI /
 # cdylib / staticlib surface; this crate is a Rust-internal SIMD

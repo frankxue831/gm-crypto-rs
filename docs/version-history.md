@@ -19,6 +19,64 @@ only a condensed current-release block — see its `Don't` section.
 
 ## Cycles
 
+**v1.11.2 — presentation patch; PREPPED, publish is the maintainer's call.**
+No crypto path, public API, C ABI, wire format, MSRV or dependency change —
+the only `crates/**/*.rs` delta is two inner attributes on
+`gmcrypto-core/src/lib.rs`, and `cargo-public-api` is byte-identical to
+1.11.1. It needed a version because **crates.io metadata and docs.rs renders
+are baked into a published version**: every defect it fixes was already
+corrected in the repository and invisible to anyone who had not cloned it.
+The two that mattered: `gmcrypto-simd` outranks `gmcrypto-core` in a
+crates.io `sm4` search and was rendering the *workspace* README (H1
+`gm-crypto-rs`, `gmcrypto-core` badges, no statement that it is an internal
+`rlib` outside SemVer) — it now has its own; and every feature-gated item on
+docs.rs was documented but **unbadged**, so `sm4::gcm_streaming` and
+`sm2::key_exchange` named their gating feature in no rendered documentation
+at all. The mechanism is one line —
+`#![cfg_attr(docsrs, feature(doc_cfg))]` plus
+`rustdoc-args = ["--cfg", "docsrs"]` — because **`doc_auto_cfg` was removed
+in Rust 1.92 and merged into `doc_cfg`** (rust-lang/rust#138907), under which
+auto-labelling is on by default: 101 badges, including compound gates like
+`tlcp` + `x509`, with no per-item `doc(cfg(...))`. The plan had budgeted
+eight per-item attributes as the likely path; the empirical render check made
+them unnecessary. Also: a crate-root landing page with a default-features
+doctest, a README Installation section, `sm4` added to keywords (missing from
+a crate that implements it), `homepage` dropped workspace-wide (it duplicated
+`repository`), TLCP and chain-verification rows added to the `gmcrypto-c`
+README (its crates.io page had **zero** mentions of TLCP since 1.9.0), and
+the stale `html_root_url` (pinned at `1.0.0`) removed rather than re-pinned.
+Two accuracy fixes worth keeping: the README claimed all 20 dudect targets
+were "gated" — 15 block at `|tau| <= 0.20`, four report to a `0.55` sentinel,
+and **`ct_sm4_gcm_decrypt_buffered` has no threshold in either workflow**
+despite `docs/v0.9-scope.md` specifying one; and "all 10 features are opt-in"
+against 11. Runbook: `docs/v1.11.2-release-review.md`.
+
+**v1.11.1 — two-defect patch, HELD then re-cut; PUBLISHED 2026-08-22 from
+`26a49c3` (tag `v1.11.1`), sibling pins `=1.11.1`.** (1) #163: enabling
+`sm4-bitsliced-simd` on 1.11.0 made *serial* SM4 — the CCM CBC-MAC path —
+slower than scalar on AArch64, because `tau` called a one-byte-to-x8 adapter
+four times per word (32 scalar S-box evaluations where four suffice). #165
+replaced it with a four-byte `sbox_x4` entry; batch paths unchanged; the
+repaired path **executes** only under that feature (`sm4-aead` compiles
+`sbox_x4` but never selects it), and **x86_64 throughput stayed unmeasured**.
+(2) The first cut `8cb4aac` was **held**: its dudect evidence failed
+`ct_tlcp_cbc_deprotect` (0.30 on Xeon 8573C, 0.32–0.42 on EPYC 9V74). Root
+cause predated the patch — since v1.7 the TLCP SM4-CBC deprotect equalized the
+inner-HMAC SM3 compression *count* but computed the MAC through the streaming
+hasher, whose buffer copy and finalize-padding branch stayed
+secret-length-dependent. Fix 1 made that residual measurable. #169 rewrote it
+as a fixed-schedule constant-time construction (`tlcp::record::mac_ct`): same
+block count, MAC values and wire bytes unchanged, 9V74 0.32–0.42 → 0.026. It
+**executes in every `tlcp` build, including `gmcrypto-c`**. The durable lesson
+was procedural: the hosted `ubuntu-24.04` pool is heterogeneous (EPYC 7763 /
+9V74 / Xeon 8573C / 6973P-C) and the workflows did not record which CPU ran a
+slot, so the same `ct_sm4_cbc_decrypt_fanout` failure went undiagnosed on
+2026-08-07 and again on 2026-08-22. #172 made both gates print `RUNNER-CPU:`
+beside the verdicts; #173 established that on 9V74 that target spans
+0.0396–0.2008 **on unchanged code**, i.e. its 0.20 gate sits inside the class's
+noise band. Records: `docs/v1.11.1-release-review.md`,
+`docs/v0.5-dudect-recalibration.md` (2026-08-23).
+
 **v1.11 — RustCrypto `aead` 0.6 trait fit — implemented on `feat/aead-traits`;
 PUBLISHED to crates.io 2026-08-01 from `613f619` (all three crates, order simd →
 core → c), workspace `1.9.1` → `1.11.0`, sibling pins `=1.11.0`. crates.io skips
