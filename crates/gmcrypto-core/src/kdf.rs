@@ -1,7 +1,53 @@
 //! Key derivation functions.
 //!
-//! v0.2 ships [`pbkdf2_hmac_sm3`] only. Future v0.3+ may add HKDF and
-//! other KDF flavors here.
+//! [`pbkdf2_hmac_sm3`] is the only one: **PBKDF2-HMAC-SM3**, RFC 8018 §5.2
+//! over RFC 2104 over [SM3](crate::sm3). It is what
+//! [`pkcs8`](crate::pkcs8)'s PBES2 encrypted-private-key path derives its
+//! wrapping key with, and it is the right primitive for turning a
+//! human-chosen password into key material. It is **not** a general-purpose
+//! KDF for high-entropy inputs — for those, an HKDF-shaped extract-expand is
+//! the better fit, and this crate does not ship one.
+//!
+//! Two API choices here are deliberate and will not change:
+//!
+//! - **No default iteration count.** `iterations` is a required parameter
+//!   with no default, because a default is a number that ages silently: what
+//!   was defensible in 2015 is not in 2026, and a caller who never chose one
+//!   never revisits it. Choose from your own threat model and current
+//!   hardware, write it down, and raise it deliberately. `0` is rejected.
+//! - **The caller supplies the output buffer.** `output: &mut [u8]` sets the
+//!   derived length and lets the caller place the key material where it can
+//!   zeroize it. A `Vec`-returning signature would put secrets in an
+//!   allocation this crate chose and the caller cannot reliably wipe.
+//!
+//! Returns `None` — never a reason — on a zero iteration count, an empty
+//! output buffer, or a length past RFC 8018's `dkLen` ceiling.
+//!
+//! ```rust
+//! use gmcrypto_core::kdf::pbkdf2_hmac_sm3;
+//! // `zeroize` is a dependency of this crate, not a re-export — add it to
+//! // your own Cargo.toml to wipe derived key material.
+//! use zeroize::Zeroize;
+//!
+//! // 100_000 is illustrative, not a recommendation — pick yours, and note
+//! // that a high count is a *cost you pay too*: this example is most of the
+//! // runtime of this crate's doctest suite.
+//! const ITERATIONS: u32 = 100_000;
+//!
+//! let mut key = [0u8; 32];
+//! pbkdf2_hmac_sm3(b"correct horse battery staple", b"per-user salt", ITERATIONS, &mut key)
+//!     .expect("non-zero iterations and a non-empty buffer");
+//!
+//! // The salt is what makes two users with the same password derive
+//! // different keys. It is not a secret, but it must be per-user.
+//! let mut other = [0u8; 32];
+//! pbkdf2_hmac_sm3(b"correct horse battery staple", b"other salt", ITERATIONS, &mut other)
+//!     .unwrap();
+//! assert_ne!(key, other);
+//!
+//! key.zeroize();
+//! other.zeroize();
+//! ```
 
 use crate::hmac::hmac_sm3;
 use crate::sm3::DIGEST_SIZE;
