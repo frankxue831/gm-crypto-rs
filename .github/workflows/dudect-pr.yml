@@ -341,6 +341,22 @@ jobs:
               # 0.20 gate.
               required_low["ct_sm4_gcm_decrypt"] = 0.20
               required_low["ct_sm4_ccm_decrypt"] = 0.20
+              # v0.9 W3 added the buffered-GCM bench and docs/v0.9-scope.md
+              # specified `|tau| < 0.20` for it, but the gate entry was never
+              # written — so from v0.9 to 2026-08-23 this target emitted a
+              # |tau| line every run and was compared against nothing. The
+              # completeness check iterates required_low keys, so an absent
+              # key is simply never required and the "measured < n_runs"
+              # backstop cannot see it. docs/v0.10-scope.md meanwhile cites
+              # this target as the gate covering the buffered-GCM FFI path's
+              # constant-time property. Closing it at the documented 0.20.
+              # Evidence (docs/v0.5-dudect-recalibration.md, 2026-08-23):
+              # 33 runs / 159 measurements across both budgets, 0 run-medians
+              # over 0.20, worst 0.1205 (100K) and 0.1047 (10K). Its sibling
+              # ct_sm4_gcm_decrypt above is quieter on the median but had MORE
+              # single-run excursions past 0.20 (2/100 vs 1/100) and has held
+              # this gate since v0.8.
+              required_low["ct_sm4_gcm_decrypt_buffered"] = 0.20
           if "sm4-xts" in matrix_features:
               # v0.12 W3 — SM4-XTS decrypt target (Q12.9 of
               # docs/v0.12-scope.md). Class-split by master key at a CTS
