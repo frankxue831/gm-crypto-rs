@@ -351,7 +351,7 @@ jobs:
               # this target as the gate covering the buffered-GCM FFI path's
               # constant-time property. Closing it at the documented 0.20.
               # Evidence (docs/v0.5-dudect-recalibration.md, 2026-08-23):
-              # 33 runs / 159 measurements across both budgets, 0 run-medians
+              # 34 runs / 142 measurements across both budgets, 0 run-medians
               # over 0.20, worst 0.1205 (100K) and 0.1047 (10K). Its sibling
               # ct_sm4_gcm_decrypt above is quieter on the median but had MORE
               # single-run excursions past 0.20 (2/100 vs 1/100) and has held
