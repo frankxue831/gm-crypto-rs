@@ -1,7 +1,54 @@
 //! Constant-time-designed pure-Rust SM2 / SM3 / SM4 primitives.
 //!
-//! See the workspace `README.md` for scope, threat model, and the honest
-//! framing of the in-CI `dudect`-based timing-leak regression harness.
+//! `no_std` + `alloc`, no C dependency, MSRV 1.85. Every secret-touching path
+//! is written against [`subtle`](https://docs.rs/subtle)'s constant-time
+//! primitives — no `==`, no `if`, no `bool` on a secret-derived value — and
+//! guarded in CI by a [`dudect`](https://docs.rs/dudect-bencher)-based
+//! detectable-leak regression harness. Failure modes are deliberately
+//! indistinguishable: fallible operations return one opaque [`Error`] or
+//! `None`, never a reason.
+//!
+//! **This crate has not been independently audited.** Assurance is internal
+//! (KAT vectors, gmssl interop, the timing harness, a `cargo-fuzz` suite) and
+//! the project is solo-maintained with no support SLA. Read
+//! [`SECURITY.md`](https://github.com/frankxue831/gm-crypto-rs/blob/main/SECURITY.md)
+//! for the threat model and disclosure process, and the
+//! [`README`](https://github.com/frankxue831/gm-crypto-rs#readme) for scope,
+//! before relying on it.
+//!
+//! # Usage
+//!
+//! ```toml
+//! [dependencies]
+//! gmcrypto-core = "1.11"
+//! ```
+//!
+//! `default = []` — the base build is the primitives below with no optional
+//! dependency. Most of what this crate can do is opt-in; see
+//! [Crate features](#crate-features).
+//!
+//! ```rust
+//! use gmcrypto_core::{sm3, sm4};
+//!
+//! // SM3 (GB/T 32905) — 32-byte digest.
+//! let digest = sm3::hash(b"abc");
+//! assert_eq!(digest.len(), 32);
+//!
+//! // SM4-CBC (GB/T 32907) — PKCS#7 padded. The IV is caller-supplied and
+//! // must be unpredictable per message; this fixed one is for the example.
+//! let key = [0x42u8; sm4::KEY_SIZE];
+//! let iv = [0x24u8; sm4::BLOCK_SIZE];
+//!
+//! let ciphertext = sm4::mode_cbc::encrypt(&key, &iv, b"hello world");
+//! let recovered = sm4::mode_cbc::decrypt(&key, &iv, &ciphertext)
+//!     .expect("padding or length is wrong — one opaque None either way");
+//!
+//! assert_eq!(recovered, b"hello world");
+//! ```
+//!
+//! SM2 signing and public-key encryption additionally take a caller-supplied
+//! `rand_core::TryCryptoRng`; this crate pulls no RNG into its own dependency
+//! graph, so pick one (`getrandom`'s `SysRng`, say) in your `Cargo.toml`.
 //!
 //! # Modules
 //!
@@ -32,6 +79,11 @@
 //! - [`spki`] — RFC 5280 `SubjectPublicKeyInfo` for SM2 (v0.3 W2).
 //! - [`sec1`] — RFC 5915 `ECPrivateKey` + SEC1 uncompressed point (v0.3 W2).
 //! - [`pkcs8`] — RFC 5958 `OneAsymmetricKey` + RFC 8018 PBES2 (v0.3 W2).
+//! - `tlcp` (the module appears with the feature of the same name, v1.6) —
+//!   TLCP (GB/T 38636-2020) crypto toolkit: key schedule, record protection,
+//!   and — with `x509` — chain verification. **Not a protocol
+//!   implementation**, and `verify_chain` / `verify_pair` are structural
+//!   trust only, not endpoint authentication.
 //! - [`traits`] — in-crate `Hash` / `Mac` / `BlockCipher` traits
 //!   (v0.3 W5). v0.4 W2 adds RustCrypto-trait fit (`digest::Digest`,
 //!   `digest::Mac`, `cipher::BlockCipherEncrypt`/`BlockCipherDecrypt`)
@@ -108,8 +160,18 @@
 //! `rand_core::Rng` impl — see the workspace `README.md`.
 
 #![no_std]
+// v1.11.2 — "Available on crate feature `x` only" badges on docs.rs. The
+// `docsrs` cfg is set ONLY by `[package.metadata.docs.rs] rustdoc-args`, so
+// this is inert on stable and the `-D warnings` stable `cargo doc` gate in
+// api-stability.yml is unaffected. `doc_auto_cfg` was REMOVED in 1.92 and
+// merged into `doc_cfg` (rust-lang/rust#138907); under the merged feature the
+// auto-labelling is on by default, so no per-item `doc(cfg(...))` is needed —
+// 101 badges render from this one line, incl. compound gates like
+// `tlcp` + `x509`. Still an unstable feature: if a future nightly moves it
+// again, the docs.rs build for the affected version fails and the fix is a
+// republish.
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(missing_docs)]
-#![doc(html_root_url = "https://docs.rs/gmcrypto-core/1.0.0")]
 
 extern crate alloc;
 

@@ -22,11 +22,12 @@ agent that never reads it break something?* If not, it is history — file it.
 
 | | |
 |---|---|
-| Workspace version | `1.11.1` (sibling pins `=1.11.1`) — **re-cut, prepped, not yet published.** First cut `8cb4aac` was held (nightly dudect `ct_tlcp_cbc_deprotect` 0.30 on Xeon 8573C / 0.32–0.42 on EPYC 9V74); fixed by #169 (`tlcp::record::mac_ct`); **publish from the squash SHA of the re-cut release PR, never from `8cb4aac`** |
-| Live on crates.io | **`1.11.0`** — all three crates, 2026-08-01 from `613f619` (tag `v1.11.0`) |
-| 1.11.1 patch | Two fixes: #163 (`sm4-bitsliced-simd` made serial SM4 / CCM slower than scalar on AArch64; the repaired path *executes* only under that feature — `sm4-aead` compiles `sbox_x4` but never selects it; **x86_64 throughput unmeasured, don't claim it**) and #169 (TLCP CBC deprotect's Lucky13 inner-HMAC now length-independent by construction; executes in every `tlcp` build **incl. `gmcrypto-c`**). Default core (`default = []`) behaviour- and timing-identical to 1.11.0; `tlcp` builds wire-identical with deliberately changed timing. Hosted `ubuntu-24.04` dudect runners are heterogeneous (EPYC 7763 / 9V74 / Xeon 8573C / 6973P-C) — **record the `Model name` of every dudect run before calling a red slot noise** |
+| Workspace version | `1.11.2` (sibling pins `=1.11.2`) — **prepped, not yet published.** Docs / metadata only: no crypto path, public API, C ABI, wire format, MSRV or dependency change, and the `cargo-public-api` baselines are byte-identical to 1.11.1. The headline release check is therefore mechanical — `git diff` shows no `crates/**/*.rs` change outside doc comments and inner doc attributes |
+| Live on crates.io | **`1.11.1`** — all three crates, 2026-08-22 from `26a49c3` (tag `v1.11.1`) |
+| 1.11.2 patch | Presentation only, because crates.io metadata and docs.rs renders are baked into a *published version*: docs.rs feature badges (`#![cfg_attr(docsrs, feature(doc_cfg))]` + `rustdoc-args`), a per-crate `gmcrypto-simd` README (it was rendering the workspace one while outranking `gmcrypto-core` in a crates.io `sm4` search), a `gmcrypto-core` crate-root landing page, keyword/description/`homepage` metadata, and README staleness. Runbook: `docs/v1.11.2-release-review.md` |
+| Dudect runner pool | Hosted `ubuntu-24.04` is heterogeneous (EPYC 7763 / 9V74 / Xeon 8573C / 6973P-C) and composite-window targets read materially higher on some SKUs. Both workflows print `RUNNER-CPU:` beside the verdicts since #172 — **read it before calling a red slot noise.** `ct_sm4_cbc_decrypt_fanout` spans 0.0396–0.2008 on 9V74 on unchanged code, i.e. its 0.20 gate sits inside that class's noise band (`docs/v0.5-dudect-recalibration.md`, 2026-08-23) |
 | crates.io skips | `1.10.0` (non-publishing assurance) and **`1.9.1`** (licence-text patch superseded by 1.11.0). Record: `docs/v1.9.1-release-review.md`. **1.11.0 is the first published release carrying licence text**; 1.9.0 and earlier stay without it |
-| Runbook / gate | `docs/v1.11.1-release-review.md`, `docs/v1.11.1-gate1-evidence.md`. Previous: `docs/v1.11.0-release-review.md`, `docs/v1.11.0-gate1-evidence.md` (PASS) |
+| Runbook / gate | `docs/v1.11.2-release-review.md`, `docs/v1.11.2-gate1-evidence.md`. Previous: `docs/v1.11.1-release-review.md`, `docs/v1.11.1-gate1-evidence.md` (PASS) |
 
 `cargo publish` and the SSH-signed tag are the **maintainer's authenticated
 call** — the agent path is branch + PR. The 1.11.0 publish was a recorded
@@ -148,6 +149,11 @@ cargo +nightly fuzz build --features simd   # second profile = sm4-bitsliced-sim
 cargo +nightly fuzz run fuzz_pem fuzz/corpus/fuzz_pem fuzz/seeds/fuzz_pem -- \
   -max_len=16384 -rss_limit_mb=2048 -timeout=25 -max_total_time=60
 
+# docs.rs render (feature badges). Nightly-only: `doc_cfg` is unstable.
+# NEVER add --cfg docsrs to api-stability.yml's stable cargo-doc job.
+cargo +nightly rustdoc -p gmcrypto-core --all-features -- --cfg docsrs
+grep -c 'stab portability' target/doc/gmcrypto_core/index.html
+
 python3 .github/scripts/check_disclosure_boundary.py --self-test
 python3 .github/scripts/check_disclosure_boundary.py --worktree
 python3 .github/scripts/check_disclosure_boundary.py --range origin/main..HEAD
@@ -232,6 +238,11 @@ no_std comb-table lazy init — not `LazyLock`/`OnceLock` (both `std`).
 - Don't add SIMD intrinsics to `gmcrypto-core` — route via `gmcrypto-simd`.
 - Don't promote `gmcrypto-simd` from rlib to cdylib/staticlib (`gmcrypto-c`
   is the only C ABI).
+- Don't point `gmcrypto-simd`'s `readme` back at `../../README.md` (v1.11.2 gave
+  it its own — it outranks `gmcrypto-core` in a crates.io `sm4` search, so its
+  page has to say it is an internal backend). Don't add `all-features = true` to
+  `gmcrypto-c`'s docs.rs metadata: it would switch on `regen-header` and run
+  cbindgen in the docs build.
 - Don't widen the `gmcrypto-simd` public API (no raw pointers / extern "C"
   across that boundary).
 - Don't add a `cpufeatures` check inside an inner SM4 loop in `gmcrypto-core`
@@ -318,6 +329,14 @@ no_std comb-table lazy init — not `LazyLock`/`OnceLock` (both `std`).
 - RustCrypto 0.11/0.5: inherent vs trait `finalize`/`encrypt_block` — use UFCS.
   HMAC via `<HmacSm3 as digest::KeyInit>::new_from_slice` (`Mac` no longer
   carries `KeyInit`).
+- docs.rs feature badges come from `#![cfg_attr(docsrs, feature(doc_cfg))]` in
+  core's `lib.rs`, switched on by `rustdoc-args = ["--cfg", "docsrs"]`. It is
+  **inert on stable**, which is what keeps `api-stability.yml`'s `-D warnings`
+  `cargo doc` job green — adding `--cfg docsrs` there would make `#![feature]`
+  fail to compile. `doc_auto_cfg` was **removed in 1.92** and merged into
+  `doc_cfg`; under the merged feature auto-labelling needs no per-item
+  `doc(cfg(...))`. Still unstable: a malformed render surfaces only on docs.rs
+  after publish, so run the nightly render above before cutting.
 - cbindgen 0.27 doesn't recognize `#[unsafe(no_mangle)]` — pin **0.29+**.
 - CI `cargo deny`: `taiki-e/install-action@v2` with `cargo-deny@0.20.2` — don't
   switch to `cargo install --locked cargo-deny`.

@@ -21,7 +21,7 @@ default-members = ["crates/gmcrypto-core"]
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "1.11.1"
+version = "1.11.2"
 edition = "2024"
 # Dual-licensed, the Rust ecosystem convention: a consumer may take either.
 # Apache-2.0 carries the express patent grant; MIT is the permissive path for
@@ -39,8 +39,9 @@ edition = "2024"
 # starting with 1.11.0; 1.9.0 and earlier on crates.io remain without them.
 # (1.9.1 prepared this fix but was never published — see CHANGELOG.)
 license = "MIT OR Apache-2.0"
+# No `homepage`: it held the same URL as `repository`, so the crates.io
+# sidebar printed the identical link twice (v1.11.2).
 repository = "https://github.com/frankxue831/gm-crypto-rs"
-homepage = "https://github.com/frankxue831/gm-crypto-rs"
 rust-version = "1.85"
 
 [workspace.dependencies]

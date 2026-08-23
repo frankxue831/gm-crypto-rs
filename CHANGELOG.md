@@ -5,6 +5,68 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.11.2] - 2026-08-23
+
+**Presentation only.** No crypto code path, public API, C ABI, wire format,
+MSRV, or dependency changed. The only edits under `crates/*/src` are doc
+comments and one inner attribute that is inert unless `--cfg docsrs` is set —
+which only docs.rs sets. `cargo-public-api` baselines are byte-identical to
+1.11.1. Sibling pins move to `=1.11.2`.
+
+It exists because crates.io metadata and docs.rs renders are baked into a
+*published version*: everything below was already true in the repository at
+1.11.1 and invisible to anyone who had not cloned it.
+
+### Added
+
+- **Feature labels on docs.rs.** Every gated item now renders an "Available on
+  crate feature `x` only" badge — 101 of them, including compound gates like
+  `tlcp` + `x509`. `sm4::gcm_streaming` and `sm2::key_exchange` previously
+  named their gating feature in no rendered documentation at all. Mechanism is
+  `#![cfg_attr(docsrs, feature(doc_cfg))]` plus `rustdoc-args = ["--cfg",
+  "docsrs"]`; `doc_auto_cfg` was removed in Rust 1.92 and merged into
+  `doc_cfg`, under which the auto-labelling needs no per-item attribute.
+- **`gmcrypto-simd` has its own README.** It rendered the *workspace* README —
+  an H1 reading `gm-crypto-rs`, three badges pointing at `gmcrypto-core`, and
+  no sentence saying it is an internal `rlib` backend. A crates.io search for
+  `sm4` ranks it above `gmcrypto-core`, so that page was a front door for the
+  wrong crate. It now says what it is, that every public item is
+  `#[doc(hidden)]` and outside SemVer, and what to depend on instead.
+- **A landing page on the `gmcrypto-core` crate root:** posture stated on the
+  page rather than delegated to a bare `README.md` mention with no URL,
+  a `# Usage` section, and a runnable example that compiles under default
+  features. `tlcp` was described under *Crate features* but missing from the
+  module list.
+- **An Installation section in the README**, above the quick-start, stating
+  that `default = []` and that the examples need a caller-supplied RNG.
+- **TLCP and chain-verification rows in the `gmcrypto-c` README.** Its
+  crates.io page had zero mentions of TLCP, though the toolkit has been
+  C-callable since 1.9.0 and two `tlcp_*.c` examples ship.
+
+### Changed
+
+- `gmcrypto-core` keywords: `sm4` added — it was missing from a crate that
+  implements it — displacing self-coined `gm-crypto` and `no-std`, which
+  duplicates a declared category.
+- `homepage` dropped workspace-wide: it held the same URL as `repository`, so
+  the crates.io sidebar printed the identical link twice.
+- `gmcrypto-simd` and `gmcrypto-c` descriptions rewritten (the former rendered
+  literal backticks; the latter listed no X.509 or TLCP).
+
+### Fixed
+
+- README staleness now visible on crates.io, where the README *is* the landing
+  page: a July 2026 dateline, a parked-items list still naming the `aead`
+  trait fit that shipped in 1.11.0, "all 10 are opt-in" against 11 features,
+  "doc-only examples" for nine C files CI compiles with `-Werror`, and a
+  v0.4-era wasm note in the present tense.
+- The dudect gate description said the harness's 20 targets were "gated". They
+  are not uniformly: 15 block at `|tau| <= 0.20`, four report to a `0.55`
+  gross-regression sentinel, and `ct_sm4_gcm_decrypt_buffered` currently has
+  no threshold in either workflow. The README now says so.
+- Stale `html_root_url` (pinned at `1.0.0` since the 1.0 release) removed
+  rather than re-pinned; docs.rs resolves cross-crate links itself.
+
 ## [1.11.1] - 2026-08-22
 
 **A patch for two defects, one of which the other exposed.**
