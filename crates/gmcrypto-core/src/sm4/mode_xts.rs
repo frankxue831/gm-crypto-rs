@@ -60,7 +60,8 @@
 //! # API
 //!
 //! ```rust
-//! # #[cfg(feature = "sm4-xts")] {
+//! # #[cfg(feature = "sm4-xts")]
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use gmcrypto_core::sm4::{mode_xts, mode_xts::XTS_KEY_SIZE};
 //!
 //! let key: [u8; XTS_KEY_SIZE] = [
@@ -72,10 +73,12 @@
 //! let tweak: [u8; 16] = [0x11; 16];
 //! let plaintext = b"a full data unit at least 16 bytes long";
 //!
-//! let ct = mode_xts::encrypt(&key, &tweak, plaintext).expect("valid");
-//! let pt = mode_xts::decrypt(&key, &tweak, &ct).expect("valid");
+//! // `None` if the data unit is under one block or Key1 == Key2 — opaque either way.
+//! let ct = mode_xts::encrypt(&key, &tweak, plaintext).ok_or("rejected")?;
+//! let pt = mode_xts::decrypt(&key, &tweak, &ct).ok_or("rejected")?;
 //! assert_eq!(pt, plaintext);
-//! # }
+//! # Ok(()) }
+//! # #[cfg(not(feature = "sm4-xts"))] fn main() {}
 //! ```
 //!
 //! # Multi-sector (whole-disk) helper
@@ -92,7 +95,8 @@
 //! API — see [`encrypt_sectors`].
 //!
 //! ```rust
-//! # #[cfg(feature = "sm4-xts")] {
+//! # #[cfg(feature = "sm4-xts")]
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use gmcrypto_core::sm4::mode_xts::{self, XTS_KEY_SIZE};
 //!
 //! // Key1 ‖ Key2 — the two halves MUST differ (GB/T 17964 weak-key guard).
@@ -107,11 +111,15 @@
 //! // A 2-sector (1 KiB) region, encrypted then decrypted back in place.
 //! let mut region = [0xABu8; 1024];
 //! let original = region;
-//! mode_xts::encrypt_sectors(&key, sector_size, start_sector, &mut region).unwrap();
+//! // Pre-flight validation: on `None` the buffer is untouched.
+//! mode_xts::encrypt_sectors(&key, sector_size, start_sector, &mut region)
+//!     .ok_or("sector size or region length rejected")?;
 //! assert_ne!(region, original);
-//! mode_xts::decrypt_sectors(&key, sector_size, start_sector, &mut region).unwrap();
+//! mode_xts::decrypt_sectors(&key, sector_size, start_sector, &mut region)
+//!     .ok_or("sector size or region length rejected")?;
 //! assert_eq!(region, original);
-//! # }
+//! # Ok(()) }
+//! # #[cfg(not(feature = "sm4-xts"))] fn main() {}
 //! ```
 
 use alloc::vec::Vec;

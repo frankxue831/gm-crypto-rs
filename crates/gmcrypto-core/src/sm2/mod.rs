@@ -54,20 +54,22 @@
 //! // crate — add it (or another CSPRNG) to your own Cargo.toml.
 //! use getrandom::SysRng;
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // `from_bytes_be` is the recommended constructor: always available, and
 //! // it keeps `crypto_bigint::U256` out of your code. It returns a
 //! // `CtOption` — rejection of an out-of-range scalar is constant-time.
 //! let d = [0x42u8; 32];
-//! let key = Sm2PrivateKey::from_bytes_be(&d).expect("0x42..42 is a valid scalar");
+//! let key = Sm2PrivateKey::from_bytes_be(&d)
+//!     .into_option()
+//!     .ok_or("scalar out of range")?;
 //! let public = key.public_key();
 //!
-//! let sig = sign_with_id(&key, DEFAULT_SIGNER_ID, b"attack at dawn", &mut SysRng)
-//!     .expect("signing failed — RNG or an internal invariant");
-//!
+//! let sig = sign_with_id(&key, DEFAULT_SIGNER_ID, b"attack at dawn", &mut SysRng)?;
 //! assert!(verify_with_id(&public, DEFAULT_SIGNER_ID, b"attack at dawn", &sig));
 //!
 //! // A different ID is a different Z, so the same signature no longer verifies.
 //! assert!(!verify_with_id(&public, b"other-signer", b"attack at dawn", &sig));
+//! # Ok(()) }
 //! ```
 //!
 //! `Sm2PrivateKey::to_bytes_be` hands back **plaintext secret bytes**; the

@@ -1,23 +1,34 @@
 # gm-crypto-rs
 
-Constant-time-designed pure-Rust SM2 / SM3 / SM4 SDK for Chinese national
-cryptography (GB/T 32905 / 32918 / 32907 / GM/T 0009). SM2 sign / verify,
-public-key encrypt / decrypt, key exchange (GM/T 0003.3), X.509-with-SM2
-leaf certificate parse + signature verify, the TLCP (GB/T 38636) key
-schedule; SM4-CBC / CTR / GCM / CCM / XTS (single-shot and streaming);
-HMAC-SM3, PBKDF2-HMAC-SM3; plus a complete C ABI (`gmcrypto-c`, 104 entry
-points) — all secret-touching paths guarded by an in-CI `dudect-bencher`
-detectable-leak regression harness.
+Pure-Rust SM2 / SM3 / SM4 — the Chinese national cryptographic algorithms —
+with constant-time discipline that is **measured in CI**, not just intended.
 
 [![Crates.io](https://img.shields.io/crates/v/gmcrypto-core.svg)](https://crates.io/crates/gmcrypto-core)
 [![Documentation](https://docs.rs/gmcrypto-core/badge.svg)](https://docs.rs/gmcrypto-core)
+[![MSRV](https://img.shields.io/badge/MSRV-1.85-blue.svg)](https://github.com/frankxue831/gm-crypto-rs#stability--semver)
 [![License](https://img.shields.io/crates/l/gmcrypto-core.svg)](https://crates.io/crates/gmcrypto-core)
 
-**Personal project notice:** not affiliated with, endorsed by, sponsored by, or
-certified by any upstream cryptography project, payment gateway, standards body,
-or vendor.
+For Rust services that must speak GB/T 32918 / 32905 / 32907 and want a
+`no_std` core with no C dependency — and for C, C++, Python, Go and Zig
+callers through a complete, always-on C ABI. Every secret-touching path is
+written against `subtle`'s constant-time primitives and guarded by a
+`dudect` timing-leak harness that blocks merges.
 
-Official ecosystem membership, layering, versioning, and compatibility gates are defined in the [gmcrypto Rust ecosystem charter](docs/ECOSYSTEM.md).
+```rust
+use gmcrypto_core::sm2::{DEFAULT_SIGNER_ID, Sm2PrivateKey, sign_with_id, verify_with_id};
+use gmcrypto_core::sm3;
+use getrandom::SysRng; // any `rand_core::TryCryptoRng`; this crate ships no RNG
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let digest = sm3::hash(b"hello");                     // SM3: 32 bytes
+
+    let key = Sm2PrivateKey::from_bytes_be(&secret_32)    // your scalar, big-endian
+        .into_option().ok_or("scalar out of range")?;
+    let sig = sign_with_id(&key, DEFAULT_SIGNER_ID, b"hello", &mut SysRng)?;
+    assert!(verify_with_id(&key.public_key(), DEFAULT_SIGNER_ID, b"hello", &sig));
+    Ok(())
+}
+```
 
 > ⚠️ **Not independently audited.** No third-party / external security audit has
 > been performed. Assurance is internal: a multi-model adversarial pre-publish
@@ -28,22 +39,62 @@ Official ecosystem membership, layering, versioning, and compatibility gates are
 > project with no support SLA. Review the code and **use at your own risk.** See
 > [`SECURITY.md`](SECURITY.md) for the threat model and disclosure process.
 
-**Status:** actively maintained as of August 2026. The 1.x line is
-feature-complete for its stated scope — v1.9.0 closed the TLCP arc — so commit
-volume is low by design rather than by neglect. Issues and PRs get a response.
+## Installation
+
+```bash
+cargo add gmcrypto-core
+```
+
+```toml
+[dependencies]
+gmcrypto-core = "1.11"
+getrandom = { version = "0.4", default-features = false, features = ["sys_rng"] }
+```
+
+`default = []`. The base build is SM2, SM3, SM4-ECB/CBC/CTR, HMAC-SM3,
+PBKDF2-HMAC-SM3 and the DER / PEM / PKCS#8 codecs, with no optional
+dependency. Everything else below is behind a feature flag. The crate
+deliberately pulls no RNG; SM2 signing and encryption take any
+`rand_core::TryCryptoRng`, and `getrandom`'s `SysRng` is the usual choice.
+
+C / C++ / Python / Go / Zig callers want [`gmcrypto-c`](crates/gmcrypto-c/README.md)
+instead. `gmcrypto-simd` is an internal backend — do not depend on it directly.
+
+## What's in the box
+
+| | Standard | Feature |
+|---|---|---|
+| SM2 sign / verify, encrypt / decrypt | GB/T 32918, GM/T 0009 DER | default |
+| SM3 hash, HMAC-SM3, PBKDF2-HMAC-SM3 | GB/T 32905, RFC 2104 / 8018 | default |
+| SM4-ECB / CBC / CTR, single-shot and streaming | GB/T 32907 | default |
+| DER / PEM / SPKI / SEC1 / PKCS#8 (incl. PBES2-encrypted) | RFC 5280 / 5915 / 5958 / 7468 | default |
+| SM4-GCM / SM4-CCM AEAD, incremental-input GCM | — | `sm4-aead` |
+| SM4-XTS sector mode (confidentiality only) | GB/T 17964-2021 | `sm4-xts` |
+| SM2 key exchange with key confirmation | GM/T 0003.3 | `sm2-key-exchange` |
+| X.509-with-SM2 leaf parse + verify, linear chain verify | GM/T 0015 | `x509` |
+| TLCP key schedule, record protection, `[sign, enc]` pair verify | GB/T 38636-2020 | `tlcp` |
+| RustCrypto `digest` / `cipher` / `aead` trait fits | — | `*-traits` |
+| Table-less bitsliced SM4 S-box; AVX2 / NEON packed batches | — | `sm4-bitsliced[-simd]` |
+
+Three crates, released together at one lockstep version:
+
+| Crate | Role |
+|---|---|
+| [`gmcrypto-core`](https://crates.io/crates/gmcrypto-core) | The `no_std + alloc` crypto core, `unsafe_code = "forbid"`. The Rust API. |
+| [`gmcrypto-c`](https://crates.io/crates/gmcrypto-c) | C ABI, cdylib + staticlib: 104 entry points, committed [`gmcrypto.h`](crates/gmcrypto-c/include/gmcrypto.h) drift-checked in CI. A default build exports the whole surface. |
+| [`gmcrypto-simd`](https://crates.io/crates/gmcrypto-simd) | Internal AVX2 / NEON / CLMUL / PMULL backend. No stable Rust API. |
 
 ## Why this rather than the alternatives
 
 | | gm-crypto-rs | `libsm` | RustCrypto `sm2` / `sm4` |
 |---|---|---|---|
 | SM2 + SM3 + SM4 in one crate | ✅ | ✅ | separate crates |
-| Timing-leak harness in CI | ✅ 20 `dudect` targets, 15 blocking | — | — |
+| Timing-leak harness in CI | ✅ 20 `dudect` targets, 16 blocking | — | — |
 | Fuzzing | ✅ 33 targets, nightly | — | — |
 | C ABI | ✅ 104 entry points | — | — |
 | TLCP (GB/T 38636) toolkit | ✅ | — | — |
 | `no_std` | ✅ | not advertised | ✅ |
 | Enforced SemVer (`cargo-semver-checks`) | ✅ | — | — |
-| Latest release | **1.11.1** | 0.6.1 | `sm4` 0.6.0, `sm2` 0.14.0-rc |
 | **External security audit** | **none** | none | none |
 | **Production track record** | **thin — first published 2026** | years | years |
 
@@ -57,328 +108,136 @@ priority is the longest field exposure, `libsm` has years of it and this does
 not. If your priority is verifiable constant-time discipline, a C ABI, or TLCP
 building blocks, none of the alternatives offer them.
 
-## What this is
+## How "constant-time" is checked
 
-A small, auditable, pure-Rust SM2 / SM3 / SM4 SDK whose central
-differentiating commitment is that secret-touching code paths are
-**constant-time-designed and guarded by an in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/)
-detectable-leak regression harness**: 20 real `ct_*` targets (12
-always-on + 2 cfg-gated under `sm4-bitsliced-simd` + 3 cfg-gated under
-`sm4-aead` + 1 cfg-gated under `sm4-xts` + 1 cfg-gated under
-`sm2-key-exchange` + 1 cfg-gated under `tlcp`) plus a deliberately-leaky
-`negative_control` that proves
-the harness can detect leaks. Fifteen of the 20 block a merge at `|tau| <= 0.20`. Four
-(`ct_fn_invert`, `ct_fp_invert`, `ct_sign_k_class`, `ct_hmac_sm3`) carry
-target-specific policy after the 2026-05-12 / 06-07 / 06-17 recalibrations:
-they measure a composite window whose class split reads as noise on some
-hosted-runner CPUs, so they report as telemetry and only a `0.55`
-gross-regression sentinel fires. The twentieth,
-`ct_sm4_gcm_decrypt_buffered`, currently reports without a threshold. See
-[`SECURITY.md`](SECURITY.md) and
-[`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md).
+The differentiator is not the design intent — [`RustCrypto/sm2`](https://docs.rs/sm2/)
+aims for constant-time too — it is the **in-CI regression gate**. Every PR
+and every night, a [`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
+times each secret-touching operation under two input classes and gates the
+per-target `|tau|` statistic. A deliberately leaky `negative_control` must
+fire on every run, proving the harness can still see a leak.
 
-The harness reports timing-leak detection events. **It does not prove
-constant-time.** Low `|tau|` values mean the test could not detect a leak with
-the budget given, not that no leak exists. Language taken directly from
-`dudect-bencher`'s own docs.
+| Target | Secret it splits on | Gate |
+|---|---|---|
+| `ct_sign` | private key `d` and nonce `k` magnitude | 0.20 |
+| `ct_sign_k_class` | nonce only, fixed `d` — the leak `ct_sign` cannot see | sentinel 0.55 |
+| `ct_mul_g`, `ct_mul_var` | scalar | 0.20 |
+| `ct_sm2_decrypt` | recipient `d_B` | 0.20 |
+| `ct_sm2_key_exchange` (`sm2-key-exchange`) | initiator's static `d_A` | 0.20 |
+| `ct_sm4_key_schedule`, `ct_sm4_encrypt_block`, `ct_sm4_ctr_encrypt` | master key | 0.20 |
+| `ct_sm4_encrypt_block_bitsliced_simd`, `ct_sm4_cbc_decrypt_fanout` (`sm4-bitsliced-simd`) | master key, through the SIMD batch path | 0.20 |
+| `ct_sm4_gcm_decrypt`, `ct_sm4_gcm_decrypt_buffered`, `ct_sm4_ccm_decrypt` (`sm4-aead`) | master key, valid `(ct, tag)` for both classes | 0.20 |
+| `ct_sm4_xts_decrypt` (`sm4-xts`) | master key, over a ciphertext-stealing tail | 0.20 |
+| `ct_tlcp_cbc_deprotect` (`tlcp`) | recovered-fragment length, fixed key — the Lucky13 residual | 0.20 |
+| `ct_hmac_sm3` | key | sentinel 0.55 |
+| `ct_pkcs8_decrypt` | password bytes, both blobs valid | 0.20 |
+| `ct_fn_invert`, `ct_fp_invert` | field element, direct inversion diagnostics | sentinel 0.55 |
+| `negative_control` | deliberately leaky | must fire, `> 1.0` |
 
-The harness covers: SM2 sign (split by both private key `d` and nonce
-`k` magnitude, with both retry nonces class-tied), SM2 decrypt (split
-by recipient `d_B`), SM4 key schedule + single-block encrypt (split by
-master key, under default linear-scan and `sm4-bitsliced` paths), the
-v0.5 SIMD-packed dispatch (`ct_sm4_encrypt_block_bitsliced_simd`,
-cfg-gated), v0.6's batched CBC-decrypt fanout
-(`ct_sm4_cbc_decrypt_fanout`, cfg-gated), v0.7's SM4-CTR encrypt
-(`ct_sm4_ctr_encrypt`, exercising the public batch path on every
-cipher matrix entry), v0.8's SM4-GCM + SM4-CCM decrypt
-(`ct_sm4_gcm_decrypt` and `ct_sm4_ccm_decrypt`, cfg-gated on
-`sm4-aead`), v0.9's incremental-input buffered SM4-GCM decrypt
-(`ct_sm4_gcm_decrypt_buffered`, cfg-gated on `sm4-aead`), v0.12's SM4-XTS
-decrypt over a ciphertext-stealing data unit (`ct_sm4_xts_decrypt`,
-cfg-gated on `sm4-xts` — the CTS tail is the riskiest tweak arithmetic, so
-that is what gates), v1.1's full
-SM2 key-exchange initiator flow (`ct_sm2_key_exchange`, cfg-gated on
-`sm2-key-exchange` — split by static `d_A` with per-class valid
-responder transcripts), v1.7's Lucky13-hardened TLCP record deprotect
-(`ct_tlcp_cbc_deprotect`, cfg-gated on `tlcp` — the residual guard behind an
-equalisation that is enforced separately by an equivalence test), HMAC-SM3
-(split by key), encrypted-PKCS#8
-decrypt (split by password bytes — both classes' blobs valid for their
-class's password so both succeed via identical control flow), plus
-direct `Fn::invert` and `Fp::invert` diagnostics and two always-on
-`noise_floor_*` probes that cannot leak by construction and exist to
-characterise runner noise. The `ct_sign_k_class`
-target closes v0.1's structural blind spot to nonce-only leaks.
+Sixteen of the twenty block a merge at `|tau| <= 0.20`. Four sit on a `0.55`
+gross-regression sentinel: they measure a composite window whose class split
+reads as noise on some hosted-runner CPUs, so they report as telemetry and
+only an egregious value fails. The harness reports detection events — **it
+does not prove constant-time.** A low `|tau|` means no leak was detected with
+the budget given, not that none exists. The full discipline, the hosted-runner
+noise history, and every demotion with its data are in [`SECURITY.md`](SECURITY.md)
+and [`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md).
 
-The `crypto-bigint 0.6 → 0.7.3` upgrade resolved the v0.1-era
-`ConstMontyForm::invert` leak directly: on the v0.2 W0 harness both
-direct invert diagnostics measured under `|tau| ≈ 0.01`, two orders of
-magnitude below the gate. Subsequent GH Actions runner-image drift on
-2026-05-12 raised the empirical noise floor on `ct_fn_invert` /
-`ct_fp_invert` — both targets moved to PR-smoke telemetry + a nightly
-gross-regression sentinel at `|tau| ≥ 0.55`. See
-[`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md)
-for the data and posture. See [`SECURITY.md`](SECURITY.md) for the full
-constant-time discipline.
-
-The differentiator vs. existing Rust SM2 crates (notably
-[`RustCrypto/sm2`](https://docs.rs/sm2/), which already aims for constant-time
-secret-dependent operations in its design) is **the in-CI regression gate**, not
-the design intent in isolation.
+Beyond timing: KAT vectors in CI, 33 `cargo-fuzz` targets run nightly, and an
+interop suite against a pinned from-source [GmSSL](https://github.com/guanzhi/GmSSL)
+3.2.0 — the reference implementation — cross-validating signatures,
+ciphertexts and AEAD output byte-for-byte.
 
 ## What this isn't
 
-- Not a TLS/TLCP protocol implementation (the `tlcp` feature ships cryptographic building blocks, including record protection, but no handshake state machine, record framing, connection/session orchestration, or transport I/O).
-- Not SM9, ZUC, post-quantum.
-- Not an HSM/SDF/SKF integration.
-- Not a certified cryptographic module.
+- Not a TLS/TLCP protocol implementation. The `tlcp` feature ships the
+  cryptographic building blocks — key schedule, record protection,
+  certificate-pair verification — but no handshake state machine, record
+  framing, session orchestration or transport I/O.
+- Not SM9, ZUC, or post-quantum.
+- Not an HSM / SDF / SKF integration, and not a certified cryptographic module.
 - Not constant-time on CPUs with data-dependent multiply latencies (some older
   x86, some embedded).
-- Not a comprehensive SM-crypto library yet — see the roadmap below.
+- `verify_chain` / `verify_pair` make **structural** trust decisions only. A
+  `true` means the chain links to an anchor you supplied — never "this is the
+  peer I dialed". Binding an identity to an endpoint is the caller's, permanently.
 
-## Installation
+## More examples
 
-```bash
-cargo add gmcrypto-core
-```
-
-```toml
-[dependencies]
-gmcrypto-core = "1.11"
-```
-
-`default = []`: the base build is SM2, SM3, SM4-ECB/CBC/CTR, HMAC-SM3,
-PBKDF2-HMAC-SM3 and the DER/PEM/PKCS#8 codecs, with no optional dependency.
-Everything else in this README — AEAD, XTS, key exchange, X.509, TLCP, the
-RustCrypto trait fits, the SIMD backend — is behind a feature flag; see
-[Crates & features](#crates--features). The examples below also need an RNG,
-which this crate deliberately does not pull in:
-
-```toml
-getrandom = { version = "0.4", default-features = false, features = ["sys_rng"] }
-```
-
-C / C++ / Python / Go / Zig callers want `gmcrypto-c` instead; `gmcrypto-simd`
-is an internal backend and should not be depended on directly.
-
-## Quick-start
-
-```rust
-use gmcrypto_core::sm2::{
-    sign_with_id, verify_with_id, Sm2PrivateKey, DEFAULT_SIGNER_ID,
-};
-use getrandom::SysRng;
-use hex_literal::hex;
-
-// `from_bytes_be` is the recommended constructor: always available, and it
-// keeps `crypto_bigint::U256` out of your code.
-let d_be: [u8; 32] = hex!(
-    "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8"
-);
-let key = Sm2PrivateKey::from_bytes_be(&d_be).expect("d in [1, n-2]");
-let public = key.public_key();
-
-// Signing takes a fallible `rand_core::TryCryptoRng`, so an RNG failure
-// surfaces as an error rather than a panic. `SysRng` satisfies it directly.
-let mut rng = SysRng;
-let sig = sign_with_id(&key, DEFAULT_SIGNER_ID, b"hello", &mut rng).unwrap();
-assert!(verify_with_id(&public, DEFAULT_SIGNER_ID, b"hello", &sig));
-```
-
-**SM2 key exchange** (v1.1, opt-in `sm2-key-exchange`): an authenticated
-two-party key agreement with mandatory key confirmation. Each step consumes
-the state machine, so an ephemeral cannot be reused and neither side sees
-the key before the peer's confirmation tag verifies:
+**SM2 key exchange** (`sm2-key-exchange`) — authenticated two-party agreement
+with mandatory key confirmation. Each step consumes the state machine, so an
+ephemeral cannot be reused and neither side sees the key before the peer's
+confirmation tag verifies:
 
 ```rust
 use gmcrypto_core::sm2::key_exchange::{Sm2KxInitiator, Sm2KxResponder};
 
-// A (initiator) and B (responder) hold each other's static public keys.
 let init = Sm2KxInitiator::new(&key_a, &pub_b, b"A-id", b"B-id", 32)?;
-let (r_a, init_waiting) = init.produce_ephemeral(&mut rng)?; // R_A -> B
+let (r_a, init_waiting) = init.produce_ephemeral(&mut rng)?;      // R_A -> B
 
 let resp = Sm2KxResponder::new(&key_b, &pub_a, b"A-id", b"B-id", 32)?;
-let (r_b, s_b, resp_waiting) = resp.respond(&r_a, &mut rng)?; // (R_B, S_B) -> A
+let (r_b, s_b, resp_waiting) = resp.respond(&r_a, &mut rng)?;      // (R_B, S_B) -> A
 
-let (k_a, s_a) = init_waiting.confirm(&r_b, &s_b)?; // verifies S_B; S_A -> B
-let k_b = resp_waiting.finish(&s_a)?;               // verifies S_A
-assert_eq!(k_a.as_bytes(), k_b.as_bytes());         // 32-byte agreed key
+let (k_a, s_a) = init_waiting.confirm(&r_b, &s_b)?;               // verifies S_B; S_A -> B
+let k_b = resp_waiting.finish(&s_a)?;                             // verifies S_A
+assert_eq!(k_a.as_bytes(), k_b.as_bytes());
 ```
 
-**X.509-with-SM2** (v1.3, opt-in `x509`): parse a DER v3 leaf certificate
-and verify its SM2-with-SM3 signature against an issuer public key. **This
-makes no trust decisions** — no chains, no clock, no extension
-interpretation, no revocation; `true` means exactly "this issuer key signed
-these exact wire `tbsCertificate` bytes":
+**X.509-with-SM2** (`x509`) — parse a DER v3 leaf and verify its SM2-with-SM3
+signature against an issuer key. `true` means exactly "this issuer key signed
+these wire `tbsCertificate` bytes"; no clock, no extension interpretation, no
+revocation:
 
 ```rust
 use gmcrypto_core::x509::Certificate;
 
 let cert = Certificate::from_der(&leaf_der).ok_or("not a GM/T 0015 cert")?;
 assert!(cert.verify_signature(&issuer_public_key));
-let _validity = (cert.not_before(), cert.not_after()); // exposed; no clock
+let _validity = (cert.not_before(), cert.not_after());  // exposed, never compared
 ```
 
-v1.8 adds a deliberately narrow chain layer: `x509::verify_chain` walks a
-caller-ordered chain to a trusted anchor (per-edge signature, keyUsage /
-basicConstraints, optional comparison time), and `tlcp::chain::verify_pair`
-(with `tlcp` + `x509`) verifies a TLCP [sign, enc] double-cert pair. Both
-return a single `bool` and make **structural** trust decisions only —
-**endpoint identity binding stays the caller's, permanently** (a `true` is
-never "this is the peer I dialed").
-
-The same surfaces are reachable from C / C++ / Python / Go / Zig through
-`gmcrypto-c` — see [`crates/gmcrypto-c/README.md`](crates/gmcrypto-c/README.md)
-and the examples under
-[`crates/gmcrypto-c/examples/`](crates/gmcrypto-c/examples/)
-(`sm2_sign.c`, `sm4_gcm_streaming.c`, `sm4_ccm.c`, `sm4_xts_sector.c`,
-`sm4_xts_multisector.c`, `sm2_key_exchange.c`, `x509_verify.c`,
-`tlcp_handshake.c`, `tlcp_verify_pair.c`). All nine are syntax-checked in CI
-against the committed header with `-Wall -Wextra -Werror`, so a stale
-declaration fails the build rather than the reader.
-
-## Crates & features
-
-Three crates, released together at one lockstep version:
-
-| Crate | Role |
-|---|---|
-| [`gmcrypto-core`](https://crates.io/crates/gmcrypto-core) | The `no_std + alloc` crypto core (`unsafe_code = "forbid"`). The Rust API. |
-| [`gmcrypto-c`](https://crates.io/crates/gmcrypto-c) | C ABI shim (cdylib + staticlib): 104 entry points, committed [`gmcrypto.h`](crates/gmcrypto-c/include/gmcrypto.h) drift-checked in CI. **Always-on**: a default build exports the full surface. |
-| [`gmcrypto-simd`](https://crates.io/crates/gmcrypto-simd) | Internal AVX2/NEON/CLMUL/PMULL acceleration backend. **No stable Rust API** — use `gmcrypto-core`. |
-
-`gmcrypto-core` features (`default = []`; all additive, all opt-in):
-
-| Feature | Adds |
-|---|---|
-| `sm4-aead` | SM4-GCM + SM4-CCM single-shot AEAD, incremental-input buffered GCM (pulls `gmcrypto-simd` for GHASH). |
-| `sm4-xts` | SM4-XTS (GB/T 17964-2021, **not** IEEE 1619): single-shot + in-place multi-sector disk helpers. Confidentiality only. |
-| `sm2-key-exchange` | GM/T 0003.3 key agreement (typestate role state-machines): confirmed flow by default + the standard-permitted no-confirmation completers (v1.6). |
-| `x509` | X.509-with-SM2 leaf parse + signature verify; v1.8 adds linear `verify_chain` + keyUsage/basicConstraints readers. **Structural trust only — NOT endpoint authentication.** |
-| `tlcp` | TLCP (GB/T 38636-2020) crypto toolkit: key schedule (P_SM3 PRF, master secret, key block, Finished) + **record protection** (SM4-CBC Lucky13-hardened deprotect; SM4-GCM record with `sm4-aead`) + **certificate-pair verification** (`tlcp::chain::verify_pair`, with `x509`). **Not a protocol implementation.** |
-| `sm4-bitsliced` | Table-less, gate-only SM4 S-box (constant-time by construction; byte-identical output). |
-| `sm4-bitsliced-simd` | AVX2 (x86_64) / NEON (aarch64) packed bitsliced SM4 batches, plus a four-byte serial-`tau` path so CCM CBC-MAC is not routed through wasted x8 lanes. Runtime AVX2 detection; scalar fallback off those targets. |
-| `digest-traits` / `cipher-traits` | RustCrypto trait fit (`digest 0.11` / `cipher 0.5`) for `Sm3` / `HmacSm3` / `Sm4Cipher`. |
-| `aead-traits` | RustCrypto trait fit (`aead 0.6`) for SM4-GCM / SM4-CCM: `Sm4Gcm` (12-byte nonce, 16-byte tag) and `Sm4Ccm<M, N>` (tag/nonce sizes as type parameters). Implies `sm4-aead`. |
-| `crypto-bigint-scalar` | `Sm2PrivateKey::from_scalar(U256)` — the documented `crypto-bigint 0.7` escape hatch. |
+The same surfaces are reachable from C through `gmcrypto-c`; nine shipped
+[examples](crates/gmcrypto-c/examples/) — SM2 signing, streaming GCM, CCM, XTS
+sectors, key exchange, X.509, a TLCP handshake and pair verification — are
+compiled in CI against the committed header with `-Wall -Wextra -Werror`.
 
 ## Stability & SemVer
 
-The line graduated to **1.0 (stable)** with the **1.0.0** release; the current release is
-**1.11.1** (a patch: on the measured AArch64 host the opt-in `sm4-bitsliced-simd`
-feature no longer makes serial SM4 — the CCM CBC-MAC path — slower than the scalar
-build, issue #163 (x86_64 throughput unmeasured; correctness/KAT/fuzz-covered only);
-and the TLCP SM4-CBC deprotect's Lucky13 inner-HMAC is now length-independent by
-construction — every `tlcp` build including the C ABI — a residual the first fix made
-measurable on Zen 4 / Xeon runners. Wire-identical to 1.11.0; the default core build
-is behaviour-identical. **1.11.0** was the RustCrypto `aead` 0.6
-trait fit; **1.9.0** the TLCP toolkit C FFI that closed the TLCP arc). crates.io history
-goes **0.16.0 → 1.0.0 → 1.0.1 → 1.1.0 → 1.2.0 → 1.3.0 → 1.4.0 → 1.6.0 → 1.7.0 → 1.8.0 → 1.9.0 → 1.11.0 → 1.11.1**, skipping 0.17.0–0.23.0,
-1.5.0, 1.9.1 and 1.10.0 (the 0.x run was the assurance +
-API-finalization arc that shipped together in `1.0.0`; 1.5 was the TLCP-decomposition
-design cycle, [`docs/tlcp-decomposition.md`](docs/tlcp-decomposition.md); 1.10 was an
-assurance cycle that changed no published crate's runtime behavior, so its work ships
-here in `1.11.0`. **1.9.1 is the one skip that was not planned as such**: it was a
-fully prepared and verified licence-text packaging patch, superseded when `1.11.0`
-shipped that same fix — see [`docs/v1.9.1-release-review.md`](docs/v1.9.1-release-review.md),
-kept as the record). Every post-1.0 release has been additive (SemVer-checked);
-the only migration ever required is 0.16 → 1.0, a single major bump — no published 0.x
-consumer ever saw an intermediate break. The public API had been stable in
-practice since v0.5; the **v1.0 readiness audit** (v0.21) froze and tooling-guarded
-it, the **v0.22 API-tightening cycle** decoupled it from `crypto-bigint 0.7`, and
-the **v0.23 pre-1.0 re-audit remediation cycle** applied the API/ABI-finality +
-hardening fixes from a multi-model adversarial re-audit
-([`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md)) —
-see [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md).
+- **1.x is stable.** Every release since 1.0.0 has been additive;
+  `cargo-semver-checks` gates breaking changes in CI. The only migration ever
+  required was 0.16 → 1.0.
+- **Covered:** the public Rust API of `gmcrypto-core` (snapshotted in
+  [`docs/api-baseline/`](docs/api-baseline/), drift-checked in CI) and the
+  `gmcrypto-c` C ABI (the committed header, drift-checked in CI).
+- **Not covered:** anything `#[doc(hidden)]` — the low-level curve and point
+  arithmetic, the raw DER reader / writer, the in-crate traits — and the whole
+  of `gmcrypto-simd`. These exist for in-repo dev crates and may change in any
+  release.
+- **Wire output is byte-identical to 0.16.0:** SM2 signatures and ciphertexts,
+  every SM4 mode.
+- **MSRV is 1.85** (edition 2024). An MSRV bump is a minor, not a patch.
+- **Features are additive**, `default = []`, all eleven opt-in.
+- **No `crypto-bigint` type in the always-on API.** Byte-adjacent types take
+  and return `[u8; 32]`. The one exception is the opt-in `crypto-bigint-scalar`
+  feature's `Sm2PrivateKey::from_scalar(U256)`, and enabling it opts you into
+  that crate's major-version contract.
+- **Failures are opaque by design.** `verify_with_id` returns `bool`; every
+  other fallible operation returns one `Error::Failed` or `None`, never a
+  reason. PRs that distinguish failure modes are rejected — see
+  [`SECURITY.md`](SECURITY.md).
 
-**From 1.0, SemVer is enforced**: breaking changes to the covered surface require a
-major bump, and `cargo-semver-checks` runs as the forward breaking-change gate in
-CI (the three crates always release together at one lockstep version, with
-intra-workspace deps pinned exactly — `=1.11.1`). The runtime wire output (SM2
-signatures / ciphertexts, SM4 mode bytes) is byte-identical to 0.16.0.
-
-- **What's covered by SemVer:** the public Rust API of `gmcrypto-core` (the
-  surface snapshotted in [`docs/api-baseline/gmcrypto-core.txt`](docs/api-baseline/gmcrypto-core.txt),
-  drift-checked in CI) and the `gmcrypto-c` **C ABI** (the committed
-  `crates/gmcrypto-c/include/gmcrypto.h`, drift-checked in CI).
-- **What's NOT covered:** anything `#[doc(hidden)]` — `sm2::sign_raw_with_id` (the
-  dudect harness hook), `Sm4Cbc{Encryptor,Decryptor}::take_output` (FFI-shim drains),
-  (v0.22) the low-level SM2 curve arithmetic `sm2::curve` / `sm2::scalar_mul` /
-  `ProjectivePoint::to_affine`, and (v0.23) the raw EC point surface
-  `sm2::point` / `ProjectivePoint` (the type + module + re-export) +
-  `Sm2PublicKey::{from_point, point}`, the low-level `asn1::{reader, writer, oid}`
-  modules, and the in-crate `traits::{Hash, Mac, BlockCipher}` module (all kept
-  `pub` only for in-repo dev crates); and the entire **`gmcrypto-simd`** crate, which
-  is an internal acceleration backend with **no stable Rust API** (use `gmcrypto-core`
-  from Rust, `gmcrypto-c` from C). These may change or be removed in any release.
-- **High-level key path speaks keys, not points (v0.23).**
-  `Sm2PrivateKey::public_key()` returns `Sm2PublicKey` (not the now-internal
-  `ProjectivePoint`); `Sm2PublicKey::from_sec1_bytes` is the on-curve-checked public
-  point constructor. `spki::{encode, decode}` and `sec1::EcPrivateKey.public` speak
-  `Sm2PublicKey`.
-- **RNG bound (v0.23).** `sm2::{sign_with_id, encrypt}` name the **fallible**
-  `rand_core::TryCryptoRng` bound — a deliberate, documented ecosystem coupling
-  (`rand_core` is the RNG interop point, the RustCrypto-wide convention; unlike the
-  v0.22 `crypto-bigint` decoupling, replacing it would hurt interop). An RNG failure
-  collapses to the single `Failed`, never a panic.
-- **Single-shot SM4-GCM `encrypt` is fallible (v0.23).**
-  `mode_gcm::{encrypt, encrypt_with_tag_len}` return `Option<…>`, rejecting plaintext
-  past the `2^36 − 32`-byte GCM counter ceiling (matching the streaming path and
-  `decrypt`).
-- **Features are additive** (`default = []`; all 11 are opt-in) and the build is
-  `no_std` + `alloc`-only with `unsafe_code = "forbid"` on the core.
-- **MSRV is 1.85** (edition 2024); an MSRV bump is treated as a minor, not a patch.
-- **`crypto-bigint` decoupling (v0.22):** the **always-on** (default-features) public
-  API names **no** `crypto-bigint` types — the byte-adjacent types
-  (`asn1::{encode,decode}_sig`, `Sm2Ciphertext::{x,y}`) take/return `[u8; 32]`, and
-  the curve/scalar arithmetic is `#[doc(hidden)]` (above). The **only** place a
-  `crypto-bigint 0.7` type appears in the public API is the **opt-in**
-  `crypto-bigint-scalar` feature's `Sm2PrivateKey::from_scalar(U256)` — enabling that
-  feature is an explicit opt-in to the `crypto-bigint 0.7` type contract (a
-  `crypto-bigint` major bump would be breaking for that feature). The recommended
-  always-on path (`Sm2PrivateKey::from_bytes_be`) avoids it entirely. See
-  [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) §3.A.
-
-## Release history & roadmap
-
-Per-release narratives live in [`CHANGELOG.md`](CHANGELOG.md) (every
-published version, Keep-a-Changelog format) and in the per-cycle scope
-documents under [`docs/`](docs/) (`vX.Y-scope.md` — including the
-non-publishing assurance milestones v0.14 and v0.17–v0.23: parser fuzzing,
-the open-source flip, dudect-gate hardening, the v1.0 readiness audit and
-remediation).
-
-The arc so far: v0.1–v0.16 built the primitive surface (SM2/SM3/SM4, all
-SM4 cipher modes incl. AEAD + XTS, the C ABI, SIMD acceleration); v0.17–v0.23
-were the assurance + API-finalization run-up to **1.0.0**; the 1.x line has
-been strictly additive throughout — SM2 key exchange (1.1) + its C FFI (1.2),
-X.509-with-SM2 leaf parse/verify (1.3) + its C FFI (1.4), then the TLCP arc:
-the key schedule and no-confirmation SM2-KX completers (1.6), record
-protection with the Lucky13-hardened CBC deprotect (1.7), certificate-chain
-and `[sign, enc]` pair verification (1.8), and the C FFI that exposes the
-whole toolkit — 85 → 104 entry points (1.9).
-
-**Direction: the TLCP (GB/T 38636) toolkit is complete**, in-core and from C.
-A C client can run a full handshake end-to-end — key exchange, key schedule,
-record protection, certificate verification. What it is *not* is a protocol
-implementation: there is no handshake state machine, no record framing, and
-no transport I/O, and adding them is a separate decision (a sans-I/O engine in
-its own crate) that has **not** been committed to. Smaller parked items — AVX-512
-`sbox_x64` and CCM buffered input — are tracked in the scope docs. (The
-RustCrypto `aead` trait fit shipped in v1.11; the class-split-aware dudect
-noise-twin landed as required non-blocking telemetry, and becoming a relative
-gate is still pending runner calibration.)
-
-**How it was built:** for the verification-first development method behind
-this library — pre-registered scope, multi-model adversarial review,
-executable-evidence gates, and the failures kept as receipts — see
-[`CASE-STUDY.md`](CASE-STUDY.md).
+Release notes: [`CHANGELOG.md`](CHANGELOG.md), every published version. The
+per-cycle design records are under [`docs/`](docs/); the verification-first
+method behind them — pre-registered scope, adversarial review, executable
+evidence gates, failures kept as receipts — is in [`CASE-STUDY.md`](CASE-STUDY.md).
+The TLCP toolkit is complete as a toolkit; a sans-I/O protocol engine would be
+a separate crate and has not been committed to.
 
 ## Threat model
 
 See [`SECURITY.md`](SECURITY.md). Briefly: server-side use, dedicated host,
-operator-trusted, network MITM in scope, side-channel attacks beyond what the
-dudect harness covers are NOT in scope.
+operator-trusted, network MITM in scope; side-channel attacks beyond what the
+dudect harness covers are not.
 
 ## Build & test
 
@@ -397,45 +256,32 @@ GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl --features sm4-aead  # 13 tests
 ```
 
 The suite **pins its oracle version** and fails with an `ORACLE DRIFT` message
-on any other build. That pin is load-bearing rather than fussy: GmSSL renames
-subcommands and narrows accepted input ranges between releases, so an unpinned
-oracle quietly changes what "interop passes" means. CI runs the same suite
-against a from-source v3.2.0 build. To cross-validate against a different
-release deliberately, set `GMCRYPTO_GMSSL_VERSION` (e.g. `"GmSSL 3.1.1"`).
+on any other build. GmSSL renames subcommands and narrows accepted input
+ranges between releases, so an unpinned oracle quietly changes what "interop
+passes" means. To cross-validate against a different release deliberately,
+set `GMCRYPTO_GMSSL_VERSION` (e.g. `"GmSSL 3.1.1"`).
 
 ## wasm32 support
 
-`gmcrypto-core` builds on `wasm32-unknown-unknown` as of v0.4. CI gates
-both stable and MSRV (1.85) builds on the target.
+`gmcrypto-core` builds on `wasm32-unknown-unknown`; CI gates both stable and
+MSRV builds on the target.
 
 ```bash
 rustup target add wasm32-unknown-unknown
 cargo build -p gmcrypto-core --target wasm32-unknown-unknown --no-default-features
 ```
 
-The crate is `no_std + alloc` only and does NOT pull `getrandom`'s
-`wasm_js` backend or `wasm-bindgen` / `js-sys` into its default dep
-graph. Wasm callers wire their own `rand_core::Rng` impl — typically
-by enabling `getrandom`'s `wasm_js` feature in *their* `Cargo.toml`:
+The crate does not pull `getrandom`'s `wasm_js` backend or `wasm-bindgen` into
+its default graph. Wasm callers enable it in *their* `Cargo.toml`:
 
 ```toml
 [dependencies]
 gmcrypto-core = "1.11"
-rand_core = { version = "0.10", default-features = false }
 getrandom = { version = "0.4", default-features = false, features = ["wasm_js"] }
 ```
 
-```rust
-use gmcrypto_core::sm2::{sign_with_id, Sm2PrivateKey, DEFAULT_SIGNER_ID};
-use getrandom::SysRng;
-
-let mut rng = SysRng; // wasm_js-backed when targeting wasm32
-let sig = sign_with_id(&priv_key, DEFAULT_SIGNER_ID, b"msg", &mut rng).unwrap();
-```
-
-CI gates the wasm32 build target on every PR. There is no
-`wasm-bindgen-test` runner executing KAT vectors under Node or a headless
-browser; adding one has not been committed to.
+There is no `wasm-bindgen-test` runner executing KAT vectors under Node or a
+headless browser; adding one has not been committed to.
 
 ## License
 
@@ -446,20 +292,18 @@ Dual-licensed under either of
 - MIT license ([`LICENSE-MIT`](LICENSE-MIT) or
   <https://opensource.org/licenses/MIT>)
 
-at your option. This is the Rust ecosystem convention: Apache-2.0 carries the
-express patent grant, MIT is the permissive path for downstreams whose legal
-review fast-tracks it.
-
-**Starting with 1.11.0, both texts ship inside every published crate.** Every
-release up to and including 1.9.0 shipped none — the licence existed only at the
-repository root and nothing pointed cargo at it — so those archives on crates.io
-do not contain it. The licence that governs those releases is unchanged; only
-the packaging was wrong.
+at your option. Both texts ship inside every published crate from 1.11.0;
+archives up to 1.9.0 on crates.io do not contain them — the licence that
+governs those releases is unchanged, only the packaging was wrong.
 
 Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in this project by you, as defined in the Apache-2.0
 license, shall be dual-licensed as above, without any additional terms or
 conditions.
 
-Some reference outputs use the upstream [`gmssl`](https://github.com/guanzhi/GmSSL)
-tool. This project is independent of that project.
+**Personal project notice:** not affiliated with, endorsed by, sponsored by, or
+certified by any upstream cryptography project, payment gateway, standards body,
+or vendor. Some reference outputs use the upstream
+[`gmssl`](https://github.com/guanzhi/GmSSL) tool; this project is independent of
+it. Official ecosystem membership, layering, versioning and compatibility gates
+are defined in the [gmcrypto Rust ecosystem charter](docs/ECOSYSTEM.md).

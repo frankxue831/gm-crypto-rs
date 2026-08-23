@@ -61,7 +61,8 @@
 //! # API
 //!
 //! ```rust
-//! # #[cfg(feature = "sm4-aead")] {
+//! # #[cfg(feature = "sm4-aead")]
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use gmcrypto_core::sm4::{KEY_SIZE, mode_gcm};
 //!
 //! let key: [u8; KEY_SIZE] = [0x42; KEY_SIZE];
@@ -69,18 +70,20 @@
 //! let aad: &[u8] = b"additional authenticated data";
 //! let plaintext = b"hello world";
 //!
-//! let (ciphertext, tag) =
-//!     mode_gcm::encrypt(&key, &nonce, aad, plaintext).expect("plaintext under the GCM ceiling");
+//! let (ciphertext, tag) = mode_gcm::encrypt(&key, &nonce, aad, plaintext)
+//!     .ok_or("plaintext past the GCM counter ceiling")?;
 //! assert_eq!(ciphertext.len(), plaintext.len());
 //!
-//! let recovered = mode_gcm::decrypt(&key, &nonce, aad, &ciphertext, &tag);
-//! assert_eq!(recovered.as_deref(), Some(plaintext.as_slice()));
+//! let recovered = mode_gcm::decrypt(&key, &nonce, aad, &ciphertext, &tag)
+//!     .ok_or("authentication failed")?;
+//! assert_eq!(recovered, plaintext);
 //!
-//! // A tampered tag fails verification.
+//! // A tampered tag fails verification — with the same opaque `None`.
 //! let mut bad_tag = tag;
 //! bad_tag[0] ^= 0x01;
 //! assert!(mode_gcm::decrypt(&key, &nonce, aad, &ciphertext, &bad_tag).is_none());
-//! # }
+//! # Ok(()) }
+//! # #[cfg(not(feature = "sm4-aead"))] fn main() {}
 //! ```
 
 use alloc::vec;

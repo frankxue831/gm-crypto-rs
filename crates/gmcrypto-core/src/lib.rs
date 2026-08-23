@@ -28,136 +28,120 @@
 //! [Crate features](#crate-features).
 //!
 //! ```rust
+//! use gmcrypto_core::sm2::{DEFAULT_SIGNER_ID, Sm2PrivateKey, sign_with_id, verify_with_id};
 //! use gmcrypto_core::{sm3, sm4};
+//! use getrandom::SysRng; // any `rand_core::TryCryptoRng`; this crate ships no RNG
 //!
-//! // SM3 (GB/T 32905) — 32-byte digest.
-//! let digest = sm3::hash(b"abc");
-//! assert_eq!(digest.len(), 32);
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # let secret_32 = [0x42u8; 32];
+//! // SM3 (GB/T 32905): 32-byte digest.
+//! let digest = sm3::hash(b"hello");
 //!
-//! // SM4-CBC (GB/T 32907) — PKCS#7 padded. The IV is caller-supplied and
-//! // must be unpredictable per message; this fixed one is for the example.
+//! // SM2 (GB/T 32918): sign and verify under the GB/T default signer ID.
+//! let key = Sm2PrivateKey::from_bytes_be(&secret_32)   // your scalar, big-endian
+//!     .into_option().ok_or("scalar out of range")?;
+//! let sig = sign_with_id(&key, DEFAULT_SIGNER_ID, b"hello", &mut SysRng)?;
+//! assert!(verify_with_id(&key.public_key(), DEFAULT_SIGNER_ID, b"hello", &sig));
+//!
+//! // SM4-CBC (GB/T 32907), PKCS#7 padded. The IV is caller-supplied and must
+//! // be unpredictable per message; a fixed one here only because it is an example.
 //! let key = [0x42u8; sm4::KEY_SIZE];
 //! let iv = [0x24u8; sm4::BLOCK_SIZE];
-//!
 //! let ciphertext = sm4::mode_cbc::encrypt(&key, &iv, b"hello world");
 //! let recovered = sm4::mode_cbc::decrypt(&key, &iv, &ciphertext)
-//!     .expect("padding or length is wrong — one opaque None either way");
-//!
+//!     .ok_or("bad padding or length — one opaque None either way")?;
 //! assert_eq!(recovered, b"hello world");
+//! # Ok(()) }
 //! ```
 //!
-//! SM2 signing and public-key encryption additionally take a caller-supplied
-//! `rand_core::TryCryptoRng`; this crate pulls no RNG into its own dependency
-//! graph, so pick one (`getrandom`'s `SysRng`, say) in your `Cargo.toml`.
+//! Signing and public-key encryption take any `rand_core::TryCryptoRng`; an
+//! RNG failure surfaces as the same opaque [`Error`] as any other failure.
 //!
 //! # Modules
 //!
-//! - [`sm2`] — SM2 elliptic-curve sign / verify / encrypt / decrypt
-//!   (GB/T 32918). Comb-table fixed-base scalar mult (v0.3 W6). The
-//!   opt-in `sm2-key-exchange` feature (v1.1) adds
-//!   `sm2::key_exchange` — GM/T 0003.3 key agreement with key
-//!   confirmation (`Sm2KxInitiator` / `Sm2KxResponder` role
-//!   state-machines).
-//! - [`sm3`] — SM3 hash (GB/T 32905) with streaming `new/update/finalize`.
-//! - `x509` (the module appears with the feature of the same name, v1.3) —
-//!   X.509-with-SM2 LEAF certificate parse + SM2-with-SM3 signature verify
-//!   over the exact wire `tbsCertificate` bytes. **No trust decisions**
-//!   (no chains / time checks / extension interpretation / revocation).
-//! - [`sm4`] — SM4 block cipher (GB/T 32907) + CBC and CTR modes
-//!   (single-shot and streaming). The opt-in `sm4-aead` feature adds
-//!   SM4-GCM (single-shot + incremental-input buffered) and SM4-CCM;
-//!   the opt-in `sm4-xts` feature adds SM4-XTS (GB/T 17964-2021,
-//!   single-shot + in-place multi-sector). v0.4 W3 adds an opt-in
-//!   bitsliced (table-less, gate-only) S-box behind the
-//!   `sm4-bitsliced` feature.
-//! - [`hmac`] — HMAC-SM3 (RFC 2104), single-shot + v0.3 W5 streaming.
-//! - [`kdf`] — PBKDF2-HMAC-SM3 (RFC 8018 §5.2).
-//! - [`asn1`] — strict-canonical DER reader / writer / OID constants
-//!   (v0.3 W1); GM/T 0009 SM2 ciphertext SEQUENCE; RFC 3279 SM2
-//!   signature SEQUENCE.
-//! - [`pem`] — RFC 7468 PEM codec (v0.3 W2; hand-rolled, `no_std`).
-//! - [`spki`] — RFC 5280 `SubjectPublicKeyInfo` for SM2 (v0.3 W2).
-//! - [`sec1`] — RFC 5915 `ECPrivateKey` + SEC1 uncompressed point (v0.3 W2).
-//! - [`pkcs8`] — RFC 5958 `OneAsymmetricKey` + RFC 8018 PBES2 (v0.3 W2).
-//! - `tlcp` (the module appears with the feature of the same name, v1.6) —
-//!   TLCP (GB/T 38636-2020) crypto toolkit: key schedule, record protection,
-//!   and — with `x509` — chain verification. **Not a protocol
-//!   implementation**, and `verify_chain` / `verify_pair` are structural
-//!   trust only, not endpoint authentication.
-//! - [`traits`] — in-crate `Hash` / `Mac` / `BlockCipher` traits
-//!   (v0.3 W5). v0.4 W2 adds RustCrypto-trait fit (`digest::Digest`,
-//!   `digest::Mac`, `cipher::BlockCipherEncrypt`/`BlockCipherDecrypt`)
-//!   behind the opt-in `digest-traits` / `cipher-traits` features
-//!   (migrated to `digest 0.11` / `cipher 0.5` in v0.11).
+//! | | |
+//! |---|---|
+//! | [`sm2`] | SM2 sign / verify, encrypt / decrypt (GB/T 32918). With `sm2-key-exchange`: `sm2::key_exchange`, GM/T 0003.3 key agreement |
+//! | [`sm3`] | SM3 hash (GB/T 32905), single-shot and streaming |
+//! | [`sm4`] | SM4 block cipher (GB/T 32907) with ECB / CBC / CTR. With `sm4-aead`: GCM, CCM, incremental GCM. With `sm4-xts`: XTS |
+//! | [`hmac`] | HMAC-SM3 (RFC 2104), single-shot and streaming |
+//! | [`kdf`] | PBKDF2-HMAC-SM3 (RFC 8018 §5.2) |
+//! | [`asn1`] | Strict-canonical DER for the two SM2 wire structures: RFC 3279 signatures, GM/T 0009 ciphertexts |
+//! | [`pem`], [`spki`], [`sec1`], [`pkcs8`] | RFC 7468 PEM, RFC 5280 `SubjectPublicKeyInfo`, RFC 5915 `ECPrivateKey`, RFC 5958 `OneAsymmetricKey` with PBES2 encryption |
+//! | `x509` | With `x509`: X.509-with-SM2 leaf parse and signature verify, linear chain verify. **No trust decisions** beyond structure |
+//! | `tlcp` | With `tlcp`: TLCP (GB/T 38636-2020) key schedule, record protection, and — with `x509` — `[sign, enc]` pair verification. **Not a protocol implementation** |
 //!
 //! # Crate features
 //!
-//! - `default` — `no_std`, `alloc`-only. No optional dependencies.
-//! - `digest-traits` — opt-in (v0.4 W2). Implements `digest::Digest` for
-//!   [`sm3::Sm3`] and `digest::Mac` for [`hmac::HmacSm3`]. Pulls
-//!   `digest = "0.11"` — a pre-1.0 ecosystem crate, so a breaking `digest`
-//!   release is **not** covered by `gmcrypto-core`'s `SemVer` (bump your own).
-//! - `cipher-traits` — opt-in (v0.4 W2). Implements
-//!   `cipher::{BlockCipherEncrypt, BlockCipherDecrypt, BlockSizeUser,
-//!   KeySizeUser, KeyInit}` for [`sm4::Sm4Cipher`]. Pulls `cipher = "0.5"` —
-//!   a pre-1.0 ecosystem crate, so a breaking `cipher` release is **not**
-//!   covered by `gmcrypto-core`'s `SemVer` (bump your own).
-//! - `aead-traits` — opt-in (v1.11). Implements `aead::{AeadCore, AeadInOut,
-//!   KeyInit, KeySizeUser}` for `sm4::Sm4Gcm` and `sm4::Sm4Ccm`, which in
-//!   turn yields the `Vec`-returning `aead::Aead` via that crate's blanket
-//!   impl. Thin wrappers over `sm4::mode_gcm` / `sm4::mode_ccm` — every
-//!   failure becomes the one opaque `aead::Error`. Implies `sm4-aead`. Pulls
-//!   `aead = "0.6"` — a pre-1.0 ecosystem crate, so a breaking `aead` release
-//!   is **not** covered by `gmcrypto-core`'s `SemVer` (bump your own).
-//! - `sm4-bitsliced` — opt-in (v0.4 W3). Routes the SM4 S-box through
-//!   a bitsliced (table-less, gate-only) Itoh-Tsujii inversion in
-//!   GF(2^8). Byte-identical output to the default linear-scan path;
-//!   constant-time by construction (no table lookups, no branches on
-//!   secret bits).
-//! - `sm4-bitsliced-simd` — opt-in (v0.5 W4 scaffolding; AVX2 / NEON
-//!   intrinsic implementations land in v0.5.x). Implies
-//!   `sm4-bitsliced`. Default-off.
-//! - `crypto-bigint-scalar` — opt-in (v0.5 W5). Exposes
-//!   [`sm2::Sm2PrivateKey::from_scalar`] which takes a
-//!   `crypto_bigint::U256` directly. Default-off; the always-on
-//!   `from_bytes_be` constructor is the recommended path for callers
-//!   who don't want a transitive `crypto-bigint` dep.
-//! - `sm4-aead` — opt-in (v0.8). SM4-GCM (`sm4::mode_gcm`, plus the
-//!   v0.9 incremental-input buffered `sm4::gcm_streaming`) and
-//!   SM4-CCM (`sm4::mode_ccm`) authenticated encryption. Pulls the
-//!   workspace-internal `gmcrypto-simd` for the GHASH primitive
-//!   (CLMUL / PMULL / constant-time software fallback).
-//! - `sm4-xts` — opt-in (v0.12). SM4-XTS tweakable disk/sector mode
-//!   (`sm4::mode_xts`; GB/T 17964-2021, bit-reflected α-doubling —
-//!   **not** IEEE 1619), single-shot + the v0.15 in-place
-//!   multi-sector helpers. Pure-core, no new dependency.
-//!   Confidentiality only — XTS does not authenticate.
-//! - `sm2-key-exchange` — opt-in (v1.1). GM/T 0003.3 ≡ GB/T
-//!   32918.3-2016 key agreement (`sm2::key_exchange`):
-//!   consume-on-transition role state-machines, single-use ephemerals,
-//!   commit-on-confirm key release, `ZeroizeOnDrop` agreed key. Key
-//!   confirmation is the default flow; v1.6 adds the standard-permitted
-//!   no-confirmation completers (TLCP's ECDHE shape — confirmation
-//!   becomes the caller's protocol). Pure-core, no new dependency;
-//!   byte-identical to the GM/T 0003.5 recommended-curve worked
-//!   example. The C ABI projection ships in `gmcrypto-c` (v1.2).
-//! - `x509` — opt-in (v1.3). X.509-with-SM2 leaf certificate parse +
-//!   signature verify (GM/T 0015 profile): strict in-repo DER, v3-only,
-//!   `sm2-sign-with-sm3` outer==inner, SPKI delegated to [`spki`].
-//!   Pure-core, no new dependency, public inputs only (no constant-time
-//!   obligations arise). NO trust decisions — see the module docs.
-//! - `tlcp` — opt-in (v1.6). TLCP (GB/T 38636-2020) crypto toolkit:
-//!   the key schedule so far (`tlcp::key_schedule` — `P_SM3` PRF,
-//!   master secret, key block, Finished `verify_data`); it grows per
-//!   `docs/tlcp-decomposition.md` §7. Pure-core, no new dependency.
-//!   NOT a protocol implementation — see the module docs.
+//! `default = []`: `no_std` + `alloc`, no optional dependency. Every feature
+//! is additive and opt-in. Items behind a feature are badged with it on
+//! docs.rs.
+//!
+//! **Capability features** — pure-core, no new dependency unless stated:
+//!
+//! - `sm4-aead` — SM4-GCM and SM4-CCM (`sm4::mode_gcm`, `sm4::mode_ccm`),
+//!   plus incremental-input GCM (`sm4::gcm_streaming`). Pulls the
+//!   workspace-internal `gmcrypto-simd` for GHASH (CLMUL / PMULL, with a
+//!   constant-time software fallback).
+//! - `sm4-xts` — SM4-XTS sector mode (`sm4::mode_xts`), per GB/T 17964-2021:
+//!   bit-reflected α-doubling, **not** IEEE 1619. Single-shot and in-place
+//!   multi-sector. Confidentiality only — XTS does not authenticate.
+//! - `sm2-key-exchange` — GM/T 0003.3 key agreement (`sm2::key_exchange`):
+//!   consume-on-transition role state machines, single-use ephemerals, key
+//!   released only after the peer's confirmation tag verifies. The
+//!   standard-permitted no-confirmation completers are also provided for
+//!   protocols — TLCP among them — that carry confirmation themselves.
+//! - `x509` — X.509-with-SM2 certificate parse and signature verify (GM/T 0015
+//!   profile), strict DER, v3 only. Public inputs only, so no constant-time
+//!   obligation arises. Structural trust only — see the module docs.
+//! - `tlcp` — the TLCP (GB/T 38636-2020) crypto toolkit: `P_SM3` key
+//!   schedule, SM4-CBC and SM4-GCM record protection with a Lucky13-hardened
+//!   CBC deprotect, and with `x509` the `[sign, enc]` double-certificate pair
+//!   check. No handshake state machine, framing or I/O.
+//!
+//! **Implementation features** — byte-identical output, different code path:
+//!
+//! - `sm4-bitsliced` — routes the SM4 S-box through a table-less, gate-only
+//!   bitsliced inversion in GF(2^8). Constant-time by construction: no table
+//!   lookups, no branches on secret bits. The default path is a linear scan
+//!   with the same property; this one is faster under SIMD.
+//! - `sm4-bitsliced-simd` — packs that bitsliced S-box into AVX2 (`x86_64`) or
+//!   NEON (aarch64) lanes for the batch paths, with runtime detection and a
+//!   scalar fallback. Implies `sm4-bitsliced`; pulls `gmcrypto-simd`, where
+//!   the crate's only `unsafe` lives.
+//!
+//! **Ecosystem trait fits** — each pulls one pre-1.0 `RustCrypto` crate, so a
+//! breaking release of *that* crate is not covered by this crate's `SemVer`:
+//!
+//! - `digest-traits` — `digest::Digest` for [`sm3::Sm3`], `digest::Mac` for
+//!   [`hmac::HmacSm3`] (`digest = "0.11"`).
+//! - `cipher-traits` — `cipher::{BlockCipherEncrypt, BlockCipherDecrypt,
+//!   KeyInit}` for [`sm4::Sm4Cipher`] (`cipher = "0.5"`).
+//! - `aead-traits` — `aead::{AeadCore, AeadInOut, KeyInit}` for `sm4::Sm4Gcm`
+//!   and `sm4::Sm4Ccm`, which yields the `Vec`-returning `aead::Aead` through
+//!   that crate's blanket impl. Thin wrappers over `mode_gcm` / `mode_ccm`;
+//!   every failure becomes the one opaque `aead::Error`. Implies `sm4-aead`
+//!   (`aead = "0.6"`).
+//! - `crypto-bigint-scalar` — [`sm2::Sm2PrivateKey::from_scalar`], taking a
+//!   `crypto_bigint::U256` directly. The always-on `from_bytes_be` is the
+//!   recommended constructor; this exists for callers who already hold the
+//!   scalar as that type and accept `crypto-bigint`'s major-version contract.
 //!
 //! # `wasm32-unknown-unknown`
 //!
-//! Builds clean as of v0.4 W1. The crate is `no_std + alloc` only and
-//! does NOT pull `getrandom`'s `wasm_js` backend or `wasm-bindgen` /
-//! `js-sys` into its default dep graph. Wasm callers wire their own
-//! `rand_core::Rng` impl — see the workspace `README.md`.
+//! Builds on the target, gated in CI at stable and MSRV. The crate does not
+//! pull `getrandom`'s `wasm_js` backend or `wasm-bindgen` into its default
+//! graph; wasm callers enable `wasm_js` in their own `Cargo.toml` and pass
+//! `getrandom::SysRng` — or any other `rand_core::TryCryptoRng` — to the SM2
+//! operations that need randomness.
+//!
+//! # Release notes
+//!
+//! Every published version is in
+//! [`CHANGELOG.md`](https://github.com/frankxue831/gm-crypto-rs/blob/main/CHANGELOG.md).
+//! The project is at 1.x and additive since 1.0.0; `cargo-semver-checks` gates
+//! breaking changes in CI, and the three workspace crates release together at
+//! one version.
 
 #![no_std]
 // v1.11.2 — "Available on crate feature `x` only" badges on docs.rs. The
@@ -213,7 +197,7 @@ pub(crate) fn u256_to_be32(v: &crypto_bigint::U256) -> [u8; 32] {
     v.to_be_bytes().into()
 }
 
-/// Workspace-wide failure type (v0.5 W5).
+/// Workspace-wide failure type.
 ///
 /// Every fallible public surface in `gmcrypto-core` that does not
 /// return `Option` / `bool` / `subtle::CtOption` returns

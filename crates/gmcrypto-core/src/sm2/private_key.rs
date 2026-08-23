@@ -28,26 +28,6 @@ use zeroize::ZeroizeOnDrop;
 /// distinguishable error. The cached public key is computed once with
 /// `mul_g`.
 ///
-/// # v0.5 W5 migration
-///
-/// Prior to v0.5 the constructor was `Sm2PrivateKey::new(d: U256)`
-/// (always-on, no feature flag). v0.5 renames it to `from_scalar`
-/// **and** gates it behind `crypto-bigint-scalar` per Q5.17 in
-/// `docs/v0.5-scope.md`. Migration:
-///
-/// ```text
-/// // Before v0.5:
-/// let key = Sm2PrivateKey::new(d_u256).unwrap();
-/// // After v0.5 (option 1 — no crypto_bigint exposure):
-/// let key = Sm2PrivateKey::from_bytes_be(&d_u256.to_be_bytes()).unwrap();
-/// // After v0.5 (option 2 — enable feature, rename):
-/// let key = Sm2PrivateKey::from_scalar(d_u256).unwrap();
-/// ```
-///
-/// The serializer `to_sec1_be(&self) -> [u8; 32]` (v0.3+,
-/// `#[doc(hidden)] pub`, not-SemVer) is replaced by the always-on
-/// public [`Sm2PrivateKey::to_bytes_be`] in v0.5.
-///
 /// # Zeroization
 ///
 /// The inner scalar is zeroized when the key is dropped. The public key
