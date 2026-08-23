@@ -1,4 +1,77 @@
 //! SM2 elliptic curve cryptography (GB/T 32918-2017).
+//!
+//! SM2 is the Chinese national public-key algorithm: a 256-bit prime-field
+//! curve with its own signature and public-key-encryption schemes. It is not
+//! ECDSA-on-a-different-curve — both schemes bind a **signer identity** into
+//! the hash, so a signature is only meaningful relative to the `id` it was
+//! produced under.
+//!
+//! # What is here
+//!
+//! | | |
+//! |---|---|
+//! | [`sign_with_id`] / [`verify_with_id`] | GB/T 32918.2 signature, DER-encoded `(r, s)` |
+//! | [`encrypt`](fn@encrypt) / [`decrypt`](fn@decrypt) | GB/T 32918.4 public-key encryption, GM/T 0009 DER `C1‖C3‖C2` |
+//! | [`Sm2PrivateKey`] / [`Sm2PublicKey`] | key types; SEC1 and raw-scalar constructors |
+//! | [`raw_ciphertext`] | the `C1‖C3‖C2` byte layout, for callers not using DER |
+//! | `key_exchange` | GM/T 0003.3 key agreement — behind the `sm2-key-exchange` feature |
+//!
+//! # The signer ID is part of the signature
+//!
+//! Both schemes hash a `Z` value derived from the curve parameters, the
+//! public key, **and** a caller-supplied identity string. Verify with a
+//! different `id` than you signed with and the signature fails — correctly.
+//! [`DEFAULT_SIGNER_ID`] is the `"1234567812345678"` from GB/T 32918.2 §10,
+//! which is what most interoperating implementations use when the protocol
+//! does not specify one. Use it when you have no better answer, not as a
+//! placeholder to fill in later: changing it later invalidates every
+//! signature already issued.
+//!
+//! # Randomness is the caller's
+//!
+//! Signing and encryption both consume a `rand_core::TryCryptoRng`. This
+//! crate pulls no RNG into its dependency graph — pick one in your own
+//! `Cargo.toml` (`getrandom`'s `SysRng`, an OS-backed CSPRNG, is the usual
+//! answer; on `wasm32` you additionally enable its `wasm_js` feature). An
+//! RNG failure surfaces as the same opaque [`Error`](crate::Error) as any
+//! other failure, never a panic.
+//!
+//! # Failure is deliberately uninformative
+//!
+//! [`verify_with_id`] returns `bool`. [`decrypt`](fn@decrypt) returns one
+//! [`Error::Failed`](crate::Error::Failed) whether the DER was malformed,
+//! `C1` was off-curve, or the `C3` hash did not match — distinguishing them
+//! would hand an attacker an oracle. This is a designed property, not a
+//! missing feature; see `SECURITY.md`.
+//!
+//! # Example
+//!
+//! ```rust
+//! use gmcrypto_core::sm2::{
+//!     DEFAULT_SIGNER_ID, Sm2PrivateKey, sign_with_id, verify_with_id,
+//! };
+//! // Any `rand_core::TryCryptoRng`. `getrandom` is not a dependency of this
+//! // crate — add it (or another CSPRNG) to your own Cargo.toml.
+//! use getrandom::SysRng;
+//!
+//! // `from_bytes_be` is the recommended constructor: always available, and
+//! // it keeps `crypto_bigint::U256` out of your code. It returns a
+//! // `CtOption` — rejection of an out-of-range scalar is constant-time.
+//! let d = [0x42u8; 32];
+//! let key = Sm2PrivateKey::from_bytes_be(&d).expect("0x42..42 is a valid scalar");
+//! let public = key.public_key();
+//!
+//! let sig = sign_with_id(&key, DEFAULT_SIGNER_ID, b"attack at dawn", &mut SysRng)
+//!     .expect("signing failed — RNG or an internal invariant");
+//!
+//! assert!(verify_with_id(&public, DEFAULT_SIGNER_ID, b"attack at dawn", &sig));
+//!
+//! // A different ID is a different Z, so the same signature no longer verifies.
+//! assert!(!verify_with_id(&public, b"other-signer", b"attack at dawn", &sig));
+//! ```
+//!
+//! `Sm2PrivateKey::to_bytes_be` hands back **plaintext secret bytes**; the
+//! caller owns zeroizing that `[u8; 32]`.
 
 pub(crate) mod comb_table;
 // `curve` is internal low-level SM2 field/scalar arithmetic over `crypto-bigint`

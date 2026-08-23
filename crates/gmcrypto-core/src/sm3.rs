@@ -1,6 +1,42 @@
 //! SM3 hash function (GB/T 32905-2016).
 //!
-//! 256-bit Merkle-Damgård hash. Block size 512 bits, output 256 bits.
+//! 256-bit Merkle-Damgård hash: 512-bit blocks, 256-bit output, 64 rounds.
+//! It is the hash every other primitive in this crate reaches for — SM2's
+//! `Z` and message digests, [`HMAC-SM3`](crate::hmac),
+//! [`PBKDF2-HMAC-SM3`](crate::kdf), SM4-GCM's KDF-free tag path, and the
+//! TLCP `P_SM3` PRF.
+//!
+//! Two entry points, one algorithm:
+//!
+//! - [`hash`] — single-shot, `&[u8]` in, `[u8; 32]` out.
+//! - [`Sm3`] — streaming `new` / `update` / `finalize`, for input you do not
+//!   hold contiguously. `finalize` consumes the hasher, so a state cannot be
+//!   read twice by accident; the internal state is zeroized on drop.
+//!
+//! Hashing takes no secret-dependent branch, but note what that does and
+//! does not buy you: a hash of secret data is only as safe as the *length*
+//! it reveals. Message length is public in any Merkle-Damgård construction.
+//!
+//! With the opt-in `digest-traits` feature, [`Sm3`] also implements
+//! `digest::Digest` for callers wiring it into the `RustCrypto` ecosystem.
+//!
+//! ```rust
+//! use gmcrypto_core::sm3::{self, Sm3};
+//!
+//! // GB/T 32905-2016 §A.1 — the standard's own worked example.
+//! let expected = [
+//!     0x66, 0xc7, 0xf0, 0xf4, 0x62, 0xee, 0xed, 0xd9, 0xd1, 0xf2, 0xd4, 0x6b,
+//!     0xdc, 0x10, 0xe4, 0xe2, 0x41, 0x67, 0xc4, 0x87, 0x5c, 0xf2, 0xf7, 0xa2,
+//!     0x29, 0x7d, 0xa0, 0x2b, 0x8f, 0x4b, 0xa8, 0xe0,
+//! ];
+//! assert_eq!(sm3::hash(b"abc"), expected);
+//!
+//! // Streaming reaches the same digest, split however you like.
+//! let mut hasher = Sm3::new();
+//! hasher.update(b"a");
+//! hasher.update(b"bc");
+//! assert_eq!(hasher.finalize(), expected);
+//! ```
 
 use core::convert::TryInto;
 
