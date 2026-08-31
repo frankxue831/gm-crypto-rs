@@ -591,6 +591,23 @@ wherever a distinguishing failure could leak information. Specifically:
 
 PRs that distinguish failure modes — even "helpfully" — will be rejected.
 
+## Logging & observability
+
+`gmcrypto-core` emits **no logs** — no `log` / `tracing` / `defmt` facade, no
+`core::fmt` formatting of secret-derived values, no diagnostic output of any
+kind. This is a contract, not a gap. The failure-mode invariant above makes
+failure causes intentionally indistinguishable, so there is nothing a logging
+hook would be permitted to say; and every logging call site would be a place a
+future change could leak a failure cause or format a secret (formatting is
+itself variable-time). A consequence integrators can rely on: **this crate
+cannot leak key material, plaintext, or failure causes through your log
+pipeline**, because it has no path into one. The `gmcrypto-c` ABI carries the
+same posture — every failure is the single `GMCRYPTO_FAILED`, never a reason.
+Observability for developing the library itself lives in tests, benches, and
+CI workflows (where `std` is available), never in the shipped crates. PRs
+adding a logging facade or diagnostic output to `gmcrypto-core` will be
+rejected, the same as PRs distinguishing failure modes.
+
 ## Parser fuzzing (v0.14)
 
 The failure-mode invariant above is enforced not only by the type system and

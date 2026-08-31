@@ -248,6 +248,9 @@ no_std comb-table lazy init — not `LazyLock`/`OnceLock` (both `std`).
 - Don't add a `cpufeatures` check inside an inner SM4 loop in `gmcrypto-core`
   (cached in `gmcrypto-simd::detect`). Don't pull `cpufeatures` into core.
 - Don't make any C ABI entry distinguish failure modes (`GMCRYPTO_FAILED` only).
+- Don't add `log`/`tracing`/`defmt` (or any logging/diagnostic output) to the
+  shipped crates — the core never logs (SECURITY.md "Logging & observability");
+  dev observability lives in tests/benches/workflows only.
 - Don't invent a second RNG-callback shape; `CallbackRng` already covers KX /
   record. Don't pull `getrandom`'s `wasm_js` into core's default dep graph
   (wasm callers enable it in *their* `Cargo.toml`).
