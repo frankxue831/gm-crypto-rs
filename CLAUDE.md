@@ -157,6 +157,8 @@ grep -c 'stab portability' target/doc/gmcrypto_core/index.html
 python3 .github/scripts/check_disclosure_boundary.py --self-test
 python3 .github/scripts/check_disclosure_boundary.py --worktree
 python3 .github/scripts/check_disclosure_boundary.py --range origin/main..HEAD
+# P2 lines are advisory (pre-existing gate-evidence docs trip ~9); only P1 blocks.
+# Never edit committed evidence docs to silence P2s.
 ```
 
 ## Architecture
