@@ -356,6 +356,26 @@ jobs:
               # measured. Same 0.20 gate.
               required_low["ct_tlcp_cbc_deprotect"] = 0.20
 
+          # 2026-09-01 — SKU-conditional bound for ct_sm4_cbc_decrypt_fanout.
+          # On EPYC 9V74 (Azure-custom, the pool's noisiest SKU) the observed
+          # no-change run-median distribution spans 0.0355–0.2904 across 14
+          # draws with three false reds (2026-08-07 / 08-22 / 08-28, the last
+          # a same-night pass/fail pair on identical code), so the 0.20
+          # primary gate sits inside that class's noise band and cannot be
+          # authoritative there. On that SKU alone the bound is raised to the
+          # established 0.55 gross-regression convention — still fires on a
+          # v0.1-class real leak (~0.70), and a real code-level leak is
+          # SKU-independent so the 0.20 gate on quiet-SKU draws (most nights)
+          # catches it within days. Every other CPU — including unrecognized
+          # new SKUs, fail-closed — keeps 0.20. The target stays in
+          # required_low, so completeness gating is unchanged. See
+          # docs/v0.5-dudect-recalibration.md (2026-09-01).
+          fanout = "ct_sm4_cbc_decrypt_fanout"
+          if fanout in required_low and "EPYC 9V74" in cpu:
+              required_low[fanout] = 0.55
+              print(f"SKU-GATE: {fanout} bound 0.20 -> 0.55 on this SKU "
+                    "(9V74 no-change noise band; docs/v0.5-dudect-recalibration.md 2026-09-01)")
+
           # v0.5 W4 phase 2 prep — gross-regression sentinel for
           # targets too noisy for a 0.20 gate on the current
           # ubuntu-24.04 runner image but still worth watching for
