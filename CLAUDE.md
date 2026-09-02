@@ -60,7 +60,7 @@ Stated costs: fresh key schedule per call; allocation inside methods named
 
 ## Open backlog
 
-- Still open: AVX-512 `sbox_x64`, CCM buffered input, **F21** `ct_sm4_cbc_unpad`
+- Still open: AVX-512 `sbox_x64`, streaming-CCM FFI (v1.13 candidate; Rust types landed v1.12), **F21** `ct_sm4_cbc_unpad`
   (v1.10 attempted; composite window is blind — landing it would gate something
   that cannot fail). Record: `docs/v1.10-scope.md` Q10.9.
 - **F16 closed** in v1.10 (`interop-gmssl` in `ci.yml`). Pre-1.0 §3.A

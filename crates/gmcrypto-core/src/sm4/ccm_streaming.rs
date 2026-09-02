@@ -1,4 +1,82 @@
-//! Length-committed streaming SM4-CCM (v1.12). Module docs: see Task 5.
+//! Length-committed streaming SM4-CCM (v1.12).
+//!
+//! Stateful counterpart to [`super::mode_ccm`]'s single-shot
+//! [`encrypt`] / [`decrypt`]. The two directions are asymmetric, and the
+//! names are chosen to say exactly what each one is:
+//!
+//! - [`Sm4CcmEncryptor`] is **length-committed streaming**: the caller
+//!   declares the plaintext length at construction, because CCM encodes it
+//!   in the first CBC-MAC block `B0` (RFC 3610 §2.2). In exchange, each
+//!   [`update`](Sm4CcmEncryptor::update) emits its chunk's ciphertext
+//!   immediately — the CBC-MAC and the CTR keystream both advance chunk by
+//!   chunk — with `O(chunk)` memory.
+//! - [`Sm4CcmDecryptor`] is **incremental-input buffered**, never
+//!   "streaming": CCM authenticates the *plaintext*, so no MAC work can
+//!   start until the length is known, which for a stream is EOF. It buffers
+//!   ciphertext and does all its work in
+//!   [`finalize_verify`](Sm4CcmDecryptor::finalize_verify), releasing the
+//!   plaintext only after the tag verifies (commit-on-verify). Memory is
+//!   `O(message)`, bounded by the nonce's payload ceiling.
+//!
+//! # Why this exists despite the v0.15 objection
+//!
+//! `docs/v0.15-scope.md` (Q15.11) rejected an "incremental-input" CCM API
+//! because, for an *unknown*-length plaintext, it could only buffer and had
+//! no memory story. That holds. The length-committed encryptor is the design
+//! that objection did not evaluate: once the length is declared, nothing in
+//! CCM prevents streaming encryption. The decryptor exists for API parity
+//! with [`super::Sm4GcmDecryptor`] and is labelled as what it is.
+//!
+//! # Contract
+//!
+//! - AAD is supplied at construction only (it is the message header).
+//! - Encryptor: an `update` that would exceed the committed length emits
+//!   nothing and **poisons** the encryptor; `finalize` returns `None` if
+//!   poisoned or **under-fed**. A partial stream is never tag-authenticated.
+//!   (Stricter than [`super::Sm4GcmEncryptor`], which still returns a tag
+//!   after poison.)
+//! - Decryptor: `update` never fails; it latches once the buffer would pass
+//!   `2^(8q) − 1` bytes (`q = 15 − nonce.len()`), and `finalize_verify`
+//!   then returns `None`. The tag's length selects the tag length.
+//! - Every failure is the single `None` (workspace failure-mode invariant).
+//! - Nonce uniqueness per key is the caller's responsibility, as for every
+//!   mode in this crate. A `(key, nonce)` pair also fixes `B0`, so two
+//!   encryptors on the same pair with different lengths are a nonce reuse.
+//!
+//! # Example
+//!
+//! ```rust
+//! # #[cfg(feature = "sm4-aead")]
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use gmcrypto_core::sm4::{KEY_SIZE, Sm4CcmDecryptor, Sm4CcmEncryptor};
+//!
+//! let key: [u8; KEY_SIZE] = [0x42; KEY_SIZE];
+//! let nonce = [0x01u8; 12];
+//! let aad = b"header";
+//! let frame = b"a payload whose length the header already told us";
+//!
+//! // Commit to the length, then stream.
+//! let mut enc = Sm4CcmEncryptor::new(&key, &nonce, aad, frame.len(), 16)
+//!     .ok_or("nonce or tag length outside RFC 3610 §2.1")?;
+//! let mut ct = Vec::new();
+//! for chunk in frame.chunks(7) {
+//!     ct.extend_from_slice(&enc.update(chunk).ok_or("over-fed")?);
+//! }
+//! let tag = enc.finalize().ok_or("under-fed")?;
+//!
+//! // Buffer, then verify-and-release.
+//! let mut dec = Sm4CcmDecryptor::new(&key, &nonce, aad).ok_or("bad nonce length")?;
+//! for chunk in ct.chunks(5) {
+//!     dec.update(chunk);
+//! }
+//! let recovered = dec.finalize_verify(&tag).ok_or("authentication failed")?;
+//! assert_eq!(recovered, frame);
+//! # Ok(()) }
+//! # #[cfg(not(feature = "sm4-aead"))] fn main() {}
+//! ```
+//!
+//! [`encrypt`]: super::mode_ccm::encrypt
+//! [`decrypt`]: super::mode_ccm::decrypt
 
 use alloc::vec;
 use alloc::vec::Vec;

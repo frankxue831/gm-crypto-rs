@@ -14,8 +14,10 @@
 //!   authentication (no GHASH), so the algorithm reads only from the
 //!   existing block cipher path.
 //! - Requires the caller to commit to plaintext length up front (the
-//!   length is encoded in the first CBC-MAC block) — incompatible
-//!   with streaming. v0.8 ships single-shot only.
+//!   length is encoded in the first CBC-MAC block `B0`). That rules out
+//!   streaming an *unknown*-length plaintext, not streaming as such:
+//!   [`super::ccm_streaming`] (v1.12) streams encryption once the length
+//!   is declared. This module stays the single-shot path.
 //! - Parameterizes tag length (4/6/8/10/12/14/16 bytes per RFC 3610).
 //!
 //! # Nonce contract
