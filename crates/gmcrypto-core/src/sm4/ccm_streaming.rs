@@ -16,7 +16,9 @@
 //!   ciphertext and does all its work in
 //!   [`finalize_verify`](Sm4CcmDecryptor::finalize_verify), releasing the
 //!   plaintext only after the tag verifies (commit-on-verify). Memory is
-//!   `O(message)`, bounded by the nonce's payload ceiling.
+//!   `O(message)`, bounded by the nonce's payload ceiling (for a 7-byte
+//!   nonce, q = 8, the ceiling is 2^64 − 1 and the latch is not a practical
+//!   memory bound).
 //!
 //! # Why this exists despite the v0.15 objection
 //!
@@ -314,12 +316,14 @@ impl Sm4CcmEncryptor {
 /// ciphertext is buffered until then — `O(message)` memory, the same
 /// shape as [`super::Sm4GcmDecryptor`]. The buffer is latched at the
 /// nonce's payload ceiling (`2^(8q) − 1`, e.g. 65 535 bytes for a 13-byte
-/// nonce) so a misbehaving peer cannot make it grow without bound.
+/// nonce; for a 7-byte nonce, q = 8, the ceiling is 2^64 − 1 and the latch
+/// is not a practical memory bound) so a misbehaving peer cannot make it
+/// grow without bound.
 ///
 /// This type is a thin wrapper over the single-shot decrypt body and adds
 /// no cryptography — which is what lets it share the single-shot's dudect
 /// coverage. Holds the SM4 key schedule (zeroized on drop by that field);
-/// its other state — nonce, AAD, ciphertext — is public.
+/// its other state — nonce, AAD, ciphertext — is not secret.
 pub struct Sm4CcmDecryptor {
     cipher: Sm4Cipher,
     nonce: [u8; MAX_NONCE_LEN],

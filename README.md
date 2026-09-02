@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 > re-audit (see [`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md)), in-CI KAT vectors,
 > in-CI gmssl 3.2.0 interop (13/13, cross-validated against a pinned from-source
 > build of the reference implementation; currently non-gating), an in-CI `dudect`
-> timing-leak harness, and a 33-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
+> timing-leak harness, and a 35-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
 > project with no support SLA. Review the code and **use at your own risk.** See
 > [`SECURITY.md`](SECURITY.md) for the threat model and disclosure process.
 
@@ -68,7 +68,7 @@ instead. `gmcrypto-simd` is an internal backend — do not depend on it directly
 | SM3 hash, HMAC-SM3, PBKDF2-HMAC-SM3 | GB/T 32905, RFC 2104 / 8018 | default |
 | SM4-ECB / CBC / CTR, single-shot and streaming | GB/T 32907 | default |
 | DER / PEM / SPKI / SEC1 / PKCS#8 (incl. PBES2-encrypted) | RFC 5280 / 5915 / 5958 / 7468 | default |
-| SM4-GCM / SM4-CCM AEAD, incremental-input GCM | — | `sm4-aead` |
+| SM4-GCM / SM4-CCM AEAD, incremental-input GCM, length-committed streaming CCM | — | `sm4-aead` |
 | SM4-XTS sector mode (confidentiality only) | GB/T 17964-2021 | `sm4-xts` |
 | SM2 key exchange with key confirmation | GM/T 0003.3 | `sm2-key-exchange` |
 | X.509-with-SM2 leaf parse + verify, linear chain verify | GM/T 0015 | `x509` |
@@ -90,7 +90,7 @@ Three crates, released together at one lockstep version:
 |---|---|---|---|
 | SM2 + SM3 + SM4 in one crate | ✅ | ✅ | separate crates |
 | Timing-leak harness in CI | ✅ 20 `dudect` targets, 16 blocking | — | — |
-| Fuzzing | ✅ 33 targets, nightly | — | — |
+| Fuzzing | ✅ 35 targets, nightly | — | — |
 | C ABI | ✅ 104 entry points | — | — |
 | TLCP (GB/T 38636) toolkit | ✅ | — | — |
 | `no_std` | ✅ | not advertised | ✅ |
@@ -143,7 +143,7 @@ the budget given, not that none exists. The full discipline, the hosted-runner
 noise history, and every demotion with its data are in [`SECURITY.md`](SECURITY.md)
 and [`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md).
 
-Beyond timing: KAT vectors in CI, 33 `cargo-fuzz` targets run nightly, and an
+Beyond timing: KAT vectors in CI, 35 `cargo-fuzz` targets run nightly, and an
 interop suite against a pinned from-source [GmSSL](https://github.com/guanzhi/GmSSL)
 3.2.0 — the reference implementation — cross-validating signatures,
 ciphertexts and AEAD output byte-for-byte.

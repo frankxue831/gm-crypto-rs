@@ -182,7 +182,7 @@ decoders, whose validation prologues are duplicated. v1.10 also added
 `fuzz_sm4_aead_traits`, which asserts the new `aead` 0.6 trait path is
 byte-identical to the inherent `mode_gcm` / `mode_ccm` path — that thinness is
 the argument behind v1.11 adding no dudect target, so a divergence there would
-invalidate an assurance claim rather than merely be a wrapper bug. **33 targets
+invalidate an assurance claim rather than merely be a wrapper bug. **35 targets
 total** — the census must
 equal both `fuzz/Cargo.toml`'s `[[bin]]` entries and the `FUZZ_TARGETS`
 list in `.github/workflows/fuzz-nightly.yml`; a target absent from that

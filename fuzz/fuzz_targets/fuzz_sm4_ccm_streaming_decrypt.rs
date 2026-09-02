@@ -8,8 +8,8 @@
 //! invalid ones, so the `None == None` arm is exercised), `nl' = nl % 17`,
 //! `al' = al % 33`. The single-shot oracle takes `ct ‖ tag` plus `tag_len`
 //! (NOT GCM's split `(ct, tag)`): `decrypt(key, nonce, aad, ct‖tag,
-//! tag.len())`. Streaming side: `Sm4CcmDecryptor::new` (a `None` there is
-//! the streaming side's `None`), feed `ct` in chunks of `max(1, chunk_len)`,
+//! tag.len())`. Incremental side: `Sm4CcmDecryptor::new` (a `None` there is
+//! the incremental side's `None`), feed `ct` in chunks of `max(1, chunk_len)`,
 //! `finalize_verify(&tag)`. The two `Option<Vec<u8>>`s MUST be equal for
 //! EVERY input. Invariant: never panics.
 #![no_main]
