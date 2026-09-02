@@ -19,6 +19,35 @@ only a condensed current-release block — see its `Don't` section.
 
 ## Cycles
 
+**v1.12 — length-committed streaming SM4-CCM; PREPPED, publish is the
+maintainer's call.** `sm4::ccm_streaming::{Sm4CcmEncryptor, Sm4CcmDecryptor}`
+behind the existing `sm4-aead` flag — no new feature, no new dependency, no C
+ABI change; default build byte-identical. Overturns the v0.15 Q15.11
+buffer-only objection with the design it never evaluated: the caller declares
+`plaintext_len` so `B0` is fixed, then CBC-MAC and CTR advance per chunk at
+`O(chunk)` (OpenSSL EVP is precedent for the length commitment only — it does
+not stream CCM). Over-feed emits nothing and poisons; `finalize` is `None` on
+poison or under-feed, stricter than `Sm4GcmEncryptor` on purpose. The
+decryptor is an incremental-input buffered, commit-on-verify, latched pure
+delegator over the new `pub(super) mode_ccm::decrypt_with_cipher`; **no new
+dudect target** (Q12.8 — the `Sm4GcmEncryptor` and v1.11 thin-wrapper
+precedents), the thinness guarded by two new differential fuzz targets
+(`fuzz_sm4_ccm_streaming_{decrypt,encrypt}`, census 33 → **35**), the encrypt
+one carrying a declared-length mode byte so the over-/under-feed arms actually
+fire. The `mode_ccm` refactor extracted a shared `q`-byte `counter_block`
+(never GCM's `inc32` — a 12-byte nonce is `q = 3`), `build_a0`,
+`payload_ceiling`; single-shot API, outputs and the OpenSSL KATs unchanged;
+api-baseline +29 additive lines. The maintainer's spec review pinned eight
+implementer traps before code (q-byte counter vs `inc32`, `checked_add` on
+`u64` for wasm32, whole-chunk rejection, the 13-byte-nonce 65 535-byte
+decryptor latch, split `(ct, tag)` delegate, `pub(super)` not `pub(crate)`,
+the fuzz layouts, and the stale "incompatible with streaming" premise in
+`mode_ccm.rs` / `lib.rs`). Spec PR #185; implementation PR #186 (eight
+commits, subagent-driven with per-task reviews; the whole-branch review's one
+fix wave was docs-only). FFI projection is the v1.13 candidate; the
+`Sm4GcmEncryptor` / `GhashAcc` zeroize follow-up is in the scope §6. Scope:
+`docs/v1.12-scope.md`.
+
 **v1.11.2 — presentation patch; PREPPED, publish is the maintainer's call.**
 No crypto path, public API, C ABI, wire format, MSRV or dependency change —
 the only `crates/**/*.rs` delta is two inner attributes on

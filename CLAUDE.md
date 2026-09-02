@@ -22,12 +22,12 @@ agent that never reads it break something?* If not, it is history — file it.
 
 | | |
 |---|---|
-| Workspace version | `1.11.2` (sibling pins `=1.11.2`) — **published**; no next release prepped. A new minor does not always mean crates.io (see Workflow) |
+| Workspace version | `1.12.0` (sibling pins `=1.12.0`) — **prepped, not published**: publish simd → core → c from the release-prep merge SHA is the maintainer's call; Gate #1 evidence (`docs/ECOSYSTEM.md` §8) precedes it. A new minor does not always mean crates.io (see Workflow) |
 | Live on crates.io | **`1.11.2`** — all three crates, 2026-08-23 from `0de98e2` (tag `v1.11.2`, ED25519-verified). Previous: `1.11.1` 2026-08-22 from `26a49c3` |
 | 1.11.2 patch | Presentation only (no non-comment `.rs` line changed since 1.11.1), because crates.io metadata and docs.rs renders are baked into a *published version*: docs.rs feature badges (`#![cfg_attr(docsrs, feature(doc_cfg))]` + `rustdoc-args`), a per-crate `gmcrypto-simd` README (it was rendering the workspace one while outranking `gmcrypto-core` in a crates.io `sm4` search), a `gmcrypto-core` crate-root landing page plus module pages for `sm2`/`sm3`/`kdf`/`asn1`, a README rewritten as a landing page (code at line 17, not 166), crate docs stripped of internal cycle tags, every doctest on `?`, and keyword/description/`homepage` metadata. All six §13 post-publish checks verified on the live pages 2026-08-23. Runbook: `docs/v1.11.2-release-review.md` |
 | Dudect runner pool | Hosted `ubuntu-24.04` is heterogeneous (EPYC 7763 / 9V74 / 9V45 / Xeon 8573C / 6973P-C) and composite-window targets read materially higher on some SKUs. Both workflows print `RUNNER-CPU:` beside the verdicts since #172 — **read it before calling a red slot noise.** `ct_sm4_cbc_decrypt_fanout` no-change medians reached 0.2904 on 9V74 (three false reds), so since 2026-09-01 its bound is **0.55 on EPYC 9V74 only** (a `SKU-GATE:` line marks each application), 0.20 everywhere else incl. unknown SKUs (`docs/v0.5-dudect-recalibration.md`, 2026-09-01) |
 | crates.io skips | `1.10.0` (non-publishing assurance) and **`1.9.1`** (licence-text patch superseded by 1.11.0). Record: `docs/v1.9.1-release-review.md`. **1.11.0 is the first published release carrying licence text**; 1.9.0 and earlier stay without it |
-| Runbook / gate | `docs/v1.11.2-release-review.md`, `docs/v1.11.2-gate1-evidence.md` (PASS ×3). Previous: `docs/v1.11.1-release-review.md`, `docs/v1.11.1-gate1-evidence.md` (PASS) |
+| Runbook / gate | v1.12: sequence in `docs/v1.12-scope.md` §7; no runbook / Gate #1 evidence doc yet. Previous: `docs/v1.11.2-release-review.md`, `docs/v1.11.2-gate1-evidence.md` (PASS ×3); `docs/v1.11.1-release-review.md`, `docs/v1.11.1-gate1-evidence.md` (PASS) |
 
 `cargo publish` and the SSH-signed tag are the **maintainer's authenticated
 call** — the agent path is branch + PR. The 1.11.0 publish was a recorded
@@ -37,26 +37,39 @@ When handing a maintainer a publish command, put the `cd` **inside** the code
 block (the app Run button uses the current directory). For `git tag`, **name
 the SHA** — `HEAD` may have moved.
 
-### v1.11 — the current release
+### v1.12 — the current release
 
-Opt-in `aead-traits = ["sm4-aead", "dep:aead"]` adds `sm4::Sm4Gcm` (U12 nonce /
-U16 postfix tag) and `sm4::Sm4Ccm<M = U16, N = U12>` (sealed `CcmTagSize` /
-`CcmNonceSize` = RFC 3610 §2.1; invalid combo is a compile error). Default
-build byte-identical. Scope: `docs/v1.11-scope.md`.
+`sm4::Sm4CcmEncryptor` / `sm4::Sm4CcmDecryptor` (`sm4::ccm_streaming`), behind
+the **existing** `sm4-aead` flag — no new feature, no new dep, no C ABI change.
+Default build byte-identical. Scope: `docs/v1.12-scope.md`.
 
-Two things that look like defects but are load-bearing:
+Load-bearing, and easy to "fix" wrongly:
 
-- **Trait set is not a free choice.** `aead` 0.6 blanket-implements `Aead` for
-  every `AeadInOut`, so `impl Aead for Sm4Gcm` **cannot compile**. Implement
-  `KeySizeUser` + `KeyInit` + `AeadCore` + `AeadInOut`. `AeadInPlace` is
-  deprecated; there is no `aead::stream` — `gcm_streaming` stays inherent-only.
-- **Both types are thin wrappers** over `mode_gcm`/`mode_ccm` (why v1.11 adds
-  no dudect target). Guarded by `fuzz_sm4_aead_traits`, not by prose. Do not
-  refactor into re-implementations. **SM4-XTS gets no aead fit** —
-  confidentiality-only, no tag.
+- **The encryptor is length-committed by design.** `new` takes `plaintext_len`
+  because CCM's `B0` encodes it; that commitment is what makes `O(chunk)`
+  streaming possible. An over-feeding `update` emits nothing and poisons;
+  `finalize` is `None` on poison **or under-feed** (stricter than
+  `Sm4GcmEncryptor` — a partial stream is never tag-authenticated). Don't relax
+  either.
+- **The decryptor is a pure delegator** over `mode_ccm::decrypt_with_cipher`
+  (buffer, latch at `payload_ceiling(q)`, gate `tag.len()`, delegate). That
+  thinness is why v1.12 adds **no dudect target**; it is guarded by
+  `fuzz_sm4_ccm_streaming_decrypt`. Any cryptographic work inside it (a
+  length-declared decryptor, incremental CBC-MAC, CTR before finalize) voids
+  the argument and reopens dudect.
+- **CCM's counter is `mode_ccm::counter_block`** (`q`-byte big-endian field,
+  `q = 15 − nonce.len()`), shared by single-shot and streaming. Never GCM's
+  `inc32` — even the 12-byte nonce is `q = 3`.
+- Helpers promoted for `ccm_streaming` are `pub(super)` (the `mode_gcm`
+  precedent), never `pub` / `pub(crate)`.
+- Terminology: encryptor "length-committed streaming"; decryptor
+  "incremental-input buffered" — never "streaming".
 
-Stated costs: fresh key schedule per call; allocation inside methods named
-"in place".
+FFI projection is the v1.13 candidate (v0.9 → v0.10 cadence); the
+`Sm4GcmEncryptor` / `GhashAcc` zeroize follow-up is recorded in the scope §6.
+The v1.11 `aead-traits` constraints (implement `AeadInOut`, never `Aead`; both
+types thin over `mode_gcm`/`mode_ccm`; no XTS fit) still hold — see
+`docs/version-history.md`.
 
 ## Open backlog
 
