@@ -1,0 +1,366 @@
+//! Length-committed streaming SM4-CCM (v1.12). Module docs: see Task 5.
+
+use alloc::vec;
+use alloc::vec::Vec;
+
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
+use super::cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
+use super::mode_ccm::{build_a0, build_b0, counter_block, format_aad_into, validate_params};
+
+/// Length-committed, output-streaming SM4-CCM encryptor.
+///
+/// The caller commits to the exact plaintext length at construction
+/// (CCM encodes it in the first CBC-MAC block `B0`, RFC 3610 §2.2); in
+/// exchange every [`update`](Self::update) emits its chunk's ciphertext
+/// immediately with `O(chunk)` memory. AAD is supplied at construction
+/// only. [`finalize`](Self::finalize) emits the tag — or `None` if the
+/// stream was under-fed or poisoned. See the module docstring for the
+/// contract and the divergence from [`super::Sm4GcmEncryptor`].
+///
+/// Holds plaintext-derived state across calls (the CBC-MAC partial block,
+/// the running MAC, leftover keystream) and the SM4 key schedule; all of
+/// it is zeroized on drop (best-effort — stack copies and register spills
+/// are outside what `zeroize` reaches).
+#[derive(Zeroize, ZeroizeOnDrop)]
+pub struct Sm4CcmEncryptor {
+    cipher: Sm4Cipher,
+    a0: [u8; BLOCK_SIZE],
+    /// Running CBC-MAC value `T`.
+    mac: [u8; BLOCK_SIZE],
+    /// Plaintext bytes not yet folded into `mac` (< one block).
+    mac_block: [u8; BLOCK_SIZE],
+    mac_block_len: usize,
+    /// Leftover keystream from the last partial-block CTR step.
+    ks: [u8; BLOCK_SIZE],
+    ks_pos: usize,
+    /// Index of the next CTR block to generate (`A_1` is the first).
+    next_block: u64,
+    declared_len: u64,
+    fed_len: u64,
+    tag_len: usize,
+    poisoned: bool,
+}
+
+impl Sm4CcmEncryptor {
+    /// Construct from key, nonce, the full AAD, the committed plaintext
+    /// length, and the tag length.
+    ///
+    /// Returns `None` if the nonce length is outside `[7, 13]`, `tag_len`
+    /// is not one of `{4, 6, 8, 10, 12, 14, 16}`, or `plaintext_len` does
+    /// not fit the nonce's `q = 15 − nonce.len()`-byte length field — the
+    /// same gate as [`super::mode_ccm::encrypt`]. Formats and folds
+    /// `B0 ‖ format(aad)` here (an `O(aad)` allocation that is dropped
+    /// before returning); the streaming phase is `O(chunk)`.
+    ///
+    /// **Nonce uniqueness is the caller's contract.** A `(key, nonce)` pair
+    /// also fixes `B0`, so two encryptors on the same pair with different
+    /// `plaintext_len` are still a nonce reuse.
+    #[must_use]
+    pub fn new(
+        key: &[u8; KEY_SIZE],
+        nonce: &[u8],
+        aad: &[u8],
+        plaintext_len: usize,
+        tag_len: usize,
+    ) -> Option<Self> {
+        validate_params(nonce, plaintext_len, aad.len(), tag_len)?;
+        let declared_len = u64::try_from(plaintext_len).ok()?;
+        let cipher = Sm4Cipher::new(key);
+        let q = 15 - nonce.len();
+
+        // Fold the fixed prefix `B0 ‖ format(aad)` into the CBC-MAC now.
+        // `format_aad_into` zero-pads to a block boundary, and B0 is one
+        // block, so the prefix is block-aligned.
+        let mut prefix = Vec::with_capacity(2 * BLOCK_SIZE);
+        prefix.extend_from_slice(&build_b0(nonce, plaintext_len, !aad.is_empty(), tag_len, q));
+        if !aad.is_empty() {
+            format_aad_into(&mut prefix, aad);
+        }
+        let mut mac = [0u8; BLOCK_SIZE];
+        for block in prefix.chunks_exact(BLOCK_SIZE) {
+            for (m, &b) in mac.iter_mut().zip(block) {
+                *m ^= b;
+            }
+            cipher.encrypt_block(&mut mac);
+        }
+
+        Some(Self {
+            a0: build_a0(nonce),
+            cipher,
+            mac,
+            mac_block: [0u8; BLOCK_SIZE],
+            mac_block_len: 0,
+            ks: [0u8; BLOCK_SIZE],
+            ks_pos: BLOCK_SIZE, // no leftover keystream yet
+            next_block: 1,
+            declared_len,
+            fed_len: 0,
+            tag_len,
+            poisoned: false,
+        })
+    }
+
+    /// Encrypt `chunk`, returning its ciphertext (same length).
+    ///
+    /// Returns `None` — emitting nothing and **poisoning** the encryptor so
+    /// every later call also returns `None` — if the cumulative plaintext
+    /// would exceed the committed `plaintext_len`. Ciphertext already
+    /// emitted is not retracted, but no tag will authenticate it.
+    /// `update(&[])` is a no-op returning an empty `Vec`.
+    #[must_use]
+    pub fn update(&mut self, chunk: &[u8]) -> Option<Vec<u8>> {
+        if self.poisoned {
+            return None;
+        }
+        // checked_add on u64: a wrapping usize add on a 32-bit target could
+        // miss the bound and then run the q-byte counter past its field.
+        let new_len = u64::try_from(chunk.len())
+            .ok()
+            .and_then(|c| self.fed_len.checked_add(c))
+            .filter(|&n| n <= self.declared_len);
+        let Some(new_len) = new_len else {
+            self.poisoned = true;
+            return None;
+        };
+
+        let mut out = vec![0u8; chunk.len()];
+        let mut i = 0;
+
+        // 1. Drain leftover keystream from a previous partial-block call.
+        while i < chunk.len() && self.ks_pos < BLOCK_SIZE {
+            out[i] = chunk[i] ^ self.ks[self.ks_pos];
+            self.ks_pos += 1;
+            i += 1;
+        }
+
+        // 2. Whole blocks: batch the keystream through `encrypt_blocks` so
+        //    bulk chunks keep the SIMD fanout under `sm4-bitsliced-simd`
+        //    (the single-shot's path). Byte-identical to per-block.
+        let whole = (chunk.len() - i) / BLOCK_SIZE;
+        if whole > 0 {
+            let first = self.next_block;
+            let mut blocks: Vec<[u8; BLOCK_SIZE]> = (0..whole)
+                .map(|k| counter_block(&self.a0, first + u64::try_from(k).unwrap_or(u64::MAX)))
+                .collect();
+            self.cipher.encrypt_blocks(&mut blocks);
+            for (k, ks_block) in blocks.iter().enumerate() {
+                let base = i + k * BLOCK_SIZE;
+                for lane in 0..BLOCK_SIZE {
+                    out[base + lane] = chunk[base + lane] ^ ks_block[lane];
+                }
+            }
+            blocks.iter_mut().zeroize();
+            self.next_block += u64::try_from(whole).unwrap_or(u64::MAX);
+            i += whole * BLOCK_SIZE;
+        }
+
+        // 3. Tail (< one block): one keystream block, consume what is
+        //    needed, keep the rest as leftover.
+        if i < chunk.len() {
+            self.ks = counter_block(&self.a0, self.next_block);
+            self.cipher.encrypt_block(&mut self.ks);
+            self.next_block += 1;
+            self.ks_pos = 0;
+            while i < chunk.len() {
+                out[i] = chunk[i] ^ self.ks[self.ks_pos];
+                self.ks_pos += 1;
+                i += 1;
+            }
+        }
+
+        // 4. CBC-MAC absorbs the *plaintext* (CCM authenticates plaintext).
+        self.mac_absorb(chunk);
+        self.fed_len = new_len;
+        Some(out)
+    }
+
+    /// Finish and return the `tag_len`-byte tag.
+    ///
+    /// Returns `None` if the encryptor is poisoned or **under-fed**
+    /// (`fed != plaintext_len`): the length in `B0` is a commitment, and a
+    /// tag over a shorter message than the one committed to would be a tag
+    /// over a message the caller never sent. This is deliberately stricter
+    /// than [`super::Sm4GcmEncryptor::finalize`], which still returns a
+    /// tag after a poisoned `update`.
+    #[must_use]
+    pub fn finalize(mut self) -> Option<Vec<u8>> {
+        if self.poisoned || self.fed_len != self.declared_len {
+            return None;
+        }
+        // Zero-pad and fold any partial plaintext block. The unused tail
+        // of `mac_block` is already zero (reset after every fold).
+        if self.mac_block_len != 0 {
+            self.mac_fold();
+        }
+        let mut s0 = self.a0;
+        self.cipher.encrypt_block(&mut s0);
+        let tag: Vec<u8> = s0
+            .iter()
+            .zip(&self.mac)
+            .take(self.tag_len)
+            .map(|(s, t)| s ^ t)
+            .collect();
+        s0.zeroize();
+        Some(tag)
+    }
+
+    fn mac_absorb(&mut self, data: &[u8]) {
+        for &b in data {
+            self.mac_block[self.mac_block_len] = b;
+            self.mac_block_len += 1;
+            if self.mac_block_len == BLOCK_SIZE {
+                self.mac_fold();
+            }
+        }
+    }
+
+    fn mac_fold(&mut self) {
+        for (m, &b) in self.mac.iter_mut().zip(&self.mac_block) {
+            *m ^= b;
+        }
+        self.cipher.encrypt_block(&mut self.mac);
+        self.mac_block = [0u8; BLOCK_SIZE];
+        self.mac_block_len = 0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sm4::mode_ccm;
+    use crate::sm4::mode_ccm::{MAX_NONCE_LEN, MIN_NONCE_LEN, VALID_TAG_LENS};
+
+    const KEY: [u8; 16] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
+        0x10,
+    ];
+    const NONCE_12: [u8; 12] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn make_payload(len: usize) -> Vec<u8> {
+        (0..len as u32).map(|i| (i ^ (i >> 3)) as u8).collect()
+    }
+
+    /// Drive `pt` through a fresh encryptor in fixed `chunk`-byte pieces and
+    /// return `ct ‖ tag` (the single-shot output shape).
+    fn stream_encrypt(
+        nonce: &[u8],
+        aad: &[u8],
+        pt: &[u8],
+        tag_len: usize,
+        chunk: usize,
+    ) -> Vec<u8> {
+        let mut enc =
+            Sm4CcmEncryptor::new(&KEY, nonce, aad, pt.len(), tag_len).expect("valid params");
+        let mut out = Vec::new();
+        let mut off = 0;
+        while off < pt.len() {
+            let take = chunk.min(pt.len() - off);
+            out.extend_from_slice(
+                &enc.update(&pt[off..off + take])
+                    .expect("within declared length"),
+            );
+            off += take;
+        }
+        out.extend_from_slice(&enc.finalize().expect("declared length fed exactly"));
+        out
+    }
+
+    #[test]
+    fn encryptor_chunked_matches_single_shot() {
+        let aad = b"associated header";
+        let pt = make_payload(200);
+        let want = mode_ccm::encrypt(&KEY, &NONCE_12, aad, &pt, 16).expect("valid params");
+        for chunk in [1usize, 7, 15, 16, 17, 31, 32, 33, 100, pt.len()] {
+            let got = stream_encrypt(&NONCE_12, aad, &pt, 16, chunk);
+            assert_eq!(got, want, "ct||tag divergence at chunk {chunk}");
+        }
+    }
+
+    #[test]
+    fn encryptor_every_tag_length_matches_single_shot() {
+        let pt = make_payload(45);
+        for &tag_len in &VALID_TAG_LENS {
+            let want =
+                mode_ccm::encrypt(&KEY, &NONCE_12, b"aad", &pt, tag_len).expect("valid params");
+            let got = stream_encrypt(&NONCE_12, b"aad", &pt, tag_len, 13);
+            assert_eq!(got, want, "tag_len {tag_len}");
+            assert_eq!(got.len(), pt.len() + tag_len);
+        }
+    }
+
+    #[test]
+    fn encryptor_every_nonce_length_matches_single_shot() {
+        let pt = make_payload(70);
+        for nonce_len in MIN_NONCE_LEN..=MAX_NONCE_LEN {
+            let nonce = vec![0x42u8; nonce_len];
+            let want = mode_ccm::encrypt(&KEY, &nonce, b"x", &pt, 16).expect("valid params");
+            let got = stream_encrypt(&nonce, b"x", &pt, 16, 9);
+            assert_eq!(got, want, "nonce_len {nonce_len}");
+        }
+    }
+
+    #[test]
+    fn encryptor_empty_aad_and_zero_length_plaintext() {
+        let want_no_aad = mode_ccm::encrypt(&KEY, &NONCE_12, &[], b"hello", 16).expect("valid");
+        assert_eq!(stream_encrypt(&NONCE_12, &[], b"hello", 16, 2), want_no_aad);
+
+        let want_empty = mode_ccm::encrypt(&KEY, &NONCE_12, b"aad", &[], 16).expect("valid");
+        let enc = Sm4CcmEncryptor::new(&KEY, &NONCE_12, b"aad", 0, 16).expect("valid");
+        let tag = enc.finalize().expect("zero declared, zero fed");
+        assert_eq!(tag, want_empty);
+    }
+
+    #[test]
+    fn encryptor_empty_updates_are_noops() {
+        let pt = b"payload";
+        let want = mode_ccm::encrypt(&KEY, &NONCE_12, b"a", pt, 16).expect("valid");
+        let mut enc = Sm4CcmEncryptor::new(&KEY, &NONCE_12, b"a", pt.len(), 16).expect("valid");
+        assert_eq!(enc.update(&[]).unwrap().len(), 0);
+        let mut got = enc.update(pt).unwrap();
+        assert_eq!(enc.update(&[]).unwrap().len(), 0);
+        got.extend_from_slice(&enc.finalize().unwrap());
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn encryptor_over_feed_emits_nothing_poisons_and_finalize_is_none() {
+        let mut enc = Sm4CcmEncryptor::new(&KEY, &NONCE_12, b"a", 10, 16).expect("valid");
+        assert_eq!(enc.update(&[0u8; 6]).unwrap().len(), 6);
+        // 6 + 5 > 10: the whole chunk is rejected, nothing emitted.
+        assert!(enc.update(&[0u8; 5]).is_none());
+        // Poisoned: even a chunk that would have fit is refused.
+        assert!(enc.update(&[0u8; 1]).is_none());
+        assert!(enc.update(&[]).is_none());
+        assert!(enc.finalize().is_none());
+    }
+
+    #[test]
+    fn encryptor_under_feed_finalize_is_none() {
+        let mut enc = Sm4CcmEncryptor::new(&KEY, &NONCE_12, b"a", 10, 16).expect("valid");
+        assert_eq!(enc.update(&[0u8; 9]).unwrap().len(), 9);
+        assert!(enc.finalize().is_none());
+    }
+
+    #[test]
+    fn encryptor_new_rejects_invalid_parameters() {
+        assert!(
+            Sm4CcmEncryptor::new(&KEY, &[0u8; 6], b"", 0, 16).is_none(),
+            "nonce too short"
+        );
+        assert!(
+            Sm4CcmEncryptor::new(&KEY, &[0u8; 14], b"", 0, 16).is_none(),
+            "nonce too long"
+        );
+        for tag_len in [0usize, 3, 5, 7, 9, 11, 13, 15, 17, 32] {
+            assert!(
+                Sm4CcmEncryptor::new(&KEY, &NONCE_12, b"", 0, tag_len).is_none(),
+                "tag_len {tag_len}"
+            );
+        }
+        // 13-byte nonce → q = 2 → ceiling 65 535.
+        assert!(Sm4CcmEncryptor::new(&KEY, &[0u8; 13], b"", 65_535, 16).is_some());
+        assert!(Sm4CcmEncryptor::new(&KEY, &[0u8; 13], b"", 65_536, 16).is_none());
+    }
+}
