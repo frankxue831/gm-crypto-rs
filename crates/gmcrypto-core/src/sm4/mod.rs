@@ -101,7 +101,7 @@ pub use gcm_streaming::{Sm4GcmDecryptor, Sm4GcmEncryptor};
 
 // v1.12 — length-committed streaming / incremental-input buffered SM4-CCM.
 #[cfg(feature = "sm4-aead")]
-pub use ccm_streaming::Sm4CcmEncryptor;
+pub use ccm_streaming::{Sm4CcmDecryptor, Sm4CcmEncryptor};
 
 // v0.12 — SM4-XTS combined key size (Key1 ‖ Key2 = 2×16 bytes).
 #[cfg(feature = "sm4-xts")]

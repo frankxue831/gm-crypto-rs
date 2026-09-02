@@ -6,7 +6,10 @@ use alloc::vec::Vec;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
-use super::mode_ccm::{build_a0, build_b0, counter_block, format_aad_into, validate_params};
+use super::mode_ccm::{
+    MAX_NONCE_LEN, MIN_NONCE_LEN, VALID_TAG_LENS, build_a0, build_b0, counter_block,
+    decrypt_with_cipher, format_aad_into, payload_ceiling, validate_params,
+};
 
 /// Length-committed, output-streaming SM4-CCM encryptor.
 ///
@@ -225,11 +228,96 @@ impl Sm4CcmEncryptor {
     }
 }
 
+/// Incremental-input, output-**buffered** SM4-CCM decryptor (commit-on-verify).
+///
+/// Not a streaming type: CCM's CBC-MAC runs over the plaintext and needs
+/// the total length in `B0`, which for a stream is known only at EOF, so
+/// all work happens in [`finalize_verify`](Self::finalize_verify) and the
+/// ciphertext is buffered until then — `O(message)` memory, the same
+/// shape as [`super::Sm4GcmDecryptor`]. The buffer is latched at the
+/// nonce's payload ceiling (`2^(8q) − 1`, e.g. 65 535 bytes for a 13-byte
+/// nonce) so a misbehaving peer cannot make it grow without bound.
+///
+/// This type is a thin wrapper over the single-shot decrypt body and adds
+/// no cryptography — which is what lets it share the single-shot's dudect
+/// coverage. Holds the SM4 key schedule (zeroized on drop by that field);
+/// its other state — nonce, AAD, ciphertext — is public.
+pub struct Sm4CcmDecryptor {
+    cipher: Sm4Cipher,
+    nonce: [u8; MAX_NONCE_LEN],
+    nonce_len: usize,
+    aad: Vec<u8>,
+    buf: Vec<u8>,
+    ceiling: u64,
+    overflowed: bool,
+}
+
+impl Sm4CcmDecryptor {
+    /// Construct from key, nonce, and the full AAD (retained until
+    /// [`finalize_verify`](Self::finalize_verify) — the MAC cannot consume
+    /// it before the length is known). Returns `None` if the nonce length
+    /// is outside `[7, 13]`.
+    #[must_use]
+    pub fn new(key: &[u8; KEY_SIZE], nonce: &[u8], aad: &[u8]) -> Option<Self> {
+        if nonce.len() < MIN_NONCE_LEN || nonce.len() > MAX_NONCE_LEN {
+            return None;
+        }
+        let mut n = [0u8; MAX_NONCE_LEN];
+        n[..nonce.len()].copy_from_slice(nonce);
+        Some(Self {
+            cipher: Sm4Cipher::new(key),
+            nonce: n,
+            nonce_len: nonce.len(),
+            aad: aad.to_vec(),
+            buf: Vec::new(),
+            ceiling: payload_ceiling(15 - nonce.len()),
+            overflowed: false,
+        })
+    }
+
+    /// Buffer `chunk` of ciphertext. Emits nothing (commit-on-verify).
+    /// Once the buffered length would exceed the nonce's payload ceiling
+    /// the overflow is latched, further chunks are dropped, and
+    /// [`finalize_verify`](Self::finalize_verify) returns `None`.
+    pub fn update(&mut self, chunk: &[u8]) {
+        if self.overflowed {
+            return;
+        }
+        let within_ceiling = u64::try_from(self.buf.len())
+            .ok()
+            .zip(u64::try_from(chunk.len()).ok())
+            .and_then(|(cur, c)| cur.checked_add(c))
+            .is_some_and(|n| n <= self.ceiling);
+        if !within_ceiling {
+            self.overflowed = true;
+            return;
+        }
+        self.buf.extend_from_slice(chunk);
+    }
+
+    /// Verify `tag` (its length selects the tag length, validated against
+    /// RFC 3610 §2.1) and, on success, return the plaintext. `None` on tag
+    /// mismatch, invalid tag length, or a latched overflow — single failure
+    /// mode. No plaintext survives the failure path.
+    #[must_use]
+    pub fn finalize_verify(self, tag: &[u8]) -> Option<Vec<u8>> {
+        if self.overflowed || !VALID_TAG_LENS.contains(&tag.len()) {
+            return None;
+        }
+        decrypt_with_cipher(
+            &self.cipher,
+            &self.nonce[..self.nonce_len],
+            &self.aad,
+            &self.buf,
+            tag,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::sm4::mode_ccm;
-    use crate::sm4::mode_ccm::{MAX_NONCE_LEN, MIN_NONCE_LEN, VALID_TAG_LENS};
 
     const KEY: [u8; 16] = [
         0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
@@ -362,5 +450,134 @@ mod tests {
         // 13-byte nonce → q = 2 → ceiling 65 535.
         assert!(Sm4CcmEncryptor::new(&KEY, &[0u8; 13], b"", 65_535, 16).is_some());
         assert!(Sm4CcmEncryptor::new(&KEY, &[0u8; 13], b"", 65_536, 16).is_none());
+    }
+
+    /// Feed `ct` through a fresh decryptor in `chunk`-byte pieces and verify.
+    fn stream_decrypt(
+        nonce: &[u8],
+        aad: &[u8],
+        ct: &[u8],
+        tag: &[u8],
+        chunk: usize,
+    ) -> Option<Vec<u8>> {
+        let mut dec = Sm4CcmDecryptor::new(&KEY, nonce, aad).expect("valid nonce");
+        let mut off = 0;
+        while off < ct.len() {
+            let take = chunk.min(ct.len() - off);
+            dec.update(&ct[off..off + take]);
+            off += take;
+        }
+        dec.finalize_verify(tag)
+    }
+
+    #[test]
+    fn decryptor_chunked_matches_single_shot() {
+        let aad = b"associated header";
+        let pt = make_payload(200);
+        let ct_with_tag = mode_ccm::encrypt(&KEY, &NONCE_12, aad, &pt, 16).expect("valid");
+        let (ct, tag) = ct_with_tag.split_at(ct_with_tag.len() - 16);
+        for chunk in [1usize, 7, 15, 16, 17, 31, 32, 33, 100, ct.len()] {
+            assert_eq!(
+                stream_decrypt(&NONCE_12, aad, ct, tag, chunk).as_deref(),
+                Some(pt.as_slice()),
+                "divergence at chunk {chunk}"
+            );
+        }
+    }
+
+    #[test]
+    fn decryptor_every_tag_length_verifies() {
+        let pt = make_payload(33);
+        for &tag_len in &VALID_TAG_LENS {
+            let ct_with_tag =
+                mode_ccm::encrypt(&KEY, &NONCE_12, b"aad", &pt, tag_len).expect("valid");
+            let (ct, tag) = ct_with_tag.split_at(ct_with_tag.len() - tag_len);
+            assert_eq!(
+                stream_decrypt(&NONCE_12, b"aad", ct, tag, 5).as_deref(),
+                Some(pt.as_slice())
+            );
+        }
+    }
+
+    #[test]
+    fn decryptor_rejects_tampered_tag_and_ciphertext_and_aad() {
+        let pt = b"tamper target";
+        let ct_with_tag = mode_ccm::encrypt(&KEY, &NONCE_12, b"h", pt, 16).expect("valid");
+        let (ct, tag) = ct_with_tag.split_at(ct_with_tag.len() - 16);
+
+        let mut bad_tag = tag.to_vec();
+        bad_tag[0] ^= 0x01;
+        assert!(stream_decrypt(&NONCE_12, b"h", ct, &bad_tag, 4).is_none());
+
+        let mut bad_ct = ct.to_vec();
+        bad_ct[0] ^= 0x01;
+        assert!(stream_decrypt(&NONCE_12, b"h", &bad_ct, tag, 4).is_none());
+
+        assert!(stream_decrypt(&NONCE_12, b"wrong", ct, tag, 4).is_none());
+    }
+
+    #[test]
+    fn decryptor_rejects_invalid_tag_length() {
+        let ct_with_tag = mode_ccm::encrypt(&KEY, &NONCE_12, b"h", b"x", 16).expect("valid");
+        let (ct, tag) = ct_with_tag.split_at(ct_with_tag.len() - 16);
+        for bad_len in [0usize, 3, 5, 7, 9, 11, 13, 15] {
+            assert!(
+                stream_decrypt(&NONCE_12, b"h", ct, &tag[..bad_len], 4).is_none(),
+                "tag len {bad_len}"
+            );
+        }
+    }
+
+    #[test]
+    fn decryptor_new_rejects_invalid_nonce_length() {
+        assert!(Sm4CcmDecryptor::new(&KEY, &[0u8; 6], b"").is_none());
+        assert!(Sm4CcmDecryptor::new(&KEY, &[0u8; 14], b"").is_none());
+        assert!(Sm4CcmDecryptor::new(&KEY, &[0u8; 7], b"").is_some());
+        assert!(Sm4CcmDecryptor::new(&KEY, &[0u8; 13], b"").is_some());
+    }
+
+    #[test]
+    fn decryptor_latches_past_the_q_ceiling() {
+        // 13-byte nonce → q = 2 → ceiling 65 535 bytes.
+        let nonce = [0x42u8; 13];
+        let at_ceiling = vec![0u8; 65_535];
+        let mut dec = Sm4CcmDecryptor::new(&KEY, &nonce, b"").expect("valid nonce");
+        dec.update(&at_ceiling);
+        dec.update(&[0u8; 1]); // 65 536 > ceiling → latch
+        assert!(dec.finalize_verify(&[0u8; 16]).is_none());
+
+        // Exactly at the ceiling is accepted by the latch (and then fails
+        // only on the tag, which is the single-shot's decision).
+        let mut dec = Sm4CcmDecryptor::new(&KEY, &nonce, b"").expect("valid nonce");
+        dec.update(&at_ceiling);
+        assert!(dec.finalize_verify(&[0u8; 16]).is_none()); // garbage tag
+    }
+
+    #[test]
+    fn decryptor_empty_updates_then_verify() {
+        let ct_with_tag = mode_ccm::encrypt(&KEY, &NONCE_12, b"a", &[], 16).expect("valid");
+        let mut dec = Sm4CcmDecryptor::new(&KEY, &NONCE_12, b"a").expect("valid nonce");
+        dec.update(&[]);
+        dec.update(&[]);
+        assert_eq!(dec.finalize_verify(&ct_with_tag).as_deref(), Some(&[][..]));
+    }
+
+    #[test]
+    fn round_trip_through_streaming_both_directions() {
+        let aad = b"end to end";
+        let pt = make_payload(137);
+        let mut enc = Sm4CcmEncryptor::new(&KEY, &NONCE_12, aad, pt.len(), 12).expect("valid");
+        let mut ct = Vec::new();
+        for c in pt.chunks(13) {
+            ct.extend_from_slice(&enc.update(c).unwrap());
+        }
+        let tag = enc.finalize().unwrap();
+        assert_eq!(tag.len(), 12);
+
+        let mut dec = Sm4CcmDecryptor::new(&KEY, &NONCE_12, aad).expect("valid nonce");
+        for c in ct.chunks(11) {
+            dec.update(c);
+        }
+        assert_eq!(dec.finalize_verify(&tag).as_deref(), Some(pt.as_slice()));
     }
 }
