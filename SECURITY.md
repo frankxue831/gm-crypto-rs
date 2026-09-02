@@ -240,6 +240,24 @@ the inherent path, so a future rewrite that quietly reimplemented mode logic in
 the wrapper would fail the fuzz sweep rather than silently invalidate this
 paragraph.
 
+**The v1.12 streaming SM4-CCM types add NO dudect target** — two precedents,
+one each. `Sm4CcmEncryptor`'s secret-dependent work is the same
+`Sm4Cipher::encrypt_block(s)` chain the single-shot runs (CBC-MAC over
+plaintext, CTR keystream); everything it adds — chunk boundaries, the leftover
+keystream position, the committed length, the over-/under-feed arms — is
+control flow over **public** quantities, and encryption has no tag comparison
+and no secret-dependent failure arm. That is the reasoning under which
+`Sm4GcmEncryptor` has no target, and `ct_sm4_ctr_encrypt` already gates the
+keystream path class-split by key. `Sm4CcmDecryptor` is a thin wrapper over the
+single-shot decrypt body (`decrypt_with_cipher`) already measured by
+`ct_sm4_ccm_decrypt`: the code that touches the key is byte-identical, and
+`fuzz_sm4_ccm_streaming_decrypt` fails the nightly sweep if a future rewrite
+quietly reimplements mode logic in the wrapper. **This holds only while the
+decryptor stays a delegator** — a length-declared decryptor, an incremental
+CBC-MAC over unverified plaintext, or CTR-before-finalize would introduce a
+new secret-touching body and reopen the question (`docs/v1.12-scope.md`
+Q12.8).
+
 **Cfg-gated on `sm2-key-exchange` (1):**
 
 - `ct_sm2_key_exchange` — the full SM2 key-exchange initiator side
@@ -612,7 +630,7 @@ rejected, the same as PRs distinguishing failure modes.
 
 The failure-mode invariant above is enforced not only by the type system and
 KAT/interop tests over curated inputs, but by **coverage-guided fuzzing over
-adversarial inputs**. The suite currently stands at **33 targets — see
+adversarial inputs**. The suite currently stands at **35 targets — see
 "Post-1.0 growth" below for the current census, which is authoritative.**
 
 The rest of this section is the *historical* v0.14 record. v0.14 introduced a
@@ -660,7 +678,7 @@ also gained a non-gating **`cargo fuzz coverage`** job that renders per-target
 an artifact (the report is the deliverable, not a coverage-% gate). v0.20 is an
 infra-assurance cycle — no published-crate change; workspace stays `0.16.0`.
 
-**Post-1.0 growth (current census: 33 targets).** The post-1.0 hardening cycle
+**Post-1.0 growth (current census: 35 targets).** The post-1.0 hardening cycle
 (PRs #98/#99) added seven more: primitive one-shot-vs-streaming differentials
 `fuzz_sm3` / `fuzz_hmac_sm3`, the raw-pointer C-ABI surface `fuzz_c_abi`
 (happy-path / NULL-rejection / undersized-buffer op families over the
@@ -697,6 +715,13 @@ list must name every `fuzz/Cargo.toml` `[[bin]]` — a target absent from it
 builds in CI but is silently never fuzzed (a drift that existed for
 #98/#99's targets and was fixed in #102; the list now carries an explicit
 must-match note).
+
+**v1.12** added `fuzz_sm4_ccm_streaming_decrypt` (the buffered CCM decryptor
+against `mode_ccm::decrypt(ct‖tag, tag_len)` across arbitrary chunking and
+valid-and-invalid tag lengths) and `fuzz_sm4_ccm_streaming_encrypt` (the
+length-committed encryptor against `mode_ccm::encrypt` plus round-trip, with
+a declared-length mode byte so the over-feed and under-feed arms actually
+fire; census 33 → **35**).
 
 **Every target must also have a committed `fuzz/seeds/<target>/` directory,
 and CI now preflights this (#117).** libFuzzer treats a *nonexistent* corpus

@@ -183,6 +183,21 @@ impl gmcrypto_core::sm4::cbc_streaming::Sm4CbcEncryptor
 pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcEncryptor::finalize(self) -> alloc::vec::Vec<u8>
 pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcEncryptor::new(&[u8; 16], &[u8; 16]) -> Self
 pub fn gmcrypto_core::sm4::cbc_streaming::Sm4CbcEncryptor::update(&mut self, &[u8])
+pub mod gmcrypto_core::sm4::ccm_streaming
+pub struct gmcrypto_core::sm4::ccm_streaming::Sm4CcmDecryptor
+impl gmcrypto_core::sm4::ccm_streaming::Sm4CcmDecryptor
+pub fn gmcrypto_core::sm4::ccm_streaming::Sm4CcmDecryptor::finalize_verify(self, &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn gmcrypto_core::sm4::ccm_streaming::Sm4CcmDecryptor::new(&[u8; 16], &[u8], &[u8]) -> core::option::Option<Self>
+pub fn gmcrypto_core::sm4::ccm_streaming::Sm4CcmDecryptor::update(&mut self, &[u8])
+pub struct gmcrypto_core::sm4::ccm_streaming::Sm4CcmEncryptor
+impl gmcrypto_core::sm4::ccm_streaming::Sm4CcmEncryptor
+pub fn gmcrypto_core::sm4::ccm_streaming::Sm4CcmEncryptor::finalize(self) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn gmcrypto_core::sm4::ccm_streaming::Sm4CcmEncryptor::new(&[u8; 16], &[u8], &[u8], usize, usize) -> core::option::Option<Self>
+pub fn gmcrypto_core::sm4::ccm_streaming::Sm4CcmEncryptor::update(&mut self, &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
+impl core::ops::drop::Drop for gmcrypto_core::sm4::ccm_streaming::Sm4CcmEncryptor
+pub fn gmcrypto_core::sm4::ccm_streaming::Sm4CcmEncryptor::drop(&mut self)
+impl zeroize::Zeroize for gmcrypto_core::sm4::ccm_streaming::Sm4CcmEncryptor
+pub fn gmcrypto_core::sm4::ccm_streaming::Sm4CcmEncryptor::zeroize(&mut self)
 pub mod gmcrypto_core::sm4::cipher
 pub struct gmcrypto_core::sm4::cipher::Sm4Cipher
 impl gmcrypto_core::sm4::cipher::Sm4Cipher
@@ -328,6 +343,20 @@ impl<M: gmcrypto_core::sm4::CcmTagSize, N: gmcrypto_core::sm4::CcmNonceSize> cry
 pub fn gmcrypto_core::sm4::Sm4Ccm<M, N>::new(&crypto_common::Key<Self>) -> Self
 impl<M: gmcrypto_core::sm4::CcmTagSize, N: gmcrypto_core::sm4::CcmNonceSize> crypto_common::KeySizeUser for gmcrypto_core::sm4::Sm4Ccm<M, N>
 pub type gmcrypto_core::sm4::Sm4Ccm<M, N>::KeySize = typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UInt<typenum::uint::UTerm, typenum::bit::B1>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>, typenum::bit::B0>
+pub struct gmcrypto_core::sm4::Sm4CcmDecryptor
+impl gmcrypto_core::sm4::ccm_streaming::Sm4CcmDecryptor
+pub fn gmcrypto_core::sm4::ccm_streaming::Sm4CcmDecryptor::finalize_verify(self, &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn gmcrypto_core::sm4::ccm_streaming::Sm4CcmDecryptor::new(&[u8; 16], &[u8], &[u8]) -> core::option::Option<Self>
+pub fn gmcrypto_core::sm4::ccm_streaming::Sm4CcmDecryptor::update(&mut self, &[u8])
+pub struct gmcrypto_core::sm4::Sm4CcmEncryptor
+impl gmcrypto_core::sm4::ccm_streaming::Sm4CcmEncryptor
+pub fn gmcrypto_core::sm4::ccm_streaming::Sm4CcmEncryptor::finalize(self) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn gmcrypto_core::sm4::ccm_streaming::Sm4CcmEncryptor::new(&[u8; 16], &[u8], &[u8], usize, usize) -> core::option::Option<Self>
+pub fn gmcrypto_core::sm4::ccm_streaming::Sm4CcmEncryptor::update(&mut self, &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
+impl core::ops::drop::Drop for gmcrypto_core::sm4::ccm_streaming::Sm4CcmEncryptor
+pub fn gmcrypto_core::sm4::ccm_streaming::Sm4CcmEncryptor::drop(&mut self)
+impl zeroize::Zeroize for gmcrypto_core::sm4::ccm_streaming::Sm4CcmEncryptor
+pub fn gmcrypto_core::sm4::ccm_streaming::Sm4CcmEncryptor::zeroize(&mut self)
 pub struct gmcrypto_core::sm4::Sm4Cipher
 impl gmcrypto_core::sm4::cipher::Sm4Cipher
 pub fn gmcrypto_core::sm4::cipher::Sm4Cipher::decrypt_block(&self, &mut [u8; 16])
