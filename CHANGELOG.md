@@ -5,6 +5,34 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**v1.12 — length-committed streaming SM4-CCM (additive; behind the existing
+`sm4-aead` feature).** Scope + maintainer-signed forks:
+[`docs/v1.12-scope.md`](docs/v1.12-scope.md). Default-features build is
+byte-identical; no new dependency; no C ABI change (FFI is the v1.13
+candidate).
+
+### Added
+
+- **`sm4::Sm4CcmEncryptor`** — the caller commits to the plaintext length at
+  construction (CCM encodes it in `B0`), and in exchange every `update` emits
+  its chunk's ciphertext with `O(chunk)` memory. An over-feeding `update`
+  emits nothing and poisons the encryptor; `finalize` returns `None` when
+  poisoned or under-fed, so a partial stream is never tag-authenticated
+  (deliberately stricter than `Sm4GcmEncryptor`). Zeroized on drop.
+- **`sm4::Sm4CcmDecryptor`** — incremental-input, output-buffered,
+  commit-on-verify (the `Sm4GcmDecryptor` shape; never called "streaming").
+  A thin wrapper over the single-shot decrypt body, latched at the nonce's
+  payload ceiling so a peer cannot grow the buffer without bound.
+- Fuzz: `fuzz_sm4_ccm_streaming_decrypt` and `fuzz_sm4_ccm_streaming_encrypt`
+  differential targets (census 33 → 35).
+
+### Changed
+
+- `sm4::mode_ccm` internals: the `A_i` counter encoder is one shared helper,
+  and `decrypt` delegates to a body over a scheduled cipher. Public API and
+  outputs unchanged (OpenSSL KATs pass unmodified). Module docs no longer
+  state that CCM is "incompatible with streaming".
+
 ## [1.11.2] - 2026-08-23
 
 **Presentation only.** No crypto code path, public API, C ABI, wire format,

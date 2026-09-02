@@ -32,7 +32,7 @@
 
 #![cfg(feature = "sm4-aead")]
 
-use gmcrypto_core::sm4::mode_ccm;
+use gmcrypto_core::sm4::{Sm4CcmDecryptor, Sm4CcmEncryptor, mode_ccm};
 
 struct CcmVector {
     name: &'static str,
@@ -241,4 +241,47 @@ fn tampered_aad_fails() {
         mode_ccm::decrypt(&v.key, v.nonce, bad_aad, v.expected, v.tag_len).is_none(),
         "AAD-tamper not detected for baseline",
     );
+}
+
+/// v1.12 — every OpenSSL vector reproduced by the length-committed
+/// streaming encryptor in two chunkings (1-byte and 7-byte pieces).
+#[test]
+fn streaming_encryptor_matches_openssl_vectors() {
+    for v in VECTORS {
+        for chunk in [1usize, 7] {
+            let mut enc =
+                Sm4CcmEncryptor::new(&v.key, v.nonce, v.aad, v.plaintext.len(), v.tag_len)
+                    .unwrap_or_else(|| {
+                        panic!("encryptor rejected params for scenario {:?}", v.name)
+                    });
+            let mut got = Vec::new();
+            for piece in v.plaintext.chunks(chunk) {
+                got.extend_from_slice(&enc.update(piece).expect("within declared length"));
+            }
+            got.extend_from_slice(&enc.finalize().expect("declared length fed exactly"));
+            assert_eq!(got, v.expected, "scenario {:?} chunk {chunk}", v.name);
+        }
+    }
+}
+
+/// v1.12 — every OpenSSL vector recovered by the incremental-input
+/// buffered decryptor in two chunkings.
+#[test]
+fn streaming_decryptor_matches_openssl_vectors() {
+    for v in VECTORS {
+        let (ct, tag) = v.expected.split_at(v.expected.len() - v.tag_len);
+        for chunk in [1usize, 7] {
+            let mut dec = Sm4CcmDecryptor::new(&v.key, v.nonce, v.aad)
+                .unwrap_or_else(|| panic!("decryptor rejected nonce for scenario {:?}", v.name));
+            for piece in ct.chunks(chunk) {
+                dec.update(piece);
+            }
+            assert_eq!(
+                dec.finalize_verify(tag).as_deref(),
+                Some(v.plaintext),
+                "scenario {:?} chunk {chunk}",
+                v.name
+            );
+        }
+    }
 }

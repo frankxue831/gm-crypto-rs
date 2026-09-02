@@ -49,6 +49,16 @@ pub mod mode_ccm;
 #[cfg(feature = "sm4-aead")]
 pub mod gcm_streaming;
 
+// v1.12 — length-committed streaming SM4-CCM. Same `sm4-aead` gate;
+// reuses `mode_ccm` internals (validate_params, B0/A0 construction, the
+// q-byte `counter_block` encoder, `decrypt_with_cipher`). The encryptor is
+// output-streaming once the caller commits to `plaintext_len` (B0 encodes
+// it); the decryptor is input-incremental / output-buffered
+// (commit-on-verify) and is a thin wrapper over the single-shot body.
+// Single-shot `mode_ccm` stays the simple path. See docs/v1.12-scope.md.
+#[cfg(feature = "sm4-aead")]
+pub mod ccm_streaming;
+
 // v0.4 W3 — Bitsliced (table-less, gate-only) SM4 S-box behind the
 // `sm4-bitsliced` feature flag (Q4.9 / Q4.10 / Q4.11 of
 // docs/v0.4-scope.md). The module is `pub(crate)` so `cipher.rs`'s
@@ -88,6 +98,10 @@ pub use mode_gcm::GcmTagLen;
 // v0.9 W2 — incremental-input buffered SM4-GCM types.
 #[cfg(feature = "sm4-aead")]
 pub use gcm_streaming::{Sm4GcmDecryptor, Sm4GcmEncryptor};
+
+// v1.12 — length-committed streaming / incremental-input buffered SM4-CCM.
+#[cfg(feature = "sm4-aead")]
+pub use ccm_streaming::{Sm4CcmDecryptor, Sm4CcmEncryptor};
 
 // v0.12 — SM4-XTS combined key size (Key1 ‖ Key2 = 2×16 bytes).
 #[cfg(feature = "sm4-xts")]

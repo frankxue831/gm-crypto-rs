@@ -14,8 +14,10 @@
 //!   authentication (no GHASH), so the algorithm reads only from the
 //!   existing block cipher path.
 //! - Requires the caller to commit to plaintext length up front (the
-//!   length is encoded in the first CBC-MAC block) — incompatible
-//!   with streaming. v0.8 ships single-shot only.
+//!   length is encoded in the first CBC-MAC block `B0`). That rules out
+//!   streaming an *unknown*-length plaintext, not streaming as such:
+//!   [`super::ccm_streaming`] (v1.12) streams encryption once the length
+//!   is declared. This module stays the single-shot path.
 //! - Parameterizes tag length (4/6/8/10/12/14/16 bytes per RFC 3610).
 //!
 //! # Nonce contract
@@ -123,11 +125,11 @@ use zeroize::Zeroize;
 use super::cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
 
 /// Valid CCM tag lengths in bytes per RFC 3610 §2.1.
-const VALID_TAG_LENS: [usize; 7] = [4, 6, 8, 10, 12, 14, 16];
+pub(super) const VALID_TAG_LENS: [usize; 7] = [4, 6, 8, 10, 12, 14, 16];
 
 /// Valid CCM nonce lengths in bytes per RFC 3610 §2.1.
-const MIN_NONCE_LEN: usize = 7;
-const MAX_NONCE_LEN: usize = 13;
+pub(super) const MIN_NONCE_LEN: usize = 7;
+pub(super) const MAX_NONCE_LEN: usize = 13;
 
 /// Encrypt `plaintext` under `(key, nonce)` with `aad` authenticated,
 /// producing `ciphertext ‖ tag` in a single output buffer.
@@ -169,10 +171,7 @@ pub fn encrypt(
     // increments the trailing q-byte counter. The encrypted A_0 is
     // XOR'd into the leading tag_len bytes of T to produce the final
     // tag.
-    let mut a0 = [0u8; BLOCK_SIZE];
-    a0[0] = (q - 1) as u8; // Adata bit is 0 in A_i blocks (only in B_i blocks).
-    a0[1..=nonce.len()].copy_from_slice(nonce);
-    // Bytes [1 + nonce_len..16] = counter, starts at 0.
+    let a0 = build_a0(nonce);
 
     let mut s0 = a0;
     cipher.encrypt_block(&mut s0);
@@ -219,12 +218,31 @@ pub fn decrypt(
         return None;
     }
     let split = ciphertext_with_tag.len() - tag_len;
-    let ct = &ciphertext_with_tag[..split];
-    let wire_tag = &ciphertext_with_tag[split..];
-
-    validate_params(nonce, ct.len(), aad.len(), tag_len)?;
-
     let cipher = Sm4Cipher::new(key);
+    decrypt_with_cipher(
+        &cipher,
+        nonce,
+        aad,
+        &ciphertext_with_tag[..split],
+        &ciphertext_with_tag[split..],
+    )
+}
+
+/// The `decrypt` body over an already-scheduled cipher and an
+/// already-split `(ct, tag)`. `tag.len()` is the tag length. `pub(super)`
+/// so `Sm4CcmDecryptor` delegates here without re-running the key schedule
+/// or concatenating its buffer (v1.12 Q12.4 / Q12.5). This function IS the
+/// single-shot decrypt — the decryptor adds nothing over it, which is what
+/// lets that type ride `ct_sm4_ccm_decrypt` instead of a new dudect target.
+pub(super) fn decrypt_with_cipher(
+    cipher: &Sm4Cipher,
+    nonce: &[u8],
+    aad: &[u8],
+    ct: &[u8],
+    wire_tag: &[u8],
+) -> Option<Vec<u8>> {
+    let tag_len = wire_tag.len();
+    validate_params(nonce, ct.len(), aad.len(), tag_len)?;
     let q = 15 - nonce.len();
 
     // Step 1: CTR-decrypt the ciphertext into a tentative plaintext.
@@ -235,12 +253,10 @@ pub fn decrypt(
     // before `return None` (B-3, v0.23 — a `Vec` drop frees but does
     // not scrub, and SM2-decrypt / the GCM-decrypt comment both hold
     // this same posture).
-    let mut a0 = [0u8; BLOCK_SIZE];
-    a0[0] = (q - 1) as u8;
-    a0[1..=nonce.len()].copy_from_slice(nonce);
+    let a0 = build_a0(nonce);
 
     let mut tentative_pt = vec![0u8; ct.len()];
-    ccm_ctr_xor(&cipher, &a0, ct, &mut tentative_pt);
+    ccm_ctr_xor(cipher, &a0, ct, &mut tentative_pt);
 
     // Step 2: recompute the MAC over the tentative plaintext.
     let b0 = build_b0(nonce, tentative_pt.len(), !aad.is_empty(), tag_len, q);
@@ -253,7 +269,7 @@ pub fn decrypt(
     while auth.len() % BLOCK_SIZE != 0 {
         auth.push(0);
     }
-    let t = cbc_mac(&cipher, &auth);
+    let t = cbc_mac(cipher, &auth);
 
     // Step 3: compute the expected tag bytes.
     let mut s0 = a0;
@@ -277,8 +293,14 @@ pub fn decrypt(
 // CCM internals
 // ============================================================
 
-/// Validate caller-supplied parameters per RFC 3610 §2.1.
-fn validate_params(nonce: &[u8], pt_len: usize, aad_len: usize, tag_len: usize) -> Option<()> {
+/// Validate caller-supplied parameters per RFC 3610 §2.1. `pub(super)` so
+/// `ccm_streaming` runs the identical gate at construction (v1.12 Q12.5).
+pub(super) fn validate_params(
+    nonce: &[u8],
+    pt_len: usize,
+    aad_len: usize,
+    tag_len: usize,
+) -> Option<()> {
     if !VALID_TAG_LENS.contains(&tag_len) {
         return None;
     }
@@ -286,12 +308,9 @@ fn validate_params(nonce: &[u8], pt_len: usize, aad_len: usize, tag_len: usize) 
         return None;
     }
     let q = 15 - nonce.len();
-    // Plaintext length must fit in q bytes.
-    if q < 8 {
-        let max_pt: u64 = (1u64 << (8 * q)) - 1;
-        if (pt_len as u64) > max_pt {
-            return None;
-        }
+    // Plaintext length must fit in the q-byte length field of B0.
+    if u64::try_from(pt_len).ok()? > payload_ceiling(q) {
+        return None;
     }
     // AAD length encoding limits: spec allows up to 2^64-1 via the
     // 8-byte FFFF prefix, which exceeds practical input sizes. We
@@ -301,8 +320,48 @@ fn validate_params(nonce: &[u8], pt_len: usize, aad_len: usize, tag_len: usize) 
     Some(())
 }
 
+/// Largest payload length representable in CCM's `q`-byte length field:
+/// `2^(8q) − 1` for `q < 8`, unbounded (`u64::MAX`) at `q = 8`. The
+/// `ccm_streaming` decryptor latches on this during `update` (v1.12 Q12.4).
+pub(super) const fn payload_ceiling(q: usize) -> u64 {
+    if q >= 8 {
+        u64::MAX
+    } else {
+        (1u64 << (8 * q)) - 1
+    }
+}
+
+/// The CTR pre-counter block `A0`: `(q − 1) ‖ nonce ‖ 0^q`. The Adata bit
+/// is never set in `A_i` blocks (only in `B_i`). Shared by the single-shot
+/// paths and `ccm_streaming` (v1.12 Q12.5).
+pub(super) fn build_a0(nonce: &[u8]) -> [u8; BLOCK_SIZE] {
+    let q = 15 - nonce.len();
+    let mut a0 = [0u8; BLOCK_SIZE];
+    a0[0] = (q - 1) as u8;
+    a0[1..=nonce.len()].copy_from_slice(nonce);
+    a0
+}
+
+/// `A_i` for CTR block index `i`: `a0` with its trailing `q` bytes replaced
+/// by `i` as a `q`-byte big-endian integer, `q` read back from `a0[0] + 1`.
+///
+/// This is CCM's counter, **not** GCM's `inc32` — even the 12-byte default
+/// nonce is `q = 3`, not a 32-bit field. Width argument: every caller
+/// enforces `payload_len ≤ payload_ceiling(q)` before generating keystream
+/// (`validate_params` for the single-shot, `Sm4CcmEncryptor::new` for the
+/// stream), so the largest index ever requested is
+/// `ceil(payload_ceiling(q) / 16) < 2^(8q)` and the field cannot overflow.
+pub(super) fn counter_block(a0: &[u8; BLOCK_SIZE], i: u64) -> [u8; BLOCK_SIZE] {
+    let q = a0[0] as usize + 1;
+    let counter_start = BLOCK_SIZE - q;
+    let mut a_i = *a0;
+    let be = i.to_be_bytes();
+    a_i[counter_start..].copy_from_slice(&be[8 - q..]);
+    a_i
+}
+
 /// Construct the first authentication block `B0` per RFC 3610 §2.2.
-fn build_b0(
+pub(super) fn build_b0(
     nonce: &[u8],
     pt_len: usize,
     has_aad: bool,
@@ -331,7 +390,7 @@ fn build_b0(
 
 /// Append the formatted AAD to `out` per RFC 3610 §2.2 (zero-padded
 /// to a block boundary).
-fn format_aad_into(out: &mut Vec<u8>, aad: &[u8]) {
+pub(super) fn format_aad_into(out: &mut Vec<u8>, aad: &[u8]) {
     // Length-prefix encoding per the spec:
     let alen = aad.len();
     if alen < 0xFF00 {
@@ -380,19 +439,11 @@ fn ccm_ctr_xor(cipher: &Sm4Cipher, a0: &[u8; BLOCK_SIZE], input: &[u8], output: 
         return;
     }
     let block_count = input.len().div_ceil(BLOCK_SIZE);
-    let nonce_part_end = a0[0] as usize; // q - 1 = byte index where counter starts - 1
-    let q = (nonce_part_end + 1) as u32; // q is 15 - nonce.len()
-    let counter_start_idx = 16 - q as usize;
 
-    // Build A_1 .. A_block_count.
-    let mut keystream: Vec<[u8; BLOCK_SIZE]> = Vec::with_capacity(block_count);
-    for i in 1..=block_count {
-        let mut a_i = *a0;
-        // Encode i as q-byte BE into the trailing slot.
-        let i_bytes = (i as u64).to_be_bytes();
-        a_i[counter_start_idx..16].copy_from_slice(&i_bytes[8 - q as usize..8]);
-        keystream.push(a_i);
-    }
+    // Build A_1 .. A_block_count through the shared encoder.
+    let mut keystream: Vec<[u8; BLOCK_SIZE]> = (1..=block_count)
+        .map(|i| counter_block(a0, i as u64))
+        .collect();
     cipher.encrypt_blocks(&mut keystream);
 
     for j in 0..input.len() {
@@ -697,5 +748,66 @@ mod tests {
         let nonce = [0x42u8; 12];
         // Decrypt with tag_len=16 but only 8 bytes of input → None.
         assert!(decrypt(&KEY, &nonce, b"aad", &[0u8; 8], 16).is_none());
+    }
+
+    #[test]
+    fn payload_ceiling_matches_rfc3610_q_field() {
+        assert_eq!(payload_ceiling(2), 65_535);
+        assert_eq!(payload_ceiling(3), 16_777_215);
+        assert_eq!(payload_ceiling(7), (1u64 << 56) - 1);
+        assert_eq!(payload_ceiling(8), u64::MAX);
+    }
+
+    #[test]
+    fn build_a0_layout_is_flags_nonce_zero_counter() {
+        let nonce = [0x11u8; 12]; // q = 3
+        let a0 = build_a0(&nonce);
+        assert_eq!(a0[0], 2, "flags byte is q - 1");
+        assert_eq!(&a0[1..13], &nonce[..]);
+        assert_eq!(&a0[13..], &[0u8; 3], "counter field starts at zero");
+    }
+
+    #[test]
+    fn counter_block_encodes_q_byte_big_endian_index() {
+        // For every nonce length, the trailing q bytes of A_i must be i as a
+        // q-byte big-endian integer and the rest of the block must equal A0.
+        for nonce_len in MIN_NONCE_LEN..=MAX_NONCE_LEN {
+            let q = 15 - nonce_len;
+            let nonce = vec![0x5au8; nonce_len];
+            let a0 = build_a0(&nonce);
+            let max_i = if q >= 8 {
+                u64::MAX
+            } else {
+                (1u64 << (8 * q)) - 1
+            };
+            for &i in &[1u64, 2, 255, 256, 65_535, 65_536, max_i] {
+                if i > max_i {
+                    continue;
+                }
+                let got = counter_block(&a0, i);
+                assert_eq!(&got[..16 - q], &a0[..16 - q], "q={q} i={i}: prefix altered");
+                let be = i.to_be_bytes();
+                assert_eq!(&got[16 - q..], &be[8 - q..], "q={q} i={i}: counter field");
+            }
+        }
+    }
+
+    #[test]
+    fn decrypt_with_cipher_matches_public_decrypt() {
+        let nonce = [0x42u8; 12];
+        let aad = b"aad";
+        let ct_with_tag = encrypt(&KEY, &nonce, aad, b"split path", 8).expect("valid params");
+        let split = ct_with_tag.len() - 8;
+        let cipher = Sm4Cipher::new(&KEY);
+        let via_cipher = decrypt_with_cipher(
+            &cipher,
+            &nonce,
+            aad,
+            &ct_with_tag[..split],
+            &ct_with_tag[split..],
+        );
+        let via_public = decrypt(&KEY, &nonce, aad, &ct_with_tag, 8);
+        assert_eq!(via_cipher, via_public);
+        assert_eq!(via_cipher.as_deref(), Some(&b"split path"[..]));
     }
 }

@@ -324,5 +324,25 @@ test = false
 doc = false
 bench = false
 
+# v1.12 — DIFFERENTIAL: Sm4CcmDecryptor vs mode_ccm::decrypt across
+# arbitrary chunking; the oracle takes ct||tag plus tag_len. The wrapper's
+# thinness (docs/v1.12-scope.md Q12.4/Q12.8) is what this target guards.
+[[bin]]
+name = "fuzz_sm4_ccm_streaming_decrypt"
+path = "fuzz_targets/fuzz_sm4_ccm_streaming_decrypt.rs"
+test = false
+doc = false
+bench = false
+
+# v1.12 — DIFFERENTIAL: Sm4CcmEncryptor vs mode_ccm::encrypt across
+# arbitrary chunking, plus the over-feed / under-feed arms, which a
+# fed-length-equals-remaining layout could never reach.
+[[bin]]
+name = "fuzz_sm4_ccm_streaming_encrypt"
+path = "fuzz_targets/fuzz_sm4_ccm_streaming_encrypt.rs"
+test = false
+doc = false
+bench = false
+
 # v0.14 — its own workspace so it is excluded from the parent.
 [workspace]

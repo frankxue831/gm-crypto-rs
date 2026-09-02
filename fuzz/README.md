@@ -182,7 +182,7 @@ decoders, whose validation prologues are duplicated. v1.10 also added
 `fuzz_sm4_aead_traits`, which asserts the new `aead` 0.6 trait path is
 byte-identical to the inherent `mode_gcm` / `mode_ccm` path — that thinness is
 the argument behind v1.11 adding no dudect target, so a divergence there would
-invalidate an assurance claim rather than merely be a wrapper bug. **33 targets
+invalidate an assurance claim rather than merely be a wrapper bug. **35 targets
 total** — the census must
 equal both `fuzz/Cargo.toml`'s `[[bin]]` entries and the `FUZZ_TARGETS`
 list in `.github/workflows/fuzz-nightly.yml`; a target absent from that
@@ -211,6 +211,13 @@ streaming targets' layouts are:
   where the source reads `nonce_len` as `u8 % 17` (0..=16) and `aad_len` as
   `u8 % 33` (0..=32), so both valid and malformed nonce/aad lengths are explored;
   the GCM `tag` is a fixed 16 bytes (the `mode_gcm::decrypt` path).
+- `fuzz_sm4_ccm_streaming_decrypt` (v1.12):
+  `[key:16][tl:1][tag:tl'][nonce_len:1][nonce][aad_len:1][aad][chunk_len:1][ct:rest]`
+  with `tl' = tl % 18` (valid AND invalid CCM tag lengths), `nonce_len % 17`,
+  `aad_len % 33`; the oracle is `mode_ccm::decrypt(ct‖tag, tag.len())`.
+- `fuzz_sm4_ccm_streaming_encrypt` (v1.12):
+  `[key:16][tl:1][nonce_len:1][nonce][aad_len:1][aad][chunk:1][mode:1][pt:rest]`
+  where `mode % 3` picks the declared length: exact / under-feed / over-feed.
 
 where `chunk_len` (a `u8`, fed as `max(1, chunk_len)` so `0` ⇒ 1-byte chunks) sets the streaming chunk size the
 ciphertext is fed in. Their seeds are valid encrypts generated under a fixed key.

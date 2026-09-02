@@ -63,7 +63,7 @@
 //! |---|---|
 //! | [`sm2`] | SM2 sign / verify, encrypt / decrypt (GB/T 32918). With `sm2-key-exchange`: `sm2::key_exchange`, GM/T 0003.3 key agreement |
 //! | [`sm3`] | SM3 hash (GB/T 32905), single-shot and streaming |
-//! | [`sm4`] | SM4 block cipher (GB/T 32907) with ECB / CBC / CTR. With `sm4-aead`: GCM, CCM, incremental GCM. With `sm4-xts`: XTS |
+//! | [`sm4`] | SM4 block cipher (GB/T 32907) with ECB / CBC / CTR. With `sm4-aead`: GCM, CCM, incremental GCM, length-committed streaming CCM. With `sm4-xts`: XTS |
 //! | [`hmac`] | HMAC-SM3 (RFC 2104), single-shot and streaming |
 //! | [`kdf`] | PBKDF2-HMAC-SM3 (RFC 8018 §5.2) |
 //! | [`asn1`] | Strict-canonical DER for the two SM2 wire structures: RFC 3279 signatures, GM/T 0009 ciphertexts |
@@ -80,7 +80,8 @@
 //! **Capability features** — pure-core, no new dependency unless stated:
 //!
 //! - `sm4-aead` — SM4-GCM and SM4-CCM (`sm4::mode_gcm`, `sm4::mode_ccm`),
-//!   plus incremental-input GCM (`sm4::gcm_streaming`). Pulls the
+//!   plus incremental-input GCM (`sm4::gcm_streaming`) and length-committed
+//!   streaming CCM (`sm4::ccm_streaming`). Pulls the
 //!   workspace-internal `gmcrypto-simd` for GHASH (CLMUL / PMULL, with a
 //!   constant-time software fallback).
 //! - `sm4-xts` — SM4-XTS sector mode (`sm4::mode_xts`), per GB/T 17964-2021:
