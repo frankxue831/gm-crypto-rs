@@ -21,7 +21,7 @@ default-members = ["crates/gmcrypto-core"]
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "1.11.2"
+version = "1.12.0"
 edition = "2024"
 # Dual-licensed, the Rust ecosystem convention: a consumer may take either.
 # Apache-2.0 carries the express patent grant; MIT is the permissive path for
