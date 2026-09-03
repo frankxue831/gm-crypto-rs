@@ -5,7 +5,7 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.12.0] - 2026-09-02
+## [1.12.0] - 2026-09-04
 
 **v1.12 — length-committed streaming SM4-CCM (additive; behind the existing
 `sm4-aead` feature).** Scope + maintainer-signed forks:
