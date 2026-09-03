@@ -26,8 +26,10 @@ fuzz/artifacts/
 flamegraph.svg
 perf.data*
 
-# Local agent-session metadata (worktrees, etc.)
-.claude/
+# Local agent-session metadata (worktrees, per-user settings, scratch).
+# `.claude/rules/` is committed: path-scoped agent constraints shared by the repo.
+.claude/*
+!.claude/rules/
 
 # Isolated implementation worktrees created by local tooling.
 .worktrees/

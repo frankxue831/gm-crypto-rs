@@ -286,6 +286,18 @@ ALLOWLIST = [
     },
     {
         "rules": ["agent-tooling"],
+        "paths": [r"^CLAUDE\.md$", r"^AGENTS\.md$", r"^\.claude/rules/[^/]+\.md$"],
+        "regexes": [r"^\.claude/$"],
+        "reason": (
+            "Committed, path-scoped agent rules (`.claude/rules/*.md`) are repository "
+            "policy, not local scaffolding: the root CLAUDE.md must name the directory "
+            "to point at them, and the rules cross-reference each other. Only the "
+            "bare directory literal is allowed; a scratch or session path under it "
+            "still reports. DECIDED (D10, docs/disclosure-boundary.md §7.2)."
+        ),
+    },
+    {
+        "rules": ["agent-tooling"],
         "paths": [r"^docs/v0\.2\.0-release-review\.md$"],
         "regexes": [r"^\.claude/$"],
         "reason": "A packaging checklist asserting the published .crate does NOT contain that directory.",

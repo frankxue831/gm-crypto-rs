@@ -19,8 +19,8 @@ only a condensed current-release block — see its `Don't` section.
 
 ## Cycles
 
-**v1.12 — length-committed streaming SM4-CCM; PREPPED, publish is the
-maintainer's call.** `sm4::ccm_streaming::{Sm4CcmEncryptor, Sm4CcmDecryptor}`
+**v1.12 — length-committed streaming SM4-CCM; PUBLISHED 2026-09-04 from
+`b0c6679` (1.12.0, all three crates; publish delegated for this release).** `sm4::ccm_streaming::{Sm4CcmEncryptor, Sm4CcmDecryptor}`
 behind the existing `sm4-aead` flag — no new feature, no new dependency, no C
 ABI change; default build byte-identical. Overturns the v0.15 Q15.11
 buffer-only objection with the design it never evaluated: the caller declares
@@ -46,9 +46,16 @@ the fuzz layouts, and the stale "incompatible with streaming" premise in
 commits, subagent-driven with per-task reviews; the whole-branch review's one
 fix wave was docs-only). FFI projection is the v1.13 candidate; the
 `Sm4GcmEncryptor` / `GhashAcc` zeroize follow-up is in the scope §6. Scope:
-`docs/v1.12-scope.md`.
+`docs/v1.12-scope.md`. Gate #1 PASSed against `9ccb262` (#188,
+`docs/v1.12.0-gate1-evidence.md`); #189 then separated the gated SHA from
+`RELEASE_SHA` in the records, and #190 dated the CHANGELOG heading to the
+publish day. Post-release housekeeping: `CLAUDE.md` was cut from 360 lines to
+under 200 per the official "under 200 lines" guidance, with area constraints
+moved into committed path-scoped rule files (dudect, ffi, simd, sm4, sm2-sm3,
+protocols, fuzz, features-and-ci, docs-and-release) and the 1.11.2 / crates.io
+skips / closed-backlog narrative left to this file, where it already was.
 
-**v1.11.2 — presentation patch; PREPPED, publish is the maintainer's call.**
+**v1.11.2 — presentation patch; PUBLISHED 2026-08-23 from `0de98e2`.**
 No crypto path, public API, C ABI, wire format, MSRV or dependency change —
 the only `crates/**/*.rs` delta is two inner attributes on
 `gmcrypto-core/src/lib.rs`, and `cargo-public-api` is byte-identical to
