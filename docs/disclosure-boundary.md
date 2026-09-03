@@ -380,3 +380,15 @@ entire document is an internal working note".
 
 **D9 — Third-party contributor handle. Decided: keep.** Already public via the
 merged PR, and crediting contributors is correct.
+
+**D10 — Committed agent rules under `.claude/rules/`. Decided: allow the bare
+directory literal in `CLAUDE.md` and in the rule files themselves; nothing
+else.** The root `CLAUDE.md` was cut to under 200 lines and its area-specific
+constraints moved into path-scoped `.claude/rules/*.md`, which are repository
+policy shared with every contributor, not session scaffolding — the same
+standing as `CLAUDE.md` itself. The `agent-tooling` class exists to catch
+local scratch trees and plan directories; a committed rules directory is the
+opposite of that. The exemption is pinned to the bare `.claude/` literal on
+exactly those paths, so a session path, worktree path or plan file under
+`.claude/` still reports. `.gitignore` narrows from `.claude/` to `.claude/*`
++ `!.claude/rules/` for the same reason.
