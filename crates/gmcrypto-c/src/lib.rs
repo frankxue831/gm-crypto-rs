@@ -2,7 +2,9 @@
 //!
 //! Exposes SM2 (sign/verify, encrypt/decrypt, and — since v1.2 — the
 //! GM/T 0003.3 key exchange with key confirmation) / SM3 / SM4
-//! (ECB/CBC/CTR/GCM/CCM/XTS) / HMAC-SM3 / PBKDF2-HMAC-SM3 plus SM2 key
+//! (ECB/CBC/CTR/GCM/CCM/XTS, with streaming CBC/GCM handles, a
+//! length-committed streaming CCM encryptor and an incremental-input
+//! buffered CCM decryptor) / HMAC-SM3 / PBKDF2-HMAC-SM3 plus SM2 key
 //! import/export and — since v1.4 — X.509-with-SM2 leaf certificate
 //! parse + signature verify (NO trust decisions) to C / C++ / Python /
 //! Go / Zig / Ruby callers via opaque handles and a cbindgen-generated
@@ -1653,9 +1655,11 @@ pub unsafe extern "C" fn gmcrypto_sm4_xts_decrypt_sectors(
 // GMCRYPTO_ERR on every error. Asymmetry: the encryptor `_update`
 // emits ciphertext (out triple); the decryptor `_update` emits NOTHING
 // (commit-on-verify) and plaintext is released only by
-// `_finalize_verify` after a constant-time tag check. Streaming CCM is
-// out of scope (CBC-MAC needs total length up-front). See
-// docs/v0.10-scope.md.
+// `_finalize_verify` after a constant-time tag check. See
+// docs/v0.10-scope.md. The length-committed streaming SM4-CCM encryptor
+// and incremental-input buffered decryptor handles follow in the next
+// section (v1.13; Rust design docs/v1.12-scope.md, projection
+// docs/v1.13-scope.md).
 // ============================================================
 
 /// Construct a streaming SM4-GCM encryptor. `key` is exactly 16 bytes;

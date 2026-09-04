@@ -527,7 +527,7 @@ jobs:
       # cryptographic-correctness gate (Rust-equivalence on every
       # entry point). As of v0.23 W3 (A-1) the AEAD (SM4-GCM/CCM) +
       # SM4-XTS FFI is always compiled into the C ABI, so the default
-      # build runs all 97 c_smoke tests (no per-feature invocation).
+      # build runs all 109 c_smoke tests (no per-feature invocation).
       - name: cargo test -p gmcrypto-c
         run: cargo test -p gmcrypto-c
       # Compile every shipped translation unit against the committed header.
