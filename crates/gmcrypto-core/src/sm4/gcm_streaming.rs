@@ -43,6 +43,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use subtle::ConstantTimeEq;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
 use super::mode_gcm::{GcmTagLen, TAG_SIZE, derive_j0, gctr, inc32};
@@ -60,6 +61,7 @@ const GCM_MAX_PT_BYTES: u64 = (1u64 << 36) - 32;
 /// `ghash_a_c_lens` but driven incrementally.
 ///
 /// [`pad_to_block`]: GhashAcc::pad_to_block
+#[derive(Zeroize, ZeroizeOnDrop)]
 struct GhashAcc {
     h: [u8; BLOCK_SIZE],
     y: [u8; BLOCK_SIZE],
@@ -111,14 +113,16 @@ impl GhashAcc {
 
     /// Test-only: finish without appending the length block.
     #[cfg(test)]
-    fn finish_no_lengths(mut self) -> [u8; BLOCK_SIZE] {
+    fn finish_no_lengths(&mut self) -> [u8; BLOCK_SIZE] {
         self.pad_to_block();
         self.y
     }
 
     /// Close the final (CT) domain, append `[aad_bits]_64 ‖ [ct_bits]_64`,
-    /// and return the final `Y`.
-    fn finish_with_lengths(mut self, aad_len: u64, ct_len: u64) -> [u8; BLOCK_SIZE] {
+    /// and return the final `Y`. Borrows rather than consumes so the
+    /// accumulator stays owned by its `ZeroizeOnDrop` parent and is wiped
+    /// with it (v1.13; a by-value `self` here is E0509 under `Drop`).
+    fn finish_with_lengths(&mut self, aad_len: u64, ct_len: u64) -> [u8; BLOCK_SIZE] {
         self.pad_to_block();
         let mut lb = [0u8; BLOCK_SIZE];
         lb[..8].copy_from_slice(&aad_len.saturating_mul(8).to_be_bytes());
@@ -177,6 +181,11 @@ fn init_gcm(
 /// encryptor/decryptor asymmetry.
 ///
 /// [`finalize_with_tag_len`]: Self::finalize_with_tag_len
+///
+/// Holds the SM4 key schedule, the GHASH subkey `H` and running state,
+/// and leftover keystream; all of it is zeroized on drop (best-effort —
+/// stack copies and register spills are outside what `zeroize` reaches).
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Sm4GcmEncryptor {
     cipher: Sm4Cipher,
     j0: [u8; BLOCK_SIZE],
@@ -271,7 +280,7 @@ impl Sm4GcmEncryptor {
 
     /// Finish and emit the full 128-bit tag.
     #[must_use]
-    pub fn finalize(self) -> [u8; TAG_SIZE] {
+    pub fn finalize(mut self) -> [u8; TAG_SIZE] {
         let s = self.ghash.finish_with_lengths(self.aad_len, self.ct_len);
         let mut tag = [0u8; TAG_SIZE];
         gctr_block(&self.cipher, &self.j0, &s, &mut tag);
@@ -295,6 +304,11 @@ impl Sm4GcmEncryptor {
 /// the tag and releases the plaintext only on success (commit-on-
 /// verify). Memory is `O(message)`. See the module docstring for the
 /// asymmetry rationale.
+///
+/// Holds the SM4 key schedule, the GHASH subkey `H` and running state, and
+/// the buffered ciphertext; all of it is zeroized on drop (best-effort —
+/// stack copies and register spills are outside what `zeroize` reaches).
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Sm4GcmDecryptor {
     cipher: Sm4Cipher,
     j0: [u8; BLOCK_SIZE],
@@ -351,7 +365,7 @@ impl Sm4GcmDecryptor {
     /// produced on the failure path (commit-on-verify), so no
     /// failure-path buffer needs zeroizing.
     #[must_use]
-    pub fn finalize_verify(self, tag: &[u8]) -> Option<Vec<u8>> {
+    pub fn finalize_verify(mut self, tag: &[u8]) -> Option<Vec<u8>> {
         if self.overflowed {
             return None;
         }
@@ -528,6 +542,54 @@ mod tests {
             dec.update(c);
         }
         assert_eq!(dec.finalize_verify(&tag).as_deref(), Some(pt.as_slice()));
+    }
+
+    #[test]
+    fn ghash_acc_zeroize_clears_state() {
+        use zeroize::Zeroize;
+        let h = [0x66u8; BLOCK_SIZE];
+        let mut g = GhashAcc::new(&h);
+        g.update(&[0xAAu8; 20]); // one fold, four bytes pending
+        assert_eq!(g.block_len, 4);
+        g.zeroize();
+        assert_eq!(g.h, [0u8; BLOCK_SIZE]);
+        assert_eq!(g.y, [0u8; BLOCK_SIZE]);
+        assert_eq!(g.block, [0u8; BLOCK_SIZE]);
+        assert_eq!(g.block_len, 0);
+    }
+
+    #[test]
+    fn encryptor_zeroize_clears_keystream_and_subkey() {
+        use zeroize::Zeroize;
+        let mut enc = Sm4GcmEncryptor::new(&KEY, &NONCE_12, b"aad");
+        let _ct = enc.update(&[0x11u8; 5]).expect("under ceiling");
+        // A partial block leaves live keystream behind.
+        assert_ne!(enc.ks, [0u8; BLOCK_SIZE]);
+        enc.zeroize();
+        assert_eq!(enc.ks, [0u8; BLOCK_SIZE]);
+        assert_eq!(enc.ks_pos, 0);
+        assert_eq!(enc.counter, [0u8; BLOCK_SIZE]);
+        assert_eq!(enc.j0, [0u8; BLOCK_SIZE]);
+        assert_eq!(enc.ghash.h, [0u8; BLOCK_SIZE]);
+        assert_eq!(enc.ghash.y, [0u8; BLOCK_SIZE]);
+        assert_eq!(enc.ct_len, 0);
+        assert_eq!(enc.aad_len, 0);
+        assert!(!enc.poisoned);
+    }
+
+    #[test]
+    fn decryptor_zeroize_clears_buffer_and_subkey() {
+        use zeroize::Zeroize;
+        let mut dec = Sm4GcmDecryptor::new(&KEY, &NONCE_12, b"aad");
+        dec.update(&[0x22u8; 40]);
+        assert_eq!(dec.ct_buf.len(), 40);
+        dec.zeroize();
+        assert!(dec.ct_buf.is_empty());
+        assert_eq!(dec.ghash.h, [0u8; BLOCK_SIZE]);
+        assert_eq!(dec.ghash.y, [0u8; BLOCK_SIZE]);
+        assert_eq!(dec.j0, [0u8; BLOCK_SIZE]);
+        assert_eq!(dec.aad_len, 0);
+        assert!(!dec.overflowed);
     }
 
     #[test]

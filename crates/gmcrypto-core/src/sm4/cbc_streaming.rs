@@ -41,6 +41,7 @@ use crate::sm4::cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
 // the note on `strip_pkcs7_block` for why one copy matters.
 use crate::sm4::mode_cbc::strip_pkcs7_block;
 use alloc::vec::Vec;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Streaming SM4-CBC encryptor with PKCS#7 padding.
 ///
@@ -53,6 +54,11 @@ use alloc::vec::Vec;
 /// `update` may be called any number of times with arbitrary chunk
 /// sizes. `finalize` must be called exactly once; after `finalize`
 /// the instance is consumed.
+///
+/// Holds the SM4 key schedule, the chaining block and any partial
+/// plaintext block; all of it is zeroized on drop (best-effort — stack
+/// copies and register spills are outside what `zeroize` reaches).
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Sm4CbcEncryptor {
     cipher: Sm4Cipher,
     /// Most recent ciphertext block (or IV before the first block
@@ -145,7 +151,9 @@ impl Sm4CbcEncryptor {
         }
         let block = self.buffer;
         self.encrypt_one(&block);
-        self.output
+        // `self` is `ZeroizeOnDrop`; take the output so the drop wipes an
+        // empty Vec and the caller owns the ciphertext (v1.13).
+        core::mem::take(&mut self.output)
     }
 
     fn encrypt_one(&mut self, plaintext_block: &[u8; BLOCK_SIZE]) {
@@ -173,6 +181,12 @@ impl Sm4CbcEncryptor {
 ///
 /// Same single-`None` failure-mode posture as the v0.2 single-shot
 /// [`super::mode_cbc::decrypt`].
+///
+/// Holds the SM4 key schedule, the chaining block, the held-back plaintext
+/// block and the not-yet-drained plaintext; all of it is zeroized on drop
+/// (best-effort — stack copies and register spills are outside what
+/// `zeroize` reaches).
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Sm4CbcDecryptor {
     cipher: Sm4Cipher,
     /// Most recent ciphertext block (or IV before the first block).
@@ -292,7 +306,9 @@ impl Sm4CbcDecryptor {
         let last = self.held_back?;
         let stripped = strip_pkcs7_block(&last)?;
         self.output.extend_from_slice(&last[..stripped]);
-        Some(self.output)
+        // `held_back` stays on `self` so the drop wipes that plaintext block;
+        // the caller takes ownership of the assembled output (v1.13).
+        Some(core::mem::take(&mut self.output))
     }
 
     fn decrypt_one(&mut self, ciphertext_block: &[u8; BLOCK_SIZE]) {
@@ -631,5 +647,40 @@ mod tests {
         let blob = enc.finalize();
         let recovered = mode_cbc::decrypt(&key, &iv, &blob).expect("oneshot decrypt");
         assert_eq!(recovered, pt);
+    }
+
+    #[test]
+    fn encryptor_zeroize_clears_partial_block_and_output() {
+        use zeroize::Zeroize;
+        let key = [0x42u8; KEY_SIZE];
+        let iv = [0x33u8; BLOCK_SIZE];
+        let mut enc = Sm4CbcEncryptor::new(&key, &iv);
+        enc.update(&[0x55u8; 20]); // one block emitted, four bytes buffered
+        assert_eq!(enc.buffer_len, 4);
+        assert_eq!(enc.output.len(), BLOCK_SIZE);
+        enc.zeroize();
+        assert_eq!(enc.buffer, [0u8; BLOCK_SIZE]);
+        assert_eq!(enc.buffer_len, 0);
+        assert!(enc.output.is_empty());
+        assert_eq!(enc.prev, [0u8; BLOCK_SIZE]);
+    }
+
+    #[test]
+    fn decryptor_zeroize_clears_output_and_held_back_block() {
+        use zeroize::Zeroize;
+        let key = [0x42u8; KEY_SIZE];
+        let iv = [0x33u8; BLOCK_SIZE];
+        let pt = [0x77u8; 20];
+        let ct = mode_cbc::encrypt(&key, &iv, &pt); // 32 bytes
+        let mut dec = Sm4CbcDecryptor::new(&key, &iv);
+        dec.update(&ct);
+        assert!(dec.held_back.is_some());
+        assert_eq!(dec.output.len(), BLOCK_SIZE);
+        dec.zeroize();
+        assert!(dec.held_back.is_none());
+        assert!(dec.output.is_empty());
+        assert_eq!(dec.buffer, [0u8; BLOCK_SIZE]);
+        assert_eq!(dec.buffer_len, 0);
+        assert_eq!(dec.prev, [0u8; BLOCK_SIZE]);
     }
 }

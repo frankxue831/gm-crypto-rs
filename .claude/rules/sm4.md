@@ -27,9 +27,11 @@ paths:
 
 - `Sm4GcmDecryptor` is commit-on-verify and `O(message)` memory — not a
   stream. GCM's counter is `inc32`; nothing else uses it.
-- The GCM pair does not zeroize yet (`Sm4GcmEncryptor` leftover keystream,
-  `GhashAcc` `H`/`y`); nor do `Sm4CtrCipher` and the CBC streaming pair. That
-  is the v1.13 zeroize item — until it lands, don't describe them as wiped.
+- **Every type under `*_streaming` / `ccm_streaming` derives `Zeroize` +
+  `ZeroizeOnDrop`** (v1.13, incl. the private `GhashAcc`). A new streaming
+  type derives both; a consuming method never moves a field out of `self`
+  (E0509) — `GhashAcc::finish_with_lengths(&mut self)` and the CBC
+  `finalize`'s `mem::take` are the shapes. The claim is always best-effort.
 
 ## CCM (v1.12 — `ccm_streaming`, behind the existing `sm4-aead` flag)
 
@@ -60,5 +62,9 @@ paths:
 
 - Don't ship `encode_c1c2c3_legacy`-style legacy layouts as encoders; legacy
   forms are decrypt-only.
-- `zeroize` here has no `alloc` feature: wipe a `Vec<[u8; 16]>` with
-  `.iter_mut().zeroize()`, not `.zeroize()`.
+- `zeroize` is declared with `derive` + `alloc` (v1.13), so `Vec<Z>` fields
+  derive cleanly and `.zeroize()` on a `Vec` wipes the elements, clears, then
+  wipes the spare capacity — but never blocks freed by earlier reallocations.
+  A `#[derive(ZeroizeOnDrop)]` type cannot move a field out of `self` (E0509):
+  return `Copy` values, or
+  `core::mem::take(&mut self.vec)` — never `ManuallyDrop` / `Option`-wrapping.

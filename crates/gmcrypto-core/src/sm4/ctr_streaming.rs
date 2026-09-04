@@ -17,6 +17,8 @@
 
 use alloc::vec::Vec;
 
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
 use super::cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
 
 /// Streaming SM4-CTR cipher.
@@ -38,8 +40,13 @@ use super::cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
 /// keystream; the next byte requires a fresh `encrypt_block` of
 /// `counter`. Initial state is `leftover_pos = 16` (no leftover).
 ///
+/// Holds the SM4 key schedule and the unconsumed keystream block; both are
+/// zeroized on drop (best-effort — stack copies and register spills are
+/// outside what `zeroize` reaches).
+///
 /// [`update`]: Sm4CtrCipher::update
 /// [`finalize`]: Sm4CtrCipher::finalize
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Sm4CtrCipher {
     cipher: Sm4Cipher,
     counter: [u8; BLOCK_SIZE],
@@ -239,5 +246,20 @@ mod tests {
         let mut out = [];
         cipher.update(&[], &mut out);
         cipher.finalize();
+    }
+
+    #[test]
+    fn zeroize_clears_leftover_keystream_and_counter() {
+        use zeroize::Zeroize;
+        let mut cipher = Sm4CtrCipher::new(&KEY, &COUNTER);
+        let mut out = [0u8; 5];
+        cipher.update(&[0u8; 5], &mut out);
+        // A partial call leaves unconsumed keystream in `leftover`.
+        assert_eq!(cipher.leftover_pos, 5);
+        assert_ne!(cipher.leftover, [0u8; BLOCK_SIZE]);
+        cipher.zeroize();
+        assert_eq!(cipher.leftover, [0u8; BLOCK_SIZE]);
+        assert_eq!(cipher.leftover_pos, 0);
+        assert_eq!(cipher.counter, [0u8; BLOCK_SIZE]);
     }
 }
