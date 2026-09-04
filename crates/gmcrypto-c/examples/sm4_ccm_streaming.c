@@ -106,6 +106,10 @@ int main(void) {
     }
 
     /* ---- the length commitment: an under-fed encryptor emits no tag ---- */
+    /* A fresh nonce for the second encryptor: never reuse (key, nonce), even
+     * for a demonstration — the same pair with a different length is still a
+     * nonce reuse. */
+    nonce[0] ^= 0x80;
     gmcrypto_sm4_ccm_encryptor_t *short_enc = gmcrypto_sm4_ccm_encryptor_new(
         key, nonce, sizeof nonce, aad, sizeof(aad) - 1, pt_len, tag_len);
     if (!short_enc) {

@@ -2037,9 +2037,9 @@ pub unsafe extern "C" fn gmcrypto_sm4_ccm_encryptor_finalize(
         if enc.is_null() {
             return GMCRYPTO_ERR;
         }
-        // Default the reported length to 0 so every failure arm (poison,
-        // under-feed, bad out pointer) satisfies "finalize failure writes 0"
-        // (spec Q13.5). write_output overwrites it on success / short buffer.
+        // Default the reported length to 0 so the two `None` arms (poison,
+        // under-feed) satisfy "finalize failure writes 0" (spec Q13.5).
+        // write_output overwrites it on success / short buffer.
         if !out_actual_len.is_null() {
             // SAFETY: caller-asserted valid *mut usize.
             unsafe { ptr::write(out_actual_len, 0) };

@@ -2124,31 +2124,60 @@ fn sm4_ccm_decryptor_short_out_reports_required_len() {
 
 #[test]
 fn sm4_ccm_decryptor_latch_surfaces_at_finalize() {
-    // 13-byte nonce → q = 2 → payload ceiling 65 535 bytes. Feeding one more
-    // byte latches inside the Rust type; every _update still returns OK and
-    // the failure surfaces at _finalize_verify (spec Q13.4).
+    // 13-byte nonce → q = 2 → payload ceiling 65 535 bytes. First prove the
+    // boundary is fine: exactly 65 535 bytes with the real tag verifies. Then
+    // one byte more, with that same (valid) tag, fails — so the ERR is the
+    // latch surfacing at _finalize_verify, not a tag mismatch (spec Q13.4).
     let nonce_13 = [0x05u8; 13];
+    let pt = vec![0x99u8; 65_535];
+    let core_out = gmcrypto_core::sm4::mode_ccm::encrypt(&CCM_KEY, &nonce_13, CCM_AAD, &pt, 16)
+        .expect("65 535 bytes fits q = 2");
+    let (ct, tag) = core_out.split_at(pt.len());
+
+    // (a) at the ceiling: OK.
     let dec = unsafe { ccm_dec(&nonce_13) };
-    let chunk = vec![0x99u8; 16_384];
-    for _ in 0..4 {
+    for chunk in ct.chunks(16_384) {
         let r = unsafe { gmcrypto_sm4_ccm_decryptor_update(dec, chunk.as_ptr(), chunk.len()) };
         assert_eq!(r, GMCRYPTO_OK);
     }
-    let tag = [0u8; 16];
-    let mut out = vec![0u8; 65_536];
-    let mut actual = 7usize;
+    let mut out = vec![0u8; ct.len()];
+    let mut actual = 0usize;
     let r = unsafe {
         gmcrypto_sm4_ccm_decryptor_finalize_verify(
             dec,
             tag.as_ptr(),
-            16,
+            tag.len(),
             out.as_mut_ptr(),
             out.len(),
             &mut actual,
         )
     };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert_eq!(&out[..actual], &pt[..]);
+
+    // (b) one byte past the ceiling: every _update still OK, finalize ERR + 0.
+    let dec = unsafe { ccm_dec(&nonce_13) };
+    for chunk in ct.chunks(16_384) {
+        let r = unsafe { gmcrypto_sm4_ccm_decryptor_update(dec, chunk.as_ptr(), chunk.len()) };
+        assert_eq!(r, GMCRYPTO_OK);
+    }
+    let extra = [0x99u8; 1];
+    let r = unsafe { gmcrypto_sm4_ccm_decryptor_update(dec, extra.as_ptr(), 1) };
+    assert_eq!(r, GMCRYPTO_OK);
+    let mut out2 = vec![0u8; ct.len() + 1];
+    let mut actual2 = 7usize;
+    let r = unsafe {
+        gmcrypto_sm4_ccm_decryptor_finalize_verify(
+            dec,
+            tag.as_ptr(),
+            tag.len(),
+            out2.as_mut_ptr(),
+            out2.len(),
+            &mut actual2,
+        )
+    };
     assert_eq!(r, GMCRYPTO_ERR);
-    assert_eq!(actual, 0);
+    assert_eq!(actual2, 0);
 }
 
 #[test]
