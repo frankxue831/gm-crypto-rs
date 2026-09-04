@@ -19,6 +19,37 @@ only a condensed current-release block — see its `Don't` section.
 
 ## Cycles
 
+**v1.13 — streaming-CCM C ABI + zeroize across the SM4 streaming family;
+PREPPED 2026-09-04 (1.13.0; publish owed).** Two additive items in one
+minor, spec'd together (`docs/v1.13-scope.md`, PR #192 — the maintainer
+approved every recommended pin in one line). **Zeroize (#193, core only):**
+`Sm4GcmEncryptor`, `Sm4GcmDecryptor` (and the private `GhashAcc` holding the
+subkey `H`), `Sm4CtrCipher`, the CBC pair and `Sm4CcmDecryptor` now derive
+`Zeroize` + `ZeroizeOnDrop`, joining `Sm4Cipher` / `Sm4CcmEncryptor`, so the
+invariant is one sentence: every streaming type wipes on drop (best-effort,
+and the caveat now names heap copies left by `Vec` reallocation). It needed
+zeroize's `alloc` feature (no `impl Zeroize for Vec` without it) and four
+E0509 refactors — a generated `Drop` forbids moving a field out of `self`,
+so `GhashAcc::finish_with_lengths` borrows and the CBC `finalize`s return
+`mem::take` — with the `ct_eq` gate untouched and outputs byte-identical.
+api-baseline +48 (the plan said +12: every impl is listed at two re-export
+paths, four lines per type per path). **C ABI (#194, c only):**
+`gmcrypto_sm4_ccm_{encryptor,decryptor}_*`, eight symbols on the v0.10 GCM
+handle lifecycle with the two pinned departures — one encryptor finalize
+(the tag length is committed at `_new`) and a `0` pre-write to
+`*out_actual_len` on every `None` arm; `c_smoke` 97 → **109**; header +154
+pure addition; `examples/sm4_ccm_streaming.c`; the stale "streaming CCM is
+out of scope" premise in the FFI crate corrected; no dudect or fuzz target
+(the v1.9 thin-shim rationale, `SECURITY.md`). Both PRs were subagent-driven
+from plans kept outside the repo, each task reviewed; the whole-branch
+reviews found only doc/example-level issues (the FFI example's under-feed
+demo had reused a `(key, nonce)` pair — fixed before the PR). Lessons
+recorded in the rule files: a plan's fuzz step runs from the worktree root,
+and the api-baseline double-lists re-exported types. Release-prep bumped the
+workspace to `1.13.0` with `=1.13.0` sibling pins. Gate #1:
+`docs/v1.13.0-gate1-evidence.md`. The `v1.12.0` SSH-signed tag was still
+not on `origin` when this paragraph was written.
+
 **v1.12 — length-committed streaming SM4-CCM; PUBLISHED 2026-09-04 from
 `b0c6679` (1.12.0, all three crates; publish delegated for this release).** `sm4::ccm_streaming::{Sm4CcmEncryptor, Sm4CcmDecryptor}`
 behind the existing `sm4-aead` flag — no new feature, no new dependency, no C

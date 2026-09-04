@@ -54,7 +54,7 @@ aead = { version = "0.6.1", default-features = false, features = ["alloc"], opti
 # can keep `unsafe_code = "forbid"`. Mirrors the established
 # `gmcrypto-c` precedent for FFI primitives. Only pulled in when
 # `sm4-bitsliced-simd` is enabled — default builds never touch it.
-gmcrypto-simd = { path = "../gmcrypto-simd", version = "=1.12.0", default-features = false, optional = true }
+gmcrypto-simd = { path = "../gmcrypto-simd", version = "=1.13.0", default-features = false, optional = true }
 
 [dev-dependencies]
 hex-literal.workspace = true

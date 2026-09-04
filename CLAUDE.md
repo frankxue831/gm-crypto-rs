@@ -23,22 +23,23 @@ history, file it.
 | | |
 |---|---|
 | Live on crates.io | **`1.12.0`** — all three crates, 2026-09-04 from `b0c6679` (publish delegated for this release). The SSH-signed tag `v1.12.0` was **not yet on `origin`** when this row was written; verify with `git ls-remote --tags origin v1.12.0` before citing it. Previous: `1.11.2` 2026-08-23 from `0de98e2` |
-| Workspace version | `1.12.0` = live. The next bump is the v1.13 release-prep PR. A new minor does not always mean crates.io (v0.14 / v1.10 were assurance cycles); don't bump or publish for a no-crate-change cycle |
-| Gate #1 | `docs/ECOSYSTEM.md` §8 must PASS before every publish; latest record `docs/v1.12.0-gate1-evidence.md` (PASS against `9ccb262`). The gated SHA is never the release SHA: the gate attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty, and a PR touching those re-owes it. Running the gate script is ordinary agent work; publishing is not |
+| Workspace version | **`1.13.0` — prepped, not yet on crates.io** (sibling pins `=1.13.0`). Publish is owed. A new minor does not always mean crates.io (v0.14 / v1.10 were assurance cycles); don't bump or publish for a no-crate-change cycle |
+| Gate #1 | `docs/ECOSYSTEM.md` §8 must PASS before every publish; latest record `docs/v1.13.0-gate1-evidence.md`. The gated SHA is never the release SHA: the gate attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty, and a PR touching those re-owes it. Running the gate script is ordinary agent work; publishing is not |
 
 `cargo publish` and the SSH-signed tag are the **maintainer's authenticated
 call** — the agent path is branch + PR. The 1.11.0 and 1.12.0 publishes were
 explicit per-release delegations, not a standing grant.
 
-### v1.13 — current cycle (spec pinned 2026-09-04; implementation next)
+### v1.13 — prepped 2026-09-04; publish owed
 
-Scope: `docs/v1.13-scope.md`, every fork pinned as recommended. Two items
-in one minor (`1.13.0`): the streaming-CCM C ABI
-(`gmcrypto_sm4_ccm_encryptor_t` / `_decryptor_t`, eight symbols, **one**
-encryptor finalize — `.claude/rules/ffi.md`) and `Zeroize` + `ZeroizeOnDrop`
-on all **seven** SM4 streaming types (zeroize gains `alloc`; four E0509
-refactors, Q13.14 — `.claude/rules/sm4.md`). Order: zeroize PR (core)
-**before** the FFI PR (c), then release-prep, Gate #1, publish (maintainer).
+Both items are on `main`: zeroize across all seven SM4 streaming types
+(#193; `.claude/rules/sm4.md` carries the invariant) and the streaming-CCM
+C ABI, eight symbols, `c_smoke` 109 (#194; `.claude/rules/ffi.md`). Spec:
+`docs/v1.13-scope.md`. Owed, in order: Gate #1 against the prepped tip,
+then publish simd → core → c and the SSH-signed tag on a named SHA
+(maintainer; not delegated). The `v1.12.0` tag was also still not on
+`origin` — verify both with `git ls-remote --tags origin`. Next cycle
+(v1.14) is not chosen; candidates are the Open backlog below.
 
 ## Open backlog
 
