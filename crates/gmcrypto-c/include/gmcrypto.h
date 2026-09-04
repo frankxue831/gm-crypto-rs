@@ -198,6 +198,33 @@ typedef struct gmcrypto_sm4_cbc_decryptor_t gmcrypto_sm4_cbc_decryptor_t;
 typedef struct gmcrypto_sm4_cbc_encryptor_t gmcrypto_sm4_cbc_encryptor_t;
 
 /*
+ Opaque handle for an incremental-input, output-BUFFERED SM4-CCM
+ decryptor (v1.13) — not a streaming type: CCM authenticates the
+ plaintext and needs the total length first, so
+ gmcrypto_sm4_ccm_decryptor_update buffers ciphertext and emits
+ NOTHING, and gmcrypto_sm4_ccm_decryptor_finalize_verify releases the
+ whole plaintext only after a constant-time tag check
+ (commit-on-verify). Memory is O(message), bounded by the nonce's
+ payload ceiling. Construct with gmcrypto_sm4_ccm_decryptor_new. The key
+ schedule and buffers are wiped when the handle is freed (best-effort).
+ */
+typedef struct gmcrypto_sm4_ccm_decryptor_t gmcrypto_sm4_ccm_decryptor_t;
+
+/*
+ Opaque handle for a length-committed streaming SM4-CCM encryptor
+ (v1.13). The plaintext length and the tag length are committed at
+ gmcrypto_sm4_ccm_encryptor_new (CCM encodes both in its first CBC-MAC
+ block, RFC 3610 section 2.2); in exchange every
+ gmcrypto_sm4_ccm_encryptor_update emits the ciphertext for its chunk
+ with O(chunk) memory, and gmcrypto_sm4_ccm_encryptor_finalize emits
+ the committed tag. Pair each handle with exactly one finalize (which
+ frees it) OR one gmcrypto_sm4_ccm_encryptor_free. The key schedule and
+ all stream state are wiped when the handle is freed (best-effort: stack
+ copies and register spills are outside what the wipe reaches).
+ */
+typedef struct gmcrypto_sm4_ccm_encryptor_t gmcrypto_sm4_ccm_encryptor_t;
+
+/*
  Opaque handle for a streaming (incremental-input, output-BUFFERED)
  SM4-GCM decryptor (v0.10 W2). Commit-on-verify:
  [`gmcrypto_sm4_gcm_decryptor_update`] buffers ciphertext and emits
@@ -877,6 +904,133 @@ int gmcrypto_sm4_gcm_decryptor_finalize_verify(gmcrypto_sm4_gcm_decryptor_t *dec
  [`gmcrypto_sm4_gcm_decryptor_finalize_verify`].
  */
  void gmcrypto_sm4_gcm_decryptor_free(gmcrypto_sm4_gcm_decryptor_t *dec) ;
+
+/*
+ Construct a length-committed streaming SM4-CCM encryptor. `key` is
+ exactly 16 bytes; `nonce` is `nonce_len` bytes with `nonce_len` in
+ 7..=13; `aad` is the full associated data, supplied once here;
+ `plaintext_len` is the exact number of plaintext bytes the caller
+ commits to feeding through `_update`; `tag_len` is one of
+ {4, 6, 8, 10, 12, 14, 16}. Returns NULL on any invalid pointer or
+ parameter, including a `plaintext_len` that does not fit the nonce's
+ length field (a 13-byte nonce allows at most 65535 bytes). Nonce
+ uniqueness per key is the caller's responsibility; the same
+ (key, nonce) with a different `plaintext_len` is still a nonce reuse.
+ */
+
+gmcrypto_sm4_ccm_encryptor_t *gmcrypto_sm4_ccm_encryptor_new(const uint8_t *key,
+                                                             const uint8_t *nonce,
+                                                             uintptr_t nonce_len,
+                                                             const uint8_t *aad,
+                                                             uintptr_t aad_len,
+                                                             uintptr_t plaintext_len,
+                                                             uintptr_t tag_len)
+;
+
+/*
+ Encrypt `pt_len` bytes of plaintext, emitting the ciphertext for this
+ chunk (length == `pt_len`; CCM's CTR component does not pad). `out`
+ must hold at least `pt_len` bytes; on a short buffer this returns
+ GMCRYPTO_ERR with the required length in `*out_actual_len`, and the
+ chunk is lost (size the buffer to the chunk). A chunk that would take
+ the cumulative plaintext past the committed `plaintext_len` emits
+ nothing, writes 0 to `*out_actual_len`, returns GMCRYPTO_ERR, and
+ poisons the handle: every later `_update` and the `_finalize` also
+ fail. `pt_len == 0` is a no-op that returns GMCRYPTO_OK with
+ `*out_actual_len == 0`. `_update` never frees the handle.
+ */
+
+int gmcrypto_sm4_ccm_encryptor_update(gmcrypto_sm4_ccm_encryptor_t *enc,
+                                      const uint8_t *pt,
+                                      uintptr_t pt_len,
+                                      uint8_t *out,
+                                      uintptr_t out_capacity,
+                                      uintptr_t *out_actual_len)
+;
+
+/*
+ Finish and emit the committed `tag_len`-byte tag through
+ `(out, out_capacity, out_actual_len)`. **Consumes the encryptor — the
+ handle is freed by this call on every path**; do not call
+ gmcrypto_sm4_ccm_encryptor_free afterwards. Returns GMCRYPTO_ERR with
+ `*out_actual_len == 0` if the handle is poisoned or was UNDER-FED
+ (fewer than `plaintext_len` bytes were fed): a partial stream is never
+ tag-authenticated. A short `out` returns GMCRYPTO_ERR with the required
+ length in `*out_actual_len` and the tag is lost (size `out` to the
+ `tag_len` you committed).
+ */
+
+int gmcrypto_sm4_ccm_encryptor_finalize(gmcrypto_sm4_ccm_encryptor_t *enc,
+                                        uint8_t *out,
+                                        uintptr_t out_capacity,
+                                        uintptr_t *out_actual_len)
+;
+
+/*
+ Free a streaming SM4-CCM encryptor without finalizing (abort path).
+ Passing NULL is a no-op. Do NOT call after `_finalize` — it already
+ consumed the handle.
+ */
+ void gmcrypto_sm4_ccm_encryptor_free(gmcrypto_sm4_ccm_encryptor_t *enc) ;
+
+/*
+ Construct an incremental-input buffered SM4-CCM decryptor. `key` is
+ exactly 16 bytes; `nonce` is `nonce_len` bytes with `nonce_len` in
+ 7..=13; `aad` is the full associated data, supplied once here. There
+ is no length or tag-length parameter: the tag's length is taken from
+ `tag_len` at `_finalize_verify`. Returns NULL on invalid input.
+ */
+
+gmcrypto_sm4_ccm_decryptor_t *gmcrypto_sm4_ccm_decryptor_new(const uint8_t *key,
+                                                             const uint8_t *nonce,
+                                                             uintptr_t nonce_len,
+                                                             const uint8_t *aad,
+                                                             uintptr_t aad_len)
+;
+
+/*
+ Buffer `ct_len` bytes of ciphertext. **Emits no plaintext**
+ (commit-on-verify) — there is no output parameter. Returns
+ GMCRYPTO_ERR only on a NULL handle or an invalid input pointer. Feeding
+ more than the nonce's payload ceiling (65535 bytes for a 13-byte
+ nonce; 2^(8*(15 - nonce_len)) - 1 in general) is latched inside the
+ handle and surfaces as GMCRYPTO_ERR at
+ gmcrypto_sm4_ccm_decryptor_finalize_verify, not here.
+ */
+
+int gmcrypto_sm4_ccm_decryptor_update(gmcrypto_sm4_ccm_decryptor_t *dec,
+                                      const uint8_t *ct,
+                                      uintptr_t ct_len)
+;
+
+/*
+ Verify `tag` (`tag_len` bytes; must be one of {4, 6, 8, 10, 12, 14,
+ 16}) and, on success, write the full plaintext (length == total
+ ciphertext fed) to `(out, out_capacity, out_actual_len)`.
+
+ **Consumes and frees the handle on every path**; do not call
+ gmcrypto_sm4_ccm_decryptor_free afterwards. Returns GMCRYPTO_ERR in
+ two cases: verification failure (tag mismatch, invalid `tag_len`, or
+ the payload-ceiling latch) — `*out_actual_len` is 0 and no plaintext
+ is written; or the tag verified but `out` is too small —
+ `*out_actual_len` is the required length and no plaintext is written.
+ The handle is gone either way, so size `out` to the total ciphertext
+ length up-front (CCM plaintext has the same length).
+ */
+
+int gmcrypto_sm4_ccm_decryptor_finalize_verify(gmcrypto_sm4_ccm_decryptor_t *dec,
+                                               const uint8_t *tag,
+                                               uintptr_t tag_len,
+                                               uint8_t *out,
+                                               uintptr_t out_capacity,
+                                               uintptr_t *out_actual_len)
+;
+
+/*
+ Free a buffered SM4-CCM decryptor without verifying (abort path).
+ NULL is a no-op. Do NOT call after `_finalize_verify`.
+ */
+ void gmcrypto_sm4_ccm_decryptor_free(gmcrypto_sm4_ccm_decryptor_t *dec) ;
 
 /*
  Construct an SM2 private key from a 32-byte big-endian scalar.
