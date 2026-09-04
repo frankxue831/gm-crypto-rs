@@ -480,6 +480,10 @@ defense-in-depth properties. None changes runtime output.
   `Sm4CbcEncryptor`, `Sm4CbcDecryptor`, `Sm4CcmEncryptor`, `Sm4CcmDecryptor` —
   derives `Zeroize` + `ZeroizeOnDrop`, wiping key schedule, keystream, partial
   blocks and buffered payload on drop (`docs/v1.13-scope.md` Q13.12–Q13.14).
+  For the `Vec`-backed buffers (`Sm4GcmDecryptor`, the CBC pair, `Sm4CcmDecryptor`)
+  the wipe covers only the current allocation: copies left in freed blocks by
+  earlier reallocations of a growing buffer are out of reach, as `zeroize`
+  itself documents.
   This is **best-effort stack zeroization**: the wipes
   cover the named owned values, but `subtle::CtOption` `Copy` duplicates produced
   during masked selection are not separately zeroable, and the compiler is free to
