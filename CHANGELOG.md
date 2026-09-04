@@ -5,6 +5,17 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Every SM4 streaming type now zeroizes on drop.** `Sm4GcmEncryptor`,
+  `Sm4GcmDecryptor`, `Sm4CtrCipher`, `Sm4CbcEncryptor`, `Sm4CbcDecryptor` and
+  `Sm4CcmDecryptor` derive `Zeroize` + `ZeroizeOnDrop` (joining `Sm4Cipher`
+  and `Sm4CcmEncryptor`), wiping key schedule, GHASH subkey/state, keystream,
+  partial blocks and buffered payload — best-effort, as before. No signature
+  changes; outputs byte-identical. `zeroize` is now pulled with its `alloc`
+  feature (same crate, no new dependency). Scope: `docs/v1.13-scope.md`
+  Q13.12–Q13.17.
+
 ## [1.12.0] - 2026-09-04
 
 **v1.12 — length-committed streaming SM4-CCM (additive; behind the existing

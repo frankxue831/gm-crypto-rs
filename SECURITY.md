@@ -474,7 +474,13 @@ defense-in-depth properties. None changes runtime output.
   plaintext on the tag-fail arm (CCM must decrypt-before-verify); and `Sm3` now
   wipes its keyed compression state on `Drop` — at the field layer, which makes the
   `HmacSm3` zeroization claim true (the prior doc overclaimed a `Drop` / `finalize`
-  zeroize that did not exist). This is **best-effort stack zeroization**: the wipes
+  zeroize that did not exist).
+  Since **v1.13** every SM4 streaming type — `Sm4GcmEncryptor`, `Sm4GcmDecryptor`
+  (with the GHASH subkey `H` and running state they hold), `Sm4CtrCipher`,
+  `Sm4CbcEncryptor`, `Sm4CbcDecryptor`, `Sm4CcmEncryptor`, `Sm4CcmDecryptor` —
+  derives `Zeroize` + `ZeroizeOnDrop`, wiping key schedule, keystream, partial
+  blocks and buffered payload on drop (`docs/v1.13-scope.md` Q13.12–Q13.14).
+  This is **best-effort stack zeroization**: the wipes
   cover the named owned values, but `subtle::CtOption` `Copy` duplicates produced
   during masked selection are not separately zeroable, and the compiler is free to
   leave transient copies in registers / spilled stack slots.
