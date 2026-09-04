@@ -30,16 +30,15 @@ history, file it.
 call** — the agent path is branch + PR. The 1.11.0 and 1.12.0 publishes were
 explicit per-release delegations, not a standing grant.
 
-### v1.13 — current cycle (spec written; awaiting must-pin review)
+### v1.13 — current cycle (spec pinned 2026-09-04; implementation next)
 
-Scope: `docs/v1.13-scope.md`. Two items in one minor (`1.13.0`): the
-streaming-CCM C ABI (`gmcrypto_sm4_ccm_encryptor_t` / `_decryptor_t`, eight
-symbols, **one** encryptor finalize — `.claude/rules/ffi.md`) and `Zeroize` +
-`ZeroizeOnDrop` on the whole SM4 streaming family (needs zeroize's `alloc`
-feature and four E0509 refactors — `.claude/rules/sm4.md`). Do not plan or
-implement until the maintainer pins Q13.3/Q13.5, Q13.4, Q13.12, Q13.13,
-Q13.14, Q13.10, Q13.11 (spec §7 step 1); then revise the spec, plan, and
-land the zeroize PR (core) **before** the FFI PR (c).
+Scope: `docs/v1.13-scope.md`, every fork pinned as recommended. Two items
+in one minor (`1.13.0`): the streaming-CCM C ABI
+(`gmcrypto_sm4_ccm_encryptor_t` / `_decryptor_t`, eight symbols, **one**
+encryptor finalize — `.claude/rules/ffi.md`) and `Zeroize` + `ZeroizeOnDrop`
+on all **seven** SM4 streaming types (zeroize gains `alloc`; four E0509
+refactors, Q13.14 — `.claude/rules/sm4.md`). Order: zeroize PR (core)
+**before** the FFI PR (c), then release-prep, Gate #1, publish (maintainer).
 
 ## Open backlog
 
