@@ -30,16 +30,15 @@ history, file it.
 call** — the agent path is branch + PR. The 1.11.0 and 1.12.0 publishes were
 explicit per-release delegations, not a standing grant.
 
-### v1.13 — next cycle (not started; spec first)
+### v1.13 — current cycle (spec pinned 2026-09-04; implementation next)
 
-Two items in one scope: the streaming-CCM FFI projection
-(`gmcrypto_sm4_ccm_encryptor_t` / `_decryptor_t` over the v1.12 Rust types,
-the GCM handle family as the template — `.claude/rules/ffi.md`) and bringing
-the whole SM4 streaming family under `Zeroize` + `ZeroizeOnDrop` (GCM
-encryptor/decryptor + `GhashAcc`, CTR, CBC pair; today only `Sm4Cipher` and
-`Sm4CcmEncryptor` wipe — `.claude/rules/sm4.md`). Write `docs/v1.13-scope.md`,
-get the maintainer's must-pin review, then plan. The v1.12 CCM constraints
-are in the `sm4` rule.
+Scope: `docs/v1.13-scope.md`, every fork pinned as recommended. Two items
+in one minor (`1.13.0`): the streaming-CCM C ABI
+(`gmcrypto_sm4_ccm_encryptor_t` / `_decryptor_t`, eight symbols, **one**
+encryptor finalize — `.claude/rules/ffi.md`) and `Zeroize` + `ZeroizeOnDrop`
+on all **seven** SM4 streaming types (zeroize gains `alloc`; four E0509
+refactors, Q13.14 — `.claude/rules/sm4.md`). Order: zeroize PR (core)
+**before** the FFI PR (c), then release-prep, Gate #1, publish (maintainer).
 
 ## Open backlog
 
