@@ -22,23 +22,23 @@ history, file it.
 
 | | |
 |---|---|
-| Live on crates.io | **`1.13.0`** — all three crates, 2026-09-04 from `5c0ae59` (publish delegated for this release). Neither SSH-signed tag `v1.13.0` nor `v1.12.0` was on `origin` when this row was written; verify with `git ls-remote --tags origin` before citing either. Previous: `1.12.0` 2026-09-04 from `b0c6679` |
+| Live on crates.io | **`1.13.0`** — all three crates, 2026-09-04 from `5c0ae59` (publish delegated for this release); tag `v1.13.0` on `origin`, ED25519-verified. Previous: `1.12.0` 2026-09-04 from `b0c6679`, tag `v1.12.0` ED25519-verified |
 | Workspace version | `1.13.0` = live. The next bump is the v1.14 release-prep PR. A new minor does not always mean crates.io (v0.14 / v1.10 were assurance cycles); don't bump or publish for a no-crate-change cycle |
 | Gate #1 | `docs/ECOSYSTEM.md` §8 must PASS before every publish; latest record `docs/v1.13.0-gate1-evidence.md`. The gated SHA is never the release SHA: the gate attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty, and a PR touching those re-owes it. Running the gate script is ordinary agent work; publishing is not |
 
 `cargo publish` and the SSH-signed tag are the **maintainer's authenticated
-call** — the agent path is branch + PR. The 1.11.0 and 1.12.0 publishes were
-explicit per-release delegations, not a standing grant.
+call** — the agent path is branch + PR. The 1.11.0, 1.12.0 and 1.13.0
+publishes were explicit per-release delegations, not a standing grant; the
+tags have always been the maintainer's.
 
-### v1.13 — published 2026-09-04; tags owed
+### v1.13 — released 2026-09-04 (complete)
 
 Shipped in `1.13.0`: zeroize across all seven SM4 streaming types (#193;
 `.claude/rules/sm4.md` carries the invariant) and the streaming-CCM C ABI,
 eight symbols, `c_smoke` 109 (#194; `.claude/rules/ffi.md`). Spec:
 `docs/v1.13-scope.md`; Gate #1 `docs/v1.13.0-gate1-evidence.md` (PASS
-against `b0b1be4`). Owed by the maintainer: the SSH-signed tags `v1.13.0`
-(on `5c0ae59`) and `v1.12.0` (on `b0c6679`). Next cycle (v1.14) is not
-chosen; candidates are the Open backlog below.
+against `b0b1be4`). Nothing is owed. Next cycle (v1.14) is not chosen;
+candidates are the Open backlog below — spec first.
 
 ## Open backlog
 
