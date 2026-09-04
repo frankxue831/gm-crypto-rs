@@ -20,7 +20,8 @@ only a condensed current-release block — see its `Don't` section.
 ## Cycles
 
 **v1.13 — streaming-CCM C ABI + zeroize across the SM4 streaming family;
-PREPPED 2026-09-04 (1.13.0; publish owed).** Two additive items in one
+PUBLISHED 2026-09-04 from `5c0ae59` (1.13.0, all three crates; publish
+delegated for this release).** Two additive items in one
 minor, spec'd together (`docs/v1.13-scope.md`, PR #192 — the maintainer
 approved every recommended pin in one line). **Zeroize (#193, core only):**
 `Sm4GcmEncryptor`, `Sm4GcmDecryptor` (and the private `GhashAcc` holding the
@@ -46,9 +47,11 @@ reviews found only doc/example-level issues (the FFI example's under-feed
 demo had reused a `(key, nonce)` pair — fixed before the PR). Lessons
 recorded in the rule files: a plan's fuzz step runs from the worktree root,
 and the api-baseline double-lists re-exported types. Release-prep bumped the
-workspace to `1.13.0` with `=1.13.0` sibling pins. Gate #1:
-`docs/v1.13.0-gate1-evidence.md`. The `v1.12.0` SSH-signed tag was still
-not on `origin` when this paragraph was written.
+workspace to `1.13.0` with `=1.13.0` sibling pins. Gate #1 PASSed
+against the prep commit `b0b1be4` (`docs/v1.13.0-gate1-evidence.md`, in the
+same PR #195); published from the squash `5c0ae59`, whose `crates/` +
+`Cargo.toml` diff to the gated SHA is empty. Neither the `v1.13.0` nor the
+`v1.12.0` SSH-signed tag was on `origin` when this paragraph was written.
 
 **v1.12 — length-committed streaming SM4-CCM; PUBLISHED 2026-09-04 from
 `b0c6679` (1.12.0, all three crates; publish delegated for this release).** `sm4::ccm_streaming::{Sm4CcmEncryptor, Sm4CcmDecryptor}`
