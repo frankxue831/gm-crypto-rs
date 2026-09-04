@@ -322,8 +322,12 @@ impl Sm4CcmEncryptor {
 ///
 /// This type is a thin wrapper over the single-shot decrypt body and adds
 /// no cryptography — which is what lets it share the single-shot's dudect
-/// coverage. Holds the SM4 key schedule (zeroized on drop by that field);
-/// its other state — nonce, AAD, ciphertext — is not secret.
+/// coverage. Holds the SM4 key schedule plus the nonce, AAD and buffered
+/// ciphertext (none of the latter secret); all of it is zeroized on drop
+/// (best-effort — stack copies and register spills are outside what
+/// `zeroize` reaches), so every type in this family carries the same
+/// posture (v1.13).
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Sm4CcmDecryptor {
     cipher: Sm4Cipher,
     nonce: [u8; MAX_NONCE_LEN],
@@ -661,5 +665,19 @@ mod tests {
             dec.update(c);
         }
         assert_eq!(dec.finalize_verify(&tag).as_deref(), Some(pt.as_slice()));
+    }
+
+    #[test]
+    fn decryptor_zeroize_clears_buffers_and_params() {
+        let mut dec = Sm4CcmDecryptor::new(&KEY, &NONCE_12, b"aad").expect("valid nonce");
+        dec.update(&[0x33u8; 30]);
+        assert_eq!(dec.buf.len(), 30);
+        dec.zeroize();
+        assert!(dec.buf.is_empty());
+        assert!(dec.aad.is_empty());
+        assert_eq!(dec.nonce, [0u8; MAX_NONCE_LEN]);
+        assert_eq!(dec.nonce_len, 0);
+        assert_eq!(dec.ceiling, 0);
+        assert!(!dec.overflowed);
     }
 }
