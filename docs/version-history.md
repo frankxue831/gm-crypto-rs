@@ -50,8 +50,9 @@ and the api-baseline double-lists re-exported types. Release-prep bumped the
 workspace to `1.13.0` with `=1.13.0` sibling pins. Gate #1 PASSed
 against the prep commit `b0b1be4` (`docs/v1.13.0-gate1-evidence.md`, in the
 same PR #195); published from the squash `5c0ae59`, whose `crates/` +
-`Cargo.toml` diff to the gated SHA is empty. Neither the `v1.13.0` nor the
-`v1.12.0` SSH-signed tag was on `origin` when this paragraph was written.
+`Cargo.toml` diff to the gated SHA is empty. The SSH-signed tags `v1.13.0`
+(on `5c0ae59`) and `v1.12.0` (on `b0c6679`) reached `origin` later the same
+day, both ED25519-verified (#197).
 
 **v1.12 — length-committed streaming SM4-CCM; PUBLISHED 2026-09-04 from
 `b0c6679` (1.12.0, all three crates; publish delegated for this release).** `sm4::ccm_streaming::{Sm4CcmEncryptor, Sm4CcmDecryptor}`
