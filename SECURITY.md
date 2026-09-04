@@ -256,7 +256,10 @@ quietly reimplements mode logic in the wrapper. **This holds only while the
 decryptor stays a delegator** — a length-declared decryptor, an incremental
 CBC-MAC over unverified plaintext, or CTR-before-finalize would introduce a
 new secret-touching body and reopen the question (`docs/v1.12-scope.md`
-Q12.8).
+Q12.8). The **v1.13 C ABI over these types** (`gmcrypto_sm4_ccm_{encryptor,decryptor}_*`)
+adds no target either — the v1.9 thin-shim rationale: pointer validation, the
+`Box` lifecycle and a copy-out sized by public lengths over the bodies already
+argued above; `c_smoke` is its gate (`docs/v1.13-scope.md` Q13.9).
 
 **Cfg-gated on `sm2-key-exchange` (1):**
 

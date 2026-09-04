@@ -1172,7 +1172,12 @@ fn version_string_matches_crate() {
 // ============================================================
 
 use gmcrypto_c::{
-    gmcrypto_sm4_ccm_decrypt, gmcrypto_sm4_ccm_encrypt, gmcrypto_sm4_gcm_decrypt,
+    gmcrypto_sm4_ccm_decrypt, gmcrypto_sm4_ccm_decryptor_finalize_verify,
+    gmcrypto_sm4_ccm_decryptor_free, gmcrypto_sm4_ccm_decryptor_new, gmcrypto_sm4_ccm_decryptor_t,
+    gmcrypto_sm4_ccm_decryptor_update, gmcrypto_sm4_ccm_encrypt,
+    gmcrypto_sm4_ccm_encryptor_finalize, gmcrypto_sm4_ccm_encryptor_free,
+    gmcrypto_sm4_ccm_encryptor_new, gmcrypto_sm4_ccm_encryptor_t,
+    gmcrypto_sm4_ccm_encryptor_update, gmcrypto_sm4_gcm_decrypt,
     gmcrypto_sm4_gcm_decrypt_with_tag_len, gmcrypto_sm4_gcm_decryptor_finalize_verify,
     gmcrypto_sm4_gcm_decryptor_free, gmcrypto_sm4_gcm_decryptor_new,
     gmcrypto_sm4_gcm_decryptor_update, gmcrypto_sm4_gcm_encrypt,
@@ -1717,6 +1722,462 @@ fn sm4_gcm_decryptor_tamper_and_bad_len_return_err() {
         )
     };
     assert_eq!(r2, GMCRYPTO_ERR);
+}
+
+// ============================================================
+// SM4-CCM — length-committed streaming encryptor (v1.13, spec Q13.2–Q13.6).
+// ============================================================
+
+const CCM_KEY: [u8; 16] = [0x42u8; 16];
+const CCM_NONCE_12: [u8; 12] = [0x01u8; 12];
+const CCM_AAD: &[u8] = b"associated header";
+
+#[allow(clippy::cast_possible_truncation)]
+fn ccm_payload(len: usize) -> Vec<u8> {
+    (0..len).map(|i| (i as u8) ^ ((i as u8) >> 3)).collect()
+}
+
+/// Construct an encryptor over the shared fixtures; panics on NULL.
+unsafe fn ccm_enc(
+    nonce: &[u8],
+    plaintext_len: usize,
+    tag_len: usize,
+) -> *mut gmcrypto_sm4_ccm_encryptor_t {
+    let enc = unsafe {
+        gmcrypto_sm4_ccm_encryptor_new(
+            CCM_KEY.as_ptr(),
+            nonce.as_ptr(),
+            nonce.len(),
+            CCM_AAD.as_ptr(),
+            CCM_AAD.len(),
+            plaintext_len,
+            tag_len,
+        )
+    };
+    assert!(!enc.is_null(), "encryptor_new must accept valid params");
+    enc
+}
+
+#[test]
+fn sm4_ccm_encryptor_new_then_free_is_clean() {
+    let enc = unsafe { ccm_enc(&CCM_NONCE_12, 32, 16) };
+    unsafe { gmcrypto_sm4_ccm_encryptor_free(enc) };
+    unsafe { gmcrypto_sm4_ccm_encryptor_free(core::ptr::null_mut()) };
+}
+
+#[test]
+fn sm4_ccm_encryptor_new_rejects_invalid_params() {
+    let bad_nonce_6 = [0x01u8; 6];
+    let bad_nonce_14 = [0x01u8; 14];
+    let nonce_13 = [0x01u8; 13];
+    let cases: [(&[u8], usize, usize, *const u8, usize); 5] = [
+        (&bad_nonce_6, 32, 16, CCM_AAD.as_ptr(), CCM_AAD.len()),
+        (&bad_nonce_14, 32, 16, CCM_AAD.as_ptr(), CCM_AAD.len()),
+        (&CCM_NONCE_12, 32, 5, CCM_AAD.as_ptr(), CCM_AAD.len()), // tag_len ∉ {4,6,..,16}
+        (&nonce_13, 65_536, 16, CCM_AAD.as_ptr(), CCM_AAD.len()), // q = 2 → ceiling 65 535
+        (&CCM_NONCE_12, 32, 16, core::ptr::null(), 3),           // NULL aad with aad_len > 0
+    ];
+    for (nonce, pt_len, tag_len, aad, aad_len) in cases {
+        let enc = unsafe {
+            gmcrypto_sm4_ccm_encryptor_new(
+                CCM_KEY.as_ptr(),
+                nonce.as_ptr(),
+                nonce.len(),
+                aad,
+                aad_len,
+                pt_len,
+                tag_len,
+            )
+        };
+        assert!(
+            enc.is_null(),
+            "nonce_len={} pt_len={pt_len} tag_len={tag_len}",
+            nonce.len()
+        );
+    }
+}
+
+#[test]
+fn sm4_ccm_encryptor_chunked_matches_core() {
+    let pt = ccm_payload(200);
+    let enc = unsafe { ccm_enc(&CCM_NONCE_12, pt.len(), 16) };
+    let mut ct = Vec::new();
+    for chunk in pt.chunks(17) {
+        let mut buf = vec![0u8; chunk.len()];
+        let mut actual = 0usize;
+        let r = unsafe {
+            gmcrypto_sm4_ccm_encryptor_update(
+                enc,
+                chunk.as_ptr(),
+                chunk.len(),
+                buf.as_mut_ptr(),
+                buf.len(),
+                &mut actual,
+            )
+        };
+        assert_eq!(r, GMCRYPTO_OK);
+        assert_eq!(actual, chunk.len());
+        ct.extend_from_slice(&buf[..actual]);
+    }
+    unsafe { gmcrypto_sm4_ccm_encryptor_free(enc) };
+
+    let core_out = gmcrypto_core::sm4::mode_ccm::encrypt(&CCM_KEY, &CCM_NONCE_12, CCM_AAD, &pt, 16)
+        .expect("valid params");
+    assert_eq!(ct, core_out[..pt.len()]);
+}
+
+#[test]
+fn sm4_ccm_encryptor_finalize_matches_core() {
+    let pt = ccm_payload(45);
+    for tag_len in [4usize, 16] {
+        let enc = unsafe { ccm_enc(&CCM_NONCE_12, pt.len(), tag_len) };
+        let mut buf = vec![0u8; pt.len()];
+        let mut actual = 0usize;
+        let r = unsafe {
+            gmcrypto_sm4_ccm_encryptor_update(
+                enc,
+                pt.as_ptr(),
+                pt.len(),
+                buf.as_mut_ptr(),
+                buf.len(),
+                &mut actual,
+            )
+        };
+        assert_eq!(r, GMCRYPTO_OK);
+        let mut tag = vec![0u8; 16];
+        let mut tag_actual = 0usize;
+        let r = unsafe {
+            gmcrypto_sm4_ccm_encryptor_finalize(enc, tag.as_mut_ptr(), tag.len(), &mut tag_actual)
+        };
+        assert_eq!(r, GMCRYPTO_OK);
+        assert_eq!(tag_actual, tag_len);
+        let core_out =
+            gmcrypto_core::sm4::mode_ccm::encrypt(&CCM_KEY, &CCM_NONCE_12, CCM_AAD, &pt, tag_len)
+                .expect("valid params");
+        assert_eq!(&buf[..actual], &core_out[..pt.len()]);
+        assert_eq!(&tag[..tag_actual], &core_out[pt.len()..]);
+        // finalize consumed the handle: no free.
+    }
+}
+
+#[test]
+fn sm4_ccm_encryptor_overfeed_poisons() {
+    let enc = unsafe { ccm_enc(&CCM_NONCE_12, 32, 16) };
+    let too_many = [0x11u8; 33];
+    let mut buf = vec![0u8; 64];
+    let mut actual = 7usize; // sentinel; must be overwritten to 0
+    let r = unsafe {
+        gmcrypto_sm4_ccm_encryptor_update(
+            enc,
+            too_many.as_ptr(),
+            too_many.len(),
+            buf.as_mut_ptr(),
+            buf.len(),
+            &mut actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_ERR);
+    assert_eq!(actual, 0);
+    // Poisoned: a following in-budget update also fails and reports 0.
+    let one = [0x22u8; 1];
+    let mut actual2 = 7usize;
+    let r = unsafe {
+        gmcrypto_sm4_ccm_encryptor_update(
+            enc,
+            one.as_ptr(),
+            1,
+            buf.as_mut_ptr(),
+            buf.len(),
+            &mut actual2,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_ERR);
+    assert_eq!(actual2, 0);
+    // finalize on a poisoned handle: ERR, 0 bytes, handle consumed.
+    let mut tag = [0u8; 16];
+    let mut tag_actual = 7usize;
+    let r =
+        unsafe { gmcrypto_sm4_ccm_encryptor_finalize(enc, tag.as_mut_ptr(), 16, &mut tag_actual) };
+    assert_eq!(r, GMCRYPTO_ERR);
+    assert_eq!(tag_actual, 0);
+}
+
+#[test]
+fn sm4_ccm_encryptor_underfeed_finalize_is_err() {
+    let enc = unsafe { ccm_enc(&CCM_NONCE_12, 32, 16) };
+    let half = [0x33u8; 16];
+    let mut buf = vec![0u8; 16];
+    let mut actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_ccm_encryptor_update(enc, half.as_ptr(), 16, buf.as_mut_ptr(), 16, &mut actual)
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert_eq!(actual, 16);
+    let mut tag = [0u8; 16];
+    let mut tag_actual = 7usize;
+    let r =
+        unsafe { gmcrypto_sm4_ccm_encryptor_finalize(enc, tag.as_mut_ptr(), 16, &mut tag_actual) };
+    assert_eq!(r, GMCRYPTO_ERR);
+    assert_eq!(tag_actual, 0);
+}
+
+#[test]
+fn sm4_ccm_encryptor_update_short_out_reports_required_len() {
+    let enc = unsafe { ccm_enc(&CCM_NONCE_12, 17, 16) };
+    let chunk = [0x44u8; 17];
+    let mut small = [0u8; 3];
+    let mut actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_ccm_encryptor_update(
+            enc,
+            chunk.as_ptr(),
+            17,
+            small.as_mut_ptr(),
+            3,
+            &mut actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_ERR);
+    assert_eq!(actual, 17);
+    unsafe { gmcrypto_sm4_ccm_encryptor_free(enc) }; // _update does not consume
+}
+
+// ============================================================
+// SM4-CCM — incremental-input buffered decryptor (v1.13, spec Q13.4–Q13.6).
+// ============================================================
+
+unsafe fn ccm_dec(nonce: &[u8]) -> *mut gmcrypto_sm4_ccm_decryptor_t {
+    let dec = unsafe {
+        gmcrypto_sm4_ccm_decryptor_new(
+            CCM_KEY.as_ptr(),
+            nonce.as_ptr(),
+            nonce.len(),
+            CCM_AAD.as_ptr(),
+            CCM_AAD.len(),
+        )
+    };
+    assert!(!dec.is_null(), "decryptor_new must accept a valid nonce");
+    dec
+}
+
+#[test]
+fn sm4_ccm_decryptor_new_then_free_is_clean() {
+    let dec = unsafe { ccm_dec(&CCM_NONCE_12) };
+    unsafe { gmcrypto_sm4_ccm_decryptor_free(dec) };
+    unsafe { gmcrypto_sm4_ccm_decryptor_free(core::ptr::null_mut()) };
+    let bad_nonce = [0x01u8; 6];
+    let dec = unsafe {
+        gmcrypto_sm4_ccm_decryptor_new(
+            CCM_KEY.as_ptr(),
+            bad_nonce.as_ptr(),
+            bad_nonce.len(),
+            CCM_AAD.as_ptr(),
+            CCM_AAD.len(),
+        )
+    };
+    assert!(dec.is_null());
+}
+
+#[test]
+fn sm4_ccm_decryptor_chunked_round_trip() {
+    let pt = ccm_payload(200);
+    let core_out = gmcrypto_core::sm4::mode_ccm::encrypt(&CCM_KEY, &CCM_NONCE_12, CCM_AAD, &pt, 16)
+        .expect("valid params");
+    let (ct, tag) = core_out.split_at(pt.len());
+
+    // (a) single-shot ciphertext, fed in 7-byte chunks.
+    let dec = unsafe { ccm_dec(&CCM_NONCE_12) };
+    for chunk in ct.chunks(7) {
+        let r = unsafe { gmcrypto_sm4_ccm_decryptor_update(dec, chunk.as_ptr(), chunk.len()) };
+        assert_eq!(r, GMCRYPTO_OK);
+    }
+    let mut out = vec![0u8; ct.len()];
+    let mut actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_ccm_decryptor_finalize_verify(
+            dec,
+            tag.as_ptr(),
+            tag.len(),
+            out.as_mut_ptr(),
+            out.len(),
+            &mut actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert_eq!(&out[..actual], &pt[..]);
+
+    // (b) the streaming encryptor's own output, fed in 11-byte chunks.
+    let enc = unsafe { ccm_enc(&CCM_NONCE_12, pt.len(), 8) };
+    let mut sct = vec![0u8; pt.len()];
+    let mut sct_len = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_ccm_encryptor_update(
+            enc,
+            pt.as_ptr(),
+            pt.len(),
+            sct.as_mut_ptr(),
+            sct.len(),
+            &mut sct_len,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    let mut stag = [0u8; 16];
+    let mut stag_len = 0usize;
+    let r =
+        unsafe { gmcrypto_sm4_ccm_encryptor_finalize(enc, stag.as_mut_ptr(), 16, &mut stag_len) };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert_eq!(stag_len, 8);
+
+    let dec = unsafe { ccm_dec(&CCM_NONCE_12) };
+    for chunk in sct[..sct_len].chunks(11) {
+        let r = unsafe { gmcrypto_sm4_ccm_decryptor_update(dec, chunk.as_ptr(), chunk.len()) };
+        assert_eq!(r, GMCRYPTO_OK);
+    }
+    let mut out2 = vec![0u8; sct_len];
+    let mut actual2 = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_ccm_decryptor_finalize_verify(
+            dec,
+            stag.as_ptr(),
+            stag_len,
+            out2.as_mut_ptr(),
+            out2.len(),
+            &mut actual2,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert_eq!(&out2[..actual2], &pt[..]);
+}
+
+#[test]
+fn sm4_ccm_decryptor_tamper_and_bad_len_return_err() {
+    let pt = ccm_payload(64);
+    let core_out = gmcrypto_core::sm4::mode_ccm::encrypt(&CCM_KEY, &CCM_NONCE_12, CCM_AAD, &pt, 16)
+        .expect("valid params");
+    let (ct, tag) = core_out.split_at(pt.len());
+
+    // flipped tag byte → ERR, *out_actual_len == 0, no plaintext.
+    let mut bad_tag = tag.to_vec();
+    bad_tag[0] ^= 0x01;
+    let dec = unsafe { ccm_dec(&CCM_NONCE_12) };
+    unsafe { gmcrypto_sm4_ccm_decryptor_update(dec, ct.as_ptr(), ct.len()) };
+    let mut out = vec![0xEEu8; ct.len()];
+    let mut actual = 7usize;
+    let r = unsafe {
+        gmcrypto_sm4_ccm_decryptor_finalize_verify(
+            dec,
+            bad_tag.as_ptr(),
+            bad_tag.len(),
+            out.as_mut_ptr(),
+            out.len(),
+            &mut actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_ERR);
+    assert_eq!(actual, 0);
+    assert!(
+        out.iter().all(|&b| b == 0xEE),
+        "no plaintext may be written on failure"
+    );
+
+    // tag_len = 5 (not in {4,6,8,10,12,14,16}) → ERR.
+    let dec = unsafe { ccm_dec(&CCM_NONCE_12) };
+    unsafe { gmcrypto_sm4_ccm_decryptor_update(dec, ct.as_ptr(), ct.len()) };
+    let mut actual = 7usize;
+    let r = unsafe {
+        gmcrypto_sm4_ccm_decryptor_finalize_verify(
+            dec,
+            tag.as_ptr(),
+            5,
+            out.as_mut_ptr(),
+            out.len(),
+            &mut actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_ERR);
+    assert_eq!(actual, 0);
+}
+
+#[test]
+fn sm4_ccm_decryptor_short_out_reports_required_len() {
+    let pt = ccm_payload(40);
+    let core_out = gmcrypto_core::sm4::mode_ccm::encrypt(&CCM_KEY, &CCM_NONCE_12, CCM_AAD, &pt, 16)
+        .expect("valid params");
+    let (ct, tag) = core_out.split_at(pt.len());
+    let dec = unsafe { ccm_dec(&CCM_NONCE_12) };
+    unsafe { gmcrypto_sm4_ccm_decryptor_update(dec, ct.as_ptr(), ct.len()) };
+    let mut small = [0u8; 8];
+    let mut actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_ccm_decryptor_finalize_verify(
+            dec,
+            tag.as_ptr(),
+            tag.len(),
+            small.as_mut_ptr(),
+            8,
+            &mut actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_ERR);
+    assert_eq!(actual, ct.len()); // verified, but the handle is gone — size up-front
+}
+
+#[test]
+fn sm4_ccm_decryptor_latch_surfaces_at_finalize() {
+    // 13-byte nonce → q = 2 → payload ceiling 65 535 bytes. First prove the
+    // boundary is fine: exactly 65 535 bytes with the real tag verifies. Then
+    // one byte more, with that same (valid) tag, fails — so the ERR is the
+    // latch surfacing at _finalize_verify, not a tag mismatch (spec Q13.4).
+    let nonce_13 = [0x05u8; 13];
+    let pt = vec![0x99u8; 65_535];
+    let core_out = gmcrypto_core::sm4::mode_ccm::encrypt(&CCM_KEY, &nonce_13, CCM_AAD, &pt, 16)
+        .expect("65 535 bytes fits q = 2");
+    let (ct, tag) = core_out.split_at(pt.len());
+
+    // (a) at the ceiling: OK.
+    let dec = unsafe { ccm_dec(&nonce_13) };
+    for chunk in ct.chunks(16_384) {
+        let r = unsafe { gmcrypto_sm4_ccm_decryptor_update(dec, chunk.as_ptr(), chunk.len()) };
+        assert_eq!(r, GMCRYPTO_OK);
+    }
+    let mut out = vec![0u8; ct.len()];
+    let mut actual = 0usize;
+    let r = unsafe {
+        gmcrypto_sm4_ccm_decryptor_finalize_verify(
+            dec,
+            tag.as_ptr(),
+            tag.len(),
+            out.as_mut_ptr(),
+            out.len(),
+            &mut actual,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_OK);
+    assert_eq!(&out[..actual], &pt[..]);
+
+    // (b) one byte past the ceiling: every _update still OK, finalize ERR + 0.
+    let dec = unsafe { ccm_dec(&nonce_13) };
+    for chunk in ct.chunks(16_384) {
+        let r = unsafe { gmcrypto_sm4_ccm_decryptor_update(dec, chunk.as_ptr(), chunk.len()) };
+        assert_eq!(r, GMCRYPTO_OK);
+    }
+    let extra = [0x99u8; 1];
+    let r = unsafe { gmcrypto_sm4_ccm_decryptor_update(dec, extra.as_ptr(), 1) };
+    assert_eq!(r, GMCRYPTO_OK);
+    let mut out2 = vec![0u8; ct.len() + 1];
+    let mut actual2 = 7usize;
+    let r = unsafe {
+        gmcrypto_sm4_ccm_decryptor_finalize_verify(
+            dec,
+            tag.as_ptr(),
+            tag.len(),
+            out2.as_mut_ptr(),
+            out2.len(),
+            &mut actual2,
+        )
+    };
+    assert_eq!(r, GMCRYPTO_ERR);
+    assert_eq!(actual2, 0);
 }
 
 #[test]

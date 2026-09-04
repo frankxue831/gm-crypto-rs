@@ -2,7 +2,9 @@
 //!
 //! Exposes SM2 (sign/verify, encrypt/decrypt, and — since v1.2 — the
 //! GM/T 0003.3 key exchange with key confirmation) / SM3 / SM4
-//! (ECB/CBC/CTR/GCM/CCM/XTS) / HMAC-SM3 / PBKDF2-HMAC-SM3 plus SM2 key
+//! (ECB/CBC/CTR/GCM/CCM/XTS, with streaming CBC/GCM handles, a
+//! length-committed streaming CCM encryptor and an incremental-input
+//! buffered CCM decryptor) / HMAC-SM3 / PBKDF2-HMAC-SM3 plus SM2 key
 //! import/export and — since v1.4 — X.509-with-SM2 leaf certificate
 //! parse + signature verify (NO trust decisions) to C / C++ / Python /
 //! Go / Zig / Ruby callers via opaque handles and a cbindgen-generated
@@ -109,8 +111,8 @@ use gmcrypto_core::sm4::{
 // always compiled into the C ABI (the forwarding `sm4-aead` feature was
 // removed; `gmcrypto-core` is pulled with `sm4-aead` always enabled).
 use gmcrypto_core::sm4::{
-    GcmTagLen, Sm4GcmDecryptor as InnerSm4GcmDec, Sm4GcmEncryptor as InnerSm4GcmEnc, mode_ccm,
-    mode_gcm,
+    GcmTagLen, Sm4CcmDecryptor as InnerSm4CcmDec, Sm4CcmEncryptor as InnerSm4CcmEnc,
+    Sm4GcmDecryptor as InnerSm4GcmDec, Sm4GcmEncryptor as InnerSm4GcmEnc, mode_ccm, mode_gcm,
 };
 // v0.13 — single-shot SM4-XTS FFI. v0.23 W3 (A-1): always compiled into
 // the C ABI (the forwarding `sm4-xts` feature was removed).
@@ -213,6 +215,33 @@ pub struct gmcrypto_sm4_gcm_encryptor_t {
 /// `O(message)`. Construct with [`gmcrypto_sm4_gcm_decryptor_new`].
 pub struct gmcrypto_sm4_gcm_decryptor_t {
     inner: InnerSm4GcmDec,
+}
+
+/// Opaque handle for a length-committed streaming SM4-CCM encryptor
+/// (v1.13). The plaintext length and the tag length are committed at
+/// gmcrypto_sm4_ccm_encryptor_new (CCM encodes both in its first CBC-MAC
+/// block, RFC 3610 section 2.2); in exchange every
+/// gmcrypto_sm4_ccm_encryptor_update emits the ciphertext for its chunk
+/// with O(chunk) memory, and gmcrypto_sm4_ccm_encryptor_finalize emits
+/// the committed tag. Pair each handle with exactly one finalize (which
+/// frees it) OR one gmcrypto_sm4_ccm_encryptor_free. The key schedule and
+/// all stream state are wiped when the handle is freed (best-effort: stack
+/// copies and register spills are outside what the wipe reaches).
+pub struct gmcrypto_sm4_ccm_encryptor_t {
+    inner: InnerSm4CcmEnc,
+}
+
+/// Opaque handle for an incremental-input, output-BUFFERED SM4-CCM
+/// decryptor (v1.13) — not a streaming type: CCM authenticates the
+/// plaintext and needs the total length first, so
+/// gmcrypto_sm4_ccm_decryptor_update buffers ciphertext and emits
+/// NOTHING, and gmcrypto_sm4_ccm_decryptor_finalize_verify releases the
+/// whole plaintext only after a constant-time tag check
+/// (commit-on-verify). Memory is O(message), bounded by the nonce's
+/// payload ceiling. Construct with gmcrypto_sm4_ccm_decryptor_new. The key
+/// schedule and buffers are wiped when the handle is freed (best-effort).
+pub struct gmcrypto_sm4_ccm_decryptor_t {
+    inner: InnerSm4CcmDec,
 }
 
 /// Opaque handle for an SM2 private key.
@@ -1626,9 +1655,11 @@ pub unsafe extern "C" fn gmcrypto_sm4_xts_decrypt_sectors(
 // GMCRYPTO_ERR on every error. Asymmetry: the encryptor `_update`
 // emits ciphertext (out triple); the decryptor `_update` emits NOTHING
 // (commit-on-verify) and plaintext is released only by
-// `_finalize_verify` after a constant-time tag check. Streaming CCM is
-// out of scope (CBC-MAC needs total length up-front). See
-// docs/v0.10-scope.md.
+// `_finalize_verify` after a constant-time tag check. See
+// docs/v0.10-scope.md. The length-committed streaming SM4-CCM encryptor
+// and incremental-input buffered decryptor handles follow in the next
+// section (v1.13; Rust design docs/v1.12-scope.md, projection
+// docs/v1.13-scope.md).
 // ============================================================
 
 /// Construct a streaming SM4-GCM encryptor. `key` is exactly 16 bytes;
@@ -1878,6 +1909,277 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_decryptor_finalize_verify(
 /// [`gmcrypto_sm4_gcm_decryptor_finalize_verify`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_gcm_decryptor_free(dec: *mut gmcrypto_sm4_gcm_decryptor_t) {
+    if dec.is_null() {
+        return;
+    }
+    // SAFETY: dec came from Box::into_raw and has not been freed.
+    drop(unsafe { Box::from_raw(dec) });
+}
+
+// ============================================================
+// SM4-CCM AEAD — length-committed streaming encryptor and
+// incremental-input buffered decryptor (v1.13).
+//
+// Wraps gmcrypto_core::sm4::{Sm4CcmEncryptor, Sm4CcmDecryptor} (v1.12).
+// Same lifecycle as the GCM handles above. Two deliberate differences
+// (docs/v1.13-scope.md F3, Q13.3, Q13.5): the encryptor has ONE finalize
+// through the output triple because the tag length is committed at
+// `_new`; and the over-feed / under-feed / poisoned `None` arms write 0
+// to `*out_actual_len` before returning GMCRYPTO_ERR, so a failed call
+// never leaves a stale length behind.
+// ============================================================
+
+/// Construct a length-committed streaming SM4-CCM encryptor. `key` is
+/// exactly 16 bytes; `nonce` is `nonce_len` bytes with `nonce_len` in
+/// 7..=13; `aad` is the full associated data, supplied once here;
+/// `plaintext_len` is the exact number of plaintext bytes the caller
+/// commits to feeding through `_update`; `tag_len` is one of
+/// {4, 6, 8, 10, 12, 14, 16}. Returns NULL on any invalid pointer or
+/// parameter, including a `plaintext_len` that does not fit the nonce's
+/// length field (a 13-byte nonce allows at most 65535 bytes). Nonce
+/// uniqueness per key is the caller's responsibility; the same
+/// (key, nonce) with a different `plaintext_len` is still a nonce reuse.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_ccm_encryptor_new(
+    key: *const u8,
+    nonce: *const u8,
+    nonce_len: usize,
+    aad: *const u8,
+    aad_len: usize,
+    plaintext_len: usize,
+    tag_len: usize,
+) -> *mut gmcrypto_sm4_ccm_encryptor_t {
+    let result = std::panic::catch_unwind(|| {
+        // SAFETY: caller guarantees each (ptr, len) pair is readable or len == 0.
+        let k = unsafe { try_slice(key, GMCRYPTO_SM4_KEY_SIZE) }?;
+        // SAFETY: as above.
+        let n = unsafe { try_slice(nonce, nonce_len) }?;
+        // SAFETY: as above.
+        let a = unsafe { try_slice(aad, aad_len) }?;
+        let k_arr: &[u8; GMCRYPTO_SM4_KEY_SIZE] = k.try_into().ok()?;
+        // The Rust constructor validates nonce length, tag length and the
+        // length-field fit; the shim adds nothing (spec Q13.2).
+        let inner = InnerSm4CcmEnc::new(k_arr, n, a, plaintext_len, tag_len)?;
+        Some(Box::into_raw(Box::new(gmcrypto_sm4_ccm_encryptor_t {
+            inner,
+        })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// Encrypt `pt_len` bytes of plaintext, emitting the ciphertext for this
+/// chunk (length == `pt_len`; CCM's CTR component does not pad). `out`
+/// must hold at least `pt_len` bytes; on a short buffer this returns
+/// GMCRYPTO_ERR with the required length in `*out_actual_len`, and the
+/// chunk is lost (size the buffer to the chunk). A chunk that would take
+/// the cumulative plaintext past the committed `plaintext_len` emits
+/// nothing, writes 0 to `*out_actual_len`, returns GMCRYPTO_ERR, and
+/// poisons the handle: every later `_update` and the `_finalize` also
+/// fail. `pt_len == 0` is a no-op that returns GMCRYPTO_OK with
+/// `*out_actual_len == 0`. `_update` never frees the handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_ccm_encryptor_update(
+    enc: *mut gmcrypto_sm4_ccm_encryptor_t,
+    pt: *const u8,
+    pt_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if enc.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        // SAFETY: caller guarantees (pt, pt_len) is readable or pt_len == 0.
+        let input = match unsafe { try_slice(pt, pt_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: enc non-null per the check; caller guarantees unique
+        // access for the duration of this call.
+        let e = unsafe { &mut *enc };
+        if let Some(ct) = e.inner.update(input) {
+            // SAFETY: out valid for out_capacity; out_actual_len valid.
+            unsafe { write_output(&ct, out, out_capacity, out_actual_len) }
+        } else {
+            // Over-feed or already poisoned: report zero bytes, then the
+            // single error (spec Q13.3). Not routed through write_output,
+            // whose empty-input path returns GMCRYPTO_OK.
+            if !out_actual_len.is_null() {
+                // SAFETY: caller-asserted valid *mut usize.
+                unsafe { ptr::write(out_actual_len, 0) };
+            }
+            GMCRYPTO_ERR
+        }
+    })
+}
+
+/// Finish and emit the committed `tag_len`-byte tag through
+/// `(out, out_capacity, out_actual_len)`. **Consumes the encryptor — the
+/// handle is freed by this call on every path**; do not call
+/// gmcrypto_sm4_ccm_encryptor_free afterwards. Returns GMCRYPTO_ERR with
+/// `*out_actual_len == 0` if the handle is poisoned or was UNDER-FED
+/// (fewer than `plaintext_len` bytes were fed): a partial stream is never
+/// tag-authenticated. A short `out` returns GMCRYPTO_ERR with the required
+/// length in `*out_actual_len` and the tag is lost (size `out` to the
+/// `tag_len` you committed).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_ccm_encryptor_finalize(
+    enc: *mut gmcrypto_sm4_ccm_encryptor_t,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if enc.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        // Default the reported length to 0 so the two `None` arms (poison,
+        // under-feed) satisfy "finalize failure writes 0" (spec Q13.5).
+        // write_output overwrites it on success / short buffer.
+        if !out_actual_len.is_null() {
+            // SAFETY: caller-asserted valid *mut usize.
+            unsafe { ptr::write(out_actual_len, 0) };
+        }
+        // SAFETY: enc came from Box::into_raw; take ownership + free
+        // (consumed even on failure, per the CBC/GCM precedent).
+        let boxed = unsafe { Box::from_raw(enc) };
+        match boxed.inner.finalize() {
+            // SAFETY: out valid for out_capacity; out_actual_len valid.
+            Some(tag) => unsafe { write_output(&tag, out, out_capacity, out_actual_len) },
+            None => GMCRYPTO_ERR, // poisoned or under-fed; len already 0
+        }
+    })
+}
+
+/// Free a streaming SM4-CCM encryptor without finalizing (abort path).
+/// Passing NULL is a no-op. Do NOT call after `_finalize` — it already
+/// consumed the handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_ccm_encryptor_free(enc: *mut gmcrypto_sm4_ccm_encryptor_t) {
+    if enc.is_null() {
+        return;
+    }
+    // SAFETY: enc came from Box::into_raw and has not been freed.
+    drop(unsafe { Box::from_raw(enc) });
+}
+
+/// Construct an incremental-input buffered SM4-CCM decryptor. `key` is
+/// exactly 16 bytes; `nonce` is `nonce_len` bytes with `nonce_len` in
+/// 7..=13; `aad` is the full associated data, supplied once here. There
+/// is no length or tag-length parameter: the tag's length is taken from
+/// `tag_len` at `_finalize_verify`. Returns NULL on invalid input.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_ccm_decryptor_new(
+    key: *const u8,
+    nonce: *const u8,
+    nonce_len: usize,
+    aad: *const u8,
+    aad_len: usize,
+) -> *mut gmcrypto_sm4_ccm_decryptor_t {
+    let result = std::panic::catch_unwind(|| {
+        // SAFETY: caller guarantees each (ptr, len) pair is readable or len == 0.
+        let k = unsafe { try_slice(key, GMCRYPTO_SM4_KEY_SIZE) }?;
+        // SAFETY: as above.
+        let n = unsafe { try_slice(nonce, nonce_len) }?;
+        // SAFETY: as above.
+        let a = unsafe { try_slice(aad, aad_len) }?;
+        let k_arr: &[u8; GMCRYPTO_SM4_KEY_SIZE] = k.try_into().ok()?;
+        let inner = InnerSm4CcmDec::new(k_arr, n, a)?;
+        Some(Box::into_raw(Box::new(gmcrypto_sm4_ccm_decryptor_t {
+            inner,
+        })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// Buffer `ct_len` bytes of ciphertext. **Emits no plaintext**
+/// (commit-on-verify) — there is no output parameter. Returns
+/// GMCRYPTO_ERR only on a NULL handle or an invalid input pointer. Feeding
+/// more than the nonce's payload ceiling (65535 bytes for a 13-byte
+/// nonce; 2^(8*(15 - nonce_len)) - 1 in general) is latched inside the
+/// handle and surfaces as GMCRYPTO_ERR at
+/// gmcrypto_sm4_ccm_decryptor_finalize_verify, not here.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_ccm_decryptor_update(
+    dec: *mut gmcrypto_sm4_ccm_decryptor_t,
+    ct: *const u8,
+    ct_len: usize,
+) -> c_int {
+    ffi_guard(|| {
+        if dec.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        // SAFETY: caller guarantees (ct, ct_len) is readable or ct_len == 0.
+        let input = match unsafe { try_slice(ct, ct_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: dec non-null per the check; unique access for the call.
+        let d = unsafe { &mut *dec };
+        d.inner.update(input);
+        GMCRYPTO_OK
+    })
+}
+
+/// Verify `tag` (`tag_len` bytes; must be one of {4, 6, 8, 10, 12, 14,
+/// 16}) and, on success, write the full plaintext (length == total
+/// ciphertext fed) to `(out, out_capacity, out_actual_len)`.
+///
+/// **Consumes and frees the handle on every path**; do not call
+/// gmcrypto_sm4_ccm_decryptor_free afterwards. Returns GMCRYPTO_ERR in
+/// two cases: verification failure (tag mismatch, invalid `tag_len`, or
+/// the payload-ceiling latch) — `*out_actual_len` is 0 and no plaintext
+/// is written; or the tag verified but `out` is too small —
+/// `*out_actual_len` is the required length and no plaintext is written.
+/// The handle is gone either way, so size `out` to the total ciphertext
+/// length up-front (CCM plaintext has the same length).
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_ccm_decryptor_finalize_verify(
+    dec: *mut gmcrypto_sm4_ccm_decryptor_t,
+    tag: *const u8,
+    tag_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if dec.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        // Default the reported length to 0 so every failure arm satisfies
+        // "finalize failure writes 0" (the GCM decryptor precedent).
+        if !out_actual_len.is_null() {
+            // SAFETY: caller-asserted valid *mut usize.
+            unsafe { ptr::write(out_actual_len, 0) };
+        }
+        // SAFETY: dec came from Box::into_raw; take ownership + free.
+        let boxed = unsafe { Box::from_raw(dec) };
+        // SAFETY: caller guarantees (tag, tag_len) is readable or tag_len == 0.
+        let t = match unsafe { try_slice(tag, tag_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR, // boxed dropped → freed; len already 0
+        };
+        if let Some(pt) = boxed.inner.finalize_verify(t) {
+            // SAFETY: out valid for out_capacity; out_actual_len valid.
+            unsafe { write_output(&pt, out, out_capacity, out_actual_len) }
+        } else {
+            GMCRYPTO_ERR // commit-on-verify failure; len already 0
+        }
+    })
+}
+
+/// Free a buffered SM4-CCM decryptor without verifying (abort path).
+/// NULL is a no-op. Do NOT call after `_finalize_verify`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_ccm_decryptor_free(dec: *mut gmcrypto_sm4_ccm_decryptor_t) {
     if dec.is_null() {
         return;
     }

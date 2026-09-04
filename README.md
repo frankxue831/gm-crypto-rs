@@ -196,10 +196,11 @@ assert!(cert.verify_signature(&issuer_public_key));
 let _validity = (cert.not_before(), cert.not_after());  // exposed, never compared
 ```
 
-The same surfaces are reachable from C through `gmcrypto-c`; nine shipped
-[examples](crates/gmcrypto-c/examples/) — SM2 signing, streaming GCM, CCM, XTS
-sectors, key exchange, X.509, a TLCP handshake and pair verification — are
-compiled in CI against the committed header with `-Wall -Wextra -Werror`.
+The same surfaces are reachable from C through `gmcrypto-c`; ten shipped
+[examples](crates/gmcrypto-c/examples/) — SM2 signing, streaming GCM,
+single-shot and length-committed streaming CCM, XTS sectors, key exchange,
+X.509, a TLCP handshake and pair verification — are compiled in CI against the
+committed header with `-Wall -Wextra -Werror`.
 
 ## Stability & SemVer
 

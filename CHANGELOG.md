@@ -5,6 +5,17 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Streaming SM4-CCM in the C ABI.** `gmcrypto_sm4_ccm_encryptor_{new,update,finalize,free}`
+  (length-committed: `plaintext_len` and `tag_len` at `_new`; one `_finalize`
+  through the output triple; over-feed / under-feed / poison report zero
+  bytes and the single `GMCRYPTO_ERR`) and
+  `gmcrypto_sm4_ccm_decryptor_{new,update,finalize_verify,free}`
+  (incremental-input buffered, commit-on-verify; the payload-ceiling latch
+  surfaces at `_finalize_verify`). Header regenerated; `c_smoke` 97 → 109;
+  `examples/sm4_ccm_streaming.c`. Scope: `docs/v1.13-scope.md` Q13.1–Q13.11.
+
 ### Changed
 
 - **Every SM4 streaming type now zeroizes on drop.** `Sm4GcmEncryptor`,
