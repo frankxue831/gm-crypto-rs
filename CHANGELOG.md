@@ -5,6 +5,15 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-09-04
+
+**v1.13 — streaming-CCM C ABI + zeroize across the SM4 streaming family
+(additive).** Scope + maintainer-pinned forks:
+[`docs/v1.13-scope.md`](docs/v1.13-scope.md). Rust public API gains only
+`Drop` + `Zeroize` impls; the C ABI gains eight symbols and changes nothing;
+`zeroize` is pulled with its `alloc` feature (same crate, no new dependency);
+MSRV 1.85 unchanged.
+
 ### Added
 
 - **Streaming SM4-CCM in the C ABI.** `gmcrypto_sm4_ccm_encryptor_{new,update,finalize,free}`

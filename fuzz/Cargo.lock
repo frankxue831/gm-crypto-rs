@@ -168,7 +168,7 @@ dependencies = [
 
 [[package]]
 name = "gmcrypto-c"
-version = "1.12.0"
+version = "1.13.0"
 dependencies = [
  "getrandom 0.4.2",
  "gmcrypto-core",
@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "gmcrypto-core"
-version = "1.12.0"
+version = "1.13.0"
 dependencies = [
  "aead",
  "crypto-bigint",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "gmcrypto-simd"
-version = "1.12.0"
+version = "1.13.0"
 dependencies = [
  "cpufeatures",
 ]
