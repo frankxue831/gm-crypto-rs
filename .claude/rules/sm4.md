@@ -60,5 +60,8 @@ paths:
 
 - Don't ship `encode_c1c2c3_legacy`-style legacy layouts as encoders; legacy
   forms are decrypt-only.
-- `zeroize` here has no `alloc` feature: wipe a `Vec<[u8; 16]>` with
-  `.iter_mut().zeroize()`, not `.zeroize()`.
+- `zeroize` is declared with `derive` + `alloc` (v1.13), so `Vec<Z>` fields
+  derive cleanly and `.zeroize()` on a `Vec` wipes elements **and spare
+  capacity** then clears. A `#[derive(ZeroizeOnDrop)]` type cannot move a
+  field out of `self` (E0509): return `Copy` values, or
+  `core::mem::take(&mut self.vec)` — never `ManuallyDrop` / `Option`-wrapping.

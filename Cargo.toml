@@ -47,7 +47,7 @@ rust-version = "1.85"
 [workspace.dependencies]
 crypto-bigint = { version = "0.7.3", default-features = false, features = ["subtle", "zeroize"] }
 subtle = { version = "2.6.1", default-features = false }
-zeroize = { version = "1.8.2", default-features = false, features = ["derive"] }
+zeroize = { version = "1.8.2", default-features = false, features = ["derive", "alloc"] }
 rand_core = { version = "0.10.1", default-features = false }
 getrandom = { version = "0.4.2", default-features = false, features = ["sys_rng"] }
 # v0.3 W6 — thread-safe lazy init for the precomputed comb table.
