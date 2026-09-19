@@ -81,7 +81,7 @@ Three crates, released together at one lockstep version:
 | Crate | Role |
 |---|---|
 | [`gmcrypto-core`](https://crates.io/crates/gmcrypto-core) | The `no_std + alloc` crypto core, `unsafe_code = "forbid"`. The Rust API. |
-| [`gmcrypto-c`](https://crates.io/crates/gmcrypto-c) | C ABI, cdylib + staticlib: 104 entry points, committed [`gmcrypto.h`](crates/gmcrypto-c/include/gmcrypto.h) drift-checked in CI. A default build exports the whole surface. |
+| [`gmcrypto-c`](https://crates.io/crates/gmcrypto-c) | C ABI, cdylib + staticlib: 112 entry points, committed [`gmcrypto.h`](crates/gmcrypto-c/include/gmcrypto.h) drift-checked in CI. A default build exports the whole surface. |
 | [`gmcrypto-simd`](https://crates.io/crates/gmcrypto-simd) | Internal AVX2 / NEON / CLMUL / PMULL backend. No stable Rust API. |
 
 ## Why this rather than the alternatives
@@ -91,7 +91,7 @@ Three crates, released together at one lockstep version:
 | SM2 + SM3 + SM4 in one crate | ✅ | ✅ | separate crates |
 | Timing-leak harness in CI | ✅ 20 `dudect` targets, 16 blocking | — | — |
 | Fuzzing | ✅ 35 targets, nightly | — | — |
-| C ABI | ✅ 104 entry points | — | — |
+| C ABI | ✅ 112 entry points | — | — |
 | TLCP (GB/T 38636) toolkit | ✅ | — | — |
 | `no_std` | ✅ | not advertised | ✅ |
 | Enforced SemVer (`cargo-semver-checks`) | ✅ | — | — |
