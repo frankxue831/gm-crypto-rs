@@ -34,8 +34,9 @@ tags have always been the maintainer's.
 ### v1.14 — F21 finalize-window study (assurance cycle; spec pinned 2026-09-23)
 
 No crate change, no version bump, no publish (v0.14 / v1.10 precedent).
-Spec: `docs/v1.14-scope.md` — execute the pre-committed protocol (§3) on
-the pinned host once, record exactly one of `invalid-path` /
+Spec: `docs/v1.14-scope.md` — execute the pre-committed protocol (§3, v4
+per §3a; v4 is the last version this cycle) on the pinned host, record
+exactly one of `invalid-path` /
 `distinguishable-on-this-host` / `still-blind`, then apply the one Q14.6
 edit that matches. The two leaky control patches never enter this tree;
 the T1 bench stays research-only (Q14.4). Previous cycle v1.13 released
