@@ -31,14 +31,16 @@ call** — the agent path is branch + PR. The 1.11.0, 1.12.0 and 1.13.0
 publishes were explicit per-release delegations, not a standing grant; the
 tags have always been the maintainer's.
 
-### v1.13 — released 2026-09-04 (complete)
+### v1.14 — F21 finalize-window study (assurance cycle; spec pinned 2026-09-23)
 
-Shipped in `1.13.0`: zeroize across all seven SM4 streaming types (#193;
-`.claude/rules/sm4.md` carries the invariant) and the streaming-CCM C ABI,
-eight symbols, `c_smoke` 109 (#194; `.claude/rules/ffi.md`). Spec:
-`docs/v1.13-scope.md`; Gate #1 `docs/v1.13.0-gate1-evidence.md` (PASS
-against `b0b1be4`). Nothing is owed. Next cycle (v1.14) is not chosen;
-candidates are the Open backlog below — spec first.
+No crate change, no version bump, no publish (v0.14 / v1.10 precedent).
+Spec: `docs/v1.14-scope.md` — execute the pre-committed protocol (§3) on
+the pinned host once, record exactly one of `invalid-path` /
+`distinguishable-on-this-host` / `still-blind`, then apply the one Q14.6
+edit that matches. The two leaky control patches never enter this tree;
+the T1 bench stays research-only (Q14.4). Previous cycle v1.13 released
+2026-09-04 (`docs/v1.13-scope.md`; Gate #1 PASS against `b0b1be4`);
+nothing is owed from it.
 
 ## Open backlog
 
