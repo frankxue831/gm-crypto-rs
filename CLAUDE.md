@@ -31,22 +31,25 @@ call** — the agent path is branch + PR. The 1.11.0, 1.12.0 and 1.13.0
 publishes were explicit per-release delegations, not a standing grant; the
 tags have always been the maintainer's.
 
-### v1.14 — F21 finalize-window study (assurance cycle; spec pinned 2026-09-23)
+### v1.14 — F21 finalize-window study (assurance cycle; measured 2026-09-23, complete)
 
 No crate change, no version bump, no publish (v0.14 / v1.10 precedent).
-Spec: `docs/v1.14-scope.md` — execute the pre-committed protocol (§3, v4
-per §3a; v4 is the last version this cycle) on the pinned host, record
-exactly one of `invalid-path` /
-`distinguishable-on-this-host` / `still-blind`, then apply the one Q14.6
-edit that matches. The two leaky control patches never enter this tree;
-the T1 bench stays research-only (Q14.4). Previous cycle v1.13 released
-2026-09-04 (`docs/v1.13-scope.md`; Gate #1 PASS against `b0b1be4`);
-nothing is owed from it.
+Spec `docs/v1.14-scope.md`; result `docs/f21-finalize-result.md`: protocol
+v4 label **`distinguishable-on-this-host`**, no annotations (the v3 run and
+its defective observable are recorded there). Q14.6 (b) applied: F21 stays
+open, re-scoped — the narrow `finalize()` window is a research instrument on
+the pinned host, not a CI gate, not a constant-time claim; `SECURITY.md`
+unchanged. The two leaky control patches never enter this tree; the T1
+bench stays research-only. Nothing is owed. Next cycle (v1.15) is not
+chosen; candidates are the Open backlog below — spec first.
 
 ## Open backlog
 
-- AVX-512 `sbox_x64`; **F21** `ct_sm4_cbc_unpad` (composite window is blind —
-  `docs/v1.10-scope.md` Q10.9).
+- AVX-512 `sbox_x64`; **F21** `ct_sm4_cbc_unpad` — composite window blind
+  (`docs/v1.10-scope.md` Q10.9); narrow `finalize()` window distinguishable on
+  the pinned local host only (`docs/f21-finalize-result.md`, v1.14): a
+  research instrument, not a gate; any telemetry target waits for the
+  runner-calibration conditions in `.claude/rules/dudect.md`.
 - `noise_twin_class_split` is required non-blocking telemetry, **not** a
   relative gate until hosted-runner calibration + injected-leak controls pass.
 

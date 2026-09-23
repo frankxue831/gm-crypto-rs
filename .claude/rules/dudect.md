@@ -61,4 +61,10 @@ evidence.
   `mode_ccm::decrypt_with_cipher`) earns no target; any cryptographic work
   inside it voids that and reopens the question.
 - F21 `ct_sm4_cbc_unpad` stays open: the composite window is blind, so a gate
-  there could never fail (`docs/v1.10-scope.md` Q10.9).
+  there could never fail (`docs/v1.10-scope.md` Q10.9). The narrow
+  `Sm4CbcDecryptor::finalize()` window separates an early-return control on
+  the pinned local host (`docs/f21-finalize-result.md`, v1.14) but is **not**
+  a CI target: the window is two to three timer ticks, hosted runners are
+  uncalibrated for it, and the harness's printed `max tau` is unreliable in
+  that regime — normalise `|max t|` by the declared budget instead. No gate,
+  no promotion.
