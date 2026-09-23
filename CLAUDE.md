@@ -31,7 +31,7 @@ call** — the agent path is branch + PR. The 1.11.0, 1.12.0 and 1.13.0
 publishes were explicit per-release delegations, not a standing grant; the
 tags have always been the maintainer's.
 
-### v1.14 — F21 finalize-window study (assurance cycle; spec awaiting must-pin review)
+### v1.14 — F21 finalize-window study (assurance cycle; spec pinned 2026-09-23)
 
 No crate change, no version bump, no publish (v0.14 / v1.10 precedent).
 Spec: `docs/v1.14-scope.md` — execute the pre-committed protocol (§3) on
