@@ -123,7 +123,7 @@ Printed `n` and `max tau` are recorded verbatim and not judged.
 | 5 | amp | 0.017M / −6284.26475 / −48.49137 → **44.436** | 0.020M / +0.41019 / +0.00290 → 0.00290 | 0.016M / +4730.04123 / +37.10435 → 33.446 |
 
 Round 4 constant-time shows the harness artifact §3a describes: printed
-`max tau` −0.94281 at printed `n` ≈ 0 (`|t|` 2.83 over eight cropped
+`max tau` −0.94281 at printed `n` ≈ 0 (`|t|` 2.83 over nine cropped
 samples), which v4 normalises to 0.02000. The phenomenon recurred; the
 normalisation handled it as intended.
 
@@ -228,8 +228,10 @@ date from the v3 setup and were re-hashed before the v4 run, as §3a permits.
 
 - On this host, OS, toolchain, harness, baseline and inputs, the
   `finalize()` window separates the early-return control from the shipping
-  implementation in five of five rounds by a factor of about 30 in `|tau|`,
-  with the amplified control and the liveness control firing every time.
+  implementation in five of five rounds by a factor of at least 30 in
+  `|tau|` (smallest early-return round 0.60950 over the constant-time
+  maximum 0.02000 ≈ 30.5; median over median ≈ 40), with the amplified
+  control and the liveness control firing every time.
 - It says nothing about other hardware, hosted runners, other compilers,
   other input shapes, or the constant-time safety of `strip_pkcs7_block`.
   The wrapper, the decryptor's zeroize-on-drop and the return's drop are all
@@ -290,3 +292,15 @@ v3 run (record only):
 
 The key, IV and plaintexts are fixed public research samples; nothing here is
 a secret-bearing product path.
+
+## 11. Errata
+
+- 2026-09-25, §4: the round-4 constant-time crop was stated as eight
+  samples. `dudect-bencher` prints `max tau` as `max t` over the square root
+  of the cropped subset's size, and (2.82843 / 0.94281)² = 9.000, so the crop
+  kept nine. §6's "six" checks out by the same formula
+  ((2.00000 / 0.81650)² = 6.000).
+- 2026-09-25, §8: "a factor of about 30" restated as the bound it is: at
+  least 30 per the worst pairing (≈ 30.5), about 40 median over median.
+
+No recorded value, derived value, label or annotation changes.
