@@ -31,7 +31,7 @@ call** — the agent path is branch + PR. The 1.11.0, 1.12.0 and 1.13.0
 publishes were explicit per-release delegations, not a standing grant; the
 tags have always been the maintainer's.
 
-### v1.15 — noise-twin calibration (assurance cycle; spec 2026-09-27, awaiting must-pin review)
+### v1.15 — noise-twin calibration (assurance cycle; direction approved 2026-09-27)
 
 No crate change, no version bump, no publish. Spec `docs/v1.15-scope.md`;
 facts in `docs/v0.5-dudect-recalibration.md` (2026-09-27).
@@ -40,16 +40,18 @@ facts in `docs/v0.5-dudect-recalibration.md` (2026-09-27).
 
 - The twin **does not track**. Across 161 demoted-target episodes above 0.20
   its median stayed ≤ 0.0198.
-- The excess is **target × CPU-class specific**, so no single reference can
-  work.
-- The 2026-09-17 nightly red is dispositioned: a `ct_fp_invert` sentinel
-  breach on no-change code, EPYC 9V74 only.
+- The excess is **target × CPU-class specific** in this corpus; this
+  rejects the current reference, not every possible future design.
+- The 2026-09-17 `ct_fp_invert` sentinel breach is recorded on unchanged
+  code, EPYC 9V74 only; its cause remains unexplained.
 
-**Proposed (Q15.5):** a per-(target, SKU) bound table for the four demoted
-targets, from a fixed rule. It binds only after a prospective window with
-committed outcomes (Q15.6).
+**Approved direction (Q15.2 / Q15.5–Q15.7):** retire this twin-relative
+design; derive a frozen candidate table, confirm prospectively, and require
+injected-leak sensitivity evidence before activating relaxed cells. Current
+gates remain authoritative. A baseline-only result leaves activation deferred.
 
-**Next:** must-pin review, then the window, then the implementation PR. The
+**Next:** pin the numerical protocol before calibration code or measurements,
+then derive and validate. Activation requires a separate reviewed PR. The
 v1.14 F21 result stands (`docs/f21-finalize-result.md`).
 
 ## Open backlog
@@ -59,8 +61,10 @@ v1.14 F21 result stands (`docs/f21-finalize-result.md`).
   the pinned local host only (`docs/f21-finalize-result.md`, v1.14): a
   research instrument, not a gate; any telemetry target waits for the
   runner-calibration conditions in `.claude/rules/dudect.md`.
-- `noise_twin_class_split` is required non-blocking telemetry, **not** a
-  relative gate until hosted-runner calibration + injected-leak controls pass.
+- The current `noise_twin_class_split` relative-gate proposal is retired;
+  the twin stays required non-blocking telemetry. Reopening requires a
+  materially different reference, fresh calibration and injected-leak
+  controls (`docs/v1.15-scope.md` Q15.2).
 
 ## Hard constraints (non-negotiable)
 

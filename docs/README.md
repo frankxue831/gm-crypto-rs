@@ -47,6 +47,7 @@ Per-cycle charters — scope, forks, and sign-offs recorded for each cycle. The 
 - [v1.9-scope.md](v1.9-scope.md) — v1.9 TLCP toolkit C FFI scope; Q9.1–Q9.8 (4 forks maintainer-locked).
 - [v1.10-scope.md](v1.10-scope.md) — v1.10 assurance cycle (non-publishing); Q10.1–Q10.8. Closes F16 by wiring gmssl interop into CI against a pinned from-source oracle — after finding the oracle had silently drifted to 3.2.0 and the "11/11" claim was unreproducible. Also refutes the F21 audit's suggested dudect class-split axis and records the three W2 outcomes committed in advance.
 - [v1.11-scope.md](v1.11-scope.md) — v1.11 `RustCrypto` `aead` 0.6 trait fit scope; Q11.1–Q11.10. Records the two constraints that are not free choices: `aead` 0.6 blanket-implements `Aead` for every `AeadInOut` (so a direct `impl Aead` cannot compile), and the CCM tag/nonce sets are sealed typenum bounds so an invalid combination is a compile error rather than a runtime `None`.
+- [v1.15-scope.md](v1.15-scope.md) — hosted-runner gate-calibration charter; retires the current twin-based relative proposal, requires a frozen derivation and prospective confirmation, and retains injected-leak controls before activation. Numerical protocol pending must-pin review.
 
 ## Design & decomposition
 

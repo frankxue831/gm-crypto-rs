@@ -52,9 +52,16 @@ evidence.
   `ct_sign_k_class` and `ct_hmac_sm3` (class-split image noise; HMAC has no
   non-composite backstop). `negative_control` must fire every run
   (`|tau|>1.0`, gated on the **min**).
-- Don't re-add the v0.19 fix-vs-fix relative gate (falsified). Don't turn
-  `noise_twin_class_split` into a relative gate until calibration +
-  injected-leak controls pass.
+- Don't re-add the v0.19 fix-vs-fix relative gate (falsified). The current
+  noise-twin relative proposal is retired (v1.15 Q15.2); the twin stays
+  required non-blocking telemetry. Reopening needs a materially different
+  reference, fresh hosted-runner calibration and injected-leak controls.
+- v1.15 calibration is a candidate-table study, not an active gate change.
+  Pin the numerical protocol before implementation; freeze the table before
+  prospective confirmation. Relaxed cells require target-specific injected-
+  leak sensitivity evidence before activation; baseline-only results cannot
+  authorize it. Sparse/unknown/incompatible cells keep current policy. See
+  `docs/v1.15-scope.md` Q15.5–Q15.7; PR-smoke policy is separate.
 - Don't add a target "because the cycle touched crypto" without a
   secret-dependent window: GCM decryptor, TLCP CBC deprotect, X.509 parse are
   public inputs or already covered. A pure delegator (`Sm4CcmDecryptor` over
