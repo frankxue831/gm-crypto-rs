@@ -23,7 +23,7 @@ history, file it.
 | | |
 |---|---|
 | Live on crates.io | **`1.13.0`** — all three crates, 2026-09-04 from `5c0ae59` (publish delegated for this release); tag `v1.13.0` on `origin`, ED25519-verified. Previous: `1.12.0` 2026-09-04 from `b0c6679`, tag `v1.12.0` ED25519-verified |
-| Workspace version | `1.13.0` = live. The next bump is the v1.14 release-prep PR. A new minor does not always mean crates.io (v0.14 / v1.10 were assurance cycles); don't bump or publish for a no-crate-change cycle |
+| Workspace version | `1.13.0` = live. The next bump is the release-prep PR of the next publishing cycle. A new minor does not always mean crates.io (v0.14 / v1.10 / v1.14 / v1.15 are assurance cycles); don't bump or publish for a no-crate-change cycle |
 | Gate #1 | `docs/ECOSYSTEM.md` §8 must PASS before every publish; latest record `docs/v1.13.0-gate1-evidence.md`. The gated SHA is never the release SHA: the gate attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty, and a PR touching those re-owes it. Running the gate script is ordinary agent work; publishing is not |
 
 `cargo publish` and the SSH-signed tag are the **maintainer's authenticated
@@ -31,17 +31,26 @@ call** — the agent path is branch + PR. The 1.11.0, 1.12.0 and 1.13.0
 publishes were explicit per-release delegations, not a standing grant; the
 tags have always been the maintainer's.
 
-### v1.14 — F21 finalize-window study (assurance cycle; measured 2026-09-23, complete)
+### v1.15 — noise-twin calibration (assurance cycle; spec 2026-09-27, awaiting must-pin review)
 
-No crate change, no version bump, no publish (v0.14 / v1.10 precedent).
-Spec `docs/v1.14-scope.md`; result `docs/f21-finalize-result.md`: protocol
-v4 label **`distinguishable-on-this-host`**, no annotations (the v3 run and
-its defective observable are recorded there). Q14.6 (b) applied: F21 stays
-open, re-scoped — the narrow `finalize()` window is a research instrument on
-the pinned host, not a CI gate, not a constant-time claim; `SECURITY.md`
-unchanged. The two leaky control patches never enter this tree; the T1
-bench stays research-only. Nothing is owed. Next cycle (v1.15) is not
-chosen; candidates are the Open backlog below — spec first.
+No crate change, no version bump, no publish. Spec `docs/v1.15-scope.md`;
+facts in `docs/v0.5-dudect-recalibration.md` (2026-09-27).
+
+**Findings (the corpus is 252 nightly jobs, 2026-08-11 to 09-27):**
+
+- The twin **does not track**. Across 161 demoted-target episodes above 0.20
+  its median stayed ≤ 0.0198.
+- The excess is **target × CPU-class specific**, so no single reference can
+  work.
+- The 2026-09-17 nightly red is dispositioned: a `ct_fp_invert` sentinel
+  breach on no-change code, EPYC 9V74 only.
+
+**Proposed (Q15.5):** a per-(target, SKU) bound table for the four demoted
+targets, from a fixed rule. It binds only after a prospective window with
+committed outcomes (Q15.6).
+
+**Next:** must-pin review, then the window, then the implementation PR. The
+v1.14 F21 result stands (`docs/f21-finalize-result.md`).
 
 ## Open backlog
 
