@@ -19,6 +19,36 @@ only a condensed current-release block — see its `Don't` section.
 
 ## Cycles
 
+**v1.14 — F21 finalize-window study; assurance cycle, NON-PUBLISHING (on
+`main`), measured 2026-09-23.** Workspace stays `1.13.0`; no crate change, no
+CHANGELOG entry, no publish (the v0.14 / v1.10 precedent). One item, spec'd in
+`docs/v1.14-scope.md` (#200; the maintainer approved Q14.1–Q14.6 as written):
+run the pre-committed narrow-window protocol for `Sm4CbcDecryptor::finalize()`
+on one pinned local host (Apple M1 Pro, macOS 27.0, rustc 1.94.1) and
+close or re-scope F21 by the single label it yields, all four outcomes
+committed before the first run. It built on the #199 preflight
+(`tests/f21_finalize_inputs.rs`: the two invalid-padding classes and the
+single-consumption `RefCell<Option<_>>` wrapper). The Q14.2 pre-check showed
+`Instant::now()` advancing in 41.67 ns ticks, so the leak signature is
+sub-tick. The **v3 run's mechanical label was `still-blind`**, but only
+because `dudect-bencher` divides `max t` by the size of the winning percentile
+crop: one constant-time round's crop kept six samples and printed `tau` 0.82
+from noise. The maintainer pinned **protocol v4** (#201: `|tau|` =
+`|max t| / √DUDECT_SAMPLES`, nothing else changed, the last version this
+cycle) knowing that data existed. The fresh **v4 run (#202)** — 15 runs, 63 s
+of a 30-minute budget — labelled **`distinguishable-on-this-host`, no
+annotations**: early-return median `|tau|` 0.61990 against a constant-time
+maximum of 0.02000 (at least 30× on the worst pairing), with the amplified and
+liveness controls firing in every run; the pre-check median sat at 3 ticks, on
+a knife-edge (v3's had read 2). An independent reviewer recomputed every
+`|tau|` from the raw logs (3 items raised, 3 fixed). **Q14.6 (b) applied:**
+F21 stays open, re-scoped — the narrow window is a research instrument on the
+pinned host, not a CI gate and not a constant-time claim; `SECURITY.md`
+unchanged; the T1 bench and both leaky control patches stay out of the tree,
+identified by SHA-256. A post-merge re-check (#203) corrected one miscount in
+the record (the round-4 crop kept nine samples, not eight) and restated
+"about 30" as a lower bound; no value, label or annotation moved.
+
 **v1.13 — streaming-CCM C ABI + zeroize across the SM4 streaming family;
 PUBLISHED 2026-09-04 from `5c0ae59` (1.13.0, all three crates; publish
 delegated for this release).** Two additive items in one
