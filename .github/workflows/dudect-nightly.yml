@@ -1,540 +1,90 @@
-name: dudect nightly (deeper budget)
+name: dudect build-only investigation
 
-# Cost-conscious trigger model (added during the post-v0.6.0 CI sweep):
-#
-# - REMOVED `push: branches: [main]`. Previously every merge to `main`
-#   fired the full 3-feature × 100K-sample matrix (~45 billed minutes
-#   per merge on `ubuntu-latest`). During rapid-merge weeks this was
-#   the single biggest billed-minute consumer. The PR-smoke
-#   (`dudect-pr.yml`) already gated every commit at 10K before merge,
-#   and the daily cron at 05:00 UTC catches statistical drift at 100K
-#   within 24h — so the merge trigger was duplicative. If you need an
-#   off-schedule deep run after a merge (e.g. a crypto-touching PR
-#   landed and you want the 100K confirmation before the next nightly
-#   cron), use `workflow_dispatch`:
-#     gh workflow run dudect-nightly.yml --ref main
-#
-# - KEPT `schedule:` (daily cron — the actual regression watch).
-# - KEPT `workflow_dispatch:` (manual ad-hoc reruns, including
-#   post-merge confirmation when needed).
+# Research branch only. This replaces a registered workflow solely so that
+# workflow_dispatch can build a frozen source revision without timing it.
+# Never merge this branch into main.
 on:
-  schedule:
-    - cron: '0 5 * * *'  # 05:00 UTC daily
   workflow_dispatch:
-
-# `cancel-in-progress: false` is intentional here — a partially-
-# completed 100K-sample run is wasted compute; we'd rather queue
-# behind it than discard 10+ minutes of measurement. (Compare with
-# `dudect-pr.yml` and `ci.yml`, which both cancel in progress.)
-concurrency:
-  group: dudect-nightly-${{ github.ref }}
-  cancel-in-progress: false
-
-env:
-  CARGO_TERM_COLOR: always
 
 permissions:
   contents: read
 
+env:
+  RUSTUP_TOOLCHAIN: 1.95.0
+  CARGO_TERM_COLOR: never
+
 jobs:
-  full:
-    name: timing-leak nightly (100K×5 median, |tau|<=0.20, features=${{ matrix.features }})
-    # v0.18 W1 — pinned `ubuntu-24.04` (OS-label pin, was `ubuntu-latest`):
-    # freezes the OS-major axis against the future `ubuntu-latest`→26.04 roll.
-    # The load-bearing drift fix is the exact toolchain pin below; the
-    # multi-run median absorbs the residual 24.04 image-refresh noise. The
-    # gate stays on the 24.04 noise floor it was calibrated against. See
-    # docs/v0.18-scope.md Q18.3 + docs/v0.5-dudect-recalibration.md.
+  inspect:
     runs-on: ubuntu-24.04
-    # v0.18 W1 — 5×(100K) sequential bench passes + cold-cache build.
-    # v1.0.x (2026-06-07) — bumped 25 → 40. The `default` (linear-scan
-    # S-box) and full-feature legs are the slowest and were hitting the
-    # 25-min wall at ~25m15s (GitHub shows the timed-out leg as
-    # "cancelled"), so they never reached the gate — half the matrix went
-    # red on a timeout, not a leak. The 100K×5 budget is the calibrated
-    # measurement contract and is NOT reduced; 40 min adds headroom while
-    # staying bounded. See docs/v0.5-dudect-recalibration.md (2026-06-07).
-    timeout-minutes: 40
-    # Override rust-toolchain.toml (stable) for every command in this job.
-    env:
-      RUSTUP_TOOLCHAIN: 1.95.0
-    strategy:
-      fail-fast: false
-      matrix:
-        # v0.4 W3 — second matrix entry under `sm4-bitsliced` exercises
-        # the bitsliced S-box gate sequence. Same `|tau| <= 0.20` gate
-        # applies to both configurations.
-        # v0.5 W4 (phase 1) — third entry under `sm4-bitsliced-simd`
-        # exercises the SIMD-packed-bitsliced dispatch (phase 1:
-        # transparent delegate to the single-block bitslice; phase 2 /
-        # phase 3 swap in AVX2 / NEON intrinsics). The new
-        # `ct_sm4_encrypt_block_bitsliced_simd` target gates at
-        # `|tau| <= 0.20`.
-        # v0.8 W4 — fourth entry under `sm4-bitsliced-simd,sm4-aead`
-        # exercises SM4-GCM / SM4-CCM under the SIMD-packed cipher
-        # path. The new `ct_sm4_gcm_decrypt` and `ct_sm4_ccm_decrypt`
-        # targets are cfg-gated on `sm4-aead`; same `|tau| <= 0.20`
-        # gate at the 100K-sample budget.
-        # v0.12 W3 — the fourth entry also carries `sm4-xts`, gating the
-        # `ct_sm4_xts_decrypt` target (cfg-gated on `sm4-xts`) at a CTS
-        # data-unit length; same `|tau| <= 0.20` gate.
-        features:
-          - "default"
-          - "sm4-bitsliced"
-          - "sm4-bitsliced-simd"
-        # v1.1 W3 — the fourth pass also carries `sm2-key-exchange`, gating
-        # the `ct_sm2_key_exchange` target. v1.7 W3 adds `tlcp`, gating
-        # `ct_tlcp_cbc_deprotect` (the Lucky13 residual guard). Same
-        # `|tau| <= 0.20` gate.
-          - "sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp"
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      # v0.18 W1 — PINNED (was @stable). The toolchain is the load-bearing
-      # drift axis: the 2026-05-12 ubuntu-24.04 image refresh rolled Rust
-      # 1.94.1 → 1.95.0 and shifted the ct_fn_invert / ct_fp_invert noise
-      # floor (docs/v0.5-dudect-recalibration.md). Pin captured empirically
-      # from the "Capture runner environment" rustc -Vv; MUST be >= MSRV 1.85.
-      # A DELIBERATE bump is a reviewed re-baseline: bump here, dispatch the
-      # nightly several times, confirm medians stable, record the new floor
-      # (with ImageVersion + kernel) in docs/v0.5-dudect-recalibration.md.
-      # See docs/v0.18-scope.md Q18.4.
-      - uses: dtolnay/rust-toolchain@1.95.0
-      - name: Verify effective dudect toolchain
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import os
-          import subprocess
-          rustc = subprocess.check_output(["rustc", "-Vv"], text=True).strip()
-          cargo = subprocess.check_output(["cargo", "-V"], text=True).strip()
-          active = subprocess.check_output(["rustup", "show", "active-toolchain"], text=True).strip()
-          print(rustc, cargo, active, sep="\n")
-          if os.environ.get("RUSTUP_TOOLCHAIN") != "1.95.0":
-              raise SystemExit("dudect requires job-level RUSTUP_TOOLCHAIN=1.95.0")
-          if not (rustc.startswith("rustc 1.95.0 (") and "release: 1.95.0" in rustc.splitlines()
-                  and "host: x86_64-unknown-linux-gnu" in rustc.splitlines()):
-              raise SystemExit("unexpected effective dudect rustc identity")
-          if not cargo.startswith("cargo 1.95.0 ("):
-              raise SystemExit("unexpected effective dudect cargo identity")
-          if active.split()[0] != "1.95.0-x86_64-unknown-linux-gnu":
-              raise SystemExit("unexpected effective dudect active toolchain")
-          PY
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@v4
         with:
-          # Keyed on the matrix job-index (0-3), NOT ${{ matrix.features }}:
-          # the 4th leg's feature string contains commas
-          # (sm4-bitsliced-simd,sm4-aead,sm4-xts) and Swatinem/rust-cache
-          # rejects commas in `shared-key`
-          # (ValidationError: Key ... cannot contain commas), so that leg's
-          # build cache was never restored. job-index keeps each leg's cache
-          # distinct; the job NAME still carries the human-readable features=.
-          shared-key: gmcrypto-stable-${{ strategy.job-index }}
-
-      # v0.5 W4 phase 2 prep — capture runner environment so future
-      # calibration drifts can be correlated with `|tau|` shifts.
-      # See `docs/v0.5-dudect-recalibration.md`.
-      - name: Capture runner environment (for noise-floor correlation)
-        run: |
-          set +e
-          echo "=== Runner image ==="
-          echo "ImageVersion: ${ImageVersion:-<unset>}"
-          echo "ImageOS:      ${ImageOS:-<unset>}"
-          echo
-          echo "=== Kernel ==="
-          uname -a
-          echo
-          echo "=== CPU ==="
-          lscpu 2>/dev/null | head -30 || cat /proc/cpuinfo | head -25
-          echo
-          echo "=== CPU governor / turbo state ==="
-          for cpu in /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor; do
-            [ -r "$cpu" ] && echo "$cpu = $(cat "$cpu")"
-          done
-          [ -r /sys/devices/system/cpu/intel_pstate/no_turbo ] && \
-            echo "intel_pstate/no_turbo = $(cat /sys/devices/system/cpu/intel_pstate/no_turbo)"
-          echo
-          echo "=== Rust ==="
-          rustc -Vv
-          cargo -V
-
-      - name: Run dudect harness (nightly budget, 5 runs for median)
+          ref: a832884a95a83488d853233da7cde5e37fc6b845
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: Capture reconstruction identity
         shell: bash
-        env:
-          DUDECT_SAMPLES: "100000"
-          DUDECT_RUNS: "5"
-          MATRIX_FEATURES: ${{ matrix.features }}
-        run: |
-          set -euxo pipefail
-          # v0.18 W1 — multi-run median robustness. The harness emits one
-          # `max tau` per target per process; it has NO multi-run logic
-          # (timing_leaks.rs is byte-unchanged). We loop the bench DUDECT_RUNS
-          # times into numbered logs; the parse step takes the per-target
-          # MEDIAN |tau| (robust to the run-to-run variance the 2026-05-12
-          # ubuntu-24.04 image update introduced; see
-          # docs/v0.5-dudect-recalibration.md). 5×~75s at 100K (the timeout
-          # is raised to 25 min to cover the loop + cold-cache build).
-          # v0.5 W5 — `Sm2PrivateKey::from_scalar(U256)` bench callsites
-          # require `crypto-bigint-scalar`; combine with matrix SM4 feature.
-          if [ "$MATRIX_FEATURES" = "default" ]; then
-            FEATURES="crypto-bigint-scalar"
-          else
-            FEATURES="$MATRIX_FEATURES,crypto-bigint-scalar"
-          fi
-          for i in $(seq 1 "$DUDECT_RUNS"); do
-            echo "=== dudect run $i/$DUDECT_RUNS (features=$FEATURES) ==="
-            cargo bench --bench timing_leaks --features "$FEATURES" 2>&1 | tee "dudect-nightly-$i.log"
-          done
-
-      - name: Parse and gate
-        shell: bash
-        env:
-          # Must be re-declared here: `env` is step-scoped, so without this the
-          # parse step sees an empty MATRIX_FEATURES and the feature-conditional
-          # gates (sm4-bitsliced-simd / sm4-aead / sm4-xts) would never fire.
-          MATRIX_FEATURES: ${{ matrix.features }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          # v0.18 W1 — multi-run median gate (same shape as the PR-smoke job;
-          # nightly loops N=5 at 100K). Reads dudect-nightly-1.log..N.log,
-          # accumulates findings[name]=[|tau|,...], gates the per-target MEDIAN
-          # for required_low + the sentinel, and the MIN for negative_control
-          # (must fire EVERY run). Gate on |tau| (scale-free), not |t|.
-          import re, sys, glob, statistics, os
-
-          pat = re.compile(
-              r"^bench\s+(\S+)\s*\.+\s*:.*?max tau\s*=\s*([+\-]?\d+\.\d+)",
-              re.M,
-          )
-          logs = sorted(glob.glob("dudect-nightly-*.log"))
-          assert logs, "no dudect-nightly-*.log files found — bench loop did not run"
-
-          # Runner CPU class is the variable that explained both the 2026-08-07
-          # and the 2026-08-22 ct_sm4_cbc_decrypt_fanout gate failures (EPYC
-          # 9V74 on each, unexplained at the time because this line did not
-          # exist). Hosted ubuntu-24.04 draws a heterogeneous pool and composite
-          # -window targets read materially higher on some SKUs, so the verdicts
-          # below are only interpretable next to the model name. See
-          # docs/v0.5-dudect-recalibration.md, 2026-08-23.
-          cpu = "unknown"
-          try:
-              with open("/proc/cpuinfo") as fh:
-                  for line in fh:
-                      if line.startswith("model name"):
-                          cpu = line.split(":", 1)[1].strip()
-                          break
-          except OSError:
-              pass
-          print(f"RUNNER-CPU: {cpu}")
-
-          findings = {}
-          for path in logs:
-              text = open(path).read()
-              matches = list(pat.finditer(text))
-              assert matches, f"no tau values parsed from {path}; tail:\n{text[-1000:]}"
-              for m in matches:
-                  findings.setdefault(m.group(1), []).append(abs(float(m.group(2))))
-
-          n_runs = len(logs)
-          for name, taus in findings.items():
-              if len(taus) != n_runs:
-                  print(f"WARN: {name} measured {len(taus)}/{n_runs} runs: {taus}")
-
-          def med(name): return statistics.median(findings[name]) if name in findings else None
-          def mn(name):  return min(findings[name]) if name in findings else None
-          def telem(name):
-              taus = findings.get(name)
-              if not taus: return "not measured"
-              return (f"runs={['%.4f' % t for t in taus]} median={statistics.median(taus):.4f} "
-                      f"min={min(taus):.4f} max={max(taus):.4f}")
-
-          # negative_control MUST flag (large |tau|) on EVERY run — gate on MIN.
-          required_high = {"negative_control": 1.0}
-          # 0.20 chosen empirically (matches the smoke gate). See the
-          # PR-smoke workflow for the calibration rationale.
-          required_low  = {
-              # v0.1 baseline targets.
-              "ct_mul_g": 0.20,
-              "ct_mul_var": 0.20,
-              "ct_sign": 0.20,
-              # v0.2 W0 — nonce-class split (closes the v0.1 structural blind spot)
-              # plus direct invert diagnostics (drives the W5 Fermat-invert
-              # decision tree; sign-level dudect dilutes invert by ~50x).
-              # v0.4 release-prep raised `ct_sign_k_class` 0.20 → 0.25 for the
-              # ubuntu-24.04 noise floor. v1.0.x (2026-06-07) then DEMOTED it
-              # to the gross-regression sentinel @0.55 (below), alongside the
-              # two invert diagnostics: the same two-input class-split geometry
-              # made it image-noise-dominated — the 100K nightly median reached
-              # 0.2570 / 0.2582 / 0.2768 (> 0.25) for ~2 weeks while the
-              # AUTHORITATIVE direct diagnostics `ct_fn_invert` / `ct_fp_invert`
-              # stayed at 0.0053 / 0.0115 (no real leak). The direct diagnostics
-              # remain the invert-leak guards; the honest trade is that a medium
-              # k-only full-sign leak in [0.25, 0.55] is no longer
-              # authoritatively gated until the class-split-aware noise twin is
-              # calibrated and validated with injected-leak controls. See
-              # docs/v0.5-dudect-recalibration.md (2026-08-10).
-              #
-              # v0.5 W4 phase 2 prep — `ct_fn_invert` and `ct_fp_invert`
-              # moved out of `required_low` and into
-              # `gross_regression_sentinel` (below) at the 100K nightly
-              # budget. The 2026-05-12 GH Actions `ubuntu-24.04`
-              # runner-image update (image `20260413.86.1` →
-              # `20260512.134.1`, kernel `6.17.0-1010-azure` →
-              # `6.17.0-1013-azure`, Rust toolchain `1.94.1` →
-              # `1.95.0`; see
-              # https://github.com/actions/runner-images/releases)
-              # raised the empirical 100K noise floor on these two
-              # direct invert diagnostics from ~0.006 (v0.2 baseline)
-              # to intermittent values in [0.29–0.40], with the same
-              # commit passing and failing on consecutive nightly
-              # runs (data in
-              # `docs/v0.5-dudect-recalibration.md`). The 0.20 gate
-              # at the 100K budget is no longer authoritative for
-              # those two targets. A gross-regression sentinel at
-              # `|tau| ≥ 0.55` retains protection against a real
-              # cryptographic leak (e.g. the v0.1
-              # `crypto-bigint 0.6 ConstMontyForm::invert` at
-              # `|tau| ≈ 0.70`) without firing on the observed
-              # ubuntu-24.04 noise envelope. The authoritative fix
-              # would be a pinned / noise-isolated dudect runner;
-              # that's deferred to a future scope doc.
-              # (`ct_sign_k_class` was demoted out of required_low to the
-              # gross-regression sentinel @0.55 below — see the note above.)
-              # v0.2 W1 — SM4 timing surfaces. Key schedule and encrypt
-              # share an S-box-and-linear-transform pipeline; both run on
-              # secret-derived state.
-              "ct_sm4_key_schedule": 0.20,
-              "ct_sm4_encrypt_block": 0.20,
-              # v0.7 W3 — SM4-CTR encrypt (Q7.2). Class-split by master
-              # key; dispatches into the same Sm4Cipher path as
-              # ct_sm4_encrypt_block but exercises the W1 length-flexible
-              # encrypt_blocks API (and the SIMD fanout under
-              # sm4-bitsliced-simd). Not cfg-gated — runs under all three
-              # matrix entries.
-              "ct_sm4_ctr_encrypt": 0.20,
-              # v0.2 W3 — HMAC-SM3 keyed MAC. DEMOTED 2026-06-17 to the
-              # gross-regression sentinel @0.55 (below) — the 4th two-input
-              # class-split target image-noise-dominated on ubuntu-24.04. The
-              # 06-14 nightly MEDIAN itself crossed 0.20 (runs 0.014, 0.2375,
-              # 0.016, 0.2196, 0.2135; 3/5 spiked), co-spiking with the invert
-              # pair, so a partial fix (keep nightly @0.20) is falsified. See
-              # docs/v0.5-dudect-recalibration.md (2026-06-17 resolution).
-              # v0.2 W2 — SM2 decrypt, class-split by recipient d_B.
-              # Ciphertext is encrypted to a third party so both classes
-              # fail at the MAC check via identical control flow; only
-              # d_B's bits drive any timing differential.
-              "ct_sm2_decrypt": 0.20,
-              # v0.3 W2 — encrypted-PKCS#8 decrypt, class-split by
-              # password bytes. Both classes' blobs are valid for their
-              # password so both succeed via identical control flow.
-              "ct_pkcs8_decrypt": 0.20,
-          }
-          # v0.5 W4 — extra target only present under
-          # `sm4-bitsliced-simd`. Phase 1 measures the same byte
-          # sequence as `ct_sm4_encrypt_block`; the gate stays at
-          # 0.20 across the three-phase rollout.
-          matrix_features = os.environ.get("MATRIX_FEATURES", "")
-          if "sm4-bitsliced-simd" in matrix_features:
-              required_low["ct_sm4_encrypt_block_bitsliced_simd"] = 0.20
-              # v0.6 W6 — CBC-decrypt SIMD-fanout target (Q6.7).
-              required_low["ct_sm4_cbc_decrypt_fanout"] = 0.20
-          if "sm4-aead" in matrix_features:
-              # v0.8 W4 — SM4-GCM / SM4-CCM decrypt targets (Q8.7 of
-              # docs/v0.7-aead-scope.md). Class-split by master key
-              # with valid (ct, tag) pairs for both classes; same
-              # 0.20 gate at the 100K-sample budget.
-              required_low["ct_sm4_gcm_decrypt"] = 0.20
-              required_low["ct_sm4_ccm_decrypt"] = 0.20
-              # v0.9 W3 added the buffered-GCM bench and docs/v0.9-scope.md
-              # specified `|tau| < 0.20` for it, but the gate entry was never
-              # written — so from v0.9 to 2026-08-23 this target emitted a
-              # |tau| line every run and was compared against nothing. The
-              # completeness check iterates required_low keys, so an absent
-              # key is simply never required and the "measured < n_runs"
-              # backstop cannot see it. docs/v0.10-scope.md meanwhile cites
-              # this target as the gate covering the buffered-GCM FFI path's
-              # constant-time property. Closing it at the documented 0.20.
-              # Evidence (docs/v0.5-dudect-recalibration.md, 2026-08-23):
-              # 34 runs / 142 measurements across both budgets, 0 run-medians
-              # over 0.20, worst 0.1205 (100K) and 0.1047 (10K). Its sibling
-              # ct_sm4_gcm_decrypt above is quieter on the median but had MORE
-              # single-run excursions past 0.20 (2/100 vs 1/100) and has held
-              # this gate since v0.8.
-              required_low["ct_sm4_gcm_decrypt_buffered"] = 0.20
-          if "sm4-xts" in matrix_features:
-              # v0.12 W3 — SM4-XTS decrypt target (Q12.9 of
-              # docs/v0.12-scope.md). Class-split by master key at a CTS
-              # (non-block-multiple) length; same 0.20 gate at 100K.
-              required_low["ct_sm4_xts_decrypt"] = 0.20
-          if "sm2-key-exchange" in matrix_features:
-              # v1.1 W3 — SM2 key-exchange target. Class-split by the
-              # initiator's static d_A; per-class VALID responder
-              # transcript so both classes succeed via identical control
-              # flow. Same 0.20 gate.
-              required_low["ct_sm2_key_exchange"] = 0.20
-          if "tlcp" in matrix_features:
-              # v1.7 W3 — TLCP SM4-CBC Lucky13 deprotect target (Q7.8).
-              # Class-split by recovered-fragment length with a FIXED key,
-              # so the equalized inner-hash compression count is what is
-              # measured. Same 0.20 gate.
-              required_low["ct_tlcp_cbc_deprotect"] = 0.20
-
-          # 2026-09-01 — SKU-conditional bound for ct_sm4_cbc_decrypt_fanout.
-          # On EPYC 9V74 (Azure-custom, the pool's noisiest SKU) the observed
-          # no-change run-median distribution spans 0.0355–0.2904 across 14
-          # draws with three false reds (2026-08-07 / 08-22 / 08-28, the last
-          # a same-night pass/fail pair on identical code), so the 0.20
-          # primary gate sits inside that class's noise band and cannot be
-          # authoritative there. On that SKU alone the bound is raised to the
-          # established 0.55 gross-regression convention — still fires on a
-          # v0.1-class real leak (~0.70), and a real code-level leak is
-          # SKU-independent so the 0.20 gate on quiet-SKU draws (most nights)
-          # catches it within days. Every other CPU — including unrecognized
-          # new SKUs, fail-closed — keeps 0.20. The target stays in
-          # required_low, so completeness gating is unchanged. See
-          # docs/v0.5-dudect-recalibration.md (2026-09-01).
-          fanout = "ct_sm4_cbc_decrypt_fanout"
-          if fanout in required_low and "EPYC 9V74" in cpu:
-              required_low[fanout] = 0.55
-              print(f"SKU-GATE: {fanout} bound 0.20 -> 0.55 on this SKU "
-                    "(9V74 no-change noise band; docs/v0.5-dudect-recalibration.md 2026-09-01)")
-
-          # v0.5 W4 phase 2 prep — gross-regression sentinel for
-          # targets too noisy for a 0.20 gate on the current
-          # ubuntu-24.04 runner image but still worth watching for
-          # an actual cryptographic regression. `|tau| ≥ 0.55` is
-          # well above the observed noise envelope (0.29–0.40) and
-          # well below a real leak (the v0.1 ConstMontyForm::invert
-          # measured `|tau| ≈ 0.70` in isolation). See
-          # `docs/v0.5-dudect-recalibration.md` for the data.
-          # v0.19 W3 — the relative gate (above) was FALSIFIED and demoted to
-          # telemetry, so this gross-regression sentinel is again the SOLE
-          # authoritative nightly gate for these two targets (the v0.18 posture).
-          # ct_fp_invert's 100K median reached 0.2606 on the simd leg (the noise
-          # is back); the sentinel @0.55 tolerates that envelope while still
-          # firing on a real leak (~0.70). Q19.5 honest fallback.
-          gross_regression_sentinel = {
-              "ct_fn_invert": 0.55,
-              "ct_fp_invert": 0.55,
-              # v1.0.x (2026-06-07) — demoted from required_low (was 0.25).
-              # Same two-input class-split geometry as the invert diagnostics,
-              # image-noise-dominated on ubuntu-24.04 (100K nightly median hit
-              # 0.2570–0.2768 for ~2 weeks while the invert sites stayed quiet
-              # → false alarm, no real leak). Sentinel @0.55 still fires on a
-              # gross nonce-path regression (a real leak measures ~0.70).
-              "ct_sign_k_class": 0.55,
-              # 2026-06-17 — demoted from required_low (was 0.20), the 4th
-              # two-input class-split target. ct_hmac_sm3 is constant-time by
-              # construction (two fixed keys, fixed message → identical
-              # compression work), so it can only measure two-input noise; the
-              # 06-14 nightly median crossed 0.20 (3/5 spikes) co-spiking with
-              # the invert pair while 06-16 was quiet. Sentinel @0.55 still
-              # fires on a gross HMAC-key leak. HONEST RESIDUAL: unlike the
-              # invert pair (backstopped by ct_sign), the HMAC primitive has
-              # NO direct non-composite backstop after this — only the diluted
-              # ct_pkcs8_decrypt (iterated PBKDF2) covers key-byte HMAC timing;
-              # ct_tlcp_cbc_deprotect does NOT (fixed key, equalized Lucky13
-              # path). Codex+Grok-reviewed. docs/v0.5-dudect-recalibration.md.
-              "ct_hmac_sm3": 0.55,
-          }
-          # 2026-08-10 — value is non-blocking pending hosted-runner
-          # calibration, but presence in every run is required.
-          required_telemetry = ("noise_twin_class_split",)
-
-          fail = False
-          # Completeness: every REQUIRED + SENTINEL target and the required
-          # telemetry reference must be measured in EVERY run. A target
-          # missing from one numbered log (e.g. a malformed
-          # line the regex skipped) must FAIL — never silently gate the
-          # median/min over a reduced (< n_runs) sample set. v1.0.x (2026-06-07)
-          # added the sentinel dict here: the sentinel loop below prints-without-
-          # failing on a `None` (not-measured) value, so a demoted sentinel
-          # target (e.g. ct_sign_k_class) that went missing/renamed would pass
-          # green — completeness is what guards that. (Pure telemetry — the
-          # noise_floor_* probes — is intentionally NOT completeness-gated.)
-          for name in (*required_high, *required_low, *gross_regression_sentinel, *required_telemetry):
-              got = len(findings.get(name, []))
-              if got != n_runs:
-                  print(f"FAIL: {name} measured {got}/{n_runs} runs (incomplete) — expected all {n_runs}")
-                  fail = True
-          required_high_items = tuple(required_high.items())
-          required_low_items = tuple(required_low.items())
-          gross_regression_sentinel_items = tuple(gross_regression_sentinel.items())
-          blocking_items = required_high_items + required_low_items + gross_regression_sentinel_items
-          if any(name in required_telemetry for name, _ in blocking_items):
-              raise SystemExit("FAIL: required telemetry promoted to a blocking dudect gate")
-          # required_high: gate on MIN (must fire every run).
-          for name, lower_bound in required_high_items:
-              v = mn(name)
-              if v is None: print(f"FAIL: {name} not measured"); fail = True
-              elif v <= lower_bound:
-                  print(f"FAIL: {name} min|tau|={v:.4f} <= {lower_bound} — harness broken ({telem(name)})"); fail = True
-              else: print(f"OK:   {name} min|tau|={v:.4f} (> {lower_bound}) ({telem(name)})")
-          # required_low: gate on MEDIAN (robust to single-run noise).
-          for name, upper_bound in required_low_items:
-              v = med(name)
-              if v is None: print(f"FAIL: {name} not measured"); fail = True
-              elif v > upper_bound:
-                  print(f"FAIL: {name} median|tau|={v:.4f} > {upper_bound} — timing leak ({telem(name)})"); fail = True
-              else: print(f"OK:   {name} median|tau|={v:.4f} (<= {upper_bound}) ({telem(name)})")
-
-          # v0.19 (Q19.1) — self-calibrating RELATIVE gate for the two direct-
-          # invert diagnostics, gated against a MATCHED-SENSITIVITY fix-vs-fix
-          # probe P (same operation, identical class inputs).
-          #
-          # *** v0.19 W3 RESULT: the matched-probe hypothesis was FALSIFIED. ***
-          # The 100K calibration (2026-05-30) showed the fix-vs-fix probes stay
-          # UNIFORMLY QUIET (~0.005) while the real class-split targets spike
-          # intermittently into [0.26-0.32] (ct_fp_invert median 0.2606 on the
-          # sm4-bitsliced-simd leg, ratio 50). The runner noise therefore lives
-          # in the TWO-INPUT class-split difference (z_small vs z_large), NOT in
-          # the operation duration a same-input probe can see — so the probe does
-          # NOT track the noise and the relative gate cannot absorb it. The
-          # threshold also stays pinned at ABS_FLOOR=0.20 (probe quiet), so the
-          # relative gate is no better than the fixed 0.20 the noise already
-          # breaks. HONEST FALLBACK (Q19.5): the relative gate is NON-BLOCKING
-          # TELEMETRY; the two targets stay on the v0.18 gross-regression sentinel
-          # @0.55 (below). The probes are KEPT — they are the evidence that the
-          # noise is class-split-specific (input for a v0.20 class-split-aware
-          # reference). See docs/v0.5-dudect-recalibration.md (v0.19 resolution).
-          REL_K = 4.0
-          REL_ABS_FLOOR = 0.20
-          relative_gate = {
-              "ct_fn_invert": "noise_floor_fn_invert",
-              "ct_fp_invert": "noise_floor_fp_invert",
-          }
-          for target, probe in relative_gate.items():
-              t, p = med(target), med(probe)
-              if t is None or p is None:
-                  print(f"REL-TELEMETRY: {target} vs {probe} — not measured (non-blocking)"); continue
-              threshold = max(REL_ABS_FLOOR, REL_K * p)
-              ratio = (t / p) if p > 0 else float("inf")
-              verdict = "would-PASS" if t <= threshold else "would-FAIL"
-              print(f"REL-TELEMETRY: {target} median={t:.4f} vs threshold={threshold:.4f} "
-                    f"(= max({REL_ABS_FLOOR}, {REL_K}*probe={p:.4f}), ratio={ratio:.2f}) → {verdict} (non-blocking)")
-
-          # Gross-regression sentinel (MEDIAN-gated): gates only on egregious
-          # values that would indicate a real cryptographic leak rather than
-          # runner-image noise. Prefix `SENTINEL:` so log readers can
-          # distinguish from the primary gating lines above.
-          for name, upper_bound in gross_regression_sentinel_items:
-              v = med(name)
-              if v is None:
-                  print(f"SENTINEL: {name} not measured")
-              elif v > upper_bound:
-                  print(f"SENTINEL FAIL: {name} median|tau|={v:.4f} > {upper_bound} — gross regression, investigate ({telem(name)})")
-                  fail = True
-              else:
-                  print(f"SENTINEL: {name} median|tau|={v:.4f} (non-blocking; gross-regression gate at {upper_bound}) ({telem(name)})")
-          for name in required_telemetry:
-              print(f"NOISE-TWIN: {name} {telem(name)} (required measurement; non-blocking value)")
-          sys.exit(1 if fail else 0)
-          PY
-
-      - name: Upload raw log
+          mkdir evidence
+          python3 - <<'PYCODE'
+          import os, pathlib, subprocess
+          rustc = subprocess.check_output(["rustc", "-Vv"], text=True)
+          cargo = subprocess.check_output(["cargo", "-V"], text=True)
+          active = subprocess.check_output(["rustup", "show", "active-toolchain"], text=True)
+          if not (rustc.startswith("rustc 1.95.0 (") and "host: x86_64-unknown-linux-gnu" in rustc.splitlines() and cargo.startswith("cargo 1.95.0 (") and active.split()[0] == "1.95.0-x86_64-unknown-linux-gnu"):
+              raise SystemExit("wrong effective toolchain")
+          out = pathlib.Path("evidence")
+          out.joinpath("toolchain.txt").write_text(rustc + cargo + active)
+          keys = ("ImageOS", "ImageVersion", "RUSTUP_TOOLCHAIN", "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CARGO_BUILD_TARGET", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_SHA")
+          out.joinpath("environment.txt").write_text("".join(f"{key}={os.environ.get(key, '<unset>')}\n" for key in keys))
+          for filename, command in (("source.txt", ["git", "rev-parse", "HEAD", "HEAD^{tree}"]), ("cpu.txt", ["lscpu"]), ("kernel.txt", ["uname", "-a"])):
+              out.joinpath(filename).write_bytes(subprocess.check_output(command))
+          out.joinpath("LIMITATIONS.txt").write_text("Build-only reconstruction; no timing execution. Original lockfile and binary unavailable. Newly resolved dependencies and current runner image cannot prove identity with the original failed binary.\n")
+          PYCODE
+          cargo generate-lockfile
+          cp Cargo.lock evidence/dependency-lock.txt
+      - name: Build frozen source without running benchmarks
+        shell: bash
+        run: |
+          set -euo pipefail
+          FEATURES=sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp,crypto-bigint-scalar
+          cargo metadata --locked --features "$FEATURES" --filter-platform x86_64-unknown-linux-gnu --format-version 1 > evidence/cargo-metadata.json
+          cargo bench --locked --no-run --bench timing_leaks --features "$FEATURES" --message-format=json > evidence/build.json
+          python3 - <<'PYCODE'
+          import json, pathlib, shutil, subprocess
+          out = pathlib.Path("evidence")
+          executables = []
+          for line in out.joinpath("build.json").read_text().splitlines():
+              item = json.loads(line)
+              if item.get("reason") == "compiler-artifact" and item.get("target", {}).get("name") == "timing_leaks" and item.get("executable"):
+                  executables.append(item["executable"])
+          if len(executables) != 1:
+              raise SystemExit(f"expected one benchmark executable, got {len(executables)}")
+          binary = out / "timing_leaks.bin"
+          shutil.copyfile(executables[0], binary)
+          with out.joinpath("timing_leaks.asm").open("w") as handle:
+              subprocess.run(["objdump", "-d", "-C", str(binary)], stdout=handle, check=True)
+          with out.joinpath("symbols.txt").open("w") as handle:
+              subprocess.run(["nm", "-C", "--defined-only", str(binary)], stdout=handle, check=True)
+          PYCODE
+      - name: Hash preserved outputs
         if: always()
-        uses: actions/upload-artifact@v7
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          import hashlib, json, pathlib
+          root = pathlib.Path("evidence")
+          if not root.exists():
+              raise SystemExit("missing evidence directory")
+          records = [{"name": p.name, "bytes": p.stat().st_size, "sha256": hashlib.sha256(p.read_bytes()).hexdigest()} for p in sorted(root.iterdir()) if p.is_file() and p.name != "manifest.json"]
+          root.joinpath("manifest.json").write_text(json.dumps(records, indent=2) + "\n")
+          PYCODE
+      - uses: actions/upload-artifact@v7
+        if: always()
         with:
-          name: dudect-nightly-log-${{ matrix.features }}
-          path: dudect-nightly-*.log
-          retention-days: 30
+          name: dudect-build-only-inspection
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 90
