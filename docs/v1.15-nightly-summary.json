@@ -1,0 +1,29 @@
+{
+  "actual_rustc": {
+    "rustc 1.97.1 (8bab26f4f 2026-07-14)": 156,
+    "rustc 1.98.0 (88d9e12ae 2026-08-18)": 60,
+    "rustc 1.98.1 (48a229cea 2026-09-01)": 72
+  },
+  "job_conclusions": {
+    "cancelled": 2,
+    "failure": 5,
+    "success": 281
+  },
+  "jobs": 288,
+  "jobs_with_issues": 162,
+  "output_sha256": {
+    "v1.15-nightly-corpus.csv": "157a0c9db8df66b6124f4a6652ddcd580dcba2ef10279535482b589d69c79e3a",
+    "v1.15-nightly-samples.csv": "061c99572a3736953d73aedbd4a6ea8d8b2704e5dc196e23f9ef0d64d0e6b44b"
+  },
+  "run_conclusions": {
+    "cancelled": 1,
+    "failure": 5,
+    "success": 66
+  },
+  "run_events": {
+    "schedule": 48,
+    "workflow_dispatch": 24
+  },
+  "runs": 72,
+  "samples": 26471
+}
