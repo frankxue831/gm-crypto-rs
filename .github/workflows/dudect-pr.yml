@@ -57,6 +57,9 @@ jobs:
       !contains(github.event.head_commit.message, '[no ci]') &&
       !contains(github.event.head_commit.message, '[skip actions]')
     timeout-minutes: 10
+    # Override rust-toolchain.toml (stable) for every command in this job.
+    env:
+      RUSTUP_TOOLCHAIN: 1.95.0
     strategy:
       fail-fast: false
       matrix:
@@ -99,6 +102,26 @@ jobs:
       # (with ImageVersion + kernel) in docs/v0.5-dudect-recalibration.md.
       # See docs/v0.18-scope.md Q18.4.
       - uses: dtolnay/rust-toolchain@1.95.0
+      - name: Verify effective dudect toolchain
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          import subprocess
+          rustc = subprocess.check_output(["rustc", "-Vv"], text=True).strip()
+          cargo = subprocess.check_output(["cargo", "-V"], text=True).strip()
+          active = subprocess.check_output(["rustup", "show", "active-toolchain"], text=True).strip()
+          print(rustc, cargo, active, sep="\n")
+          if os.environ.get("RUSTUP_TOOLCHAIN") != "1.95.0":
+              raise SystemExit("dudect requires job-level RUSTUP_TOOLCHAIN=1.95.0")
+          if not (rustc.startswith("rustc 1.95.0 (") and "release: 1.95.0" in rustc.splitlines()
+                  and "host: x86_64-unknown-linux-gnu" in rustc.splitlines()):
+              raise SystemExit("unexpected effective dudect rustc identity")
+          if not cargo.startswith("cargo 1.95.0 ("):
+              raise SystemExit("unexpected effective dudect cargo identity")
+          if active.split()[0] != "1.95.0-x86_64-unknown-linux-gnu":
+              raise SystemExit("unexpected effective dudect active toolchain")
+          PY
       - uses: Swatinem/rust-cache@v2
         with:
           # Keyed on the matrix job-index (0-3), NOT ${{ matrix.features }}:

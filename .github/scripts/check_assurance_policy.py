@@ -486,8 +486,8 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "GmSSL": "796eafa03285b30a7b70389b5c4ddab6f064fae0339f3b898de0210a4601ab79",
         "cargo-deny": "efc9a2787bc8b48022d35d3419af0e9987c6a11c3a5c44959fc93b1d33be9174",
         "gitleaks scan": "c7889df5e874f1a5cee871c24cd49cc539d845c0627861e49b1a9e6335d1c15f",
-        "PR dudect": "1590d45e0936cc3a0886697501481c8e13cf5f03795fe168e77e78e4218ed289",
-        "nightly dudect": "a281314a0204fc1615a710344dcae9bc42ae72eda5945b8b6d60851072b09466",
+        "PR dudect": "8cf76b3c24c5ed8276c718f51849fbaf3a3cb7459278d797f9ae354815b9e9df",
+        "nightly dudect": "ad3df5c7f838a3a33adc161e1344db833ddbea35631a7685dab8ea88a2b92d74",
     }
     for label, expected_fingerprint in reviewed_job_fingerprints.items():
         require(
@@ -1301,12 +1301,36 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "rustc -Vv\n"
         "cargo -V"
     )
+    dudect_identity_step = [
+        '      - name: Verify effective dudect toolchain',
+        '        shell: bash',
+        '        run: |',
+        "          python3 - <<'PY'",
+        '          import os',
+        '          import subprocess',
+        '          rustc = subprocess.check_output(["rustc", "-Vv"], text=True).strip()',
+        '          cargo = subprocess.check_output(["cargo", "-V"], text=True).strip()',
+        '          active = subprocess.check_output(["rustup", "show", "active-toolchain"], text=True).strip()',
+        '          print(rustc, cargo, active, sep="\\n")',
+        '          if os.environ.get("RUSTUP_TOOLCHAIN") != "1.95.0":',
+        '              raise SystemExit("dudect requires job-level RUSTUP_TOOLCHAIN=1.95.0")',
+        '          if not (rustc.startswith("rustc 1.95.0 (") and "release: 1.95.0" in rustc.splitlines()',
+        '                  and "host: x86_64-unknown-linux-gnu" in rustc.splitlines()):',
+        '              raise SystemExit("unexpected effective dudect rustc identity")',
+        '          if not cargo.startswith("cargo 1.95.0 ("):',
+        '              raise SystemExit("unexpected effective dudect cargo identity")',
+        '          if active.split()[0] != "1.95.0-x86_64-unknown-linux-gnu":',
+        '              raise SystemExit("unexpected effective dudect active toolchain")',
+        '          PY',
+    ]
     for workflow_name, dudect_job in dudect_jobs.items():
         config = dudect_job_config[workflow_name]
         workflow_source = dudect_sources[workflow_name]
         producer = producer_steps[workflow_name]
         checkout_step = step_uses(dudect_job, "actions/checkout@v7")
         toolchain_step = step_uses(dudect_job, "dtolnay/rust-toolchain@1.95.0")
+        identity_step = step_named(dudect_job, "Verify effective dudect toolchain")
+        job_env = indented_block(dudect_job, "env:", 4)
         rust_cache_step = step_uses(dudect_job, "Swatinem/rust-cache@v2")
         capture_step = step_named(
             dudect_job,
@@ -1318,6 +1342,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         expected_headers = (
             "- uses: actions/checkout@v7",
             "- uses: dtolnay/rust-toolchain@1.95.0",
+            "- name: Verify effective dudect toolchain",
             "- uses: Swatinem/rust-cache@v2",
             "- name: Capture runner environment (for noise-floor correlation)",
             f"- name: {dudect_producer_names[workflow_name]}",
@@ -1331,9 +1356,9 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
             else key_count(dudect_job, "if", 4) == 0
         )
         expected_job_keys = (
-            ("name", "runs-on", "if", "timeout-minutes", "strategy", "steps")
+            ("name", "runs-on", "if", "timeout-minutes", "env", "strategy", "steps")
             if config["has_skip_if"]
-            else ("name", "runs-on", "timeout-minutes", "strategy", "steps")
+            else ("name", "runs-on", "timeout-minutes", "env", "strategy", "steps")
         )
         require(
             f"{workflow_name} dudect job top-level key sequence is exact",
@@ -1346,10 +1371,20 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
             and has_exact_if
             and key_count(dudect_job, "continue-on-error", 4) == 0
             and key_count(dudect_job, "defaults", 4) == 0
-            and key_count(dudect_job, "env", 4) == 0
+            and key_count(dudect_job, "env", 4) == 1
             and mapping_keys(dudect_job, 4) == expected_job_keys
         )
         require(f"{workflow_name} dudect job contract is exact", job_contract)
+        require(
+            f"{workflow_name} dudect job toolchain environment is exact",
+            key_count(dudect_job, "env", 4) == 1
+            and active_source_lines(job_env)
+            == ["    env:", "      RUSTUP_TOOLCHAIN: 1.95.0"],
+        )
+        require(
+            f"{workflow_name} dudect effective toolchain verification is exact",
+            active_source_lines(identity_step) == dudect_identity_step,
+        )
         require(
             f"{workflow_name} dudect workflow environment is exact",
             key_count(workflow_source, "env", 0) == 1
@@ -3541,6 +3576,45 @@ def mutation_self_test() -> list[str]:
                 )
             },
         )
+
+    # The installed action version is insufficient: root rust-toolchain.toml
+    # selects stable unless the job overrides it, and the effective selection
+    # must be checked before any cache/build step.
+    for workflow_name, source, source_key, job_name in (
+        ("PR", DUDECT_PR, "dudect_pr", "smoke"),
+        ("nightly", DUDECT_NIGHTLY, "dudect_nightly", "full"),
+    ):
+        pin = "    env:\n      RUSTUP_TOOLCHAIN: 1.95.0\n"
+        for label, replacement in (("missing", ""), ("floating", pin.replace("1.95.0", "stable"))):
+            must_reject(
+                f"{workflow_name} dudect effective pin is {label}",
+                f"{workflow_name} dudect job toolchain environment is exact",
+                **{source_key: replace_in_job(source, job_name, pin, replacement, label)},
+            )
+        identity_name = "Verify effective dudect toolchain"
+        identity = step_named(job(source, job_name), identity_name)
+        for label, before, after in (
+            ("skipped", "        shell: bash", "        if: false\n        shell: bash"),
+            ("soft-failed", "        shell: bash", "        continue-on-error: true\n        shell: bash"),
+            ("overridden", "        shell: bash", "        env:\n          RUSTUP_TOOLCHAIN: stable\n        shell: bash"),
+            ("wrong expected rustc", 'rustc.startswith("rustc 1.95.0 ("', 'rustc.startswith("rustc 1.98.1 ("'),
+            ("ignored failure", 'raise SystemExit("unexpected effective dudect cargo identity")', 'print("ignored")'),
+        ):
+            must_reject(
+                f"{workflow_name} dudect identity guard {label}",
+                f"{workflow_name} dudect effective toolchain verification is exact",
+                **{source_key: replace_in_step(source, job_name, identity_name, before, after, label)},
+            )
+        cache = step_uses(job(source, job_name), "Swatinem/rust-cache@v2")
+        for label, changed in (
+            ("removed", source.replace(identity, "", 1)),
+            ("after cache", source.replace(identity, "", 1).replace(cache, cache + identity, 1)),
+        ):
+            must_reject(
+                f"{workflow_name} dudect identity guard {label}",
+                f"{workflow_name} dudect step sequence is exact",
+                **{source_key: changed},
+            )
 
     duplicate_jobs = (
         (

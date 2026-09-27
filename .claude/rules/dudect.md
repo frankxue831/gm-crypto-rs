@@ -24,14 +24,16 @@ each application), 0.20 everywhere else incl. unknown SKUs. Never merge with
 an unexplained red dudect check; a green re-run on different hardware is not
 evidence.
 
+Before writing that the dudect nightly is green, list the last 14 nightly
+conclusions; every red needs a ledger entry.
+
 ## Editing the gates
 
-- Known toolchain-selection gap (v1.15): the setup action installs 1.95.0,
-  but root `rust-toolchain.toml` selects `stable`; the September 17 bench
-  environment recorded Rust 1.98.1. Do not infer effective compiler from
-  the action tag. `docs/v1.15-protocol.md` proposes explicit job-level
-  selection, identity checks and fresh calibration; this repair is pending.
-  Evidence: `docs/v1.15-sentinel-investigation.md`.
+- Both dudect jobs require job-level `RUSTUP_TOOLCHAIN: 1.95.0` and an
+  effective rustc/cargo/active-toolchain check before cache/build. The root
+  stable override defeated the old action-only pin; neither the action tag
+  nor a setup message proves effective identity. Preserve these checks and
+  the accepted fresh-calibration requirement in `docs/v1.15-protocol.md`.
 
 - The workflow Python is fingerprint-pinned by `check_assurance_policy.py`.
   After a gate edit, regenerate the four reviewed fingerprints with the
