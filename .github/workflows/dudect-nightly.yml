@@ -1,34 +1,80 @@
-name: dudect exporter preflight (synthetic only)
+name: dudect D1 research diagnostic
+# Research branch only. Never merge this workflow replacement.
 on:
   workflow_dispatch:
+    inputs:
+      measure:
+        description: Execute the single predeclared D1 measurement job
+        type: boolean
+        required: true
+        default: false
 permissions:
   contents: read
 env:
   RUSTUP_TOOLCHAIN: 1.95.0
   CARGO_TERM_COLOR: never
 jobs:
-  preflight:
+  diagnostic:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: a832884a95a83488d853233da7cde5e37fc6b845
+          path: source
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.95.0
-      - name: Exercise original exporter with unequal synthetic classes
+      - name: Capture effective build identity
         shell: bash
         run: |
           set -euo pipefail
-          cp research/smoke-diagnostic/frozen.lock Cargo.lock
-          cargo metadata --locked --format-version 1 > /tmp/metadata.json
+          mkdir evidence
           python3 - <<'PYCODE'
-          import json, pathlib, shutil
-          package = next(p for p in json.load(open("/tmp/metadata.json"))["packages"] if p["name"] == "dudect-bencher")
-          assert package["version"] == "0.7.0"
-          root = pathlib.Path("/tmp/dudect-export-test")
-          shutil.copytree(pathlib.Path(package["manifest_path"]).parent, root)
-          test = pathlib.Path("research/smoke-diagnostic/export-regression.rs").read_text()
-          with (root / "src/ctbench.rs").open("a") as f:
-              f.write(test)
+          import os, pathlib, subprocess
+          rustc = subprocess.check_output(["rustc", "-Vv"], text=True)
+          cargo = subprocess.check_output(["cargo", "-V"], text=True)
+          active = subprocess.check_output(["rustup", "show", "active-toolchain"], text=True)
+          if not (rustc.startswith("rustc 1.95.0 (") and "host: x86_64-unknown-linux-gnu" in rustc.splitlines() and cargo.startswith("cargo 1.95.0 (") and active.split()[0] == "1.95.0-x86_64-unknown-linux-gnu"):
+              raise SystemExit("wrong effective toolchain")
+          if any(os.environ.get(key) for key in ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CARGO_BUILD_TARGET")):
+              raise SystemExit("unexpected build flags")
+          out = pathlib.Path("evidence")
+          out.joinpath("toolchain.txt").write_text(rustc + cargo + active)
+          keys = ("ImageOS", "ImageVersion", "RUSTUP_TOOLCHAIN", "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CARGO_BUILD_TARGET", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_SHA")
+          out.joinpath("environment.txt").write_text("".join(f"{key}={os.environ.get(key, '<unset>')}\n" for key in keys))
+          for filename, command in (("source.txt", ["git", "-C", "source", "rev-parse", "HEAD", "HEAD^{tree}"]), ("cpu.txt", ["lscpu"]), ("kernel.txt", ["uname", "-a"])):
+              out.joinpath(filename).write_bytes(subprocess.check_output(command))
           PYCODE
-          cargo test --manifest-path /tmp/dudect-export-test/Cargo.toml --lib raw_export_keeps_both_labels_and_unequal_class_lengths
+      - name: Qualify exporter and build frozen diagnostic inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 research/smoke-diagnostic/test_execute.py
+          python3 research/smoke-diagnostic/prepare.py source /tmp/dudect-d1 evidence
+      - name: Run predeclared measurements exactly once
+        if: ${{ inputs.measure }}
+        timeout-minutes: 13
+        shell: bash
+        run: python3 research/smoke-diagnostic/execute.py evidence
+      - name: Hash retained evidence including partial failures
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          import hashlib, json, pathlib
+          root = pathlib.Path("evidence")
+          if not root.exists():
+              raise SystemExit("missing evidence directory")
+          records = [{"path": str(p.relative_to(root)), "bytes": p.stat().st_size, "sha256": hashlib.sha256(p.read_bytes()).hexdigest()} for p in sorted(root.rglob("*")) if p.is_file() and p.name != "manifest.json"]
+          root.joinpath("manifest.json").write_text(json.dumps(records, indent=2) + "\n")
+          PYCODE
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: dudect-d1-evidence
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 90
