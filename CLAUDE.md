@@ -18,6 +18,14 @@ Test for new prose here: *would an agent that never read it break something,
 in any area?* If it bites in one area, it goes in that rule; if it is
 history, file it.
 
+## Owner leave-and-return (local)
+
+If `STATUS.local.md` exists at the repo root, read it first when returning to
+this project. It is the short Owner-facing sheet: now / next / pending Owner /
+unknown. Update it after bounded work; do not commit it (gitignored). Copy from
+`STATUS.local.md.example` when missing. Public release truth stays in the
+Release state table below and in `docs/`.
+
 ## Release state
 
 | | |
