@@ -50,8 +50,8 @@ design; derive a frozen candidate table, confirm prospectively, and require
 injected-leak sensitivity evidence before activating relaxed cells. Current
 gates remain authoritative. A baseline-only result leaves activation deferred.
 
-**Next:** pin the numerical protocol before calibration code or measurements,
-then derive and validate. Activation requires a separate reviewed PR. The
+**Next:** review and pin `docs/v1.15-protocol.md` before calibration code or
+measurements, then derive and validate. Activation requires a separate reviewed PR. The
 v1.14 F21 result stands (`docs/f21-finalize-result.md`).
 
 ## Open backlog
