@@ -20,10 +20,11 @@ SNAPSHOT='2030-02-13T00:00:00Z'
 NOW=datetime(2030,2,13,1,tzinfo=timezone.utc)
 
 
-def study(specs):
+def study(specs, frozen_override=None):
     """Each spec describes one scheduled default-leg job; other legs stay missing."""
     template,capture_template,files_template,_=binding_fixture()
     frozen=copy.deepcopy(template[-1]);frozen.update(calibration_start=START,calibration_end=END)
+    if frozen_override is not None: frozen=copy.deepcopy(frozen_override)
     sources=template[4];runs=[];responses={}
     responses['/actions/workflows/dudect-nightly.yml']={'id':7,'path':WORKFLOW}
     for number,spec in enumerate(specs,1):
@@ -33,6 +34,12 @@ def study(specs):
         job.update(id=100+number,run_id=number,started_at=started,status=spec.get('status','completed'),conclusion=spec.get('conclusion','success'))
         capture=copy.deepcopy(capture_template);files=files_template.copy()
         capture['metadata'].update(run_id=number,job_id=job['id'],event=run['event'],started_at=started)
+        for field in ('image_version', 'kernel', 'cpu'):
+            if field in spec: capture['metadata'][field] = spec[field]
+        for target, tau in spec.get('tau_by_target', {}).items():
+            lines = files['output.log'].decode().splitlines()
+            files['output.log'] = ('\n'.join(line.replace('max tau = -0.10000', 'max tau = ' + tau)
+                if line.startswith('bench ' + target + ' ') else line for line in lines) + '\n').encode()
         if spec.get('invalid'):capture['final_snapshot_status']='failed'
         if spec.get('breach'):files['output.log']=files['output.log'].replace(b'max tau = -0.10000',b'max tau = 0.60000')
         files['freeze.json']=canonical(frozen);capture['files']={n:digest(b) for n,b in files.items()}

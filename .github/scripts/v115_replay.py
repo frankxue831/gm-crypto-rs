@@ -87,13 +87,13 @@ def verified_collection(root):
     return rebuilt, files, digest(index_bytes)
 
 
-def calibration_report(collection, files, frozen, corpus_hash, now):
-    """Use only verified_collection output; no caller eligibility flags are read."""
+def qualified_window(collection, files, frozen, start, end, now):
+    """Bind every census row before aggregating; inputs come from verified_collection."""
     validate_freeze(frozen)
-    start = date.fromisoformat(frozen['calibration_start'])
-    end = date.fromisoformat(frozen['calibration_end'])
+    if type(start) is not date or type(end) is not date:
+        raise ValueError("UTC window dates required")
     if end != start + timedelta(days=42):
-        raise ValueError('exact 42-day calibration interval required')
+        raise ValueError('exact 42-day interval required')
     if collection['workflow_id'] != frozen['workflow_id'] or collection['workflow_path'] != WORKFLOW:
         raise ValueError('collection workflow differs from execution freeze')
     if now.utcoffset() != timedelta(0):
@@ -171,6 +171,17 @@ def calibration_report(collection, files, frozen, corpus_hash, now):
     deadline = datetime.combine(end,datetime.min.time(),tzinfo=timezone.utc)
     pending = [r['job_id'] for r in job_records if r['selection']=='selected' and r['job_status']!='completed']
     window_complete = finished >= deadline and now >= deadline and not pending
+    return (dict(window_complete=window_complete, pending_selected_jobs=pending,
+                 no_job_attempts=no_jobs, missing_dates=absent, jobs=job_records,
+                 passes=passes, existing_gate_breaches=breaches), groups, observed)
+
+
+def calibration_report(collection, files, frozen, corpus_hash, now):
+    """Use only verified_collection output; no caller eligibility flags are read."""
+    start = date.fromisoformat(frozen['calibration_start'])
+    end = date.fromisoformat(frozen['calibration_end'])
+    census, groups, observed = qualified_window(collection, files, frozen, start, end, now)
+    window_complete = census['window_complete']
     cells = []
     for leg,cpu in sorted(observed):
         for target in DEMOTED:
@@ -182,16 +193,33 @@ def calibration_report(collection, files, frozen, corpus_hash, now):
     fallback += [dict(target='ct_sm4_cbc_decrypt_fanout',feature_leg=leg,status='unchanged',
                       policy='0.55 only when raw CPU contains EPYC 9V74; 0.20 otherwise')
                  for leg in FEATURE_LEGS if 'sm4-bitsliced-simd' in leg]
-    environments = sorted({(r['feature_leg'],r['cpu'],r['image_version'],r['kernel']) for r in job_records if r['eligible']})
+    environments = sorted({(r['feature_leg'],r['cpu'],r['image_version'],r['kernel']) for r in census['jobs'] if r['eligible']})
     extractors = {name:digest((Path(__file__).parent/name).read_bytes()) for name in
                   ('v115_replay.py','v115_collect.py','v115_capture_binding.py','v115_evidence.py','v115_gate_rules.py')}
     return dict(schema=1,extractor_sha256=extractors,environment_manifest=[dict(feature_leg=leg,cpu=cpu,image_version=image,kernel=kernel)
                 for leg,cpu,image,kernel in environments],rule_version=RULE_VERSION,corpus_sha256=corpus_hash,freeze_sha256=digest(canonical(frozen)),
-                calibration_start=start.isoformat(),calibration_end=end.isoformat(),window_complete=window_complete,
+                calibration_start=start.isoformat(),calibration_end=end.isoformat(),**census,
                 status='window-incomplete' if not window_complete else 'candidate-review-required' if proposed else 'insufficient evidence',
-                pending_selected_jobs=pending,no_job_attempts=no_jobs,missing_dates=absent,jobs=job_records,passes=passes,
-                cells=cells,proposed=proposed,fallback=fallback,existing_gate_breaches=breaches,
+                cells=cells,proposed=proposed,fallback=fallback,
                 activation_authorized=False)
+
+
+def write_census_csv(report, output):
+    """Export every bound/excluded census row and exact per-pass observations."""
+    columns=('run_id','job_id','run_attempt','feature_leg','utc_date','cpu','image_version','kernel',
+             'selection','eligible','pass_number','target','seed','n_millions','max_t','max_tau','malformed')
+    with (output/'passes.csv').open('w',newline='') as stream:
+        writer=csv.DictWriter(stream,fieldnames=columns,extrasaction='ignore');writer.writeheader();writer.writerows(report['passes'])
+    job_columns=('run_id','job_id','run_attempt','event','head_sha','job_name','started_at','utc_date','feature_leg','cpu','raw_cpu',
+                 'image_version','kernel','artifact_id','job_status','job_conclusion','selection','binding_qualified','eligible','issues')
+    with (output/'jobs.csv').open('w',newline='') as stream:
+        writer=csv.DictWriter(stream,fieldnames=job_columns,extrasaction='ignore');writer.writeheader()
+        writer.writerows(dict(row,issues=';'.join(row['issues'])) for row in report['jobs'])
+    exclusions=[dict(row,reason=';'.join([row['selection']]+row['issues'])) for row in report['jobs'] if not row['eligible']]
+    exclusions+=report['missing_dates']+report['no_job_attempts']
+    with (output/'exclusions.csv').open('w',newline='') as stream:
+        writer=csv.DictWriter(stream,fieldnames=('run_id','job_id','run_attempt','utc_date','feature_leg','reason'),extrasaction='ignore')
+        writer.writeheader();writer.writerows(exclusions)
 
 
 def main():
@@ -205,20 +233,7 @@ def main():
     report = calibration_report(collection,files,frozen,corpus_hash,datetime.now(timezone.utc))
     args.output.mkdir(parents=True,exist_ok=False)
     (args.output/'calibration.json').write_bytes(canonical(report))
-    columns=('run_id','job_id','run_attempt','feature_leg','utc_date','cpu','image_version','kernel',
-             'selection','eligible','pass_number','target','seed','n_millions','max_t','max_tau','malformed')
-    with (args.output/'passes.csv').open('w',newline='') as stream:
-        writer=csv.DictWriter(stream,fieldnames=columns,extrasaction='ignore');writer.writeheader();writer.writerows(report['passes'])
-    job_columns=('run_id','job_id','run_attempt','event','head_sha','started_at','utc_date','feature_leg','cpu','raw_cpu',
-                 'image_version','kernel','artifact_id','job_status','job_conclusion','selection','binding_qualified','eligible','issues')
-    with (args.output/'jobs.csv').open('w',newline='') as stream:
-        writer=csv.DictWriter(stream,fieldnames=job_columns,extrasaction='ignore');writer.writeheader()
-        writer.writerows(dict(row,issues=';'.join(row['issues'])) for row in report['jobs'])
-    exclusions=[dict(row,reason=';'.join([row['selection']]+row['issues'])) for row in report['jobs'] if not row['eligible']]
-    exclusions+=report['missing_dates']+report['no_job_attempts']
-    with (args.output/'exclusions.csv').open('w',newline='') as stream:
-        writer=csv.DictWriter(stream,fieldnames=('run_id','job_id','run_attempt','utc_date','feature_leg','reason'),extrasaction='ignore')
-        writer.writeheader();writer.writerows(exclusions)
+    write_census_csv(report, args.output)
     print(json.dumps(dict(status=report['status'],jobs=len(report['jobs']),cells=len(report['cells']),proposed=len(report['proposed']))))
 
 
