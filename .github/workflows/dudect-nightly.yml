@@ -35,6 +35,7 @@ env:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   full:
@@ -158,32 +159,40 @@ jobs:
           cargo -V
 
       - name: Run dudect harness (nightly budget, 5 runs for median)
+        id: dudect
         shell: bash
         env:
           DUDECT_SAMPLES: "100000"
           DUDECT_RUNS: "5"
           MATRIX_FEATURES: ${{ matrix.features }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euxo pipefail
-          # v0.18 W1 — multi-run median robustness. The harness emits one
-          # `max tau` per target per process; it has NO multi-run logic
-          # (timing_leaks.rs is byte-unchanged). We loop the bench DUDECT_RUNS
-          # times into numbered logs; the parse step takes the per-target
-          # MEDIAN |tau| (robust to the run-to-run variance the 2026-05-12
-          # ubuntu-24.04 image update introduced; see
-          # docs/v0.5-dudect-recalibration.md). 5×~75s at 100K (the timeout
-          # is raised to 25 min to cover the loop + cold-cache build).
-          # v0.5 W5 — `Sm2PrivateKey::from_scalar(U256)` bench callsites
-          # require `crypto-bigint-scalar`; combine with matrix SM4 feature.
-          if [ "$MATRIX_FEATURES" = "default" ]; then
-            FEATURES="crypto-bigint-scalar"
+          printf '%s\n' '9304fbebfadcc72b02550908f8c7e2046293dfd98886d43988308c008734a74c  .github/scripts/v115_nightly.py' | sha256sum --check
+          python3 .github/scripts/v115_nightly.py route --root . --freeze docs/v1.15-execution-freeze.json --leg "$MATRIX_FEATURES" > v115-route.txt
+          if [ "$(cat v115-route.txt)" = "capture" ]; then
+            python3 .github/scripts/v115_nightly.py capture --root . --freeze docs/v1.15-execution-freeze.json
           else
-            FEATURES="$MATRIX_FEATURES,crypto-bigint-scalar"
+            # v0.18 W1 — multi-run median robustness. The harness emits one
+            # `max tau` per target per process; it has NO multi-run logic
+            # (timing_leaks.rs is byte-unchanged). We loop the bench DUDECT_RUNS
+            # times into numbered logs; the parse step takes the per-target
+            # MEDIAN |tau| (robust to the run-to-run variance the 2026-05-12
+            # ubuntu-24.04 image update introduced; see
+            # docs/v0.5-dudect-recalibration.md). 5×~75s at 100K (the timeout
+            # is raised to 25 min to cover the loop + cold-cache build).
+            # v0.5 W5 — `Sm2PrivateKey::from_scalar(U256)` bench callsites
+            # require `crypto-bigint-scalar`; combine with matrix SM4 feature.
+            if [ "$MATRIX_FEATURES" = "default" ]; then
+              FEATURES="crypto-bigint-scalar"
+            else
+              FEATURES="$MATRIX_FEATURES,crypto-bigint-scalar"
+            fi
+            for i in $(seq 1 "$DUDECT_RUNS"); do
+              echo "=== dudect run $i/$DUDECT_RUNS (features=$FEATURES) ==="
+              cargo bench --bench timing_leaks --features "$FEATURES" 2>&1 | tee "dudect-nightly-$i.log"
+            done
           fi
-          for i in $(seq 1 "$DUDECT_RUNS"); do
-            echo "=== dudect run $i/$DUDECT_RUNS (features=$FEATURES) ==="
-            cargo bench --bench timing_leaks --features "$FEATURES" 2>&1 | tee "dudect-nightly-$i.log"
-          done
 
       - name: Parse and gate
         shell: bash
@@ -538,3 +547,15 @@ jobs:
           name: dudect-nightly-log-${{ matrix.features }}
           path: dudect-nightly-*.log
           retention-days: 30
+
+      - name: Upload v1.15 capture
+        if: ${{ always() && steps.dudect.outputs.capture_artifact != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.dudect.outputs.capture_artifact }}
+          path: |
+            v115-capture/
+            capture-job.json
+            v115-route.json
+          retention-days: 90
+          if-no-files-found: warn
