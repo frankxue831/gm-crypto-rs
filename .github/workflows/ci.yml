@@ -107,6 +107,9 @@ jobs:
       - name: Verify assurance workflow policy
         shell: bash
         run: python3 .github/scripts/check_assurance_policy.py
+      - name: Test assurance evidence and numerical rules
+        shell: bash
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
