@@ -122,7 +122,7 @@ def command_output(command, root):
     return subprocess.check_output(command, cwd=root, text=True).strip()
 
 
-def snapshot(root, directory, leg, env):
+def snapshot(root, directory, leg, env, *, offline=False):
     directory.mkdir(exist_ok=True)
     config = build_environment(env)
     config['features'] = features(leg)
@@ -142,7 +142,8 @@ def snapshot(root, directory, leg, env):
         raise ValueError('effective compiler identity differs')
     (directory / 'toolchain.json').write_bytes(canonical(dict(rustc=rustc, cargo=cargo, active_toolchain=active)))
     raw = subprocess.check_output(['cargo', 'metadata', '--locked', '--features', features(leg),
-                                   '--filter-platform', TARGET, '--format-version', '1'], cwd=root, env=env)
+                                   '--filter-platform', TARGET, '--format-version', '1'] + (['--offline'] if offline else []),
+                                  cwd=root, env=env)
     resolution = normalized_resolution(json.loads(raw), root)
     if (root / 'Cargo.lock').read_bytes() != lock:
         raise ValueError('metadata changed lock resolution')
@@ -218,7 +219,7 @@ def prepare(root, evidence, leg, lock_path, metadata_path, freeze):
         (evidence / 'timing.bin').chmod(0o755)
         capture['binary_before_sha256'] = digest((evidence / 'timing.bin').read_bytes())
         # Freeze hashable build inputs after compilation as well, before any pass.
-        postbuild = snapshot(root, evidence / 'after', leg, env)
+        postbuild = snapshot(root, evidence / 'after', leg, env, offline=True)
         if postbuild != identity:
             raise ValueError('build inputs changed during compilation')
         capture['binary_after_sha256'] = capture['binary_before_sha256']
@@ -253,7 +254,8 @@ def authorize_pass(capture, freeze, evidence, number, now):
             or now.utcoffset() != timedelta(0) or not start <= started.date() < end
             or now < started or metadata.get('event') != 'schedule' or metadata.get('run_attempt') != 1):
         raise ValueError('not an authorized first scheduled calibration attempt')
-    remaining = 40 * 60 - (now - started).total_seconds()
+    # Leave two minutes for snapshot/seal/upload and five seconds for termination.
+    remaining = 40 * 60 - 120 - 5 - (now - started).total_seconds()
     if remaining <= 0:
         raise ValueError('production job time budget exhausted')
     processes = capture['processes']
@@ -278,6 +280,7 @@ def record_pass(root, evidence, capture, number, timeout, launcher=launch):
     entry['pass'] = entry.pop('pass_number')
     capture['processes'].append(entry)
     capture['status'] = 'timing-in-progress'
+    capture['final_snapshot_status'] = 'invalidated'
     seal(evidence, capture)
     output = root / f'dudect-nightly-{number}.log'
     if output.exists():
@@ -311,16 +314,30 @@ def record_pass(root, evidence, capture, number, timeout, launcher=launch):
 
 
 def finalize(root, evidence, capture):
+    # Never reuse files from a previous post-build/pre-pass/final snapshot.
+    attempts = capture.setdefault('final_snapshot_attempts', [])
+    relative = f'snapshot-attempts/final-{len(attempts) + 1:04d}'
+    attempt = dict(path=relative, status='started')
+    attempts.append(attempt)
+    capture.update(status='finalizing', final_snapshot_status='started')
+    seal(evidence, capture)
     try:
-        identity = snapshot(root, evidence / 'after', capture['metadata']['feature_leg'], os.environ.copy())
+        directory = evidence / relative
+        directory.parent.mkdir(exist_ok=True)
+        directory.mkdir()  # A prior, unrecorded attempt must not be overwritten.
+        identity = snapshot(root, directory, capture['metadata']['feature_leg'], os.environ.copy(), offline=True)
         if identity != capture.get('identity_sha256'):
             raise ValueError('final build input drift')
         capture['binary_after_sha256'] = digest((evidence / 'timing.bin').read_bytes())
         if capture['binary_after_sha256'] != capture.get('binary_before_sha256'):
             raise ValueError('final binary drift')
-        capture['status'] = 'finalized'
+        for name in IDENTITY_FILES:
+            shutil.copyfile(directory / name, evidence / 'after' / name)
+        attempt['status'] = 'complete'
+        capture.update(status='finalized', final_snapshot_status='complete')
     except Exception as error:
-        capture.update(status='finalization-failed', finalization_error=str(error))
+        attempt.update(status='failed', error=str(error))
+        capture.update(status='finalization-failed', final_snapshot_status='failed', finalization_error=str(error))
         raise
     finally:
         seal(evidence, capture)
@@ -352,7 +369,9 @@ def main():
                 parser.error('run-pass requires --freeze and --pass-number')
             try:
                 authorize_pass(capture, freeze, evidence, args.pass_number, datetime.now(timezone.utc))
-                current = snapshot(root, evidence / 'after', capture['metadata']['feature_leg'], os.environ.copy())
+                capture.update(status='pass-authorizing', final_snapshot_status='invalidated')
+                seal(evidence, capture)
+                current = snapshot(root, evidence / 'after', capture['metadata']['feature_leg'], os.environ.copy(), offline=True)
                 if current != capture['identity_sha256']:
                     raise ValueError('pre-pass build identity changed')
                 # Metadata collection time is part of the same 40-minute job budget.

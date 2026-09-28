@@ -154,8 +154,9 @@ def captured():
     metadata={k:j[k] for k in ('run_id','run_attempt','job_id','head_sha','feature_leg')}
     metadata.update(cpu='AMD EPYC 9V74',image_version='synthetic-image',kernel='synthetic-kernel')
     binary=h(files['timing.bin'])
-    capture={'schema':1,'metadata':metadata,'files':{n:h(b) for n,b in files.items()},
+    capture={'schema':1,'status':'finalized','final_snapshot_status':'complete','metadata':metadata,'files':{n:h(b) for n,b in files.items()},
              'binary_before_sha256':binary,'binary_after_sha256':binary,
+             'final_snapshot_attempts':[{'path':'snapshot-attempts/final-0001','status':'complete'}],
              'processes':[{'pass':i,'sample_budget':100000,'features':'crypto-bigint-scalar','binary_sha256':binary} for i in range(1,6)]}
     return j,frozen,capture,files
 

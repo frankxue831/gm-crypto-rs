@@ -253,6 +253,12 @@ def qualify_capture(job, frozen, capture, files):
         raise ValueError('invalid frozen SHA-256')
     if capture.get('schema') != 1 or type(capture.get('schema')) is not int:
         issues.append('unknown-capture-schema')
+    if capture.get('status') != 'finalized' or capture.get('final_snapshot_status') != 'complete':
+        issues.append('final-snapshot-incomplete')
+    attempts = capture.get('final_snapshot_attempts')
+    if (not isinstance(attempts, list) or not attempts
+            or any(not isinstance(attempt, dict) or attempt.get('status') != 'complete' for attempt in attempts)):
+        issues.append('final-snapshot-attempt-failed-or-missing')
     metadata = capture.get('metadata', {})
     if not isinstance(metadata, dict):
         metadata = {};issues.append('malformed-capture-metadata')
