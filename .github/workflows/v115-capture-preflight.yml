@@ -5,6 +5,9 @@ on:
     paths:
       - '.github/scripts/v115_capture.py'
       - '.github/scripts/test_v115_capture.py'
+      - '.github/scripts/v115_nightly.py'
+      - '.github/workflows/dudect-nightly.yml'
+      - 'docs/v1.15-execution-freeze.json'
       - '.github/workflows/v115-capture-preflight.yml'
   workflow_dispatch:
 
@@ -82,6 +85,14 @@ jobs:
                           feature_leg=os.environ['MATRIX_FEATURES'])
           Path('capture-job.json').write_text(json.dumps(metadata, indent=2) + '\n')
           PY
+      - name: Verify preflight cannot route to measurement
+        run: |
+          python3 .github/scripts/v115_nightly.py route --root . --freeze docs/v1.15-execution-freeze.json --leg "$MATRIX_FEATURES"
+          python3 - <<'PYCODE'
+          import json
+          from pathlib import Path
+          assert json.loads(Path('v115-route.json').read_text())['route'] == 'legacy'
+          PYCODE
       - name: Prepare capture without executing any timing binary
         run: |
           python3 .github/scripts/v115_capture.py prepare \
@@ -103,5 +114,6 @@ jobs:
           path: |
             v115-capture/
             capture-job.json
+            v115-route.json
           retention-days: 90
           if-no-files-found: warn

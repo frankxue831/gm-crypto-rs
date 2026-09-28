@@ -1,0 +1,78 @@
+{
+  "c0": null,
+  "calibration_end": null,
+  "calibration_start": null,
+  "identity_sha256_by_leg": {
+    "default": {
+      "Cargo.lock": "e2800837c468ba45d21e759d50e94dc115e3f72eb3139c579305a908b60ed1c8",
+      "build-config.json": "f7c3163930ac5941ed26c7746dff959bef3f855858f76cf7e7b742566b98aeee",
+      "capture-source.py": "0be0294a79969ddc525d4ca74ae55530158cdffc96276dba6ae1bd1ec1180d43",
+      "resolution.json": "bdbab84cd67c35e085f276d93df16614311f39c8c1186f0dc470d9d5a26540eb",
+      "source-manifest.json": "375f80441fa49a6fcbb2eca0381a7a907ed166aea31f1ad420b569ab621256b6",
+      "toolchain.json": "d531a397c31a726b8861b55f274c48ea253636552015e12a51ed5a2b59eaef94"
+    },
+    "sm4-bitsliced": {
+      "Cargo.lock": "e2800837c468ba45d21e759d50e94dc115e3f72eb3139c579305a908b60ed1c8",
+      "build-config.json": "5209ee84c8e9356022fddab18095fffc71c786da7d079663d33d2509938d8f3c",
+      "capture-source.py": "0be0294a79969ddc525d4ca74ae55530158cdffc96276dba6ae1bd1ec1180d43",
+      "resolution.json": "95d02a20080c8faa400efd8fb51ad4f3ee2cf5fdff916d2014db7e04ccec404c",
+      "source-manifest.json": "375f80441fa49a6fcbb2eca0381a7a907ed166aea31f1ad420b569ab621256b6",
+      "toolchain.json": "d531a397c31a726b8861b55f274c48ea253636552015e12a51ed5a2b59eaef94"
+    },
+    "sm4-bitsliced-simd": {
+      "Cargo.lock": "e2800837c468ba45d21e759d50e94dc115e3f72eb3139c579305a908b60ed1c8",
+      "build-config.json": "6bcfacc084e37cb612e6f7b7179526c36c0af366c1bb8e049370af050a6a2317",
+      "capture-source.py": "0be0294a79969ddc525d4ca74ae55530158cdffc96276dba6ae1bd1ec1180d43",
+      "resolution.json": "c1987f6cc78cc811ab4daf7f08b1e7143c633466c3ee3edb11ed3757e60d2f77",
+      "source-manifest.json": "375f80441fa49a6fcbb2eca0381a7a907ed166aea31f1ad420b569ab621256b6",
+      "toolchain.json": "d531a397c31a726b8861b55f274c48ea253636552015e12a51ed5a2b59eaef94"
+    },
+    "sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp": {
+      "Cargo.lock": "e2800837c468ba45d21e759d50e94dc115e3f72eb3139c579305a908b60ed1c8",
+      "build-config.json": "39ac3ddacd5c8c37890794c7df1ab1f89c7564ba4139a66390b0b990db3359e1",
+      "capture-source.py": "0be0294a79969ddc525d4ca74ae55530158cdffc96276dba6ae1bd1ec1180d43",
+      "resolution.json": "c1987f6cc78cc811ab4daf7f08b1e7143c633466c3ee3edb11ed3757e60d2f77",
+      "source-manifest.json": "375f80441fa49a6fcbb2eca0381a7a907ed166aea31f1ad420b569ab621256b6",
+      "toolchain.json": "d531a397c31a726b8861b55f274c48ea253636552015e12a51ed5a2b59eaef94"
+    }
+  },
+  "job_names_by_leg": {
+    "default": "timing-leak nightly (100K\u00d75 median, |tau|<=0.20, features=default)",
+    "sm4-bitsliced": "timing-leak nightly (100K\u00d75 median, |tau|<=0.20, features=sm4-bitsliced)",
+    "sm4-bitsliced-simd": "timing-leak nightly (100K\u00d75 median, |tau|<=0.20, features=sm4-bitsliced-simd)",
+    "sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp": "timing-leak nightly (100K\u00d75 median, |tau|<=0.20, features=sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp)"
+  },
+  "preflight_artifacts": [
+    {
+      "archive_sha256": "fd83f9d77643c0e08d068fda665d4b6691655cdc30b39448c30a42b328cbdf9b",
+      "artifact_id": 10979566708,
+      "name": "v115-capture-preflight-2"
+    },
+    {
+      "archive_sha256": "cb9f70376d0998a0cf44d2ed9ea19d45daa43d3c5c9aa1c3f3d876c673fa2c27",
+      "artifact_id": 10979157011,
+      "name": "v115-capture-preflight-1"
+    },
+    {
+      "archive_sha256": "78607e9f50fecdb1a1f81a7900baf7c654a651a9bf006b5b0c6c56eaad08842c",
+      "artifact_id": 10978603122,
+      "name": "v115-capture-preflight-0"
+    },
+    {
+      "archive_sha256": "91a459c126762ba0a4c56813f1a4c585d483b77e6c34f4314db76fde748388f5",
+      "artifact_id": 10978368273,
+      "name": "v115-capture-preflight-3"
+    }
+  ],
+  "preflight_run_id": 36442265860,
+  "producer_merge": "3f1b6b1de2738c428cd6248556d525c907faa25c",
+  "producer_revision": "2820fec2c9670f8e80b42ebe30ca750139c7e804",
+  "protocol_revision": "05035d52585b345a5392ff24dd06e3017aa77d36",
+  "repository": "frankxue831/gm-crypto-rs",
+  "schema": 1,
+  "t0": null,
+  "timing_executables_run": 0,
+  "workflow_id": 273624777,
+  "workflow_path": ".github/workflows/dudect-nightly.yml",
+  "workflow_sha256": "2cee6aad965f154b56317990391cc0b9862a4ab771acee8ee4b0f8a418f2ca3f"
+}
