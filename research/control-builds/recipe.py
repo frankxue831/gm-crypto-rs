@@ -145,7 +145,7 @@ use rand_core::{TryRng, TryCryptoRng};
     if target in ('ct_fn_invert','ct_fp_invert'):
         text+='        assert_eq!(x.retrieve().to_be_bytes()[0] >> 7, u8::from(right));\n'
         if variant != 'baseline':text+='        gmcrypto_core::v115_research::injected_work(&x);\n'
-        text+='        let result = x.invert().unwrap().retrieve().to_be_bytes();\n'
+        text+='        let result = x.invert().unwrap().retrieve().to_be_bytes().to_vec();\n'
     elif target == 'ct_sign_k_class':
         text+='''        let key = Sm2PrivateKey::from_scalar(U256::from_be_hex(
             "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8")).unwrap();

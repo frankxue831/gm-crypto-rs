@@ -2,7 +2,7 @@
 from pathlib import Path
 import tempfile
 import unittest
-from recipe import patch, helper, variants
+from recipe import patch, helper, variants, probe
 
 
 class RecipeTests(unittest.TestCase):
@@ -29,6 +29,15 @@ class RecipeTests(unittest.TestCase):
         self.assertNotIn('finalize',source)
         self.assertIn('let block = black_box(block);',source)
         self.assertLess(source.index('let block = black_box(block);'),source.index('if predicate =='))
+
+    def test_field_probe_serializes_byte_vector_not_encoded_uint_debug(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);p=root/'crates/gmcrypto-core/benches';p.mkdir(parents=True)
+            (p/'timing_leaks.rs').write_text('struct ClassKRng {}\nimpl TryCryptoRng for ClassKRng {}')
+            for target in ('ct_fn_invert','ct_fp_invert'):
+                probe(root,target,'baseline')
+                source=(root/'crates/gmcrypto-core/examples/v115_qualify.rs').read_text()
+                self.assertIn('let result = x.invert().unwrap().retrieve().to_be_bytes().to_vec();',source)
 
     def test_changed_anchor_is_refused(self):
         with tempfile.TemporaryDirectory() as d:
