@@ -1,0 +1,107 @@
+name: v1.15 capture build-only preflight
+
+on:
+  pull_request:
+    paths:
+      - '.github/scripts/v115_capture.py'
+      - '.github/scripts/test_v115_capture.py'
+      - '.github/workflows/v115-capture-preflight.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  capture:
+    name: capture-${{ matrix.leg }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      RUSTUP_TOOLCHAIN: 1.95.0
+      CARGO_INCREMENTAL: '0'
+      MATRIX_FEATURES: ${{ matrix.features }}
+      MATRIX_LEG: ${{ matrix.leg }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: 0
+            features: default
+          - leg: 1
+            features: sm4-bitsliced
+          - leg: 2
+            features: sm4-bitsliced-simd
+          - leg: 3
+            features: sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          # Read-only input from the already qualified structural-control recipe.
+          ref: 69ee2c2f7fe79fe6be9d7760b4b1247186eb23f7
+          path: frozen-inputs
+          sparse-checkout: research/control-builds/frozen.lock
+          sparse-checkout-cone-mode: false
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: Record Actions job provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, time, urllib.request
+          from pathlib import Path
+          base = (os.environ['GITHUB_API_URL'] + '/repos/' + os.environ['GITHUB_REPOSITORY']
+                  + '/actions/runs/' + os.environ['GITHUB_RUN_ID'] + '/attempts/'
+                  + os.environ['GITHUB_RUN_ATTEMPT'] + '/jobs?per_page=100&page=')
+          matches = []
+          for attempt in range(4):
+              jobs = []
+              page = 1
+              while True:
+                  request = urllib.request.Request(base + str(page), headers={
+                      'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                      'Accept': 'application/vnd.github+json'})
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      batch = json.load(response)['jobs']
+                  jobs.extend(batch)
+                  if len(batch) < 100:
+                      break
+                  page += 1
+              matches = [job for job in jobs if job['name'] == 'capture-' + os.environ['MATRIX_LEG']]
+              if len(matches) == 1:
+                  break
+              time.sleep(2)
+          if len(matches) != 1:
+              raise SystemExit('cannot resolve exactly one Actions job')
+          job = matches[0]
+          metadata = dict(run_id=int(os.environ['GITHUB_RUN_ID']), job_id=job['id'],
+                          run_attempt=int(os.environ['GITHUB_RUN_ATTEMPT']),
+                          event=os.environ['GITHUB_EVENT_NAME'], started_at=job['started_at'],
+                          head_sha=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+                          feature_leg=os.environ['MATRIX_FEATURES'])
+          Path('capture-job.json').write_text(json.dumps(metadata, indent=2) + '\n')
+          PY
+      - name: Prepare capture without executing any timing binary
+        run: |
+          python3 .github/scripts/v115_capture.py prepare \
+            --root . --evidence v115-capture --leg "$MATRIX_FEATURES" \
+            --lock frozen-inputs/research/control-builds/frozen.lock \
+            --metadata capture-job.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          capture = json.loads(Path('v115-capture/capture.json').read_text())
+          assert capture['status'] == 'prepared-no-timing-run'
+          assert capture['measurement_enabled'] is False
+          assert capture['processes'] == []
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: v115-capture-preflight-${{ matrix.leg }}
+          path: |
+            v115-capture/
+            capture-job.json
+          retention-days: 90
+          if-no-files-found: warn
