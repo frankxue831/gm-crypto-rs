@@ -61,6 +61,17 @@ class SelectionTests(unittest.TestCase):
         for rows in ([job(start=None)], [job(),job()], [dict(job(),feature_leg='unknown')], [dict(job(),run_id=True)]):
             with self.subTest(rows=rows), self.assertRaises(ValueError):select_scheduled_jobs(rows, START)
 
+    def test_unknown_outside_window_strata_are_retained_without_selection(self):
+        for started in ('2029-12-31T23:59:59Z', '2030-02-12T00:00:00Z'):
+            historical = dict(job(start=started), feature_leg=None)
+            with self.subTest(started=started):
+                rows = select_scheduled_jobs([historical, job(2, 20)], START)
+                old = next(r for r in rows if r['job_id'] == 10)
+                self.assertEqual(old['selection'], 'outside-window')
+                self.assertEqual(old['utc_date'], started[:10])
+                self.assertIsNone(old['feature_leg'])
+                self.assertEqual([r['job_id'] for r in rows if r['selection'] == 'selected'], [20])
+
     def test_selection_does_not_mutate_evidence(self):
         raw=[job()];saved=deepcopy(raw);select_scheduled_jobs(raw,START);self.assertEqual(raw,saved)
 

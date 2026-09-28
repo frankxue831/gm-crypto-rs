@@ -132,6 +132,25 @@ class ReplayTests(unittest.TestCase):
                 c,files,h=verified_collection(root)
                 with self.assertRaises(ValueError):calibration_report(c,files,frozen,h,NOW)
 
+    def test_historical_unknown_job_name_stays_excluded_in_complete_replay(self):
+        responses, frozen = study([dict(started='2029-12-31T05:00:00Z')] + specs_for_20_dates())
+        name = 'timing-leak nightly (100K samples, |tau|<0.20)'
+        responses['/actions/runs/1/attempts/1/jobs?per_page=100&page=1']['jobs'][0]['name'] = name
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)/'c'
+            with patch('v115_collect.utc_now', return_value=SNAPSHOT):
+                Collector(root, fake_get(responses)).collect('dudect-nightly.yml')
+            c, files, h = verified_collection(root)
+            result = calibration_report(c, files, frozen, h, NOW)
+            old = result['jobs'][0]
+            self.assertEqual(old['selection'], 'outside-window')
+            self.assertEqual(old['job_name'], name)
+            self.assertFalse(old['eligible'])
+            self.assertIn('unknown-descriptive-stratum', old['issues'])
+            self.assertEqual(len(result['jobs']), 21)
+            self.assertEqual(len(result['proposed']), 4)
+            self.assertTrue(all(row['dates'] == 20 and row['bound'] == '0.20' for row in result['proposed']))
+
     def test_empty_completed_window_keeps_every_missing_date_and_fallback(self):
         with tempfile.TemporaryDirectory() as tmp:
             r=report(Path(tmp)/'c',[])

@@ -124,7 +124,8 @@ def calibration_report(collection, files, frozen, corpus_hash, now):
             no_jobs.append(dict(run_id=run['id'],run_attempt=run['run_attempt'],event=run.get('event'),reason='no-jobs-in-api-attempt'))
         for job in attempt['jobs']:
             row = dict(run_id=run['id'],run_attempt=run['run_attempt'],job_id=job['id'],event=run.get('event'),
-                       started_at=job.get('started_at'),feature_leg=names.get(job.get('name')),head_sha=run['head_sha'])
+                       started_at=job.get('started_at'),feature_leg=names.get(job.get('name')),
+                       job_name=job.get('name'),head_sha=run['head_sha'])
             rows.append(row);actual[job['id']] = run,job
     # This call precedes any archive validity check, including for failed draws.
     selected = select_scheduled_jobs(rows, start)
@@ -132,8 +133,8 @@ def calibration_report(collection, files, frozen, corpus_hash, now):
     for row in selected:
         run,job = actual[row['job_id']]
         if row['feature_leg'] is None:
-            # Other-event jobs remain descriptive; scheduled first attempts with
-            # unknown strata have already raised in selection, never disappeared.
+            # Other-event and known outside-window jobs remain descriptive.
+            # Unknown in-window strata already raised before archive inspection.
             binding = dict(binding_qualified=False,issues=['unknown-descriptive-stratum'],capture=None,artifact_id=None)
         else:
             binding = bind_capture(run,job,artifacts_by_run.get(run['id'],[]),archives,sources,frozen)

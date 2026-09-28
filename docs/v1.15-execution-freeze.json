@@ -1,7 +1,7 @@
 {
-  "c0": null,
-  "calibration_end": null,
-  "calibration_start": null,
+  "c0": "2026-09-29T00:00:00Z",
+  "calibration_end": "2026-11-10",
+  "calibration_start": "2026-09-29",
   "identity_sha256_by_leg": {
     "default": {
       "Cargo.lock": "e2800837c468ba45d21e759d50e94dc115e3f72eb3139c579305a908b60ed1c8",

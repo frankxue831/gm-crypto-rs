@@ -43,7 +43,8 @@ def select_scheduled_jobs(jobs, start):
 
     Date is the UTC job-start date; ordering within it is start, run ID, job ID.
     All fields originate in the Actions census, not measurement output. Missing
-    ordering/stratum identity in a scheduled first attempt is unresolved census
+    ordering identity in a scheduled first attempt, or stratum identity inside
+    the window, is unresolved census
     evidence: the caller must retain it and repair provenance before deriving
     any table, not drop it and retry this function on a favorable subset.
     """
@@ -71,13 +72,13 @@ def select_scheduled_jobs(jobs, start):
             row['selection'] = 'rerun'
         else:
             timestamp = _utc(job.get('started_at'))
-            if job.get('feature_leg') not in FEATURE_LEGS:
-                raise ValueError('exact feature leg required for first-attempt selection')
             day = timestamp.date()
             row['utc_date'] = day.isoformat()
             if not start <= day < end:
                 row['selection'] = 'outside-window'
             else:
+                if job.get('feature_leg') not in FEATURE_LEGS:
+                    raise ValueError('exact feature leg required for first-attempt selection')
                 candidates.append((timestamp, job['run_id'], job['job_id'], row))
     chosen = set()
     for _, _, _, row in sorted(candidates, key=lambda item: item[:3]):
