@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "qualification_run": 36434727783,
+  "research_commit": "69ee2c2f7fe79fe6be9d7760b4b1247186eb23f7",
+  "source_commit": "b22718fd545501ec42ce578808dcbdea22b9d9d4",
+  "lock_sha256": "e2800837c468ba45d21e759d50e94dc115e3f72eb3139c579305a908b60ed1c8",
+  "recipe_sha256": "790f2b2d8bee686a32f56b389ef5e5784a6300c205059a0912cd6b3e9b4d1f2b",
+  "prepare_sha256": "a68f07babe0dc98b2c5aad18d286fa06920ed8ad01b756fbdbb2041ec08db2a5",
+  "budget_sha256": "11e6dd0f255d4086819c570bb2942d5664a252cce4e40aa90890be4be25d6fc9",
+  "build_inventory_sha256": "0465d4a05b1671cee4c45a3a1a305d0092261369a1fe9f9c26a76642d195a1be",
+  "timing_executables_run": 0,
+  "c0": null,
+  "t0": null,
+  "legs": [
+    {
+      "leg": "0",
+      "feature_leg": "default",
+      "artifact_id": 10974878149,
+      "artifact_sha256": "cd0668c1d233817ece704003df9416327f53bd790f6a23b4e82e944b74c9fc1f",
+      "artifact_bytes": 39377616,
+      "artifact_manifest_sha256": "8237cc46c6a3ed8bd9ef669649563caec67471da84639e15ee558f48405a77b8",
+      "base_input_manifest_sha256": "375f80441fa49a6fcbb2eca0381a7a907ed166aea31f1ad420b569ab621256b6",
+      "toolchain_record_sha256": "43dcb5897e3868c14f9b41b1537364f2b1b03af3a7435d1b8e244c183ebd56b6",
+      "cpu": "AMD EPYC 9V74 80-Core Processor"
+    },
+    {
+      "leg": "1",
+      "feature_leg": "sm4-bitsliced",
+      "artifact_id": 10974559080,
+      "artifact_sha256": "26d5c36137edb3a6870c5ed466f4d1a35727a3557010f71f552c6cf8991cae35",
+      "artifact_bytes": 39455689,
+      "artifact_manifest_sha256": "28a29dea6bc5452b1528a015b0c1efdf5fa0b5543abe5a10f576cec946a19b79",
+      "base_input_manifest_sha256": "375f80441fa49a6fcbb2eca0381a7a907ed166aea31f1ad420b569ab621256b6",
+      "toolchain_record_sha256": "43dcb5897e3868c14f9b41b1537364f2b1b03af3a7435d1b8e244c183ebd56b6",
+      "cpu": "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz"
+    },
+    {
+      "leg": "2",
+      "feature_leg": "sm4-bitsliced-simd",
+      "artifact_id": 10974763459,
+      "artifact_sha256": "58866c92b9a2bc5b09616c6023637207272a0320b7ecdbd33350730aee90e287",
+      "artifact_bytes": 40273995,
+      "artifact_manifest_sha256": "f8157dc22035617c2f212be2a94d35898b4c6698f35742d739dc1cefbe26156a",
+      "base_input_manifest_sha256": "375f80441fa49a6fcbb2eca0381a7a907ed166aea31f1ad420b569ab621256b6",
+      "toolchain_record_sha256": "43dcb5897e3868c14f9b41b1537364f2b1b03af3a7435d1b8e244c183ebd56b6",
+      "cpu": "AMD EPYC 9V45 96-Core Processor"
+    },
+    {
+      "leg": "3",
+      "feature_leg": "sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp",
+      "artifact_id": 10975850870,
+      "artifact_sha256": "c4943cbd67f8d1987a40d970c45781a5f8fe030bb9985d617fefe98bceffe849",
+      "artifact_bytes": 44171268,
+      "artifact_manifest_sha256": "4bffb8879950aaac1121c02b98bab77f6942503dbfc60baca2dff1fbd293de36",
+      "base_input_manifest_sha256": "375f80441fa49a6fcbb2eca0381a7a907ed166aea31f1ad420b569ab621256b6",
+      "toolchain_record_sha256": "43dcb5897e3868c14f9b41b1537364f2b1b03af3a7435d1b8e244c183ebd56b6",
+      "cpu": "AMD EPYC 7763 64-Core Processor"
+    }
+  ]
+}
