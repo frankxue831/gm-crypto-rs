@@ -157,13 +157,20 @@ def captured():
     capture={'schema':1,'status':'finalized','final_snapshot_status':'complete','metadata':metadata,'files':{n:h(b) for n,b in files.items()},
              'binary_before_sha256':binary,'binary_after_sha256':binary,
              'final_snapshot_attempts':[{'path':'snapshot-attempts/final-0001','status':'complete'}],
-             'processes':[{'pass':i,'sample_budget':100000,'features':'crypto-bigint-scalar','binary_sha256':binary} for i in range(1,6)]}
+             'processes':[{'pass':i,'status':'completed','returncode':0,'sample_budget':100000,'features':'crypto-bigint-scalar','binary_sha256':binary} for i in range(1,6)]}
     return j,frozen,capture,files
 
 
 class CaptureTests(unittest.TestCase):
     def test_complete_capture_and_signed_outputs(self):
         r=qualify_capture(*captured());self.assertTrue(r['capture_qualified'],r['issues'])
+
+    def test_failed_or_unfinished_process_cannot_qualify_complete_looking_output(self):
+        for status,code in [('failed',7),('failed',0),('started',None),('completed',7),('completed',False)]:
+            j,f,c,files=captured()
+            c['processes'][-1].update(status=status,returncode=code)
+            with self.subTest(status=status,code=code):
+                self.assertFalse(qualify_capture(j,f,c,files)['capture_qualified'])
 
     def test_input_drift_even_when_archive_manifest_is_consistent(self):
         for phase in ('before','after'):
