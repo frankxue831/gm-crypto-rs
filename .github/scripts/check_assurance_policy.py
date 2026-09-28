@@ -481,7 +481,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "nightly dudect": job(dudect_nightly, "full"),
     }
     reviewed_job_fingerprints = {
-        "build": "637d188f176673a1513f2641b27c0f581bfd7c672eef9bc69658a51aafcdfb70",
+        "build": "27c10b27626c4c1d541b90ce2eba2fc3468328c715415b5eb885c198992f154f",
         "cabi": "4ff7eccfa333d3858ef97ceb3e517c043c44a962e7333976d21896cf1b404c31",
         "GmSSL": "796eafa03285b30a7b70389b5c4ddab6f064fae0339f3b898de0210a4601ab79",
         "cargo-deny": "efc9a2787bc8b48022d35d3419af0e9987c6a11c3a5c44959fc93b1d33be9174",
@@ -4118,6 +4118,18 @@ def mutation_self_test() -> list[str]:
         "build cargo PATH shadow step",
     )
     build_fingerprint_label = "build job reviewed source fingerprint matches"
+    must_reject(
+        "build job bypasses assurance evidence and numerical tests",
+        build_fingerprint_label,
+        ci=replace_in_step(
+            CI,
+            "build",
+            "Test assurance evidence and numerical rules",
+            "        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'",
+            "        run: 'true'",
+            "build assurance evidence tests",
+        ),
+    )
     must_reject(
         "build job shadows cargo through GITHUB_PATH after policy verification",
         build_fingerprint_label,
