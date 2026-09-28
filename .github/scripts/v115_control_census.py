@@ -68,7 +68,7 @@ def control_census(collection, frozen):
         if key in attempt_map or key[0] not in run_ids:
             raise ValueError('duplicate or orphan attempt')
         attempt_map[key] = attempt
-    exclusions, study = [], []
+    exclusions, excluded_attempts, excluded_jobs, study = [], [], [], []
     for run in runs:
         if run.get('head_branch') != branch:
             exclusions.append(dict(run_id=run['id'], reason='other-branch'))
@@ -76,20 +76,55 @@ def control_census(collection, frozen):
         created = timestamp(run.get('created_at'))
         if created > finished:
             raise ValueError('run created after census snapshot')
-        if created < begin:
-            exclusions.append(dict(run_id=run['id'], reason='before-confirmation'))
+        count = positive(run.get('run_attempt'))
+        if sorted(a for r, a in attempt_map if r == run['id']) != list(range(1, count + 1)):
+            raise ValueError('missing or extra study attempt')
+        relevant = []
+        for number in range(1, count + 1):
+            attempt = attempt_map[run['id'], number]
+            metadata, jobs = attempt.get('metadata', {}), attempt.get('jobs')
+            if (metadata.get('id') != run['id'] or metadata.get('run_attempt') != number
+                    or metadata.get('head_sha') != run.get('head_sha') or not isinstance(jobs, list)):
+                raise ValueError('complete matching attempt metadata/jobs required')
+            retained = []
+            for job in jobs:
+                # Original run creation does not date its reruns or queued jobs.
+                # Exclude only a completed job demonstrably wholly before T0.
+                before = False
+                if created < begin and job.get('status') == 'completed':
+                    left, right = job.get('started_at'), job.get('completed_at')
+                    if left is not None and right is not None:
+                        before = created <= timestamp(left) <= timestamp(right) <= begin
+                if before:
+                    excluded_jobs.append(dict(run_id=run['id'], run_attempt=number,
+                                              job_id=positive(job.get('id')), reason='completed-before-confirmation'))
+                else:
+                    retained.append(job)
+            proved_empty_before = (not jobs and metadata.get('status') == 'completed'
+                                   and metadata.get('updated_at') is not None
+                                   and timestamp(metadata['updated_at']) <= begin)
+            if (created < begin and not retained and metadata.get('status') == 'completed'
+                    and (jobs or proved_empty_before)):
+                excluded_attempts.append(dict(run_id=run['id'], run_attempt=number,
+                                              reason='completed-before-confirmation'))
+            else:
+                relevant.append((number, dict(attempt, jobs=retained)))
+        if not relevant:
+            exclusions.append(dict(run_id=run['id'], reason='completed-before-confirmation'))
             continue
-        study.append((created, run['id'], run))
+        study.append((created, run['id'], run, relevant))
     study.sort(key=lambda row: row[:2])
     issues, run_rows, job_rows, seen_jobs = [], [], [], set()
     total_us, incomplete, unknown_time, attempt_count = 0, False, False, 0
-    for created, run_id, run in study:
-        slot = by_date.get(created.date().isoformat())
+    for created, run_id, run, relevant in study:
+        slot = by_date.get(created.date().isoformat()) if created >= begin else None
         selected = slot is not None and slot['run_id'] is None
         if selected:
             slot['run_id'] = run_id
         run_issues = []
-        if slot is None:
+        if created < begin:
+            run_issues.append('pre-confirmation-run-with-unexcluded-attempt')
+        elif slot is None:
             run_issues.append('unplanned-dispatch-date')
         elif not selected:
             run_issues.append('extra-dispatch-on-planned-date')
@@ -105,11 +140,8 @@ def control_census(collection, frozen):
             run_issues.append('automatic-or-manual-rerun')
         if run.get('status') != 'completed':
             incomplete = True
-        if sorted(a for r, a in attempt_map if r == run_id) != list(range(1, count + 1)):
-            raise ValueError('missing or extra study attempt')
-        for number in range(1, count + 1):
+        for number, attempt in relevant:
             attempt_count += 1
-            attempt = attempt_map[run_id, number]
             metadata = attempt.get('metadata', {})
             if (metadata.get('id') != run_id or metadata.get('run_attempt') != number
                     or metadata.get('head_sha') != run.get('head_sha')):
@@ -171,7 +203,7 @@ def control_census(collection, frozen):
                                      runtime_microseconds=elapsed, issues=sorted(set(reasons))))
                 issues.extend('job-' + str(job_id) + ':' + reason for reason in reasons)
         run_rows.append(dict(run_id=run_id, dispatch_index=slot['dispatch_index'] if slot else None,
-                             selected=selected, created_at=run['created_at'], attempts=count,
+                             selected=selected, created_at=run['created_at'], attempts=len(relevant), total_run_attempts=count,
                              issues=sorted(set(run_issues))))
         issues.extend('run-' + str(run_id) + ':' + reason for reason in run_issues)
     if len(study) > 12:
@@ -182,6 +214,7 @@ def control_census(collection, frozen):
         issues.append('more-than-72-runner-hours')
     return dict(schema=1, confirmation_start=start.isoformat(), confirmation_end=end.date().isoformat(),
                 slots=slots, runs=run_rows, jobs=job_rows, excluded_runs=exclusions,
+                excluded_attempts=excluded_attempts, excluded_jobs=excluded_jobs,
                 dispatches=len(study), attempts=attempt_count, job_count=len(job_rows),
                 runtime_microseconds_lower_bound=total_us, runtime_complete=not unknown_time,
                 all_observed_completed=not incomplete,

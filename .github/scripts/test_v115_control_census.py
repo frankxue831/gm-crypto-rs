@@ -108,7 +108,7 @@ class CensusTests(unittest.TestCase):
         add_run(c, 21, START)['head_branch'] = 'main'
         r = control_census(c, FREEZE)
         self.assertEqual(r['dispatches'], 1)
-        self.assertEqual(r['excluded_runs'], [dict(run_id=20, reason='before-confirmation'),
+        self.assertEqual(r['excluded_runs'], [dict(run_id=20, reason='completed-before-confirmation'),
                                              dict(run_id=21, reason='other-branch')])
 
     def test_queued_cross_midnight_uses_dispatch_date_and_actual_job_date(self):
@@ -181,6 +181,46 @@ class CensusTests(unittest.TestCase):
         self.assertFalse(r['window_complete']);self.assertTrue(r['budget_conformant'])
         self.assertEqual(sum(s['run_id'] is None for s in r['slots']), 11)
         self.assertEqual(r['job_count'], 4)
+
+    def test_pre_window_run_rerun_cannot_hide_budget_overflow(self):
+        c = fixture(range(12), duration=5400)
+        add_run(c, 20, START - timedelta(days=1), duration=5400, attempt_count=2)
+        for j in c['attempts'][-1]['jobs']:
+            j.update(started_at='2030-01-02T00:05:00Z', completed_at='2030-01-02T01:35:00Z')
+        r = control_census(c, FREEZE)
+        self.assertEqual((r['dispatches'], r['attempts'], r['job_count']), (13, 13, 52))
+        self.assertEqual(r['runtime_microseconds_lower_bound'], 78 * 3600 * 1000000)
+        self.assertFalse(r['budget_conformant'])
+        self.assertEqual(len(r['excluded_jobs']), 4)
+        self.assertEqual(sum(j['selected_for_binding'] for j in r['jobs']), 48)
+        for issue in ('more-than-48-jobs', 'more-than-72-runner-hours',
+                      'run-20:pre-confirmation-run-with-unexcluded-attempt'):
+            self.assertIn(issue, r['issues'])
+
+    def test_pre_window_queue_overlap_and_ambiguous_jobs_remain_accounted(self):
+        for times in [dict(started_at='2030-01-01T00:05:00Z', completed_at='2030-01-01T01:05:00Z'),
+                      dict(started_at='2029-12-31T23:30:00Z', completed_at='2030-01-01T00:30:00Z'),
+                      dict(started_at=None, completed_at=None)]:
+            c = fixture(indices=());add_run(c, 20, START - timedelta(days=1))
+            # Mixed attempt: three demonstrably pre-window jobs, one relevant.
+            c['attempts'][0]['jobs'][0].update(**times)
+            r = control_census(c, FREEZE)
+            self.assertEqual((r['dispatches'], r['attempts'], r['job_count']), (1, 1, 1))
+            self.assertEqual(len(r['excluded_jobs']), 3)
+            self.assertFalse(r['budget_conformant'])
+            self.assertFalse(r['jobs'][0]['selected_for_binding'])
+            self.assertTrue(all(s['run_id'] is None for s in r['slots']))
+
+    def test_pre_window_empty_or_incomplete_attempt_needs_timing_proof(self):
+        c = fixture(indices=());add_run(c, 20, START - timedelta(days=1))
+        c['attempts'][0]['jobs'].clear()
+        r = control_census(c, FREEZE)
+        self.assertEqual(r['attempts'], 1);self.assertFalse(r['budget_conformant'])
+        c['attempts'][0]['metadata']['updated_at'] = '2029-12-31T23:59:59Z'
+        r = control_census(c, FREEZE)
+        self.assertEqual(r['attempts'], 0);self.assertEqual(len(r['excluded_attempts']), 1)
+        c['attempts'].clear()
+        with self.assertRaises(ValueError):control_census(c, FREEZE)
 
     def test_freeze_requires_isolated_exact_identity(self):
         for key, value in [('research_branch', 'main'), ('research_head', 'a'),
