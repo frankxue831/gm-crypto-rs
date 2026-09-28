@@ -129,6 +129,23 @@ def qualify_outputs(text, *, feature_leg, sample_budget, cpu):
     """
     bounds = required_bounds(feature_leg, cpu)
     required = set(bounds) | {'negative_control', TELEMETRY}
+    return _qualify_outputs(text, feature_leg, sample_budget, cpu, bounds, required, False)
+
+
+def qualify_filtered_outputs(text, *, target, feature_leg, sample_budget, cpu):
+    """Exactly one demoted target and negative control in each of five passes.
+
+    This validates output only. Independent build, process, source and Actions
+    provenance qualification is still required before using a control result.
+    """
+    if target not in DEMOTED:
+        raise ValueError('predeclared control target required')
+    bounds = required_bounds(feature_leg, cpu)
+    return _qualify_outputs(text, feature_leg, sample_budget, cpu,
+                            {target: bounds[target]}, {target, 'negative_control'}, True)
+
+
+def _qualify_outputs(text, feature_leg, sample_budget, cpu, bounds, required, strict):
     compiled_features = ('crypto-bigint-scalar' if feature_leg == 'default'
                          else feature_leg + ',crypto-bigint-scalar')
     issues, observations = [], []
@@ -154,6 +171,8 @@ def qualify_outputs(text, *, feature_leg, sample_budget, cpu):
             pass_id = 0
         match = SEED.fullmatch(line)
         if match:
+            if strict and match[1] not in required:
+                issues.append('unexpected-filtered-target:' + match[1])
             key = (pass_id, match[1])
             seed_counts[key] += 1
             seeds[key] = match[2]
@@ -166,6 +185,8 @@ def qualify_outputs(text, *, feature_leg, sample_budget, cpu):
                 target = line.split()[1]
                 if target in required:
                     issues.append('malformed-result:' + target)
+                elif strict:
+                    issues.append('unexpected-filtered-target:' + target)
                 observations.append(dict(pass_number=pass_id, target=target, raw=line, malformed=True))
             continue
         target, n, t, tau = match.groups()
@@ -174,6 +195,8 @@ def qualify_outputs(text, *, feature_leg, sample_budget, cpu):
         observations.append(dict(pass_number=pass_id, target=target, seed=seeds.get(key),
                                  n_millions=n, max_t=t, max_tau=tau))
         if target not in required:
+            if strict:
+                issues.append('unexpected-filtered-target:' + target)
             continue
         if pass_id not in range(1, 6):
             issues.append('result-outside-pass:' + target)
