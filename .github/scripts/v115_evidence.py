@@ -302,7 +302,9 @@ def qualify_capture(job, frozen, capture, files):
     else:
         for number, process in enumerate(processes, 1):
             expected_features = 'crypto-bigint-scalar' if leg == 'default' else leg + ',crypto-bigint-scalar'
-            if (type(process.get('pass')) is not int or process.get('pass') != number
+            if (process.get('status') != 'completed' or type(process.get('returncode')) is not int
+                    or process.get('returncode') != 0
+                    or type(process.get('pass')) is not int or process.get('pass') != number
                     or type(process.get('sample_budget')) is not int or process.get('sample_budget') != 100000
                     or process.get('features') != expected_features
                     or binary_digest is None or process.get('binary_sha256') != binary_digest):
