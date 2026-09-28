@@ -17,6 +17,13 @@ ORDERS = [('original', 'swapped', 'same-left', 'same-right'),
           ('swapped', 'same-right', 'original', 'same-left'),
           ('same-left', 'original', 'same-right', 'swapped')]
 TARGET = 'ct_sm4_key_schedule'
+FULL_TARGETS = set("""negative_control ct_mul_g ct_mul_var ct_sign ct_sign_k_class
+ct_fn_invert ct_fp_invert noise_floor_fn_invert noise_floor_fp_invert
+noise_twin_class_split ct_sm4_key_schedule ct_sm4_encrypt_block ct_sm4_ctr_encrypt
+ct_hmac_sm3 ct_sm2_decrypt ct_pkcs8_decrypt ct_sm4_encrypt_block_bitsliced_simd
+ct_sm4_cbc_decrypt_fanout ct_sm4_gcm_decrypt ct_sm4_ccm_decrypt
+ct_sm4_gcm_decrypt_buffered ct_sm4_xts_decrypt ct_sm2_key_exchange
+ct_tlcp_cbc_deprotect""".split())
 FIELDS = 'bench,crop,threshold,n_left,n_right,mean_left,mean_right,var_left,var_right,t,tau,selected'
 
 
@@ -108,6 +115,14 @@ def main(root):
     ledger = root / 'run-ledger.json'
     ledger.write_text(json.dumps(plan, indent=2)+'\n')
     manifest(root, 'before-timing-manifest.json')
+    started = float(os.environ['D1_JOB_STARTED_AT'])
+    elapsed = time.time() - started
+    if elapsed < 0 or elapsed > 700:
+        (root / 'measurement-refused.json').write_text(json.dumps({
+            'reason': 'insufficient job time for 720s measurements plus evidence reserve',
+            'elapsed_seconds': elapsed
+        }, indent=2)+'\n')
+        raise SystemExit(1)
     deadline = time.monotonic()+720
     for index, item in enumerate(plan):
         remaining = deadline-time.monotonic()
@@ -134,9 +149,11 @@ def main(root):
                 item['error'] = 'nonzero benchmark exit'
             else:
                 item['targets'] = validate(directory)
-                expected = {TARGET} if item['mode'] != 'baseline' else {TARGET, 'negative_control'}
-                if not expected <= item['targets'].keys():
-                    raise ValueError('required diagnostic target missing')
+                expected = {TARGET} if item['mode'] != 'baseline' else FULL_TARGETS
+                if expected != item['targets'].keys():
+                    raise ValueError('missing or extra diagnostic targets')
+                if not all(x['valid'] for x in item['targets'].values()):
+                    raise ValueError('invalid selected statistic retained; process cannot qualify')
         except subprocess.TimeoutExpired:
             item.update(status='timeout', error='process time limit reached; no replacement')
         except (ValueError, OSError, KeyError) as error:

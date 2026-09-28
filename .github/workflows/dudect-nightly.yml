@@ -18,6 +18,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
+      - name: Start conservative job clock
+        shell: bash
+        run: echo "D1_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -49,6 +52,7 @@ jobs:
               out.joinpath(filename).write_bytes(subprocess.check_output(command))
           PYCODE
       - name: Qualify exporter and build frozen diagnostic inputs
+        timeout-minutes: 10
         shell: bash
         run: |
           set -euo pipefail

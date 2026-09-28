@@ -55,7 +55,12 @@ Compile and run synthetic tests before any timing. No compiler comparison in D1.
 ## One bounded measurement job
 
 Exactly one manual hosted job, maximum 30 minutes including builds. No retries,
-replacement draws or follow-up dispatches selected from the results. A timeout
+replacement draws or follow-up dispatches selected from the results. Preparation
+has a 10-minute step timeout. A clock recorded before checkout refuses measurement
+if more than 700 seconds have elapsed. Measurement has a 720-second global
+budget, a 180-second per-process limit and a 13-minute enclosing step timeout,
+leaving several minutes of the 30-minute job for hashing/uploading partial files.
+A refusal retains the entire planned process ledger as pending. A timeout
 is incomplete evidence; retain partial files and statuses. Synthetic preflight
 jobs are separately labelled and never contribute timing observations.
 
@@ -77,7 +82,10 @@ for diagnostic liveness. Failed liveness makes timing interpretation inconclusiv
 Write raw CSV, crop CSV and standard signed summaries for every process. Validate
 10000 total raw samples per measured target, correct class labels, 101 crop rows,
 exact selected counts and agreement of the selected signed t/tau with the printed
-five-decimal summary. Missing/malformed/nonfinite selected results are invalid,
+five-decimal summary. Baseline must contain exactly the 24 full-feature targets
+listed in execute.py; each filtered process must contain exactly the key-schedule
+target. A nonfinite selected statistic prevents that process from qualifying
+as complete, including when the other diagnostic targets are valid. Missing/malformed/nonfinite selected results are invalid,
 not zero. Preserve and report every mode, including invalid ones.
 
 ## Interpretation fixed in advance
