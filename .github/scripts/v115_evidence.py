@@ -92,7 +92,7 @@ def required_bounds(feature_leg, cpu):
     """Mirror current nightly policy; no candidate override is accepted here."""
     if feature_leg not in FEATURE_LEGS:
         raise ValueError('unknown feature leg')
-    cpu = normalize_cpu(cpu)
+    normalize_cpu(cpu)  # Validate; existing SKU policy tests the original CPU string.
     bounds = dict.fromkeys(LOW, Decimal('0.20'))
     bounds.update(dict.fromkeys(DEMOTED, Decimal('0.55')))
     if 'sm4-bitsliced-simd' in feature_leg:
@@ -133,6 +133,7 @@ def qualify_outputs(text, *, feature_leg, sample_budget, cpu):
     issues, observations = [], []
     passes, counts, seed_counts, seeds = Counter(), Counter(), Counter(), {}
     pass_id = 0
+    pass_order = []
     if type(sample_budget) is not int or sample_budget != 100000:
         issues.append('wrong-declared-sample-budget')
     for raw in text.splitlines():
@@ -141,6 +142,7 @@ def qualify_outputs(text, *, feature_leg, sample_budget, cpu):
         if match:
             pass_id, total, features = int(match[1]), int(match[2]), match[3]
             passes[pass_id] += 1
+            pass_order.append(pass_id)
             if total != 5 or pass_id not in range(1, 6):
                 issues.append('unexpected-pass:' + str(pass_id))
             if features != compiled_features:
@@ -182,6 +184,8 @@ def qualify_outputs(text, *, feature_leg, sample_budget, cpu):
             median_five([tau] * 5)
         except ValueError:
             issues.append('invalid-five-decimal-tau:' + target)
+    if pass_order != list(range(1, 6)):
+        issues.append('wrong-pass-order')
     if passes != Counter({i: 1 for i in range(1, 6)}):
         issues.append('missing-or-duplicate-passes')
     values = {}

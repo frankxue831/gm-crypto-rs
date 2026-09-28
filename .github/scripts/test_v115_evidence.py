@@ -4,7 +4,7 @@ from datetime import date
 import hashlib
 import unittest
 
-from v115_evidence import FEATURE_LEGS, select_scheduled_jobs, qualify_outputs
+from v115_evidence import FEATURE_LEGS, select_scheduled_jobs, qualify_outputs, required_bounds
 
 START = date(2030, 1, 1)
 
@@ -105,6 +105,16 @@ class OutputTests(unittest.TestCase):
         for value in ('1.00000','-1.00000','0.99999'):
             self.assertFalse(self.qualify(output().replace('1.00001',value,1))['outputs_valid'])
         self.assertTrue(self.qualify(output().replace('1.00001','-1.00001'))['outputs_valid'])
+
+    def test_pass_order_matches_the_process_ledger(self):
+        text = output().replace('run 1/5', 'run TEMP/5').replace('run 2/5', 'run 1/5').replace('run TEMP/5', 'run 2/5')
+        self.assertFalse(self.qualify(text)['outputs_valid'])
+
+    def test_existing_fanout_policy_uses_raw_cpu_while_cells_normalize_it(self):
+        target = 'ct_sm4_cbc_decrypt_fanout'
+        self.assertEqual(str(required_bounds(FEATURE_LEGS[2], 'AMD EPYC  9V74')[target]), '0.20')
+        self.assertEqual(str(required_bounds(FEATURE_LEGS[2], 'AMD EPYC(TM) 9V74')[target]), '0.20')
+        self.assertEqual(str(required_bounds(FEATURE_LEGS[2], 'AMD EPYC 9V74')[target]), '0.55')
 
     def test_budget_and_exact_feature_order(self):
         self.assertFalse(qualify_outputs(output(),feature_leg='default',sample_budget=10000,cpu='CPU')['outputs_valid'])
