@@ -45,3 +45,6 @@ docs/superpowers/
 # Python bytecode (a .pyc embeds the absolute path it was compiled from).
 __pycache__/
 *.py[co]
+
+# Owner leave-and-return working state (local only; do not publish).
+STATUS.local.md

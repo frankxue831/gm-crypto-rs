@@ -1,0 +1,22 @@
+# Status (local) — copy to STATUS.local.md
+
+Owner leave-and-return sheet. Keep it short. Agents update this after
+bounded work; do not commit `STATUS.local.md` (it is gitignored).
+
+## Now
+- Latest usable result:
+- Evidence (commit / PR / path):
+
+## Next
+- One bounded task:
+- Owner:
+
+## Pending Owner
+- none
+
+## Unknown / do not trust
+- none
+
+## Session end (two lines)
+- Changed:
+- Still open:
