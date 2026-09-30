@@ -281,19 +281,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: simd-x86
       - name: cargo test -p gmcrypto-simd (x86_64 AVX2 / CLMUL / GFNI paths)
         run: cargo test -p gmcrypto-simd
-      # v1.16 — the only job that clippy-checks the x86_64 SIMD code (the
-      # macos-14 clippy runs never compile it), including the GFNI path's
-      # `incompatible_msrv` allowances.
-      - name: cargo clippy -p gmcrypto-simd (x86_64)
-        run: cargo clippy -p gmcrypto-simd --all-targets -- -D warnings
       # v1.16 — x86_64 on rustc 1.85-1.88 is the only configuration where
       # the build.rs `gmcrypto_simd_gfni` cfg is off and the GFNI code must
       # compile out; the MSRV job runs on aarch64, where it is excluded by

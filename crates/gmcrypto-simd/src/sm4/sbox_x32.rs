@@ -136,13 +136,12 @@ pub unsafe fn sbox_x32_avx2(input: &[u8; 32]) -> [u8; 32] {
     result
 }
 
-/// GFNI SM4 S-box on 32 independent inputs (v1.16,
-/// `docs/v1.16-scope.md` Q16.3): two GFNI instructions per register
-/// instead of the AVX2 gate sequence. Byte-identical to
-/// [`sbox_x32_scalar`] (exhaustive lane tests below; run under Intel SDE
-/// in CI).
+/// GFNI SM4 S-box on 32 independent inputs (v1.16).
 ///
-/// Compiled only on `x86_64` with rustc >= 1.89 (build.rs cfg).
+/// Two GFNI instructions per register instead of the AVX2 gate sequence
+/// (`docs/v1.16-scope.md` Q16.3). Byte-identical to [`sbox_x32_scalar`]
+/// (exhaustive lane tests below; run under Intel SDE in CI). Compiled
+/// only on `x86_64` with rustc >= 1.89 (build.rs cfg).
 ///
 /// # Safety
 ///
@@ -150,7 +149,13 @@ pub unsafe fn sbox_x32_avx2(input: &[u8; 32]) -> [u8; 32] {
 /// ([`crate::detect::has_gfni_avx2`]).
 #[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
 #[target_feature(enable = "gfni,avx2")]
-#[allow(unsafe_op_in_unsafe_fn, clippy::incompatible_msrv)]
+// `cast_ptr_alignment`: the pointer casts feed `loadu`/`storeu`, which
+// take unaligned addresses by definition.
+#[allow(
+    unsafe_op_in_unsafe_fn,
+    clippy::incompatible_msrv,
+    clippy::cast_ptr_alignment
+)]
 pub unsafe fn sbox_x32_gfni(input: &[u8; 32]) -> [u8; 32] {
     let x = _mm256_loadu_si256(input.as_ptr().cast::<__m256i>());
     let out = super::gfni::sbox_round(x);
