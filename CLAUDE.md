@@ -58,11 +58,14 @@ design; derive a frozen candidate table, confirm prospectively, and require
 injected-leak sensitivity evidence before activating relaxed cells. Current
 gates remain authoritative. A baseline-only result leaves activation deferred.
 
-**Next:** implement the accepted `docs/v1.15-protocol.md` (2026-09-27):
-enforce the intended compiler, freeze build inputs and evidence capture, then
-start 42 calibration days and 42 confirmation days under the pinned criteria.
-Activation requires a separate reviewed PR. The v1.14 F21 result stands
-(`docs/f21-finalize-result.md`).
+**Execution:** the [study-isolation amendment](docs/v1.15-calibration-freeze.md#study-isolation-amendment-september-30-2026)
+keeps calibration on an immutable source checkout; after its build-only
+qualification, other features may merge to main through ordinary review and CI.
+`dudect-nightly.yml` is the frozen study; `dudect-main.yml` is current-main
+regression coverage. Study bounds never transfer automatically to changed code.
+The September 29–November 9 cohort and subsequent prospective confirmation
+requirements remain fixed; activation requires a separate reviewed PR. The
+v1.14 F21 result stands (`docs/f21-finalize-result.md`).
 
 ## Open backlog
 

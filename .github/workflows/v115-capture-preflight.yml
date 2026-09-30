@@ -1,4 +1,4 @@
-name: v1.15 capture build-only preflight
+name: v1.15 pinned capture build-only preflight
 
 on:
   pull_request:
@@ -6,6 +6,8 @@ on:
       - '.github/scripts/v115_capture.py'
       - '.github/scripts/test_v115_capture.py'
       - '.github/scripts/v115_nightly.py'
+      - '.github/scripts/v115_isolated.py'
+      - 'docs/v1.15-isolation.json'
       - '.github/workflows/dudect-nightly.yml'
       - 'docs/v1.15-execution-freeze.json'
       - '.github/workflows/v115-capture-preflight.yml'
@@ -39,6 +41,9 @@ jobs:
             features: sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: 68e6ccdd5d407ecc89ec549442bd062bb9e0b317
+          path: study-source
       - uses: actions/checkout@v7
         with:
           # Read-only input from the already qualified structural-control recipe.
@@ -48,6 +53,7 @@ jobs:
           sparse-checkout-cone-mode: false
       - uses: dtolnay/rust-toolchain@1.95.0
       - name: Record Actions job provenance
+        working-directory: study-source
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -86,6 +92,7 @@ jobs:
           Path('capture-job.json').write_text(json.dumps(metadata, indent=2) + '\n')
           PY
       - name: Verify preflight cannot route to measurement
+        working-directory: study-source
         run: |
           python3 .github/scripts/v115_nightly.py route --root . --freeze docs/v1.15-execution-freeze.json --leg "$MATRIX_FEATURES"
           python3 - <<'PYCODE'
@@ -94,10 +101,11 @@ jobs:
           assert json.loads(Path('v115-route.json').read_text())['route'] == 'legacy'
           PYCODE
       - name: Prepare capture without executing any timing binary
+        working-directory: study-source
         run: |
           python3 .github/scripts/v115_capture.py prepare \
             --root . --evidence v115-capture --leg "$MATRIX_FEATURES" \
-            --lock frozen-inputs/research/control-builds/frozen.lock \
+            --lock ../frozen-inputs/research/control-builds/frozen.lock \
             --metadata capture-job.json
           python3 - <<'PY'
           import json
@@ -106,14 +114,17 @@ jobs:
           assert capture['status'] == 'prepared-no-timing-run'
           assert capture['measurement_enabled'] is False
           assert capture['processes'] == []
+          frozen = json.loads(Path('docs/v1.15-execution-freeze.json').read_text())
+          import os
+          assert capture['identity_sha256'] == frozen['identity_sha256_by_leg'][os.environ['MATRIX_FEATURES']]
           PY
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: v115-capture-preflight-${{ matrix.leg }}
           path: |
-            v115-capture/
-            capture-job.json
-            v115-route.json
+            study-source/v115-capture/
+            study-source/capture-job.json
+            study-source/v115-route.json
           retention-days: 90
           if-no-files-found: warn

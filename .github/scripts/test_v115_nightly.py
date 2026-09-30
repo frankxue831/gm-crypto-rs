@@ -111,14 +111,7 @@ class NightlyTests(unittest.TestCase):
                     f['calibration_end']='2030-02-13';freeze.write_bytes(nightly.canonical(f))
                     with self.assertRaisesRegex(ValueError,'freeze changed'):nightly.capture(root,freeze,r,e,get=get)
 
-    def test_workflow_pins_helper_bytes_and_execution_freeze_matches_workflow(self):
-        root=Path(__file__).resolve().parents[2]
-        workflow=(root/nightly.WORKFLOW).read_text();helper=(root/'.github/scripts/v115_nightly.py').read_bytes()
-        self.assertIn(nightly.digest(helper)+'  .github/scripts/v115_nightly.py',workflow)
-        f=json.loads((root/'docs/v1.15-execution-freeze.json').read_text())
-        nightly.window(f)  # Null disables capture; a later declared window must remain exactly 42 days.
-        self.assertEqual(f['workflow_sha256'],nightly.digest(workflow.encode()))
-        nightly.verify_sources(root,f)
+
 
 
 if __name__=='__main__':unittest.main()

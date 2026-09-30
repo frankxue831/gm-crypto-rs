@@ -1,7 +1,22 @@
-name: v1.15 frozen study (build-only on manual dispatch)
+name: dudect main nightly (deeper budget)
 
-# Existing workflow identity preserves the full first-attempt study census.
-# Current-main regression coverage lives in dudect-main.yml.
+# Cost-conscious trigger model (added during the post-v0.6.0 CI sweep):
+#
+# - REMOVED `push: branches: [main]`. Previously every merge to `main`
+#   fired the full 3-feature × 100K-sample matrix (~45 billed minutes
+#   per merge on `ubuntu-latest`). During rapid-merge weeks this was
+#   the single biggest billed-minute consumer. The PR-smoke
+#   (`dudect-pr.yml`) already gated every commit at 10K before merge,
+#   and the daily cron at 05:00 UTC catches statistical drift at 100K
+#   within 24h — so the merge trigger was duplicative. If you need an
+#   off-schedule deep run after a merge (e.g. a crypto-touching PR
+#   landed and you want the 100K confirmation before the next nightly
+#   cron), use `workflow_dispatch`:
+#     gh workflow run dudect-main.yml --ref main
+#
+# - KEPT `schedule:` (daily cron — the actual regression watch).
+# - KEPT `workflow_dispatch:` (manual ad-hoc reruns, including
+#   post-merge confirmation when needed).
 on:
   schedule:
     - cron: '0 5 * * *'  # 05:00 UTC daily
@@ -12,7 +27,7 @@ on:
 # behind it than discard 10+ minutes of measurement. (Compare with
 # `dudect-pr.yml` and `ci.yml`, which both cancel in progress.)
 concurrency:
-  group: dudect-nightly-${{ github.ref }}
+  group: dudect-main-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -75,12 +90,15 @@ jobs:
           - "sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp"
     steps:
       - uses: actions/checkout@v7
-        with:
-          path: orchestration
-      - uses: actions/checkout@v7
-        with:
-          ref: 68e6ccdd5d407ecc89ec549442bd062bb9e0b317
-          path: study-source
+      # v0.18 W1 — PINNED (was @stable). The toolchain is the load-bearing
+      # drift axis: the 2026-05-12 ubuntu-24.04 image refresh rolled Rust
+      # 1.94.1 → 1.95.0 and shifted the ct_fn_invert / ct_fp_invert noise
+      # floor (docs/v0.5-dudect-recalibration.md). Pin captured empirically
+      # from the "Capture runner environment" rustc -Vv; MUST be >= MSRV 1.85.
+      # A DELIBERATE bump is a reviewed re-baseline: bump here, dispatch the
+      # nightly several times, confirm medians stable, record the new floor
+      # (with ImageVersion + kernel) in docs/v0.5-dudect-recalibration.md.
+      # See docs/v0.18-scope.md Q18.4.
       - uses: dtolnay/rust-toolchain@1.95.0
       - name: Verify effective dudect toolchain
         shell: bash
@@ -102,17 +120,63 @@ jobs:
           if active.split()[0] != "1.95.0-x86_64-unknown-linux-gnu":
               raise SystemExit("unexpected effective dudect active toolchain")
           PY
-      - name: Run isolated study or build-only preflight
-        id: dudect
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Keyed on the matrix job-index (0-3), NOT ${{ matrix.features }}:
+          # the 4th leg's feature string contains commas
+          # (sm4-bitsliced-simd,sm4-aead,sm4-xts) and Swatinem/rust-cache
+          # rejects commas in `shared-key`
+          # (ValidationError: Key ... cannot contain commas), so that leg's
+          # build cache was never restored. job-index keeps each leg's cache
+          # distinct; the job NAME still carries the human-readable features=.
+          shared-key: gmcrypto-stable-${{ strategy.job-index }}
+
+      # v0.5 W4 phase 2 prep — capture runner environment so future
+      # calibration drifts can be correlated with `|tau|` shifts.
+      # See `docs/v0.5-dudect-recalibration.md`.
+      - name: Capture runner environment (for noise-floor correlation)
+        run: |
+          set +e
+          echo "=== Runner image ==="
+          echo "ImageVersion: ${ImageVersion:-<unset>}"
+          echo "ImageOS:      ${ImageOS:-<unset>}"
+          echo
+          echo "=== Kernel ==="
+          uname -a
+          echo
+          echo "=== CPU ==="
+          lscpu 2>/dev/null | head -30 || cat /proc/cpuinfo | head -25
+          echo
+          echo "=== CPU governor / turbo state ==="
+          for cpu in /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor; do
+            [ -r "$cpu" ] && echo "$cpu = $(cat "$cpu")"
+          done
+          [ -r /sys/devices/system/cpu/intel_pstate/no_turbo ] && \
+            echo "intel_pstate/no_turbo = $(cat /sys/devices/system/cpu/intel_pstate/no_turbo)"
+          echo
+          echo "=== Rust ==="
+          rustc -Vv
+          cargo -V
+
+      - name: Run dudect harness (nightly budget, 5 runs for median)
+        shell: bash
         env:
           DUDECT_SAMPLES: "100000"
           DUDECT_RUNS: "5"
           MATRIX_FEATURES: ${{ matrix.features }}
-          GH_TOKEN: ${{ github.token }}
-        run: python3 orchestration/.github/scripts/v115_isolated.py --control-root orchestration --root study-source --leg "$MATRIX_FEATURES"
+        run: |
+          set -euxo pipefail
+          if [ "$MATRIX_FEATURES" = "default" ]; then
+            FEATURES="crypto-bigint-scalar"
+          else
+            FEATURES="$MATRIX_FEATURES,crypto-bigint-scalar"
+          fi
+          for i in $(seq 1 "$DUDECT_RUNS"); do
+            echo "=== dudect run $i/$DUDECT_RUNS (features=$FEATURES) ==="
+            cargo bench --bench timing_leaks --features "$FEATURES" 2>&1 | tee "dudect-nightly-$i.log"
+          done
+
       - name: Parse and gate
-        if: ${{ steps.dudect.outputs.route == 'capture' }}
-        working-directory: study-source
         shell: bash
         env:
           # Must be re-declared here: `env` is step-scoped, so without this the
@@ -463,17 +527,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: dudect-nightly-log-${{ matrix.features }}
-          path: study-source/dudect-nightly-*.log
+          path: dudect-nightly-*.log
           retention-days: 30
-
-      - name: Upload v1.15 capture
-        if: ${{ always() && steps.dudect.outputs.capture_artifact != '' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ steps.dudect.outputs.capture_artifact }}
-          path: |
-            study-source/v115-capture/
-            study-source/capture-job.json
-            study-source/v115-route.json
-          retention-days: 90
-          if-no-files-found: warn
