@@ -26,4 +26,12 @@ paths:
 - The crate has its **own** README (v1.11.2): it outranks `gmcrypto-core` in
   a crates.io `sm4` search, so its page has to say it is an internal backend.
   Don't point `readme` back at `../../README.md`.
-- AVX-512 `sbox_x64` is open backlog.
+- GFNI S-box (v1.16, `docs/v1.16-scope.md`) replaced the AVX-512
+  `sbox_x64` backlog item: `sbox_x32_gfni`, two GFNI instructions at
+  AVX2 width, no core batch change. Its code is behind
+  `cfg(gmcrypto_simd_gfni)`, which `build.rs` emits only on rustc >= 1.89
+  (GFNI stabilized there); keep every GFNI item behind that cfg and
+  `target_arch = "x86_64"`, or the 1.85 MSRV build breaks. The derived
+  constants in `sm4/gfni.rs` are checked by a portable test; don't
+  hand-edit them. `simd-x86-sde` is the only job guaranteed to run the
+  GFNI path.

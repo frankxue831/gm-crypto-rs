@@ -37,6 +37,7 @@ silently unwire that leg). Each opt-in feature gets its own clippy pass.
 ## CI
 
 - Five `ci.yml` jobs on `macos-14`; `simd-x86` on `ubuntu-latest`;
+  `simd-x86-sde` (Intel SDE, hash-pinned; GFNI path asserted) on `ubuntu-24.04`;
   `interop-gmssl` on `ubuntu-24.04`. Dudect stays on `ubuntu-24.04`
   (`.claude/rules/dudect.md`).
 - `cargo deny`: `taiki-e/install-action@v2` with `cargo-deny@0.20.2` — don't

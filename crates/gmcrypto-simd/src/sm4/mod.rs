@@ -18,6 +18,12 @@
 //!   scalar calls (AVX2 not selected: 10% rule unmeasured);
 //!   [`sbox_x8`] is kept as an internal candidate / test surface.
 //!
+//! v1.16 added:
+//! - `gfni` — SM4 S-box as GF2P8AFFINEQB + GF2P8AFFINEINVQB through
+//!   the isomorphism to the AES field, behind `sbox_x32_gfni`. Compiled
+//!   only on x86_64 with rustc >= 1.89 (`build.rs` emits
+//!   `cfg(gmcrypto_simd_gfni)`); its derivation tests run everywhere.
+//!
 //! The scalar primitives (Boyar-Peralta Itoh-Tsujii gate sequence)
 //! live in `scalar` and serve as the fallback path for every SIMD
 //! entry point on targets without the relevant intrinsics. The

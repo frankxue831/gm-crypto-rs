@@ -43,6 +43,13 @@
 //!   invocation; other targets use four scalar calls. The one-byte
 //!   `sbox_x8` broadcast adapter in `gmcrypto-core` is removed.
 //!
+//! # v1.16 — GFNI S-box candidate
+//!
+//! - `sm4::sbox_x32::sbox_x32_gfni` and [`has_gfni_avx2`]: the SM4
+//!   S-box in two GFNI instructions per 32 bytes. Compiled only on
+//!   x86_64 with rustc >= 1.89 (a `build.rs` version check; MSRV stays
+//!   1.85). See `docs/v1.16-scope.md`.
+//!
 //! [`gmcrypto-c`]: https://docs.rs/gmcrypto-c
 
 #![no_std]
