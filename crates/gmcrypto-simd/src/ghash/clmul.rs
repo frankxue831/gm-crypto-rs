@@ -58,7 +58,9 @@ const fn from_natural_bytes(b: &[u8; 16]) -> [u8; 16] {
 /// [`crate::detect::has_pclmulqdq`] (cached `cpufeatures` check) before
 /// calling.
 #[target_feature(enable = "pclmulqdq,sse2")]
-#[allow(unsafe_op_in_unsafe_fn)]
+// `cast_ptr_alignment`: every pointer cast feeds `_mm_loadu_si128` /
+// `_mm_storeu_si128`, which take unaligned addresses by definition.
+#[allow(unsafe_op_in_unsafe_fn, clippy::cast_ptr_alignment)]
 pub unsafe fn ghash_mul_clmul(h: &[u8; 16], x: &[u8; 16]) -> [u8; 16] {
     // Bit-reverse each byte so the standard CLMUL polynomial arithmetic
     // matches NIST GHASH bit ordering. After this transform, a `u128`
