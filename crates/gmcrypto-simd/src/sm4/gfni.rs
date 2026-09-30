@@ -16,6 +16,35 @@ pub const POST_MATRIX: u64 = 0xF3AB_34A9_74A6_B589;
 /// `B`.
 pub const POST_CONST: i32 = 0xD3;
 
+#[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+use core::arch::x86_64::{
+    __m256i, _mm256_gf2p8affine_epi64_epi8, _mm256_gf2p8affineinv_epi64_epi8, _mm256_set1_epi64x,
+};
+
+/// SM4 S-box on 32 bytes: one affine into the AES field, one
+/// inverse-plus-affine back. No table lookups, no data-dependent branches.
+///
+/// # Safety
+///
+/// The host CPU must support GFNI and AVX2
+/// ([`crate::detect::has_gfni_avx2`]).
+#[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+#[target_feature(enable = "gfni,avx2")]
+// Compiled only on rustc >= 1.89 (build.rs cfg), where these intrinsics are
+// stable; `incompatible_msrv` compares them against the workspace MSRV 1.85.
+// The matrix casts reinterpret bits for the i64 intrinsic argument.
+#[allow(
+    unsafe_op_in_unsafe_fn,
+    clippy::incompatible_msrv,
+    clippy::cast_possible_wrap
+)]
+pub unsafe fn sbox_round(x: __m256i) -> __m256i {
+    let pre = _mm256_set1_epi64x(PRE_MATRIX as i64);
+    let post = _mm256_set1_epi64x(POST_MATRIX as i64);
+    let y = _mm256_gf2p8affine_epi64_epi8::<PRE_CONST>(x, pre);
+    _mm256_gf2p8affineinv_epi64_epi8::<POST_CONST>(y, post)
+}
+
 #[cfg(test)]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 mod tests {
