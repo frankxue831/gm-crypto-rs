@@ -63,6 +63,14 @@ pub fn sbox_x4(input: &[u8; 4]) -> [u8; 4] {
     }
     #[cfg(not(target_arch = "aarch64"))]
     {
+        #[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+        {
+            if crate::detect::has_gfni_avx2() {
+                // SAFETY: `has_gfni_avx2()` returned `true`, so GFNI is
+                // available; fixed-size arrays only.
+                return unsafe { sbox_x4_gfni(input) };
+            }
+        }
         sbox_x4_scalar(input)
     }
 }
