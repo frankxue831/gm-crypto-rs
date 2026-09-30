@@ -94,6 +94,11 @@ below assumes this removal.
 
 `sbox_x4` is a safe fixed-size entry point. Its production branches are:
 
+> **v1.16 update:** on x86_64 builds with rustc 1.89 or newer, a GFNI branch
+> (`sbox_x4_gfni`) now comes first where `has_gfni_avx2()` holds, selected
+> under this document's 10% rule; see `docs/v1.16-scope.md` §7 and the record
+> above `sbox_x4`. The branches below are as designed in this repair.
+
 - **AArch64:** stage the four inputs in the first four lanes of one fixed x16
   buffer, fill the remaining lanes with public zero bytes, invoke the existing
   NEON x16 gate circuit once, and return the first four outputs. NEON is the
