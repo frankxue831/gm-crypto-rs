@@ -102,6 +102,29 @@ pub unsafe fn sbox_x32_avx2(input: &[u8; 32]) -> [u8; 32] {
     result
 }
 
+/// GFNI SM4 S-box on 32 independent inputs (v1.16,
+/// `docs/v1.16-scope.md` Q16.3): two GFNI instructions per register
+/// instead of the AVX2 gate sequence. Byte-identical to
+/// [`sbox_x32_scalar`] (exhaustive lane tests below; run under Intel SDE
+/// in CI).
+///
+/// Compiled only on `x86_64` with rustc >= 1.89 (build.rs cfg).
+///
+/// # Safety
+///
+/// Caller must guarantee the host CPU supports GFNI and AVX2
+/// ([`crate::detect::has_gfni_avx2`]).
+#[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+#[target_feature(enable = "gfni,avx2")]
+#[allow(unsafe_op_in_unsafe_fn, clippy::incompatible_msrv)]
+pub unsafe fn sbox_x32_gfni(input: &[u8; 32]) -> [u8; 32] {
+    let x = _mm256_loadu_si256(input.as_ptr().cast::<__m256i>());
+    let out = super::gfni::sbox_round(x);
+    let mut result = [0u8; 32];
+    _mm256_storeu_si256(result.as_mut_ptr().cast::<__m256i>(), out);
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,6 +143,64 @@ mod tests {
                 sbox_byte(inp),
                 "scalar x32 lane {lane} disagrees at input 0x{inp:02x}",
             );
+        }
+    }
+
+    /// v1.16 Q16.4 — the SDE CI job sets `GMCRYPTO_SIMD_EXPECT_GFNI=1`.
+    /// If the GFNI path is not compiled in or not detected there, fail
+    /// loudly instead of silently testing the fallback.
+    #[test]
+    fn gfni_path_present_when_expected() {
+        extern crate std;
+        if std::env::var_os("GMCRYPTO_SIMD_EXPECT_GFNI").is_some() {
+            assert!(
+                crate::detect::has_gfni_avx2(),
+                "GMCRYPTO_SIMD_EXPECT_GFNI is set but the GFNI+AVX2 path is unavailable",
+            );
+        }
+    }
+
+    /// v1.16 — every byte value in every lane position: GFNI kernel ==
+    /// scalar gate circuit, and filler lanes stay `S(0)`.
+    #[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+    #[test]
+    fn gfni_lane_position_sweep() {
+        if !crate::detect::has_gfni_avx2() {
+            return;
+        }
+        for b in 0u8..=255 {
+            for lane in 0..32 {
+                let mut input = [0u8; 32];
+                input[lane] = b;
+                // SAFETY: `has_gfni_avx2()` returned `true` above.
+                let out = unsafe { sbox_x32_gfni(&input) };
+                for (l, &got) in out.iter().enumerate() {
+                    let want = if l == lane {
+                        sbox_byte(b)
+                    } else {
+                        sbox_byte(0)
+                    };
+                    assert_eq!(got, want, "byte 0x{b:02x} lane {lane}, output lane {l}");
+                }
+            }
+        }
+    }
+
+    /// v1.16 — 32 distinct bytes per call, 256 offsets: catches any
+    /// cross-lane mixing the one-hot sweep cannot.
+    #[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+    #[test]
+    fn gfni_matches_scalar_on_distinct_inputs() {
+        if !crate::detect::has_gfni_avx2() {
+            return;
+        }
+        for start in 0u8..=255 {
+            #[allow(clippy::cast_possible_truncation)]
+            let input: [u8; 32] =
+                core::array::from_fn(|i| start.wrapping_add((i as u8).wrapping_mul(37)));
+            // SAFETY: `has_gfni_avx2()` returned `true` above.
+            let got = unsafe { sbox_x32_gfni(&input) };
+            assert_eq!(got, sbox_x32_scalar(&input), "offset 0x{start:02x}");
         }
     }
 }

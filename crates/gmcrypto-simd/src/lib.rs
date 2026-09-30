@@ -75,6 +75,6 @@ pub mod sm4;
 mod detect;
 
 #[doc(hidden)]
-pub use detect::{has_avx2, has_pclmulqdq, has_pmull};
+pub use detect::{has_avx2, has_gfni_avx2, has_pclmulqdq, has_pmull};
 #[doc(hidden)]
 pub use ghash::ghash_mul;

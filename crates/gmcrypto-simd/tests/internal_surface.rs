@@ -20,6 +20,7 @@ fn internal_entry_points_exist() {
 
     // Cached CPU-feature detectors (defined on all arches; `false` off-arch).
     let _ = gmcrypto_simd::has_avx2();
+    let _ = gmcrypto_simd::has_gfni_avx2();
     let _ = gmcrypto_simd::has_pclmulqdq();
     let _ = gmcrypto_simd::has_pmull();
 }
