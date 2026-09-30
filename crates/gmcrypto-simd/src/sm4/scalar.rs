@@ -71,8 +71,11 @@ const fn gf_inv(x: u8) -> u8 {
 
 /// Scalar affine `A`: for each output bit `i`, compute parity of
 /// `(A_ROWS[i] & x)`, then OR into bit position `7 - i`.
+///
+/// `pub(super)` so the GFNI module's tests can re-derive their matrices
+/// from this definition (v1.16); still crate-internal.
 #[inline]
-const fn affine_a(x: u8) -> u8 {
+pub(super) const fn affine_a(x: u8) -> u8 {
     let mut out: u8 = 0;
     let mut i = 0u32;
     while i < 8 {
