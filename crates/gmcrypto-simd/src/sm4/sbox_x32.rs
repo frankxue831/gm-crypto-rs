@@ -21,11 +21,19 @@
 //!   `super::sbox_x8_scalar` four times (codex flag #1 from the
 //!   v0.6 W6 phase 3 scope consultation).
 //!
+//! v1.16 adds `sbox_x32_gfni` (x86_64, rustc >= 1.89): the same 32
+//! bytes through two GFNI instructions (`super::gfni`). It is a tested
+//! candidate; the dispatcher selects it only once the 10% rule of
+//! `docs/v1.16-scope.md` Q16.5 is met on a measured GFNI host.
+//!
 //! # Constant-time discipline
 //!
 //! Same as [`super::sbox_x8`]: shared AVX2 gate sequence (no table
 //! lookups, no secret-derived branches); scalar path is the same
-//! gate-only `sbox_byte` from `super::scalar`.
+//! gate-only `sbox_byte` from `super::scalar`. The GFNI candidate has
+//! no table lookups or branches either; GF2P8AFFINEQB and
+//! GF2P8AFFINEINVQB are on Intel's data-operand-independent-timing
+//! list (Q16.6).
 
 use super::scalar::sbox_byte;
 use crate::detect::has_avx2;
