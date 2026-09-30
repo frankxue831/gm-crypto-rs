@@ -300,6 +300,54 @@ jobs:
       - name: GB/T 32907 A.1 million-round KAT under sm4-bitsliced-simd (x86_64, release)
         run: cargo test -p gmcrypto-core --release --lib --features sm4-bitsliced-simd gbt32907_one_million_rounds -- --ignored
 
+  simd-x86-sde:
+    # v1.16 Q16.4 (docs/v1.16-scope.md) — the GFNI S-box runs only on CPUs
+    # with GFNI, and the hosted pool mixes EPYC 7763 (no GFNI) with GFNI
+    # SKUs, so `simd-x86` alone may never reach it. Intel SDE emulates a
+    # Sapphire Rapids CPU (GFNI + AVX-512) on any x86_64 runner, so every
+    # run tests the GFNI path. GMCRYPTO_SIMD_EXPECT_GFNI makes a unit test
+    # fail if that path was not compiled in or not detected. Emulated timing
+    # means nothing: correctness only. The archive is pinned to the SHA-256
+    # Intel publishes on its SDE download page for 10.13.1.
+    name: gmcrypto-simd tests (x86_64 GFNI under Intel SDE)
+    runs-on: ubuntu-24.04
+    if: >-
+      !contains(github.event.pull_request.title, '[skip ci]') &&
+      !contains(github.event.pull_request.title, '[ci skip]') &&
+      !contains(github.event.pull_request.title, '[no ci]') &&
+      !contains(github.event.pull_request.title, '[skip actions]') &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, '[ci skip]') &&
+      !contains(github.event.head_commit.message, '[no ci]') &&
+      !contains(github.event.head_commit.message, '[skip actions]')
+    timeout-minutes: 30
+    env:
+      SDE_URL: https://downloadmirror.intel.com/924984/sde-external-10.13.1-2026-07-28-lin.tar.xz
+      SDE_SHA256: 94e97d623fec54385686e1e7ba65ebc9941748c05ee451423948334892bf2b50
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: simd-x86-sde
+      - name: Download and verify Intel SDE
+        run: |
+          curl -fsSL --retry 3 "$SDE_URL" -o sde.tar.xz
+          echo "$SDE_SHA256  sde.tar.xz" | sha256sum --check
+          mkdir sde
+          tar -xf sde.tar.xz -C sde --strip-components=1
+          # Pin launches the program under ptrace; Ubuntu's Yama default
+          # (scope 1) can refuse it on some kernels.
+          sudo sysctl -w kernel.yama.ptrace_scope=0
+          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER=$PWD/sde/sde64 -spr --" >> "$GITHUB_ENV"
+      - name: cargo test -p gmcrypto-simd under SDE (GFNI path asserted)
+        env:
+          GMCRYPTO_SIMD_EXPECT_GFNI: "1"
+        run: cargo test -p gmcrypto-simd
+      - name: SM4 tests of gmcrypto-core --features sm4-bitsliced-simd under SDE
+        run: cargo test -p gmcrypto-core --features sm4-bitsliced-simd sm4
+
   interop-gmssl:
     # F16 — the gmssl cross-validation suite is the project's headline wire
     # guarantee, and until this job it ran in NO CI job: nothing set
