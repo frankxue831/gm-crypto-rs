@@ -63,6 +63,16 @@ pub fn sbox_x32_scalar(input: &[u8; 32]) -> [u8; 32] {
 #[must_use]
 #[inline]
 pub fn sbox_x32(input: &[u8; 32]) -> [u8; 32] {
+    #[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+    {
+        if crate::detect::has_gfni_avx2() {
+            // SAFETY: `has_gfni_avx2()` returned `true`, so the host CPU
+            // supports GFNI and AVX2 and the intrinsics inside
+            // `sbox_x32_gfni` are sound to invoke. Fixed-size array
+            // reference in; fixed-size array out.
+            return unsafe { sbox_x32_gfni(input) };
+        }
+    }
     #[cfg(target_arch = "x86_64")]
     {
         if has_avx2() {
