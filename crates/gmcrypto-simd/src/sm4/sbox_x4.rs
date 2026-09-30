@@ -135,6 +135,32 @@ pub unsafe fn sbox_x4_avx2(input: &[u8; 4]) -> [u8; 4] {
     [out[0], out[1], out[2], out[3]]
 }
 
+// ============================================================
+// x86_64 GFNI candidate (v1.16, docs/v1.16-scope.md §7)
+// ============================================================
+
+#[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+use core::arch::x86_64::{_mm_cvtsi32_si128, _mm_cvtsi128_si32};
+
+/// GFNI four-byte S-box: the four bytes go into the low 32 bits of one
+/// 128-bit register (other lanes public zeros), through the two GFNI
+/// instructions, and back. No memory staging, no pointer casts.
+///
+/// Compiled only on `x86_64` with rustc >= 1.89 (build.rs cfg).
+///
+/// # Safety
+///
+/// Caller must guarantee the host CPU supports GFNI
+/// ([`crate::detect::has_gfni_avx2`]).
+#[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+#[target_feature(enable = "gfni")]
+#[allow(unsafe_op_in_unsafe_fn, clippy::trivially_copy_pass_by_ref)]
+pub unsafe fn sbox_x4_gfni(input: &[u8; 4]) -> [u8; 4] {
+    let x = _mm_cvtsi32_si128(i32::from_le_bytes(*input));
+    let out = super::gfni::sbox_round_128(x);
+    _mm_cvtsi128_si32(out).to_le_bytes()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +175,52 @@ mod tests {
                 sbox_byte(inp),
                 "scalar x4 lane {lane} disagrees at input 0x{inp:02x}",
             );
+        }
+    }
+
+    /// v1.16 — every byte value in each of the four lanes: GFNI x4 ==
+    /// scalar gate circuit, and the other lanes stay `S(0)`.
+    #[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+    #[test]
+    fn gfni_lane_position_sweep() {
+        if !crate::detect::has_gfni_avx2() {
+            return;
+        }
+        for b in 0u8..=255 {
+            for lane in 0..4 {
+                let mut input = [0u8; 4];
+                input[lane] = b;
+                // SAFETY: `has_gfni_avx2()` returned `true` above.
+                let out = unsafe { sbox_x4_gfni(&input) };
+                for (l, &got) in out.iter().enumerate() {
+                    let want = if l == lane {
+                        sbox_byte(b)
+                    } else {
+                        sbox_byte(0)
+                    };
+                    assert_eq!(got, want, "byte 0x{b:02x} lane {lane}, output lane {l}");
+                }
+            }
+        }
+    }
+
+    /// v1.16 — four distinct bytes per call over all 256 offsets.
+    #[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+    #[test]
+    fn gfni_matches_scalar_on_distinct_inputs() {
+        if !crate::detect::has_gfni_avx2() {
+            return;
+        }
+        for start in 0u8..=255 {
+            let input = [
+                start,
+                start.wrapping_add(37),
+                start.wrapping_add(101),
+                start.wrapping_add(200),
+            ];
+            // SAFETY: `has_gfni_avx2()` returned `true` above.
+            let got = unsafe { sbox_x4_gfni(&input) };
+            assert_eq!(got, sbox_x4_scalar(&input), "offset 0x{start:02x}");
         }
     }
 }

@@ -18,8 +18,31 @@ pub const POST_CONST: i32 = 0xD3;
 
 #[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
 use core::arch::x86_64::{
-    __m256i, _mm256_gf2p8affine_epi64_epi8, _mm256_gf2p8affineinv_epi64_epi8, _mm256_set1_epi64x,
+    __m128i, __m256i, _mm_gf2p8affine_epi64_epi8, _mm_gf2p8affineinv_epi64_epi8, _mm_set1_epi64x,
+    _mm256_gf2p8affine_epi64_epi8, _mm256_gf2p8affineinv_epi64_epi8, _mm256_set1_epi64x,
 };
+
+/// SM4 S-box on 16 bytes (128-bit form of [`sbox_round`]), for the
+/// single-block `sbox_x4` path. Same matrices and constants.
+///
+/// # Safety
+///
+/// The host CPU must support GFNI ([`crate::detect::has_gfni_avx2`]
+/// establishes GFNI, AVX2 and more).
+#[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+#[target_feature(enable = "gfni")]
+// See `sbox_round` for the three allowances.
+#[allow(
+    unsafe_op_in_unsafe_fn,
+    clippy::incompatible_msrv,
+    clippy::cast_possible_wrap
+)]
+pub unsafe fn sbox_round_128(x: __m128i) -> __m128i {
+    let pre = _mm_set1_epi64x(PRE_MATRIX as i64);
+    let post = _mm_set1_epi64x(POST_MATRIX as i64);
+    let y = _mm_gf2p8affine_epi64_epi8::<PRE_CONST>(x, pre);
+    _mm_gf2p8affineinv_epi64_epi8::<POST_CONST>(y, post)
+}
 
 /// SM4 S-box on 32 bytes: one affine into the AES field, one
 /// inverse-plus-affine back. No table lookups, no data-dependent branches.
