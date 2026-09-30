@@ -281,12 +281,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: simd-x86
       - name: cargo test -p gmcrypto-simd (x86_64 AVX2 / CLMUL paths)
         run: cargo test -p gmcrypto-simd
+      # The only clippy run that compiles the x86_64 SIMD code: the macos-14
+      # clippy passes in `build` never reach it (target_arch-gated).
+      - name: cargo clippy -p gmcrypto-simd (x86_64)
+        run: cargo clippy -p gmcrypto-simd --all-targets -- -D warnings
       - name: cargo test -p gmcrypto-core --features sm4-bitsliced-simd (x86_64 composition)
         run: cargo test -p gmcrypto-core --features sm4-bitsliced-simd
       - name: cargo test -p gmcrypto-core --features sm4-aead,sm4-bitsliced-simd (x86_64 composition)

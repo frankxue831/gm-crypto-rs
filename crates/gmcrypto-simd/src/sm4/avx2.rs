@@ -33,7 +33,10 @@ use super::scalar::{A_ROWS, AFFINE_B, SM4_GF_POLY};
 ///
 /// Caller must guarantee AVX2 support on the host CPU.
 #[target_feature(enable = "avx2")]
-#[allow(unsafe_op_in_unsafe_fn)]
+// `cast_possible_wrap`: `as i8` reinterprets a byte constant's bits for
+// `_mm256_set1_epi8`; the wrap is the intent (`u8::cast_signed` is 1.87,
+// above MSRV 1.85).
+#[allow(unsafe_op_in_unsafe_fn, clippy::cast_possible_wrap)]
 pub(super) unsafe fn gf_mul(mut a: __m256i, mut b: __m256i) -> __m256i {
     let mut r = _mm256_setzero_si256();
     let one = _mm256_set1_epi8(1);
@@ -99,7 +102,9 @@ pub(super) unsafe fn gf_inv(x: __m256i) -> __m256i {
 ///
 /// Caller must guarantee AVX2 support on the host CPU.
 #[target_feature(enable = "avx2")]
-#[allow(unsafe_op_in_unsafe_fn)]
+// `cast_possible_wrap`: bit reinterpretation of the row constants for
+// `_mm256_set1_epi8` (see `gf_mul`).
+#[allow(unsafe_op_in_unsafe_fn, clippy::cast_possible_wrap)]
 pub(super) unsafe fn affine_a(x: __m256i) -> __m256i {
     let row0 = _mm256_set1_epi8(A_ROWS[0] as i8);
     let row1 = _mm256_set1_epi8(A_ROWS[1] as i8);
@@ -156,7 +161,9 @@ pub(super) unsafe fn parity(x: __m256i) -> __m256i {
 ///
 /// Caller must guarantee AVX2 support on the host CPU.
 #[target_feature(enable = "avx2")]
-#[allow(unsafe_op_in_unsafe_fn)]
+// `cast_possible_wrap`: bit reinterpretation of `AFFINE_B` for
+// `_mm256_set1_epi8` (see `gf_mul`).
+#[allow(unsafe_op_in_unsafe_fn, clippy::cast_possible_wrap)]
 pub(super) unsafe fn sbox_round(x: __m256i) -> __m256i {
     let b_const = _mm256_set1_epi8(AFFINE_B as i8);
     let pre = _mm256_xor_si256(affine_a(x), b_const);

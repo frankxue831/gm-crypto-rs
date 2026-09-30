@@ -91,7 +91,9 @@ use core::arch::x86_64::{__m256i, _mm256_loadu_si256, _mm256_storeu_si256};
 /// `cpufeatures` check) before calling.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-#[allow(unsafe_op_in_unsafe_fn)]
+// `cast_ptr_alignment`: the pointer casts feed `_mm256_loadu_si256` /
+// `_mm256_storeu_si256`, which take unaligned addresses by definition.
+#[allow(unsafe_op_in_unsafe_fn, clippy::cast_ptr_alignment)]
 pub unsafe fn sbox_x32_avx2(input: &[u8; 32]) -> [u8; 32] {
     let x = _mm256_loadu_si256(input.as_ptr().cast::<__m256i>());
     let out = super::avx2::sbox_round(x);
