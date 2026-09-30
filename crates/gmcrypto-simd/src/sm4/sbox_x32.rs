@@ -10,7 +10,10 @@
 //!
 //! # Dispatch
 //!
-//! - On `x86_64` with AVX2 available at runtime: `sbox_x32_avx2`
+//! - On `x86_64` with GFNI and AVX2 available at runtime, and a
+//!   compiler of 1.89 or newer (v1.16): `sbox_x32_gfni` — two GFNI
+//!   instructions per 32 bytes (`super::gfni`).
+//! - Otherwise on `x86_64` with AVX2 available at runtime: `sbox_x32_avx2`
 //!   — the full 32-byte AVX2 path. Same shared gate sequence as
 //!   [`super::sbox_x8`] (`super::avx2::sbox_round`); the only
 //!   difference is no staging-buffer overhead.
@@ -21,16 +24,14 @@
 //!   `super::sbox_x8_scalar` four times (codex flag #1 from the
 //!   v0.6 W6 phase 3 scope consultation).
 //!
-//! v1.16 adds `sbox_x32_gfni` (x86_64, rustc >= 1.89): the same 32
-//! bytes through two GFNI instructions (`super::gfni`). It is a tested
-//! candidate; the dispatcher selects it only once the 10% rule of
-//! `docs/v1.16-scope.md` Q16.5 is met on a measured GFNI host.
+//! The GFNI branch was selected under the 10% rule of
+//! `docs/v1.16-scope.md` Q16.5; the record is above [`sbox_x32`].
 //!
 //! # Constant-time discipline
 //!
 //! Same as [`super::sbox_x8`]: shared AVX2 gate sequence (no table
 //! lookups, no secret-derived branches); scalar path is the same
-//! gate-only `sbox_byte` from `super::scalar`. The GFNI candidate has
+//! gate-only `sbox_byte` from `super::scalar`. The GFNI path has
 //! no table lookups or branches either; GF2P8AFFINEQB and
 //! GF2P8AFFINEINVQB are on Intel's data-operand-independent-timing
 //! list (Q16.6).
@@ -53,16 +54,41 @@ pub fn sbox_x32_scalar(input: &[u8; 32]) -> [u8; 32] {
 
 /// 32-way packed bitsliced SM4 S-box dispatch.
 ///
-/// On `x86_64` with AVX2: calls `sbox_x32_avx2`. Otherwise
+/// On `x86_64` with GFNI and AVX2 (rustc >= 1.89 builds): calls
+/// `sbox_x32_gfni`. Else with AVX2: `sbox_x32_avx2`. Otherwise
 /// [`sbox_x32_scalar`].
 ///
 /// Byte-identical output to applying `super::scalar::sbox_byte`
 /// to each input byte (verified exhaustively in
 /// `tests/lane_position_x32.rs` with lane-position-shifted sweeps
 /// per Q6.8 / codex's phase 3 flag #4).
+//
+// v1.16 GFNI selection record (docs/v1.16-scope.md Q16.5), measured
+// 2026-09-29 on a hosted ubuntu-24.04 runner, CPU "AMD EPYC 9V45 96-Core
+// Processor", rustc 1.98.1 (48a229cea 2026-09-01), release build, five
+// alternating samples each, medians:
+//   sbox_x32 call          AVX2 173.46 ns   GFNI 7.26 ns
+//   encrypt_blocks 1 KiB   AVX2 21.9 MB/s   GFNI 226.7 MB/s
+//   encrypt_blocks 256 KiB AVX2 22.0 MB/s   GFNI 229.7 MB/s
+//   decrypt_blocks 1 KiB   AVX2 21.9 MB/s   GFNI 227.7 MB/s
+//   decrypt_blocks 256 KiB AVX2 22.0 MB/s   GFNI 230.8 MB/s
+// Every case is at least 10% faster (about 10x end to end), so GFNI is the
+// production branch where detected. Evidence: research branch
+// `research/v1.16-gfni-measure` (never merged), Actions run 36651586704.
 #[must_use]
 #[inline]
 pub fn sbox_x32(input: &[u8; 32]) -> [u8; 32] {
+    #[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+    {
+        if crate::detect::has_gfni_avx2() {
+            // SAFETY: `has_gfni_avx2()` returned `true`, so the host CPU
+            // supports GFNI and AVX2 and the intrinsics inside
+            // `sbox_x32_gfni` are sound to invoke. Fixed-size array
+            // reference in; fixed-size array out — no raw pointers
+            // cross the unsafe boundary.
+            return unsafe { sbox_x32_gfni(input) };
+        }
+    }
     #[cfg(target_arch = "x86_64")]
     {
         if has_avx2() {

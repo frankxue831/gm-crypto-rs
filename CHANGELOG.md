@@ -7,13 +7,16 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **`gmcrypto-simd`: GFNI SM4 S-box candidate** (v1.16,
-  [`docs/v1.16-scope.md`](docs/v1.16-scope.md)). `sbox_x32_gfni` computes 32
-  S-box bytes with `GF2P8AFFINEQB` + `GF2P8AFFINEINVQB` on x86_64 CPUs with
-  GFNI and AVX2. Compiled only on rustc 1.89 or newer through a new
-  dependency-free `build.rs`; MSRV stays 1.85 and older compilers build the
-  previous code. Internal (`#[doc(hidden)]`) only; no `gmcrypto-core` API
-  change. CI gains an Intel SDE job that asserts the GFNI path runs.
+- **GFNI SM4 S-box on x86_64** (v1.16,
+  [`docs/v1.16-scope.md`](docs/v1.16-scope.md)). Under `sm4-bitsliced-simd`,
+  the batch path (`Sm4Cipher::encrypt_blocks` / `decrypt_blocks`, and so CTR,
+  GCM, CCM and CBC decryption) computes the S-box with `GF2P8AFFINEQB` +
+  `GF2P8AFFINEINVQB` on CPUs with GFNI and AVX2. Measured about 10x the AVX2
+  bitsliced throughput on an AMD EPYC 9V45 hosted runner (22 → 229 MB/s).
+  Compiled only on rustc 1.89 or newer through a new dependency-free
+  `build.rs` in `gmcrypto-simd`; MSRV stays 1.85 and older compilers build
+  the previous code. No public API change. CI gains an Intel SDE job that
+  asserts the GFNI path runs.
 
 ## [1.13.0] - 2026-09-04
 
