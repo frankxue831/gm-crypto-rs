@@ -32,6 +32,22 @@ fn gates_at_rust_1_89() {
     assert!(gfni_intrinsics_stable("rustc 2.0.0 (abcdef012 2030-01-01)"));
 }
 
+/// Early 1.89 nightlies predate the stabilization (rust-lang/rust#138940),
+/// so every 1.89 pre-release fails closed; 1.90+ pre-releases do not.
+#[test]
+fn rejects_1_89_prereleases() {
+    for early in [
+        "rustc 1.89.0-nightly (0123456789 2025-05-20)",
+        "rustc 1.89.0-beta.1 (0123456789 2025-06-27)",
+        "rustc 1.89.0-dev",
+    ] {
+        assert!(
+            !gfni_intrinsics_stable(early),
+            "{early:?} must not enable GFNI"
+        );
+    }
+}
+
 #[test]
 fn fails_closed_on_unparseable_versions() {
     for bad in [

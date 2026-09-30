@@ -10,9 +10,10 @@
 //!
 //! # Dispatch
 //!
-//! - On `x86_64` with GFNI and AVX2 available at runtime, and a
-//!   compiler of 1.89 or newer (v1.16): `sbox_x32_gfni` — two GFNI
-//!   instructions per 32 bytes (`super::gfni`).
+//! - On `x86_64` where `has_gfni_avx2()` holds at runtime (GFNI, AVX2
+//!   and OS-enabled AVX-512 state), with a compiler of 1.89 or newer
+//!   (v1.16): `sbox_x32_gfni` — two GFNI instructions per 32 bytes
+//!   (`super::gfni`).
 //! - Otherwise on `x86_64` with AVX2 available at runtime: `sbox_x32_avx2`
 //!   — the full 32-byte AVX2 path. Same shared gate sequence as
 //!   [`super::sbox_x8`] (`super::avx2::sbox_round`); the only
@@ -54,7 +55,8 @@ pub fn sbox_x32_scalar(input: &[u8; 32]) -> [u8; 32] {
 
 /// 32-way packed bitsliced SM4 S-box dispatch.
 ///
-/// On `x86_64` with GFNI and AVX2 (rustc >= 1.89 builds): calls
+/// On `x86_64` where `has_gfni_avx2()` holds (GFNI, AVX2 and
+/// OS-enabled AVX-512 state; rustc >= 1.89 builds): calls
 /// `sbox_x32_gfni`. Else with AVX2: `sbox_x32_avx2`. Otherwise
 /// [`sbox_x32_scalar`].
 ///
