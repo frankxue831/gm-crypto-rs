@@ -66,8 +66,12 @@ Activation requires a separate reviewed PR. The v1.14 F21 result stands
 
 ## Open backlog
 
-- v1.16 GFNI S-box (replaces AVX-512 `sbox_x64`): PR #224, merge held
-  for the v1.15 freeze (`docs/v1.16-scope.md`).
+- v1.16 GFNI S-box (replaces AVX-512 `sbox_x64`): merged 2026-09-30 as
+  #224 (`sbox_x32`, 9fec750) and #226 (`sbox_x4`, 6a53156), spec
+  `docs/v1.16-scope.md`. `crates/` changed after the v1.15 C0, so the
+  calibration's source pin or start date is an open Owner decision
+  (`docs/v1.15-calibration-freeze.md`; PR #227), and Gate #1 is owed
+  again before any publish.
 - **F21** `ct_sm4_cbc_unpad` — composite window blind
   (`docs/v1.10-scope.md` Q10.9); narrow `finalize()` window distinguishable on
   the pinned local host only (`docs/f21-finalize-result.md`, v1.14): a
