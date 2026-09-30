@@ -95,5 +95,37 @@ class BindingTests(unittest.TestCase):
             args,_,_,_=fixture();args[3][123]=data;args[2][0]['digest']='sha256:'+digest(data)
             r=bind_capture(*args);self.assertFalse(r['binding_qualified']);self.assertEqual(r['artifact_id'],123)
 
+    def test_isolated_capture_binds_source_separately_from_actions_head(self):
+        args,c,files,repack=fixture()
+        launcher=b'reviewed isolated launcher'; helper=b'reviewed isolation helper'
+        source='b'*40
+        amendment=dict(schema=1, repository=REPOSITORY, workflow_path=WORKFLOW,
+                       workflow_id=7, source_sha=source, freeze_sha256=digest(canonical(args[-1])),
+                       workflow_sha256=digest(launcher), helper_sha256=digest(helper))
+        args[4][(args[0]['head_sha'],WORKFLOW)]=launcher
+        args[4][(args[0]['head_sha'],'.github/scripts/v115_isolated.py')]=helper
+        c['metadata']['head_sha']=source
+        args[2],args[3]=repack()
+        r=bind_capture(*args,isolation=amendment)
+        self.assertTrue(r['binding_qualified'],r['issues'])
+        self.assertEqual(r['job']['head_sha'],source)
+        self.assertEqual(r['run_head_sha'],args[0]['head_sha'])
+        # Neither a different measured commit nor an unreviewed launcher is eligible.
+        for field in ('source_sha','workflow_sha256','helper_sha256','freeze_sha256'):
+            bad=copy.deepcopy(amendment);bad[field]='c'*len(bad[field])
+            with self.subTest(field=field):
+                try:r=bind_capture(*args,isolation=bad)
+                except ValueError:continue
+                self.assertFalse(r['binding_qualified'])
+
+    def test_isolation_does_not_reinterpret_old_capture_or_waive_provenance(self):
+        args,_,_,_=fixture()
+        amendment=dict(schema=1, repository=REPOSITORY, workflow_path=WORKFLOW,
+                       workflow_id=7, source_sha='b'*40, freeze_sha256=digest(canonical(args[-1])),
+                       workflow_sha256='c'*64,helper_sha256='d'*64)
+        self.assertTrue(bind_capture(*args,isolation=amendment)['binding_qualified'])
+        args[0]['event']='workflow_dispatch'
+        self.assertFalse(bind_capture(*args,isolation=amendment)['binding_qualified'])
+
 
 if __name__=='__main__':unittest.main()
