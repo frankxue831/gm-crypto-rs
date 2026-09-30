@@ -14,7 +14,11 @@
 //!   outputs. NEON is compile-time baseline; no runtime detect.
 //!   Must not go through [`super::sbox_x16::sbox_x16`] on any other
 //!   target (that dispatcher is 16 scalar calls off-aarch64).
-//! - **`x86_64`:** exactly four scalar gate-circuit calls. AVX2 is
+//! - **`x86_64` where `has_gfni_avx2()` holds** (rustc >= 1.89 builds;
+//!   v1.16): `sbox_x4_gfni`, one 128-bit register through two GFNI
+//!   instructions. Selected under the 10% rule; the record is above
+//!   [`sbox_x4`].
+//! - **other `x86_64`:** exactly four scalar gate-circuit calls. AVX2 is
 //!   not the production branch: the 10% improvement rule could not
 //!   be measured on the `AArch64` implementation host. The AVX2
 //!   candidate remains [`sbox_x4_avx2`] for tests. Must not call
@@ -48,7 +52,23 @@ pub fn sbox_x4_scalar(input: &[u8; 4]) -> [u8; 4] {
 /// Four-byte packed bitsliced SM4 S-box dispatch.
 ///
 /// On `aarch64`, one NEON x16 invocation with public-zero filler
-/// lanes. Elsewhere, exactly four scalar gate-circuit calls.
+/// lanes. On `x86_64` where `has_gfni_avx2()` holds (rustc >= 1.89
+/// builds), `sbox_x4_gfni`. Elsewhere, exactly four scalar gate-circuit
+/// calls.
+//
+// v1.16 GFNI-vs-scalar decision (x4 10% rule of
+// docs/sm4-single-block-simd-repair-design.md; docs/v1.16-scope.md §7):
+// - Date: 2026-09-30
+// - CPU: "Intel(R) Xeon(R) 6973P-C", hosted ubuntu-24.04 runner
+// - rustc: 1.98.1 (48a229cea 2026-09-01), release, sm4-bitsliced-simd
+// - Key-construction medians (five alternating samples): four scalar
+//   calls 11939.6 ns, GFNI 171.9 ns
+// - Pre-keyed single-block medians: four scalar calls 11640.9 ns,
+//   GFNI 191.8 ns
+// - Rule: select only if >= 10% faster for BOTH. Met (~60x both).
+// - Selection: GFNI where detected; four scalar calls otherwise.
+// Evidence: research branch `research/v1.16-gfni-x4-measure` (never
+// merged), Actions run 36679336946.
 #[must_use]
 #[inline]
 #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -63,6 +83,16 @@ pub fn sbox_x4(input: &[u8; 4]) -> [u8; 4] {
     }
     #[cfg(not(target_arch = "aarch64"))]
     {
+        #[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+        {
+            if crate::detect::has_gfni_avx2() {
+                // SAFETY: `has_gfni_avx2()` returned `true`, so GFNI is
+                // available and the intrinsics inside `sbox_x4_gfni` are
+                // sound to invoke. Fixed-size array in and out; no raw
+                // pointers cross the unsafe boundary.
+                return unsafe { sbox_x4_gfni(input) };
+            }
+        }
         sbox_x4_scalar(input)
     }
 }

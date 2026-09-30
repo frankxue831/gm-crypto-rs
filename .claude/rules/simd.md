@@ -29,7 +29,11 @@ paths:
 - GFNI S-box (v1.16, `docs/v1.16-scope.md`) replaced the AVX-512
   `sbox_x64` backlog item: `sbox_x32_gfni`, two GFNI instructions at
   AVX2 width, no core batch change; `sbox_x32` selects it where detected
-  (about 10x, record above `sbox_x32`). Its code is behind
+  (about 10x, record above `sbox_x32`), and `sbox_x4` selects
+  `sbox_x4_gfni` (128-bit, about 60x, record above `sbox_x4`). A CPU
+  model string does not tell you whether GFNI ran: hosted EPYC 9V74 VMs
+  differ in whether they expose `gfni`/`avx512f`; read the job's `lscpu`
+  Flags. Its code is behind
   `cfg(gmcrypto_simd_gfni)`, which `build.rs` emits only on rustc >= 1.89
   (GFNI stabilized there); keep every GFNI item behind that cfg and
   `target_arch = "x86_64"`, or the 1.85 MSRV build breaks. The derived
