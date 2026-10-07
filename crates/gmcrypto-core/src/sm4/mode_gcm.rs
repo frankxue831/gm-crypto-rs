@@ -611,7 +611,7 @@ mod tests {
     fn round_trip_empty_plaintext() {
         let aad = b"aad-only message";
         let (ct, tag) = encrypt(&KEY, &NONCE_12, aad, &[]).expect("under ceiling");
-        assert!(ct.is_empty());
+        assert_eq!(ct, [] as [u8; 0]);
         let recovered = decrypt(&KEY, &NONCE_12, aad, &ct, &tag).expect("tag verifies");
         assert_eq!(recovered, &[] as &[u8]);
     }

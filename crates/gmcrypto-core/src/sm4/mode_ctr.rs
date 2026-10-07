@@ -150,7 +150,7 @@ mod tests {
     fn empty_input_returns_empty_output() {
         let key = [0u8; 16];
         let counter = [0u8; 16];
-        assert!(encrypt(&key, &counter, &[]).is_empty());
-        assert!(decrypt(&key, &counter, &[]).is_empty());
+        assert_eq!(encrypt(&key, &counter, &[]), [] as [u8; 0]);
+        assert_eq!(decrypt(&key, &counter, &[]), [] as [u8; 0]);
     }
 }

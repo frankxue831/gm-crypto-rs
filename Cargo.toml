@@ -1,5 +1,7 @@
 [workspace]
-resolver = "2"
+# Prefer dependencies compatible with the declared Rust 1.85 MSRV, including
+# when a newer Cargo generates the uncommitted workspace lockfile.
+resolver = "3"
 # v0.4 W4 — `gmcrypto-c` is the C ABI shim (cdylib + staticlib +
 # cbindgen header). Per Q4.15 in docs/v0.4-scope.md, it is a
 # workspace member but NOT in `default-members` — most contributors

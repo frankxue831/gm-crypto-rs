@@ -661,7 +661,7 @@ mod tests {
         enc.zeroize();
         assert_eq!(enc.buffer, [0u8; BLOCK_SIZE]);
         assert_eq!(enc.buffer_len, 0);
-        assert!(enc.output.is_empty());
+        assert_eq!(enc.output, [] as [u8; 0]);
         assert_eq!(enc.prev, [0u8; BLOCK_SIZE]);
     }
 
@@ -678,7 +678,7 @@ mod tests {
         assert_eq!(dec.output.len(), BLOCK_SIZE);
         dec.zeroize();
         assert!(dec.held_back.is_none());
-        assert!(dec.output.is_empty());
+        assert_eq!(dec.output, [] as [u8; 0]);
         assert_eq!(dec.buffer, [0u8; BLOCK_SIZE]);
         assert_eq!(dec.buffer_len, 0);
         assert_eq!(dec.prev, [0u8; BLOCK_SIZE]);

@@ -249,7 +249,7 @@ mod tests {
         let (unused, bytes, rest) = reader::read_bit_string(&out).unwrap();
         assert_eq!(unused, 0);
         assert_eq!(bytes, &[0xAB, 0xCD]);
-        assert!(rest.is_empty());
+        assert_eq!(rest, []);
     }
 
     // ---------- write_null ----------

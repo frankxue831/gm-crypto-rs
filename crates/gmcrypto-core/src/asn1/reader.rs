@@ -332,7 +332,7 @@ mod tests {
     fn integer_canonical_zero() {
         let (bytes, rest) = read_integer(&[0x02, 0x01, 0x00]).expect("zero");
         assert_eq!(bytes, &[0x00]);
-        assert!(rest.is_empty());
+        assert_eq!(rest, []);
     }
 
     #[test]
@@ -389,14 +389,14 @@ mod tests {
     fn octet_string_round_trip() {
         let (value, rest) = read_octet_string(&[0x04, 0x03, 0x01, 0x02, 0x03]).unwrap();
         assert_eq!(value, &[0x01, 0x02, 0x03]);
-        assert!(rest.is_empty());
+        assert_eq!(rest, []);
     }
 
     #[test]
     fn octet_string_empty() {
         let (value, rest) = read_octet_string(&[0x04, 0x00]).unwrap();
-        assert!(value.is_empty());
-        assert!(rest.is_empty());
+        assert_eq!(value, []);
+        assert_eq!(rest, []);
     }
 
     // ---------- read_null ----------
@@ -422,7 +422,7 @@ mod tests {
         ];
         let (value, rest) = read_oid(&der).unwrap();
         assert_eq!(value, &der[2..]);
-        assert!(rest.is_empty());
+        assert_eq!(rest, []);
     }
 
     #[test]
@@ -445,7 +445,7 @@ mod tests {
         let (unused, bytes, rest) = read_bit_string(&[0x03, 0x03, 0x00, 0xAB, 0xCD]).unwrap();
         assert_eq!(unused, 0);
         assert_eq!(bytes, &[0xAB, 0xCD]);
-        assert!(rest.is_empty());
+        assert_eq!(rest, []);
     }
 
     #[test]
@@ -467,13 +467,13 @@ mod tests {
         let der = [0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x02];
         let (body, rest) = read_sequence(&der).unwrap();
         assert_eq!(body, &der[2..]);
-        assert!(rest.is_empty());
+        assert_eq!(rest, []);
         // Iterate body.
         let (a, body) = read_integer(body).unwrap();
         let (b, body) = read_integer(body).unwrap();
         assert_eq!(a, &[0x01]);
         assert_eq!(b, &[0x02]);
-        assert!(body.is_empty());
+        assert_eq!(body, []);
     }
 
     // ---------- context tags ----------
@@ -483,7 +483,7 @@ mod tests {
         // [0] EXPLICIT INTEGER 1 = A0 03 02 01 01
         let der = [0xA0, 0x03, 0x02, 0x01, 0x01];
         let (inner, rest) = read_context_tagged_explicit(&der, 0).unwrap();
-        assert!(rest.is_empty());
+        assert_eq!(rest, []);
         let (val, _) = read_integer(inner).unwrap();
         assert_eq!(val, &[0x01]);
     }
@@ -494,7 +494,7 @@ mod tests {
         let der = [0x81, 0x02, 0x61, 0x62];
         let (value, rest) = read_context_tagged_implicit(&der, 1).unwrap();
         assert_eq!(value, b"ab");
-        assert!(rest.is_empty());
+        assert_eq!(rest, []);
     }
 
     #[test]

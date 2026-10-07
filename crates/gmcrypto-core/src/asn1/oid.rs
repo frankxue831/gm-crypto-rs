@@ -300,7 +300,7 @@ mod tests {
             writer::write_oid(&mut buf, oid);
             let (parsed, rest) = reader::read_oid(&buf).unwrap();
             assert_eq!(parsed, *oid);
-            assert!(rest.is_empty());
+            assert_eq!(rest, []);
         }
     }
 }
