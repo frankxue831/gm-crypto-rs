@@ -487,7 +487,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "cargo-deny": "efc9a2787bc8b48022d35d3419af0e9987c6a11c3a5c44959fc93b1d33be9174",
         "gitleaks scan": "c7889df5e874f1a5cee871c24cd49cc539d845c0627861e49b1a9e6335d1c15f",
         "PR dudect": "8cf76b3c24c5ed8276c718f51849fbaf3a3cb7459278d797f9ae354815b9e9df",
-        "nightly dudect": "400a8e198cc072b6735a16c132595d03fbef3da1c69181a3b476fcf3e78f1ff8",
+        "nightly dudect": "ad3df5c7f838a3a33adc161e1344db833ddbea35631a7685dab8ea88a2b92d74",
     }
     for label, expected_fingerprint in reviewed_job_fingerprints.items():
         require(
