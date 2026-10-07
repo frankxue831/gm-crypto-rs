@@ -71,9 +71,9 @@ checksum = "15b85f9c39137c3a891689859392b1bd49812121d0d61c9caf00d46ed5ce06ae"
 
 [[package]]
 name = "cpufeatures"
-version = "0.2.17"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
+checksum = "5ca28b0ae3115b884660db4118d803791fd6756b6e88f39c0f3f7859060d7566"
 dependencies = [
  "libc",
 ]
@@ -168,7 +168,7 @@ dependencies = [
 
 [[package]]
 name = "gmcrypto-c"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "getrandom 0.4.2",
  "gmcrypto-core",
@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "gmcrypto-core"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "aead",
  "crypto-bigint",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "gmcrypto-simd"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "cpufeatures",
 ]
