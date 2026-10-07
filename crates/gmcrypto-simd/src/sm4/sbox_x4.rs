@@ -14,7 +14,11 @@
 //!   outputs. NEON is compile-time baseline; no runtime detect.
 //!   Must not go through [`super::sbox_x16::sbox_x16`] on any other
 //!   target (that dispatcher is 16 scalar calls off-aarch64).
-//! - **`x86_64`:** exactly four scalar gate-circuit calls. AVX2 is
+//! - **`x86_64` where `has_gfni_avx2()` holds** (rustc >= 1.89 builds;
+//!   v1.16): `sbox_x4_gfni`, one 128-bit register through two GFNI
+//!   instructions. Selected under the 10% rule; the record is above
+//!   [`sbox_x4`].
+//! - **other `x86_64`:** exactly four scalar gate-circuit calls. AVX2 is
 //!   not the production branch: the 10% improvement rule could not
 //!   be measured on the `AArch64` implementation host. The AVX2
 //!   candidate remains [`sbox_x4_avx2`] for tests. Must not call
@@ -48,7 +52,23 @@ pub fn sbox_x4_scalar(input: &[u8; 4]) -> [u8; 4] {
 /// Four-byte packed bitsliced SM4 S-box dispatch.
 ///
 /// On `aarch64`, one NEON x16 invocation with public-zero filler
-/// lanes. Elsewhere, exactly four scalar gate-circuit calls.
+/// lanes. On `x86_64` where `has_gfni_avx2()` holds (rustc >= 1.89
+/// builds), `sbox_x4_gfni`. Elsewhere, exactly four scalar gate-circuit
+/// calls.
+//
+// v1.16 GFNI-vs-scalar decision (x4 10% rule of
+// docs/sm4-single-block-simd-repair-design.md; docs/v1.16-scope.md §7):
+// - Date: 2026-09-30
+// - CPU: "Intel(R) Xeon(R) 6973P-C", hosted ubuntu-24.04 runner
+// - rustc: 1.98.1 (48a229cea 2026-09-01), release, sm4-bitsliced-simd
+// - Key-construction medians (five alternating samples): four scalar
+//   calls 11939.6 ns, GFNI 171.9 ns
+// - Pre-keyed single-block medians: four scalar calls 11640.9 ns,
+//   GFNI 191.8 ns
+// - Rule: select only if >= 10% faster for BOTH. Met (~60x both).
+// - Selection: GFNI where detected; four scalar calls otherwise.
+// Evidence: research branch `research/v1.16-gfni-x4-measure` (never
+// merged), Actions run 36679336946.
 #[must_use]
 #[inline]
 #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -63,6 +83,16 @@ pub fn sbox_x4(input: &[u8; 4]) -> [u8; 4] {
     }
     #[cfg(not(target_arch = "aarch64"))]
     {
+        #[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+        {
+            if crate::detect::has_gfni_avx2() {
+                // SAFETY: `has_gfni_avx2()` returned `true`, so GFNI is
+                // available and the intrinsics inside `sbox_x4_gfni` are
+                // sound to invoke. Fixed-size array in and out; no raw
+                // pointers cross the unsafe boundary.
+                return unsafe { sbox_x4_gfni(input) };
+            }
+        }
         sbox_x4_scalar(input)
     }
 }
@@ -135,6 +165,32 @@ pub unsafe fn sbox_x4_avx2(input: &[u8; 4]) -> [u8; 4] {
     [out[0], out[1], out[2], out[3]]
 }
 
+// ============================================================
+// x86_64 GFNI candidate (v1.16, docs/v1.16-scope.md §7)
+// ============================================================
+
+#[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+use core::arch::x86_64::{_mm_cvtsi32_si128, _mm_cvtsi128_si32};
+
+/// GFNI four-byte S-box: the four bytes go into the low 32 bits of one
+/// 128-bit register (other lanes public zeros), through the two GFNI
+/// instructions, and back. No memory staging, no pointer casts.
+///
+/// Compiled only on `x86_64` with rustc >= 1.89 (build.rs cfg).
+///
+/// # Safety
+///
+/// Caller must guarantee the host CPU supports GFNI
+/// ([`crate::detect::has_gfni_avx2`]).
+#[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+#[target_feature(enable = "gfni")]
+#[allow(unsafe_op_in_unsafe_fn, clippy::trivially_copy_pass_by_ref)]
+pub unsafe fn sbox_x4_gfni(input: &[u8; 4]) -> [u8; 4] {
+    let x = _mm_cvtsi32_si128(i32::from_le_bytes(*input));
+    let out = super::gfni::sbox_round_128(x);
+    _mm_cvtsi128_si32(out).to_le_bytes()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +205,52 @@ mod tests {
                 sbox_byte(inp),
                 "scalar x4 lane {lane} disagrees at input 0x{inp:02x}",
             );
+        }
+    }
+
+    /// v1.16 — every byte value in each of the four lanes: GFNI x4 ==
+    /// scalar gate circuit, and the other lanes stay `S(0)`.
+    #[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+    #[test]
+    fn gfni_lane_position_sweep() {
+        if !crate::detect::has_gfni_avx2() {
+            return;
+        }
+        for b in 0u8..=255 {
+            for lane in 0..4 {
+                let mut input = [0u8; 4];
+                input[lane] = b;
+                // SAFETY: `has_gfni_avx2()` returned `true` above.
+                let out = unsafe { sbox_x4_gfni(&input) };
+                for (l, &got) in out.iter().enumerate() {
+                    let want = if l == lane {
+                        sbox_byte(b)
+                    } else {
+                        sbox_byte(0)
+                    };
+                    assert_eq!(got, want, "byte 0x{b:02x} lane {lane}, output lane {l}");
+                }
+            }
+        }
+    }
+
+    /// v1.16 — four distinct bytes per call over all 256 offsets.
+    #[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+    #[test]
+    fn gfni_matches_scalar_on_distinct_inputs() {
+        if !crate::detect::has_gfni_avx2() {
+            return;
+        }
+        for start in 0u8..=255 {
+            let input = [
+                start,
+                start.wrapping_add(37),
+                start.wrapping_add(101),
+                start.wrapping_add(200),
+            ];
+            // SAFETY: `has_gfni_avx2()` returned `true` above.
+            let got = unsafe { sbox_x4_gfni(&input) };
+            assert_eq!(got, sbox_x4_scalar(&input), "offset 0x{start:02x}");
         }
     }
 }

@@ -69,7 +69,13 @@ v1.14 F21 result stands (`docs/f21-finalize-result.md`).
 
 ## Open backlog
 
-- AVX-512 `sbox_x64`; **F21** `ct_sm4_cbc_unpad` — composite window blind
+- v1.16 GFNI S-box (replaces AVX-512 `sbox_x64`): merged 2026-09-30 as
+  #224 (`sbox_x32`, 9fec750) and #226 (`sbox_x4`, 6a53156), spec
+  `docs/v1.16-scope.md`. `crates/` changed after the v1.15 C0, so the
+  calibration's source pin or start date is an open Owner decision
+  (`docs/v1.15-calibration-freeze.md`; PR #227), and Gate #1 is owed
+  again before any publish.
+- **F21** `ct_sm4_cbc_unpad` — composite window blind
   (`docs/v1.10-scope.md` Q10.9); narrow `finalize()` window distinguishable on
   the pinned local host only (`docs/f21-finalize-result.md`, v1.14): a
   research instrument, not a gate; any telemetry target waits for the
@@ -102,6 +108,8 @@ v1.14 F21 result stands (`docs/f21-finalize-result.md`).
 - `Cargo.lock` is gitignored (lib-crate). Don't `git add` it. Anchor is
   `/Cargo.lock` (root only) so `fuzz/Cargo.lock` stays committed.
 - MSRV **1.85**, edition **2024**. Don't use `Integer::is_multiple_of` (1.87).
+  The one exception is `gmcrypto-simd`'s GFNI path, compiled only on rustc
+  >= 1.89 via its `build.rs` cfg (`.claude/rules/simd.md`).
 - `sign_raw_with_id` is `#[doc(hidden)] pub` for dudect only — **not SemVer**.
 
 ## Commands

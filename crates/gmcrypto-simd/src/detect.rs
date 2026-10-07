@@ -20,6 +20,11 @@ cpufeatures::new!(cpuid_avx2, "avx2");
 #[cfg(target_arch = "x86_64")]
 cpufeatures::new!(cpuid_pclmulqdq, "pclmulqdq");
 
+// v1.16 — only on compilers where the `gfni` intrinsics are stable
+// (build.rs emits the cfg on rustc >= 1.89).
+#[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+cpufeatures::new!(cpuid_gfni_avx2, "gfni", "avx2");
+
 #[cfg(target_arch = "aarch64")]
 cpufeatures::new!(cpuid_aes, "aes");
 
@@ -36,6 +41,25 @@ pub fn has_avx2() -> bool {
         cpuid_avx2::get()
     }
     #[cfg(not(target_arch = "x86_64"))]
+    {
+        false
+    }
+}
+
+/// Returns `true` if the host CPU supports GFNI and AVX2 and this build
+/// includes the GFNI S-box (rustc >= 1.89; v1.16 Q16.2).
+///
+/// `cpufeatures` checks GFNI together with OS-enabled AVX-512 register
+/// state, so a GFNI CPU without AVX-512 reports `false` and keeps the
+/// AVX2 path. Always `false` off `x86_64` or on older compilers.
+#[must_use]
+#[inline]
+pub fn has_gfni_avx2() -> bool {
+    #[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
+    {
+        cpuid_gfni_avx2::get()
+    }
+    #[cfg(not(all(target_arch = "x86_64", gmcrypto_simd_gfni)))]
     {
         false
     }

@@ -673,8 +673,8 @@ mod tests {
         dec.update(&[0x33u8; 30]);
         assert_eq!(dec.buf.len(), 30);
         dec.zeroize();
-        assert!(dec.buf.is_empty());
-        assert!(dec.aad.is_empty());
+        assert_eq!(dec.buf, [] as [u8; 0]);
+        assert_eq!(dec.aad, [] as [u8; 0]);
         assert_eq!(dec.nonce, [0u8; MAX_NONCE_LEN]);
         assert_eq!(dec.nonce_len, 0);
         assert_eq!(dec.ceiling, 0);
