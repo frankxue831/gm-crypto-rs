@@ -39,6 +39,8 @@ release does not change its protocol, thresholds, or activation criteria.
   dependency and equivalent test-assertion updates, with warnings still
   denied. Workspace resolver 3 prefers Rust-1.85-compatible dependency
   versions during fresh resolution; the advertised MSRV remains 1.85.
+- Render the x86-only `sbox_x4_avx2` helper name without a broken rustdoc
+  link when documenting the SIMD crate on aarch64.
 
 ## [1.13.0] - 2026-09-04
 

@@ -32,7 +32,7 @@ Release state table below and in `docs/`.
 |---|---|
 | Live on crates.io | **`1.13.0`** — all three crates, 2026-09-04 from `5c0ae59` (publish delegated for this release); tag `v1.13.0` on `origin`, ED25519-verified. Previous: `1.12.0` 2026-09-04 from `b0c6679`, tag `v1.12.0` ED25519-verified |
 | Workspace version | `1.16.0` release candidate, **unpublished**; live remains `1.13.0`. All three crates and both exact sibling pins move together. v1.14 / v1.15 remain nonpublishing assurance cycles |
-| Gate #1 | `docs/ECOSYSTEM.md` §8 must PASS before every publish; latest record `docs/v1.13.0-gate1-evidence.md`. The gated SHA is never the release SHA: the gate attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty, and a PR touching those re-owes it. Running the gate script is ordinary agent work; publishing is not |
+| Gate #1 | `docs/ECOSYSTEM.md` §8 must PASS before every publish; candidate record `docs/v1.16.0-gate1-evidence.md`. The gated SHA is never the release SHA: the gate attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty, and a PR touching those re-owes it. Running the gate script is ordinary agent work; publishing is not |
 
 `cargo publish` and the SSH-signed tag are the **maintainer's authenticated
 call** — the agent path is branch + PR. The 1.11.0, 1.12.0 and 1.13.0
@@ -80,8 +80,8 @@ Activation requires a separate reviewed PR. The v1.14 F21 result stands
 
 ## Open backlog
 
-- v1.16 GFNI S-box: release candidate above; Gate #1 is owed again
-  before any publish because `crates/` changed after 1.13.0.
+- v1.16 GFNI S-box: release candidate above; Gate #1 passed for the
+  recorded candidate. Recheck its attachment before any publish.
 - **F21** `ct_sm4_cbc_unpad` — composite window blind
   (`docs/v1.10-scope.md` Q10.9); narrow `finalize()` window distinguishable on
   the pinned local host only (`docs/f21-finalize-result.md`, v1.14): a
