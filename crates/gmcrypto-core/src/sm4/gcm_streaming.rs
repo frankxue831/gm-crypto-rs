@@ -584,7 +584,7 @@ mod tests {
         dec.update(&[0x22u8; 40]);
         assert_eq!(dec.ct_buf.len(), 40);
         dec.zeroize();
-        assert!(dec.ct_buf.is_empty());
+        assert_eq!(dec.ct_buf, [] as [u8; 0]);
         assert_eq!(dec.ghash.h, [0u8; BLOCK_SIZE]);
         assert_eq!(dec.ghash.y, [0u8; BLOCK_SIZE]);
         assert_eq!(dec.j0, [0u8; BLOCK_SIZE]);

@@ -3577,7 +3577,7 @@ fn x509_ffi_accessors_match_core() {
         );
         // gmssl emits v3 extensions — present, non-empty, byte-equal.
         let ext = x509_copy_out_helper(gmcrypto_x509_certificate_extensions_raw, cert);
-        assert!(!ext.is_empty());
+        assert_ne!(ext, [] as [u8; 0]);
         assert_eq!(ext, core.extensions_raw().unwrap());
         unsafe { gmcrypto_x509_certificate_free(cert) };
     }

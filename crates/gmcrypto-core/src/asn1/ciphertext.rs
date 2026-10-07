@@ -206,7 +206,7 @@ mod tests {
         let ct = make_ct(Vec::new());
         let der = encode(&ct);
         let decoded = decode(&der).expect("decode empty-ciphertext round-trip");
-        assert!(decoded.ciphertext.is_empty());
+        assert_eq!(decoded.ciphertext, [] as [u8; 0]);
     }
 
     /// Decode rejects garbage / truncated / empty input.

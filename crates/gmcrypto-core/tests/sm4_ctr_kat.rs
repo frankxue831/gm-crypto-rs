@@ -158,6 +158,6 @@ fn decrypt_equals_encrypt() {
 #[test]
 fn empty_input() {
     let counter = [0u8; BLOCK_SIZE];
-    assert!(mode_ctr::encrypt(&KEY, &counter, &[]).is_empty());
-    assert!(mode_ctr::decrypt(&KEY, &counter, &[]).is_empty());
+    assert_eq!(mode_ctr::encrypt(&KEY, &counter, &[]), [] as [u8; 0]);
+    assert_eq!(mode_ctr::decrypt(&KEY, &counter, &[]), [] as [u8; 0]);
 }

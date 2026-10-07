@@ -1123,7 +1123,7 @@ mod tests {
     fn time_utctime_parses() {
         let der = utc("260611120000Z");
         let (t, rest) = read_time(&der).unwrap();
-        assert!(rest.is_empty());
+        assert_eq!(rest, []);
         assert_eq!(
             t,
             X509Time {
@@ -1204,7 +1204,7 @@ mod tests {
             let a = algid(null);
             let (span, rest) = read_sm2_sig_algid(&a).expect("valid algid rejected");
             assert_eq!(span, &a[..]);
-            assert!(rest.is_empty());
+            assert_eq!(rest, []);
         }
     }
 

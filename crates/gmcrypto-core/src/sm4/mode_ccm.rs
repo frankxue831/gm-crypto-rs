@@ -689,7 +689,7 @@ mod tests {
         let ct = encrypt(&KEY, &nonce, b"aad", &[], 16).expect("valid params");
         assert_eq!(ct.len(), 16);
         let recovered = decrypt(&KEY, &nonce, b"aad", &ct, 16).expect("tag verifies");
-        assert!(recovered.is_empty());
+        assert_eq!(recovered, [] as [u8; 0]);
     }
 
     #[test]

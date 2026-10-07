@@ -46,16 +46,18 @@ crate-type = ["rlib"]
 # still compile-time baseline on aarch64 per Q5.12 / Q6.3, so the
 # v0.6 W6 sbox_x16 path doesn't go through detect.rs.
 #
-# NB: `cpufeatures 0.2.x` is a pre-1.0 transitive runtime dep (target-gated,
+# NB: `cpufeatures 0.3.x` is a pre-1.0 transitive runtime dep (target-gated,
 # SIMD/AEAD-only). It is isolated behind the `#[doc(hidden)]` `gmcrypto-simd`
 # surface and reaches no public `gmcrypto-core` API, so a breaking
 # `cpufeatures` release is an internal-only bump (not a `gmcrypto-core` SemVer
 # event).
+# 0.3.1 fixes macro-generated deprecation errors on Rust 1.99 and retains
+# Rust 1.85 support; keep both architecture requirements at that minimum.
 [target.'cfg(target_arch = "x86_64")'.dependencies]
-cpufeatures = "0.2"
+cpufeatures = "0.3.1"
 
 [target.'cfg(target_arch = "aarch64")'.dependencies]
-cpufeatures = "0.2"
+cpufeatures = "0.3.1"
 
 [lints.rust]
 # v0.5 W4 phase 2 / Q5.11 addendum — `unsafe_code = "forbid"` is

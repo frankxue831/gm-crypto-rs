@@ -66,7 +66,7 @@ fn fixtures_parse_and_expose_fields() {
         assert!(c.not_before() < c.not_after());
         assert!(!c.serial_raw().is_empty() && c.serial_raw().len() <= 20);
         assert!(c.extensions_raw().is_some(), "gmssl emits v3 extensions");
-        assert!(!c.tbs_raw().is_empty());
+        assert_ne!(c.tbs_raw(), []);
         assert_eq!(c.tbs_raw()[0], 0x30, "tbs_raw must be the full TLV span");
     }
 }
