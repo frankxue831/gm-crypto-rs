@@ -154,13 +154,23 @@ them is why the always-on bench vector has 16 entries against 12 `ct_*`:
 **Cfg-gated on `sm4-bitsliced-simd` (2):**
 
 - `ct_sm4_encrypt_block_bitsliced_simd` — SM4 single-block encrypt under
-  `sm4-bitsliced-simd` (issue #163: four-byte `sbox_x4` for `tau`; AArch64
-  NEON x16, x86_64 four scalar calls unless AVX2 meets the 10% rule). Same
-  `|tau| <= 0.20` gate.
+  `sm4-bitsliced-simd`, using four-byte `sbox_x4` for `tau`. On `aarch64`,
+  one NEON x16 invocation; on `x86_64` where `has_gfni_avx2()` holds,
+  `sbox_x4_gfni`; otherwise exactly four scalar gate-circuit calls. The
+  AVX2-only x4 implementation remains a test candidate, not the production
+  branch. Same `|tau| <= 0.20` gate.
 - `ct_sm4_cbc_decrypt_fanout` — `Sm4CbcDecryptor`'s batched fanout
   (`decrypt_batch`) timed under load, class-split by master key (v0.6 W6).
-  Exercises `sbox_x32` on `x86_64` AVX2 (8 blocks × 4 tau bytes = 32 bytes
-  packed) and `sbox_x16` on `aarch64` NEON (4 blocks × 4 = 16 bytes).
+  On `x86_64`, `sbox_x32` processes 8 blocks × 4 tau bytes = 32 bytes,
+  selecting GFNI where `has_gfni_avx2()` holds, otherwise AVX2 if available
+  or the scalar fallback. On `aarch64`, `sbox_x16` uses NEON
+  (4 blocks × 4 = 16 bytes).
+
+Both GFNI paths are compiled only with rustc >= 1.89; the cached detector
+requires GFNI, AVX2 and OS-enabled AVX-512 state. Older compilers, including
+MSRV 1.85, retain the applicable non-GFNI paths. A timing run covers the
+backend actually selected on that runner; a CPU model string alone does not
+establish GFNI execution.
 
 **Cfg-gated on `sm4-aead` (3):**
 
