@@ -15,6 +15,37 @@ from unittest.mock import patch
 
 import native_gfni as native
 
+# Independent, minimized x86 Rust output. Never generate this from REQUIRED_TESTS:
+# that hid a scalar-only test which both SIMD feature configurations compile out.
+CORRECTNESS = (Path(__file__).parent / "fixtures/native_gfni_correctness.txt").read_text()
+
+
+class CorrectnessReceiptTests(unittest.TestCase):
+    def test_feature_applicable_output_oracles_and_dispatch_executables(self):
+        native.require_correctness(CORRECTNESS)
+
+    def test_original_scalar_only_requirement_is_rejected(self):
+        with patch.object(native, "REQUIRED_TESTS", native.REQUIRED_TESTS + (
+                "sm4::cipher::tests::sbox_ct_matches_lut",)):
+            with self.assertRaisesRegex(ValueError, "sbox_ct_matches_lut"):
+                native.require_correctness(CORRECTNESS)
+
+    def test_missing_ignored_or_duplicate_table_oracle_is_rejected(self):
+        record = "test sm4::sbox_bitsliced::tests::bitsliced_matches_table ... ok"
+        for replacement in ("", record.replace("ok", "ignored"), record + "\n" + record):
+            with self.subTest(replacement=replacement), self.assertRaisesRegex(ValueError, "bitsliced_matches_table"):
+                native.require_correctness(CORRECTNESS.replace(record, replacement))
+
+    def test_compiled_inventory_includes_million_but_cannot_prove_execution(self):
+        listing = re.sub(r"^test (\S+) \.\.\. .*", r"\1: test", CORRECTNESS, flags=re.M)
+        native.require_correctness(listing, listing=True)
+        with self.assertRaisesRegex(ValueError, "did not execute"):
+            native.require_correctness(listing)
+        with self.assertRaisesRegex(ValueError, "gbt32907_one_million_rounds"):
+            native.require_correctness(listing.replace(native.MILLION + ": test", ""), listing=True)
+        with self.assertRaisesRegex(ValueError, "dispatch_lane_position_sweep"):
+            native.require_correctness(listing.replace("dispatch_lane_position_sweep: test", "", 1), listing=True)
+
 
 def passing_logs(source):
     names = sorted(set(re.findall(r'"((?:ct_|noise_|negative_control)[a-z0-9_]*)"', source)))
@@ -155,16 +186,15 @@ class SequenceTests(unittest.TestCase):
                 elif native.MILLION in args:
                     text = f"test {native.MILLION} ... {'ignored' if failure == 'million' else 'ok'}\n"
                 elif args[:2] == ["cargo", "test"]:
-                    text = "".join(f"test {name} ... ok\n" for name in native.REQUIRED_TESTS)
-                    for suite in ("lane_position_x4", "lane_position_x16", "lane_position_x32"):
-                        text += f"     Running tests/{suite}.rs (target/release/deps/{suite})\n"
-                        text += "test dispatch_lane_position_sweep ... ok\ntest dispatch_sequential_fill_sweep ... ok\n"
+                    text = CORRECTNESS
                     if failure == "dispatch-executable":
                         text = text.replace("Running tests/lane_position_x32.rs", "Running tests/missing.rs")
                     if failure == "dispatch-sweep":
                         text = text.replace("test dispatch_lane_position_sweep ... ok", "test dispatch_lane_position_sweep ... ignored", 1)
                     if failure == "integration":
                         text = text.replace("test encrypt_blocks_matches_per_block_at_every_length ... ok\n", "")
+                    if failure == "table-oracle":
+                        text = text.replace("test sm4::sbox_bitsliced::tests::bitsliced_matches_table ... ok\n", "")
                     if failure == "lock":
                         (root / "Cargo.lock").write_text("changed")
                 elif args[:2] == ["cargo", "bench"] and failure == "timing":
@@ -190,27 +220,29 @@ class SequenceTests(unittest.TestCase):
             return code, result, commands
 
     def test_complete_sequence_and_matched_locked_features(self):
-        code, result, commands = self.exercise()
-        self.assertEqual(code, 0, result)
-        self.assertEqual(result["status"], "QUALIFIED")
-        cargo = [(args, env) for args, env in commands if args[0] == "cargo"]
-        timing = [args for args, _ in cargo if args[1] == "bench"]
-        self.assertEqual(len(timing), 5)
-        for args, env in cargo:
-            if args[1] in ("test", "bench"):
-                self.assertIn("--locked", args)
-                self.assertEqual(args[args.index("--features") + 1], native.LEGS[1] + ",crypto-bigint-scalar")
-                self.assertEqual(env["GMCRYPTO_SIMD_EXPECT_GFNI"], "1")
-                self.assertEqual(env["DUDECT_SAMPLES"], "100000")
-        tests = [args for args, _ in cargo if args[1] == "test"]
-        self.assertIn(native.DETECTOR, tests[0])
-        self.assertNotIn("--lib", tests[1])
-        self.assertEqual(tests[1][-3:], ["--", "--format", "pretty"])
-        self.assertIn("--ignored", tests[2])
-        self.assertIn(native.MILLION, tests[2])
+        for leg in native.LEGS:
+            with self.subTest(leg=leg):
+                code, result, commands = self.exercise(overrides={"MATRIX_FEATURES": leg})
+                self.assertEqual(code, 0, result)
+                self.assertEqual(result["status"], "QUALIFIED")
+                cargo = [(args, env) for args, env in commands if args[0] == "cargo"]
+                timing = [args for args, _ in cargo if args[1] == "bench"]
+                self.assertEqual(len(timing), 5)
+                for args, env in cargo:
+                    if args[1] in ("test", "bench"):
+                        self.assertIn("--locked", args)
+                        self.assertEqual(args[args.index("--features") + 1], leg + ",crypto-bigint-scalar")
+                        self.assertEqual(env["GMCRYPTO_SIMD_EXPECT_GFNI"], "1")
+                        self.assertEqual(env["DUDECT_SAMPLES"], "100000")
+                tests = [args for args, _ in cargo if args[1] == "test"]
+                self.assertIn(native.DETECTOR, tests[0])
+                self.assertNotIn("--lib", tests[1])
+                self.assertEqual(tests[1][-3:], ["--", "--format", "pretty"])
+                self.assertIn("--ignored", tests[2])
+                self.assertIn(native.MILLION, tests[2])
 
     def test_preflight_or_correctness_failure_never_reaches_timing(self):
-        for failure in ("python", "policy", "hardware", "zero-tests", "integration", "dispatch-executable", "dispatch-sweep", "million", "lock"):
+        for failure in ("python", "policy", "hardware", "zero-tests", "integration", "table-oracle", "dispatch-executable", "dispatch-sweep", "million", "lock"):
             with self.subTest(failure=failure):
                 code, result, commands = self.exercise(failure)
                 self.assertEqual(code, 1)
@@ -219,6 +251,17 @@ class SequenceTests(unittest.TestCase):
                 if failure in ("python", "policy"):
                     self.assertFalse(any(args[0] == "cargo" for args, _ in commands))
                     self.assertEqual(result["stage"], "Python runtime and assurance preflight")
+
+    def test_original_requirement_stops_before_million_and_timing(self):
+        with patch.object(native, "REQUIRED_TESTS", native.REQUIRED_TESTS + (
+                "sm4::cipher::tests::sbox_ct_matches_lut",)):
+            for leg in native.LEGS:
+                code, result, commands = self.exercise(overrides={"MATRIX_FEATURES": leg})
+                self.assertEqual(code, 1)
+                self.assertEqual(result["stage"], "release output correctness")
+                self.assertIn("sbox_ct_matches_lut", result["reason"])
+                self.assertFalse(any(native.MILLION in args or args[:2] == ["cargo", "bench"]
+                                     for args, _ in commands))
 
     def test_timing_failure_is_not_retried(self):
         code, result, commands = self.exercise("timing")
