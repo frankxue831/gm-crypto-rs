@@ -85,3 +85,28 @@ This workflow adds evidence only. It does not authorize merge, release,
 publication, gate relaxation or a new calibration. A workflow first added on
 a branch may not be dispatchable until it exists on the default branch; that
 limitation does not authorize a merge to enable it.
+
+## 1.16.0 result
+
+Three capped dispatches on the 1.16.0 candidate, 2026-10-09, with the helper
+repaired in #234:
+
+| Run | `sm4-bitsliced-simd` leg | combined-feature leg |
+|---|---|---|
+| 37987500505 | EPYC 7763, no GFNI: NOT QUALIFIED | **QUALIFIED**, EPYC 9V74 exposing GFNI |
+| 37990194511 | EPYC 7763: NOT QUALIFIED | EPYC 7763: NOT QUALIFIED |
+| 37990383386 | EPYC 7763: NOT QUALIFIED | EPYC 7763: NOT QUALIFIED |
+
+The qualified leg passed every stage above under Rust 1.95.0: detector
+asserted, 482 release correctness tests and the million-round KAT, and
+100K × 5 timing with every primary median at or below 0.0428 under the
+unchanged parser. Its `ct_sm4_cbc_decrypt_fanout` passes read 0.0417,
+0.3693, 0.0100, 0.0179 and 0.0486; the median decides, and the single
+0.3693 pass is recorded without an assigned cause.
+
+This document's rule that both feature jobs must qualify was **not met**.
+The maintainer accepted the combined-leg result for the SIMD-only leg on
+2026-10-10, because it runs the same GFNI `sbox_x4` / `sbox_x32` code and
+the same SIMD-only timing targets under a superset of features. That is a
+recorded release decision for 1.16.0, not a per-leg QUALIFIED result and
+not a change to this procedure.

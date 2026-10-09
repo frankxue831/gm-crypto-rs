@@ -19,7 +19,7 @@ only a condensed current-release block — see its `Don't` section.
 
 ## Cycles
 
-**v1.16 — GFNI SM4 S-box; 1.16.0 release candidate, UNPUBLISHED.**
+**v1.16 — GFNI SM4 S-box; 1.16.0 prepped on `main` 2026-10-10, UNPUBLISHED.**
 The batch and four-byte paths merged on 2026-09-30 in #224 (`9fec750`)
 and #226 (`6a53156`), following the x86 SIMD lint fixes in #225.
 The candidate keeps the three workspace crates in lockstep and their sibling
@@ -29,7 +29,19 @@ The v1.14 and v1.15 cycles do not publish crates. The frozen v1.15 study
 continues to describe its pinned pre-GFNI source, not this release candidate;
 its measurements cannot be transferred to the changed GFNI implementation.
 Current-source release validation and ECOSYSTEM §8 Gate #1 are independently
-required before publication. No publication or activation is recorded here.
+required before publication. Rust 1.99 compatibility (#229: `cpufeatures`
+0.3.1, workspace resolver 3) landed first. Gate #1 PASSed at `ea9c0e5`
+against downstream `96c62c1` (`docs/v1.16.0-gate1-evidence.md`). Native
+qualification tooling followed in #232–#234; its first helper required a
+scalar S-box test that both SIMD configurations compile out, which #234
+replaced with the bitsliced table oracle. Under a cap of three dispatches on
+the candidate, the combined-feature leg QUALIFIED on an EPYC 9V74 exposing
+GFNI (run 37987500505: detector asserted, release correctness and the
+million-round KAT passed, 100K×5 timing within every existing gate); the
+SIMD-only leg drew EPYC 7763 without GFNI each time, and the maintainer
+accepted the combined-leg result for it. Release prep #230 merged on
+2026-10-10 with the CHANGELOG heading dated to the intended publish day. No
+publication or activation is recorded here.
 
 **v1.14 — F21 finalize-window study; assurance cycle, NON-PUBLISHING (on
 `main`), measured 2026-09-23.** Workspace stays `1.13.0`; no crate change, no
