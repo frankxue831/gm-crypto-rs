@@ -5,9 +5,10 @@
 //! derive its correctness from the ECB primitive: for any input,
 //! `CTR(key, counter)[i] = input[i] ^ SM4_ECB(key, counter + i/16)[i%16]`.
 //! This file verifies that identity exhaustively at every length 0..=64
-//! against a couple of representative `(key, counter)` pairs, plus
-//! checks the BE counter-increment behaviour at edge cases (`0`, near
-//! `2^128-1`, mid-range).
+//! against representative counters, then crosses the x86 eight-block
+//! SIMD batch boundaries with multiple batches and partial-block tails.
+//! Bytewise BE counter increments provide an oracle independent of the
+//! production mode's `u128` addition, including carries and `2^128` wrap.
 //!
 //! The single GM/T ECB KAT (key=0x0123456789abcdeffedcba9876543210,
 //! plaintext=key, ciphertext=0x681edf34d206965e86b3e94f536e4246)
@@ -27,19 +28,47 @@ const KEY: [u8; KEY_SIZE] = [
 fn ecb_keystream(key: &[u8; KEY_SIZE], counter: &[u8; BLOCK_SIZE], block_count: usize) -> Vec<u8> {
     let cipher = Sm4Cipher::new(key);
     let mut out = Vec::with_capacity(block_count * BLOCK_SIZE);
-    for i in 0..block_count {
-        let counter_block = counter_add(counter, i as u128);
+    let mut counter_block = *counter;
+    for _ in 0..block_count {
         let mut buf = counter_block;
         cipher.encrypt_block(&mut buf);
         out.extend_from_slice(&buf);
+
+        // Increment the byte string directly, rather than sharing the
+        // production CTR mode's u128 conversion/addition implementation.
+        for byte in counter_block.iter_mut().rev() {
+            let (next, carry) = byte.overflowing_add(1);
+            *byte = next;
+            if !carry {
+                break;
+            }
+        }
     }
     out
 }
 
-const fn counter_add(counter: &[u8; BLOCK_SIZE], offset: u128) -> [u8; BLOCK_SIZE] {
-    u128::from_be_bytes(*counter)
-        .wrapping_add(offset)
-        .to_be_bytes()
+/// Check both public operations against a per-block composition oracle.
+/// Feeding the same input to both also checks CTR's inverse identity without
+/// allowing matching encryption/decryption errors to hide in a round trip.
+fn assert_ctr_matches_ecb(key: &[u8; KEY_SIZE], counter: &[u8; BLOCK_SIZE], len: usize) {
+    let input = make_plaintext(len);
+    let keystream = ecb_keystream(key, counter, len.div_ceil(BLOCK_SIZE));
+    let expected: Vec<u8> = input
+        .iter()
+        .zip(keystream.iter())
+        .map(|(p, k)| p ^ k)
+        .collect();
+
+    assert_eq!(
+        mode_ctr::encrypt(key, counter, &input),
+        expected,
+        "encrypt ≠ ECB-keystream XOR input at length {len}, counter={counter:02x?}, key={key:02x?}",
+    );
+    assert_eq!(
+        mode_ctr::decrypt(key, counter, &input),
+        expected,
+        "decrypt ≠ ECB-keystream XOR input at length {len}, counter={counter:02x?}, key={key:02x?}",
+    );
 }
 
 /// Deterministic plaintext generator.
@@ -59,21 +88,7 @@ fn make_plaintext(len: usize) -> Vec<u8> {
 fn ctr_equals_ecb_keystream_xor_plaintext_at_counter_zero() {
     let counter = [0u8; BLOCK_SIZE];
     for len in 0..=64 {
-        let plaintext = make_plaintext(len);
-        let ciphertext = mode_ctr::encrypt(&KEY, &counter, &plaintext);
-        let block_count = len.div_ceil(BLOCK_SIZE);
-        let keystream = ecb_keystream(&KEY, &counter, block_count);
-
-        let expected: Vec<u8> = plaintext
-            .iter()
-            .zip(keystream.iter())
-            .map(|(p, k)| p ^ k)
-            .collect();
-
-        assert_eq!(
-            ciphertext, expected,
-            "CTR ≠ ECB-keystream XOR plaintext at length {len}, counter=0",
-        );
+        assert_ctr_matches_ecb(&KEY, &counter, len);
     }
 }
 
@@ -86,21 +101,39 @@ fn ctr_equals_ecb_keystream_at_midrange_counter() {
         0xf0,
     ];
     for len in [1usize, 15, 16, 17, 31, 32, 33, 63, 64] {
-        let plaintext = make_plaintext(len);
-        let ciphertext = mode_ctr::encrypt(&KEY, &counter, &plaintext);
-        let block_count = len.div_ceil(BLOCK_SIZE);
-        let keystream = ecb_keystream(&KEY, &counter, block_count);
+        assert_ctr_matches_ecb(&KEY, &counter, len);
+    }
+}
 
-        let expected: Vec<u8> = plaintext
-            .iter()
-            .zip(keystream.iter())
-            .map(|(p, k)| p ^ k)
-            .collect();
+/// x86 SIMD consumes eight counter blocks per batch. The 256-byte timed
+/// window is two batches; include shorter inputs, a third batch, and tails.
+/// Carries occur at block offsets 8 and 16, including across the low 32-bit
+/// field so an accidental GCM-style inc32 cannot satisfy this CTR oracle.
+#[test]
+fn ctr_matches_ecb_across_simd_batches_and_counter_carries() {
+    let mut byte_carry = [0x42; BLOCK_SIZE];
+    byte_carry[15] = 0xf8;
+    let mut word_carry = [0x42; BLOCK_SIZE];
+    word_carry[12..].copy_from_slice(&[0xff, 0xff, 0xff, 0xf8]);
+    let mut wrap_at_second_batch = [0xff; BLOCK_SIZE];
+    wrap_at_second_batch[15] = 0xf8;
+    let mut wrap_at_third_batch = [0xff; BLOCK_SIZE];
+    wrap_at_third_batch[15] = 0xf0;
 
-        assert_eq!(
-            ciphertext, expected,
-            "CTR ≠ ECB-keystream XOR plaintext at length {len}, counter=midrange",
-        );
+    for key in [KEY, [0xa5; KEY_SIZE]] {
+        for counter in [
+            [0; BLOCK_SIZE],
+            byte_carry,
+            word_carry,
+            wrap_at_second_batch,
+            wrap_at_third_batch,
+        ] {
+            for boundary in [7 * BLOCK_SIZE, 128, 256, 384] {
+                for len in [boundary - 1, boundary, boundary + 1] {
+                    assert_ctr_matches_ecb(&key, &counter, len);
+                }
+            }
+        }
     }
 }
 
@@ -115,8 +148,6 @@ fn ctr_wraps_counter_at_2_to_128() {
     ];
     let plaintext = make_plaintext(32); // exactly two blocks; second crosses wrap
     let ciphertext = mode_ctr::encrypt(&KEY, &counter, &plaintext);
-    let recovered = mode_ctr::decrypt(&KEY, &counter, &ciphertext);
-    assert_eq!(recovered, plaintext);
 
     // Manually compute: block 0 keystream = ECB(KEY, 0xFF..FF);
     // block 1 keystream = ECB(KEY, 0x00..00) (wrap to zero).
@@ -136,6 +167,7 @@ fn ctr_wraps_counter_at_2_to_128() {
         &expected_ct[..],
         "wrap-block keystream mismatch"
     );
+    assert_eq!(mode_ctr::decrypt(&KEY, &counter, &expected_ct), plaintext);
 }
 
 /// CTR is its own inverse: `decrypt` and `encrypt` produce
@@ -144,13 +176,7 @@ fn ctr_wraps_counter_at_2_to_128() {
 fn decrypt_equals_encrypt() {
     let counter = [0x42u8; BLOCK_SIZE];
     for len in 0..=64 {
-        let input = make_plaintext(len);
-        let via_encrypt = mode_ctr::encrypt(&KEY, &counter, &input);
-        let via_decrypt = mode_ctr::decrypt(&KEY, &counter, &input);
-        assert_eq!(
-            via_encrypt, via_decrypt,
-            "encrypt ≠ decrypt at length {len}"
-        );
+        assert_ctr_matches_ecb(&KEY, &counter, len);
     }
 }
 
