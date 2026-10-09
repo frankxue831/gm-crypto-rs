@@ -1,0 +1,60 @@
+name: Native GFNI Python preflight regression
+
+# Exercise the actual runtime/audit boundary on the qualification OS before
+# merging. This job runs no Rust build, hardware qualification or timing.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/scripts/**'
+      - '.github/workflows/**'
+      - 'crates/gmcrypto-core/benches/timing_leaks.rs'
+  push:
+    branches: [main]
+    paths:
+      - '.github/scripts/**'
+      - '.github/workflows/**'
+      - 'crates/gmcrypto-core/benches/timing_leaks.rs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-gfni-python-preflight-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    name: Pinned Python and protected parser preflight (Ubuntu 24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14.8'
+      - name: Execute the actual qualification Python preflight
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, ".github/scripts")
+          from native_gfni import python_preflight
+          output = Path(os.environ["RUNNER_TEMP"]) / "native-gfni-python-preflight"
+          output.mkdir()
+          _, _, fingerprint = python_preflight(output)
+          print((output / "python-runtime.json").read_text())
+          print((output / "assurance-policy.log").read_text())
+          print(f"Reviewed nightly parser AST SHA-256: {fingerprint}")
+          PY
+      - name: Regression and protected-source mutation tests
+        run: python3 -m unittest discover -s .github/scripts -p 'test_native_gfni.py'
+      - name: Retain Python preflight evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-gfni-python-preflight
+          path: ${{ runner.temp }}/native-gfni-python-preflight/
+          retention-days: 30
+          if-no-files-found: error

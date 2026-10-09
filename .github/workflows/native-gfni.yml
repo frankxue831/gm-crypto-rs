@@ -28,6 +28,9 @@ jobs:
           - sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14.8'
       - uses: dtolnay/rust-toolchain@1.95.0
       - name: Detect, check outputs, then measure on this VM
         env:
