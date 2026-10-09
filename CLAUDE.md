@@ -31,27 +31,34 @@ Release state table below and in `docs/`.
 | | |
 |---|---|
 | Live on crates.io | **`1.13.0`** — all three crates, 2026-09-04 from `5c0ae59` (publish delegated for this release); tag `v1.13.0` on `origin`, ED25519-verified. Previous: `1.12.0` 2026-09-04 from `b0c6679`, tag `v1.12.0` ED25519-verified |
-| Workspace version | `1.16.0` release candidate, **unpublished**; live remains `1.13.0`. All three crates and both exact sibling pins move together. v1.14 / v1.15 remain nonpublishing assurance cycles |
-| Gate #1 | `docs/ECOSYSTEM.md` §8 must PASS before every publish; candidate record `docs/v1.16.0-gate1-evidence.md`. The gated SHA is never the release SHA: the gate attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty, and a PR touching those re-owes it. Running the gate script is ordinary agent work; publishing is not |
+| Workspace version | `1.16.0` on `main` (release prep #230 merged 2026-10-10), **not yet on crates.io**; live remains `1.13.0` until the publish. All three crates and both exact sibling pins move together. v1.14 / v1.15 remain nonpublishing assurance cycles |
+| Gate #1 | `docs/ECOSYSTEM.md` §8 must PASS before every publish; latest record `docs/v1.16.0-gate1-evidence.md` (gated SHA `ea9c0e5`). The gated SHA is never the release SHA: the gate attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty, and a PR touching those re-owes it. Running the gate script is ordinary agent work; publishing is not |
 
 `cargo publish` and the SSH-signed tag are the **maintainer's authenticated
 call** — the agent path is branch + PR. The 1.11.0, 1.12.0 and 1.13.0
 publishes were explicit per-release delegations, not a standing grant; the
 tags have always been the maintainer's.
 
-### v1.16 — GFNI release preparation (publishing candidate)
+### v1.16 — GFNI S-box; 1.16.0 prepped, publish owed
 
-GFNI batch and four-byte S-box improvements are already merged (#224 / #226;
-`docs/v1.16-scope.md`). Release preparation updates package versions and
-documentation only; compatibility fixes are reviewed separately. Gate #1
-and current-candidate CI must pass before publication. The changelog heading
-carries the intended publish day (2026-10-10); amend it if publication slips.
-No merge, tag or publish is authorized by a release-prep PR.
+GFNI batch and four-byte S-box improvements merged in #224 / #226
+(`docs/v1.16-scope.md`); release prep #230 merged on 2026-10-10. Gate #1
+PASSed at `ea9c0e5` and attaches while the `crates/` + `Cargo.toml` diff
+from it stays empty. Native GFNI qualification (`docs/native-gfni-qualification.md`,
+"1.16.0 result"): the combined-feature leg QUALIFIED on an EPYC 9V74 exposing
+GFNI; the SIMD-only leg is covered by the maintainer's acceptance of that
+result, not by its own run. The CHANGELOG heading carries the intended
+publish day (2026-10-10); amend it if publication slips.
+
+**Owed (maintainer):** SSH-signed tag `v1.16.0` on the named SHA the gate
+attaches to, then publish simd → core → c from it, unless delegated for this
+release. Afterwards a docs PR records 1.16.0 live (release table, this block,
+`version-history.md`).
 
 The v1.15 calibration through 2026-11-09 stays on its frozen pre-GFNI source;
-it does not validate this candidate. Study isolation is tracked in #227.
+it does not validate this release. Study isolation is tracked in #227.
 Do not repin the study, restart its calendar, or transfer its evidence to
-the GFNI implementation as part of release preparation.
+the GFNI implementation.
 
 ### v1.15 — noise-twin calibration (assurance cycle; direction approved 2026-09-27)
 
@@ -80,8 +87,8 @@ Activation requires a separate reviewed PR. The v1.14 F21 result stands
 
 ## Open backlog
 
-- v1.16 GFNI S-box: release candidate above; Gate #1 passed for the
-  recorded candidate. Recheck its attachment before any publish.
+- v1.16 GFNI S-box: 1.16.0 publish owed (block above). Recheck the Gate #1
+  attachment on the SHA you tag.
 - **F21** `ct_sm4_cbc_unpad` — composite window blind
   (`docs/v1.10-scope.md` Q10.9); narrow `finalize()` window distinguishable on
   the pinned local host only (`docs/f21-finalize-result.md`, v1.14): a
