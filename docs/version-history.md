@@ -19,7 +19,8 @@ only a condensed current-release block — see its `Don't` section.
 
 ## Cycles
 
-**v1.16 — GFNI SM4 S-box; 1.16.0 prepped on `main` 2026-10-10, UNPUBLISHED.**
+**v1.16 — GFNI SM4 S-box; PUBLISHED 2026-10-10 from `2a7c880` (1.16.0, all
+three crates; published by the maintainer).**
 The batch and four-byte paths merged on 2026-09-30 in #224 (`9fec750`)
 and #226 (`6a53156`), following the x86 SIMD lint fixes in #225.
 The candidate keeps the three workspace crates in lockstep and their sibling
@@ -40,8 +41,12 @@ GFNI (run 37987500505: detector asserted, release correctness and the
 million-round KAT passed, 100K×5 timing within every existing gate); the
 SIMD-only leg drew EPYC 7763 without GFNI each time, and the maintainer
 accepted the combined-leg result for it. Release prep #230 merged on
-2026-10-10 with the CHANGELOG heading dated to the intended publish day. No
-publication or activation is recorded here.
+2026-10-10 with the CHANGELOG heading dated to the intended publish day, and
+#235 synced the release records before the tag. The maintainer SSH-signed
+`v1.16.0` on `2a7c880` (ED25519-verified) and published simd → core → c the
+same local day (UTC+8; crates.io records 2026-10-09 23:21–23:36 UTC), from a
+tree whose `crates/` + `Cargo.toml` diff to the gated SHA is empty. No
+threshold, calibration or activation changed.
 
 **v1.14 — F21 finalize-window study; assurance cycle, NON-PUBLISHING (on
 `main`), measured 2026-09-23.** Workspace stays `1.13.0`; no crate change, no
