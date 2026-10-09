@@ -98,6 +98,29 @@ class ParserTests(unittest.TestCase):
             self.assertIn("nightly dudect executable semantics match reviewed fingerprint", rejected.getvalue())
 
 
+class PythonRuntimeTests(unittest.TestCase):
+    def test_wrong_python_is_recorded_and_rejected_before_policy_import(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            with patch.object(native.sys, "version_info", (3, 12, 3, "final", 0)), \
+                    patch.object(native, "reviewed_programs") as policy:
+                with self.assertRaisesRegex(ValueError, "requires CPython 3.14.8"):
+                    native.python_preflight(output)
+            policy.assert_not_called()
+            runtime = json.loads((output / "python-runtime.json").read_text())
+            self.assertEqual(runtime["version_info"], [3, 12, 3, "final", 0])
+            self.assertEqual(runtime["executable"], sys.executable)
+            self.assertFalse((output / "assurance-policy.log").exists())
+
+    def test_rejected_assurance_never_returns_programs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(native.sys, "version_info", (3, 14, 8, "final", 0)), \
+                    patch.object(native, "reviewed_programs", side_effect=SystemExit(1)):
+                with self.assertRaises(SystemExit):
+                    native.python_preflight(Path(tmp))
+            self.assertTrue((Path(tmp) / "python-runtime.json").is_file())
+
+
 class SequenceTests(unittest.TestCase):
     def exercise(self, failure=None, overrides=None):
         with tempfile.TemporaryDirectory() as tmp:
@@ -155,7 +178,10 @@ class SequenceTests(unittest.TestCase):
                     return 'ID=ubuntu\nVERSION_ID="24.04"\n'
                 return original_read(path, *args, **kwargs)
 
-            with patch.object(native, "ROOT", root), patch.object(native, "reviewed_programs", return_value=("guard", "parser", "hash")), \
+            preflight_error = {"python": ValueError("qualification requires CPython 3.14.8"),
+                               "policy": SystemExit(1)}.get(failure)
+            with patch.object(native, "ROOT", root), \
+                    patch.object(native, "python_preflight", return_value=("guard", "parser", "hash"), side_effect=preflight_error), \
                     patch.object(native.subprocess, "Popen", side_effect=popen), \
                     patch.object(native, "parse_logs", return_value=subprocess.CompletedProcess([], 0, "OK")), \
                     patch.object(Path, "read_text", read), contextlib.redirect_stdout(io.StringIO()):
@@ -184,12 +210,15 @@ class SequenceTests(unittest.TestCase):
         self.assertIn(native.MILLION, tests[2])
 
     def test_preflight_or_correctness_failure_never_reaches_timing(self):
-        for failure in ("hardware", "zero-tests", "integration", "dispatch-executable", "dispatch-sweep", "million", "lock"):
+        for failure in ("python", "policy", "hardware", "zero-tests", "integration", "dispatch-executable", "dispatch-sweep", "million", "lock"):
             with self.subTest(failure=failure):
                 code, result, commands = self.exercise(failure)
                 self.assertEqual(code, 1)
                 self.assertEqual(result["status"], "NOT QUALIFIED")
                 self.assertFalse(any(args[:2] == ["cargo", "bench"] for args, _ in commands))
+                if failure in ("python", "policy"):
+                    self.assertFalse(any(args[0] == "cargo" for args, _ in commands))
+                    self.assertEqual(result["stage"], "Python runtime and assurance preflight")
 
     def test_timing_failure_is_not_retried(self):
         code, result, commands = self.exercise("timing")

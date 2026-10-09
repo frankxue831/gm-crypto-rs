@@ -16,7 +16,8 @@ Each job uses the existing nightly SIMD feature string, plus
 
 On the same VM, in order, the helper:
 
-1. Checks the candidate SHA and clean tracked source, Ubuntu version and the
+1. Checks the candidate SHA and clean tracked source, Ubuntu version,
+   effective **CPython 3.14.8** and the
    existing effective Rust/Cargo/active-toolchain guard for **1.95.0**.
 2. Resolves and archives one lockfile. Every subsequent Cargo command uses
    `--locked`; its digest must remain unchanged. Build/profile overrides are
@@ -44,6 +45,15 @@ introduced. Regression tests compare the extracted bytes and the original
 parser's stdout/exit status for passing, threshold, missing-target and
 negative-control cases. The frozen v1.15 study, its routing, and its pins are
 not used or changed by this workflow.
+
+Python is installed explicitly and its effective executable, full version,
+implementation and version tuple are retained in `python-runtime.json`.
+The existing AST fingerprints depend on Python's serialization format:
+Python 3.12 emits empty fields that Python 3.13+ omits. A different runtime
+fails closed before the protected-source audit; fingerprints are never
+regenerated to accommodate it. `native-gfni-preflight.yml` runs the same
+Python preflight and regression/mutation tests on Ubuntu 24.04 for pull
+requests. That regression job runs no native qualification or timing.
 
 The per-job artifact retains the source/build identity, actual toolchain
 output, lockfile and digest, Cargo metadata, CPU flags/model, image/kernel,

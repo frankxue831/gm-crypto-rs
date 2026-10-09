@@ -71,6 +71,18 @@ def reviewed_programs(root=ROOT):
     return guard, parser[0], parser[1]
 
 
+def python_preflight(output, root=ROOT):
+    """Record the interpreter and audit protected source with its pinned AST format."""
+    runtime = {"executable": sys.executable, "version": sys.version,
+               "version_info": list(sys.version_info),
+               "implementation": sys.implementation.name}
+    (output / "python-runtime.json").write_text(json.dumps(runtime, indent=2) + "\n")
+    if sys.implementation.name != "cpython" or sys.version_info[:4] != (3, 14, 8, "final"):
+        raise ValueError("qualification requires CPython 3.14.8; see python-runtime.json")
+    with (output / "assurance-policy.log").open("w") as audit_log, contextlib.redirect_stdout(audit_log):
+        return reviewed_programs(root)
+
+
 def require_tests(log, names):
     passed = re.findall(r"^test (\S+) \.\.\. ok$", log, re.M)
     for name in names:
@@ -143,14 +155,15 @@ def qualify(output, env):
             raise ValueError("checkout differs from dispatched candidate")
         if run(["git", "status", "--porcelain", "--untracked-files=no"], "worktree.log").strip():
             raise ValueError("tracked source is dirty")
-        with (output / "assurance-policy.log").open("w") as audit_log, contextlib.redirect_stdout(audit_log):
-            guard, parser, ast_hash = reviewed_programs()
+        result["stage"] = "Python runtime and assurance preflight"
+        guard, parser, ast_hash = python_preflight(output)
         (output / "reviewed-parser.py").write_text(parser)
         result["parser_ast_sha256"] = ast_hash
         result["source_sha256"] = {p: digest(ROOT / p) for p in (
             "Cargo.toml", "crates/gmcrypto-core/Cargo.toml", "crates/gmcrypto-simd/Cargo.toml",
             "crates/gmcrypto-core/benches/timing_leaks.rs", ".github/workflows/dudect-nightly.yml",
             ".github/scripts/check_assurance_policy.py", ".github/scripts/native_gfni.py")}
+        result["stage"] = "effective Rust toolchain and locked graph"
         run(["bash", "-euo", "pipefail", "-c", guard], "toolchain.log")
         run(["cargo", "generate-lockfile"], "resolve.log")
         lock_hash = digest(ROOT / "Cargo.lock")
@@ -191,7 +204,8 @@ def qualify(output, env):
         }
         result.update(status="QUALIFIED", stage="complete")
     except (ValueError, OSError, SystemExit) as error:
-        result["reason"] = str(error)
+        result["reason"] = (f"assurance checker rejected protected policy (exit {error.code}); see assurance-policy.log"
+                            if isinstance(error, SystemExit) else str(error))
     finally:
         save()
         summary = f"Native GFNI: {result['status']} — {result['stage']}\n{result.get('reason', '')}\n"
