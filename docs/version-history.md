@@ -19,6 +19,18 @@ only a condensed current-release block — see its `Don't` section.
 
 ## Cycles
 
+**v1.16 — GFNI SM4 S-box; 1.16.0 release candidate, UNPUBLISHED.**
+The batch and four-byte paths merged on 2026-09-30 in #224 (`9fec750`)
+and #226 (`6a53156`), following the x86 SIMD lint fixes in #225.
+The candidate keeps the three workspace crates in lockstep and their sibling
+dependencies exact. Public API, C ABI and MSRV 1.85 are unchanged; GFNI is
+compiler-gated at Rust 1.89 and selected only on supported x86_64 hosts.
+The v1.14 and v1.15 cycles do not publish crates. The frozen v1.15 study
+continues to describe its pinned pre-GFNI source, not this release candidate;
+its measurements cannot be transferred to the changed GFNI implementation.
+Current-source release validation and ECOSYSTEM §8 Gate #1 are independently
+required before publication. No publication or activation is recorded here.
+
 **v1.14 — F21 finalize-window study; assurance cycle, NON-PUBLISHING (on
 `main`), measured 2026-09-23.** Workspace stays `1.13.0`; no crate change, no
 CHANGELOG entry, no publish (the v0.14 / v1.10 precedent). One item, spec'd in
