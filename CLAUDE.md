@@ -44,9 +44,9 @@ tags have always been the maintainer's.
 GFNI batch and four-byte S-box improvements are already merged (#224 / #226;
 `docs/v1.16-scope.md`). Release preparation updates package versions and
 documentation only; compatibility fixes are reviewed separately. Gate #1
-and current-candidate CI must pass before publication. The changelog date
-stays unset until the crates go live. No merge, tag or publish is authorized
-by a release-prep PR.
+and current-candidate CI must pass before publication. The changelog heading
+carries the intended publish day (2026-10-10); amend it if publication slips.
+No merge, tag or publish is authorized by a release-prep PR.
 
 The v1.15 calibration through 2026-11-09 stays on its frozen pre-GFNI source;
 it does not validate this candidate. Study isolation is tracked in #227.

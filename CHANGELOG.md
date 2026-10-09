@@ -5,12 +5,11 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.16.0] - Unreleased
+## [1.16.0] - 2026-10-10
 
-Release candidate for the merged GFNI improvements (#224, #226). The
-workspace family will publish together; 1.13.0 remains the latest published
-version. The publication date is intentionally unset. The v1.14 and v1.15
-assurance cycles do not publish crates.
+Publishes the merged GFNI improvements (#224, #226). All three workspace
+crates publish together. The v1.14 and v1.15 assurance cycles do not
+publish crates.
 
 The frozen v1.15 study measures its pinned pre-GFNI source, not this
 candidate. Its calibration does not validate the new GFNI build, and this
