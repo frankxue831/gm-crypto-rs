@@ -27,7 +27,8 @@ On the same VM, in order, the helper:
    Zero executed tests cannot pass.
 4. Runs the complete release core and backend test suites, including their
    integration executables. Required output checks include native GFNI x4/x32
-   sweeps, published-table dispatch expectations, GB/T single-block KAT,
+   sweeps, published-table dispatch expectations, the exhaustive bitsliced
+   S-box/table oracle, GB/T single-block KAT,
    all four batch API tests, CBC composition, and CTR output-oracle tests
    across eight-block boundaries, multiple batches, byte tails and counter
    carries. It then explicitly executes the ignored million-round KAT and
@@ -53,7 +54,20 @@ Python 3.12 emits empty fields that Python 3.13+ omits. A different runtime
 fails closed before the protected-source audit; fingerprints are never
 regenerated to accommodate it. `native-gfni-preflight.yml` runs the same
 Python preflight and regression/mutation tests on Ubuntu 24.04 for pull
-requests. That regression job runs no native qualification or timing.
+requests. It also uses effective Rust 1.95.0 and one recorded lockfile to
+compile and list the release core/backend tests for **both** feature strings
+above. The same receipt validator checks every required name, the ignored
+million-round KAT's availability, and each x4/x16/x32 integration executable's
+dispatch sweeps. Listing proves availability only: no test bodies, native
+qualification or timing are executed by that regression job.
+
+Both SIMD configurations imply `sm4-bitsliced`, so their exhaustive table
+oracle is `sm4::sbox_bitsliced::tests::bitsliced_matches_table`. The scalar
+`sbox_ct_matches_lut` test is compiled out in these configurations and cannot
+be required. An independent output fixture catches that mismatch without
+inventing successful records from the helper's expected-test list. Missing,
+ignored or duplicate table-oracle records still reject executed correctness;
+a compiled listing cannot substitute for a passing execution record.
 
 The per-job artifact retains the source/build identity, actual toolchain
 output, lockfile and digest, Cargo metadata, CPU flags/model, image/kernel,

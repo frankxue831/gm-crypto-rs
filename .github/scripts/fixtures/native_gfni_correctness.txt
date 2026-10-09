@@ -1,0 +1,32 @@
+     Running unittests src/lib.rs (target/release/deps/gmcrypto_core-fixture)
+test sm4::cipher::tests::gbt32907_single_block ... ok
+test sm4::cipher::tests::gbt32907_one_million_rounds ... ignored, run explicitly
+test sm4::sbox_bitsliced::tests::bitsliced_matches_table ... ok
+test sm4::cipher::tests::tau_simd_matches_four_bitsliced_sboxes ... ok
+test sm4::cbc_streaming::tests::cbc_decrypt_simd_batch_boundary_sweep ... ok
+test sm4::cbc_streaming::tests::cbc_decrypt_simd_chunked_update_sweep ... ok
+     Running tests/sm4_batch_api.rs (target/release/deps/sm4_batch_api-fixture)
+test encrypt_blocks_matches_per_block_at_every_length ... ok
+test decrypt_blocks_matches_per_block_at_every_length ... ok
+test round_trip_encrypt_then_decrypt_is_identity ... ok
+test batch_boundary_named_lengths_round_trip ... ok
+     Running tests/sm4_ctr_kat.rs (target/release/deps/sm4_ctr_kat-fixture)
+test ctr_equals_ecb_keystream_xor_plaintext_at_counter_zero ... ok
+test ctr_matches_ecb_across_simd_batches_and_counter_carries ... ok
+     Running unittests src/lib.rs (target/release/deps/gmcrypto_simd-fixture)
+test sm4::sbox_x32::tests::gfni_path_present_when_expected ... ok
+test sm4::sbox_x4::tests::gfni_lane_position_sweep ... ok
+test sm4::sbox_x4::tests::gfni_matches_scalar_on_distinct_inputs ... ok
+test sm4::sbox_x32::tests::gfni_lane_position_sweep ... ok
+test sm4::sbox_x32::tests::gfni_matches_scalar_on_distinct_inputs ... ok
+     Running tests/lane_position_x4.rs (target/release/deps/lane_position_x4-fixture)
+test dispatch_pin_00010203 ... ok
+test dispatch_mixed_distinct_bytes ... ok
+test dispatch_lane_position_sweep ... ok
+test dispatch_sequential_fill_sweep ... ok
+     Running tests/lane_position_x16.rs (target/release/deps/lane_position_x16-fixture)
+test dispatch_lane_position_sweep ... ok
+test dispatch_sequential_fill_sweep ... ok
+     Running tests/lane_position_x32.rs (target/release/deps/lane_position_x32-fixture)
+test dispatch_lane_position_sweep ... ok
+test dispatch_sequential_fill_sweep ... ok

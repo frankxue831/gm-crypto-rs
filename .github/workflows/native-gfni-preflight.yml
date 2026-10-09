@@ -1,20 +1,26 @@
-name: Native GFNI Python preflight regression
+name: Native GFNI preflight regression
 
-# Exercise the actual runtime/audit boundary on the qualification OS before
-# merging. This job runs no Rust build, hardware qualification or timing.
+# Exercise runtime/audit and compiled-test availability before merging.
+# Listing tests executes no test bodies, hardware qualification or timing.
 on:
   pull_request:
     branches: [main]
     paths:
       - '.github/scripts/**'
       - '.github/workflows/**'
-      - 'crates/gmcrypto-core/benches/timing_leaks.rs'
+      - 'crates/gmcrypto-core/**'
+      - 'crates/gmcrypto-simd/**'
+      - 'Cargo.toml'
+      - 'rust-toolchain.toml'
   push:
     branches: [main]
     paths:
       - '.github/scripts/**'
       - '.github/workflows/**'
-      - 'crates/gmcrypto-core/benches/timing_leaks.rs'
+      - 'crates/gmcrypto-core/**'
+      - 'crates/gmcrypto-simd/**'
+      - 'Cargo.toml'
+      - 'rust-toolchain.toml'
 
 permissions:
   contents: read
@@ -25,9 +31,12 @@ concurrency:
 
 jobs:
   preflight:
-    name: Pinned Python and protected parser preflight (Ubuntu 24.04)
+    name: Pinned runtime and compiled test inventory (Ubuntu 24.04)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      RUSTUP_TOOLCHAIN: 1.95.0
+      CARGO_TERM_COLOR: never
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -43,14 +52,52 @@ jobs:
           from native_gfni import python_preflight
           output = Path(os.environ["RUNNER_TEMP"]) / "native-gfni-python-preflight"
           output.mkdir()
-          _, _, fingerprint = python_preflight(output)
+          guard, _, fingerprint = python_preflight(output)
+          (output / "rust-toolchain-guard.sh").write_text(guard)
           print((output / "python-runtime.json").read_text())
           print((output / "assurance-policy.log").read_text())
           print(f"Reviewed nightly parser AST SHA-256: {fingerprint}")
           PY
       - name: Regression and protected-source mutation tests
         run: python3 -m unittest discover -s .github/scripts -p 'test_native_gfni.py'
-      - name: Retain Python preflight evidence
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: Check every required name in both compiled feature configurations
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          sys.path.insert(0, ".github/scripts")
+          from native_gfni import LEGS, require_correctness
+          output = Path(os.environ["RUNNER_TEMP"]) / "native-gfni-python-preflight"
+          def capture(args, path):
+              with path.open("w") as log:
+                  subprocess.run(args, stdout=log, stderr=subprocess.STDOUT, check=True)
+          capture(["bash", "-euo", "pipefail", str(output / "rust-toolchain-guard.sh")], output / "toolchain.log")
+          capture(["cargo", "generate-lockfile"], output / "resolve.log")
+          lock = Path("Cargo.lock").read_bytes()
+          (output / "Cargo.lock").write_bytes(lock)
+          records = []
+          for index, leg in enumerate(LEGS):
+              features = leg + ",crypto-bigint-scalar"
+              args = ["cargo", "test", "--release", "--locked", "-p", "gmcrypto-core", "-p", "gmcrypto-simd",
+                      "--features", features, "--", "--list", "--format", "pretty"]
+              log = output / f"test-inventory-{index}.log"
+              capture(args, log)
+              require_correctness(log.read_text(), listing=True)
+              if Path("Cargo.lock").read_bytes() != lock:
+                  raise SystemExit("dependency lock changed during test inventory")
+              records.append({"features": features, "command": args, "inventory": "PASS"})
+              print(f"Compiled inventory PASS: {features}; no test bodies or timing executed")
+          (output / "test-inventory.json").write_text(json.dumps({
+              "source": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+              "lock_sha256": hashlib.sha256(lock).hexdigest(), "configurations": records,
+              "qualification": "NOT RUN", "timing": "NOT RUN"}, indent=2) + "\n")
+          PY
+      - name: Retain preflight and compiled inventory evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
