@@ -33,7 +33,7 @@ REQUIRED_TESTS = (
     "dispatch_pin_00010203",
     "dispatch_mixed_distinct_bytes",
     "sm4::cipher::tests::gbt32907_single_block",
-    "sm4::cipher::tests::sbox_ct_matches_lut",
+    "sm4::sbox_bitsliced::tests::bitsliced_matches_table",
     "sm4::cipher::tests::tau_simd_matches_four_bitsliced_sboxes",
     "sm4::cbc_streaming::tests::cbc_decrypt_simd_batch_boundary_sweep",
     "sm4::cbc_streaming::tests::cbc_decrypt_simd_chunked_update_sweep",
@@ -83,11 +83,27 @@ def python_preflight(output, root=ROOT):
         return reviewed_programs(root)
 
 
-def require_tests(log, names):
-    passed = re.findall(r"^test (\S+) \.\.\. ok$", log, re.M)
+def require_tests(log, names, *, listing=False):
+    # A compiled inventory proves availability only, never executed correctness.
+    pattern = r"^(\S+): test$" if listing else r"^test (\S+) \.\.\. ok$"
+    passed = re.findall(pattern, log, re.M)
     for name in names:
         if passed.count(name) != 1:
-            raise ValueError(f"required test did not execute exactly once: {name}")
+            action = "appear in compiled inventory" if listing else "execute"
+            raise ValueError(f"required test did not {action} exactly once: {name}")
+
+
+def require_correctness(log, *, listing=False):
+    """Validate the same test inventory in PR CI and executed native evidence."""
+    require_tests(log, REQUIRED_TESTS + ((MILLION,) if listing else ()), listing=listing)
+    # These names are shared by the x4/x16/x32 integration executables.
+    # Require each executable's table-oracle dispatch sweep explicitly.
+    for suite in ("lane_position_x4", "lane_position_x16", "lane_position_x32"):
+        block = re.search(r"Running tests/" + suite + r"\.rs [^\n]*\n(.*?)(?=\n\s*(?:Running |Doc-tests )|\Z)", log, re.S)
+        if block is None:
+            raise ValueError(f"missing integration executable: {suite}")
+        require_tests(block[1], ("dispatch_lane_position_sweep", "dispatch_sequential_fill_sweep"),
+                      listing=listing)
 
 
 def parse_logs(source, directory, env):
@@ -180,14 +196,7 @@ def qualify(output, env):
         # No lib-only selector or name filter: includes ALL four batch API
         # integrations, CTR/CBC composition and the complete core/backend suites.
         correctness = run(base + ["--", "--format", "pretty"], "correctness.log")
-        require_tests(correctness, REQUIRED_TESTS)
-        # These names are shared by the x4/x16/x32 integration executables.
-        # Require each executable's table-oracle dispatch sweep explicitly.
-        for suite in ("lane_position_x4", "lane_position_x16", "lane_position_x32"):
-            block = re.search(r"Running tests/" + suite + r"\.rs [^\n]*\n(.*?)(?=\n\s*(?:Running |Doc-tests )|\Z)", correctness, re.S)
-            if block is None:
-                raise ValueError(f"missing integration executable: {suite}")
-            require_tests(block[1], ("dispatch_lane_position_sweep", "dispatch_sequential_fill_sweep"))
+        require_correctness(correctness)
         million = run(base + ["--lib", MILLION, "--", "--exact", "--ignored", "--format", "pretty"], "million-round.log")
         require_tests(million, (MILLION,))
         result["stage"] = "timing (100K x 5, unchanged nightly gates)"
