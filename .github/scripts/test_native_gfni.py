@@ -1,0 +1,211 @@
+"""Exercise real parser equivalence and fail-closed qualification sequencing."""
+import contextlib
+import io
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import textwrap
+import unittest
+from unittest.mock import patch
+
+import native_gfni as native
+
+
+def passing_logs(source):
+    names = sorted(set(re.findall(r'"((?:ct_|noise_|negative_control)[a-z0-9_]*)"', source)))
+    return "".join(f"bench {name} ... : max tau = {2.0 if name == 'negative_control' else 0.01:.5f}\n" for name in names)
+
+
+class ParserTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        with contextlib.redirect_stdout(io.StringIO()):
+            cls.guard, cls.source, cls.fingerprint = native.reviewed_programs()
+        # Independent textual extraction of the original workflow's heredoc.
+        workflow = (native.ROOT / ".github/workflows/dudect-nightly.yml").read_text()
+        step = workflow.split("      - name: Parse and gate\n", 1)[1]
+        cls.original = textwrap.dedent(step.split("          python3 - <<'PY'\n", 1)[1].split("          PY\n", 1)[0])
+
+    def test_extracted_parser_is_verbatim_reviewed_source(self):
+        self.assertEqual(self.source, self.original)
+        self.assertEqual(self.fingerprint, "40f28788c76669f50266dc6375b732753debd48894e52926ed103dbcaacaf2d2")
+
+    def test_original_and_reused_parser_agree_on_regressions(self):
+        good = passing_logs(self.source)
+        cases = [
+            (good, 0),
+            (good.replace("ct_sm4_ctr_encrypt ... : max tau = 0.01000", "ct_sm4_ctr_encrypt ... : max tau = 0.21000"), 1),
+            (good.replace("ct_fp_invert ... : max tau = 0.01000", "ct_fp_invert ... : max tau = 0.56000"), 1),
+            (good.replace("negative_control ... : max tau = 2.00000", "negative_control ... : max tau = 1.00000"), 1),
+            (good.replace("noise_twin_class_split", "missing_twin"), 1),
+            (good.replace("ct_sm4_encrypt_block_bitsliced_simd", "missing_simd"), 1),
+        ]
+        for leg in native.LEGS:
+            extra = [(good.replace("ct_sm4_gcm_decrypt_buffered", "missing_aead"), 1 if "sm4-aead" in leg else 0)]
+            for log, expected in cases + extra:
+                with self.subTest(leg=leg, log=log), tempfile.TemporaryDirectory() as tmp:
+                    directory = Path(tmp)
+                    for i in range(1, 6):
+                        (directory / f"dudect-nightly-{i}.log").write_text(log)
+                    env = dict(os.environ, MATRIX_FEATURES=leg)
+                    direct = subprocess.run([sys.executable, "-c", self.original], cwd=directory,
+                                            env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                    reused = native.parse_logs(self.source, directory, env)
+                    self.assertEqual((reused.returncode, reused.stdout), (direct.returncode, direct.stdout))
+                    self.assertEqual(reused.returncode, expected, reused.stdout)
+
+    def test_negative_control_and_telemetry_required_in_each_pass(self):
+        for replacement in ("negative_control", "noise_twin_class_split"):
+            with tempfile.TemporaryDirectory() as tmp:
+                directory = Path(tmp)
+                for i in range(1, 6):
+                    log = passing_logs(self.source)
+                    if i == 3:
+                        log = log.replace(replacement, "missing_target")
+                    (directory / f"dudect-nightly-{i}.log").write_text(log)
+                result = native.parse_logs(self.source, directory, dict(os.environ, MATRIX_FEATURES=native.LEGS[0]))
+                self.assertNotEqual(result.returncode, 0)
+
+    def test_incomplete_and_extra_passes_rejected(self):
+        for count in (0, 4, 6):
+            with tempfile.TemporaryDirectory() as tmp:
+                for i in range(1, count + 1):
+                    (Path(tmp) / f"dudect-nightly-{i}.log").write_text("")
+                with self.assertRaisesRegex(ValueError, "exactly five"):
+                    native.parse_logs(self.source, Path(tmp), {})
+
+    def test_protected_workflow_mutation_rejected_before_extraction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in (".github/scripts/check_assurance_policy.py", ".github/scripts/v115_nightly.py", ".github/workflows/ci.yml",
+                         ".github/workflows/gitleaks.yml", ".github/workflows/dudect-pr.yml",
+                         ".github/workflows/dudect-nightly.yml", "crates/gmcrypto-core/benches/timing_leaks.rs"):
+                dest = root / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(native.ROOT / name, dest)
+            nightly = root / ".github/workflows/dudect-nightly.yml"
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(native.reviewed_programs(root)[1], self.source)
+            nightly.write_text(nightly.read_text().replace('"ct_sm4_ctr_encrypt": 0.20', '"ct_sm4_ctr_encrypt": 0.99'))
+            rejected = io.StringIO()
+            with contextlib.redirect_stdout(rejected), self.assertRaises(SystemExit):
+                native.reviewed_programs(root)
+            self.assertIn("nightly dudect executable semantics match reviewed fingerprint", rejected.getvalue())
+
+
+class SequenceTests(unittest.TestCase):
+    def exercise(self, failure=None, overrides=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # Source fingerprints are tested with real files in ParserTests;
+            # these fixtures isolate command order and stopping behavior.
+            for name in ("Cargo.toml", "crates/gmcrypto-core/Cargo.toml", "crates/gmcrypto-simd/Cargo.toml",
+                         "crates/gmcrypto-core/benches/timing_leaks.rs", ".github/workflows/dudect-nightly.yml",
+                         ".github/scripts/check_assurance_policy.py", ".github/scripts/native_gfni.py"):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("fixture")
+            (root / "target/release/deps").mkdir(parents=True)
+            commands = []
+            env = dict(MATRIX_FEATURES=native.LEGS[1], GITHUB_SHA="a" * 40,
+                       GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_RUN_ATTEMPT="1", RUSTUP_TOOLCHAIN="1.95.0")
+            env.update(overrides or {})
+
+            def popen(args, **kwargs):
+                commands.append((args, dict(kwargs["env"])))
+                code, text = 0, ""
+                if args[:2] == ["git", "rev-parse"]:
+                    text = "a" * 40 + "\n"
+                elif args[:2] == ["cargo", "generate-lockfile"]:
+                    (root / "Cargo.lock").write_text("locked graph")
+                elif native.DETECTOR in args:
+                    text = f"test {native.DETECTOR} ... ok\n"
+                    if failure == "hardware":
+                        code, text = 101, "GFNI+AVX2 path is unavailable\n"
+                    if failure == "zero-tests":
+                        text = "running 0 tests\n"
+                elif native.MILLION in args:
+                    text = f"test {native.MILLION} ... {'ignored' if failure == 'million' else 'ok'}\n"
+                elif args[:2] == ["cargo", "test"]:
+                    text = "".join(f"test {name} ... ok\n" for name in native.REQUIRED_TESTS)
+                    for suite in ("lane_position_x4", "lane_position_x16", "lane_position_x32"):
+                        text += f"     Running tests/{suite}.rs (target/release/deps/{suite})\n"
+                        text += "test dispatch_lane_position_sweep ... ok\ntest dispatch_sequential_fill_sweep ... ok\n"
+                    if failure == "dispatch-executable":
+                        text = text.replace("Running tests/lane_position_x32.rs", "Running tests/missing.rs")
+                    if failure == "dispatch-sweep":
+                        text = text.replace("test dispatch_lane_position_sweep ... ok", "test dispatch_lane_position_sweep ... ignored", 1)
+                    if failure == "integration":
+                        text = text.replace("test encrypt_blocks_matches_per_block_at_every_length ... ok\n", "")
+                    if failure == "lock":
+                        (root / "Cargo.lock").write_text("changed")
+                elif args[:2] == ["cargo", "bench"] and failure == "timing":
+                    code = 1
+                return type("Process", (), {"stdout": io.StringIO(text), "wait": lambda self: code})()
+
+            original_read = Path.read_text
+
+            def read(path, *args, **kwargs):
+                if str(path) == "/etc/os-release":
+                    return 'ID=ubuntu\nVERSION_ID="24.04"\n'
+                return original_read(path, *args, **kwargs)
+
+            with patch.object(native, "ROOT", root), patch.object(native, "reviewed_programs", return_value=("guard", "parser", "hash")), \
+                    patch.object(native.subprocess, "Popen", side_effect=popen), \
+                    patch.object(native, "parse_logs", return_value=subprocess.CompletedProcess([], 0, "OK")), \
+                    patch.object(Path, "read_text", read), contextlib.redirect_stdout(io.StringIO()):
+                code = native.qualify(root / "evidence", env)
+            result = json.loads((root / "evidence/result.json").read_text())
+            return code, result, commands
+
+    def test_complete_sequence_and_matched_locked_features(self):
+        code, result, commands = self.exercise()
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result["status"], "QUALIFIED")
+        cargo = [(args, env) for args, env in commands if args[0] == "cargo"]
+        timing = [args for args, _ in cargo if args[1] == "bench"]
+        self.assertEqual(len(timing), 5)
+        for args, env in cargo:
+            if args[1] in ("test", "bench"):
+                self.assertIn("--locked", args)
+                self.assertEqual(args[args.index("--features") + 1], native.LEGS[1] + ",crypto-bigint-scalar")
+                self.assertEqual(env["GMCRYPTO_SIMD_EXPECT_GFNI"], "1")
+                self.assertEqual(env["DUDECT_SAMPLES"], "100000")
+        tests = [args for args, _ in cargo if args[1] == "test"]
+        self.assertIn(native.DETECTOR, tests[0])
+        self.assertNotIn("--lib", tests[1])
+        self.assertEqual(tests[1][-3:], ["--", "--format", "pretty"])
+        self.assertIn("--ignored", tests[2])
+        self.assertIn(native.MILLION, tests[2])
+
+    def test_preflight_or_correctness_failure_never_reaches_timing(self):
+        for failure in ("hardware", "zero-tests", "integration", "dispatch-executable", "dispatch-sweep", "million", "lock"):
+            with self.subTest(failure=failure):
+                code, result, commands = self.exercise(failure)
+                self.assertEqual(code, 1)
+                self.assertEqual(result["status"], "NOT QUALIFIED")
+                self.assertFalse(any(args[:2] == ["cargo", "bench"] for args, _ in commands))
+
+    def test_timing_failure_is_not_retried(self):
+        code, result, commands = self.exercise("timing")
+        self.assertEqual(code, 1)
+        self.assertEqual(sum(args[:2] == ["cargo", "bench"] for args, _ in commands), 1)
+
+    def test_reruns_unknown_features_and_build_overrides_rejected(self):
+        for overrides in ({"GITHUB_RUN_ATTEMPT": "2"}, {"MATRIX_FEATURES": "default"},
+                          {"RUSTFLAGS": "-C target-cpu=native"}, {"CARGO_PROFILE_BENCH_LTO": "false"},
+                          {"CARGO_BUILD_RUSTC": "alternate"}, {"CARGO_BUILD_RUSTC_WRAPPER": "wrapper"},
+                          {"CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER": "wrapper"}):
+            with self.subTest(overrides=overrides):
+                code, _, commands = self.exercise(overrides=overrides)
+                self.assertEqual(code, 1)
+                self.assertEqual(commands, [])
+
+
+if __name__ == "__main__":
+    unittest.main()
