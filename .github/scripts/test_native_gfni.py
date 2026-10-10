@@ -57,8 +57,9 @@ class ParserTests(unittest.TestCase):
     def setUpClass(cls):
         with contextlib.redirect_stdout(io.StringIO()):
             cls.guard, cls.source, cls.fingerprint = native.reviewed_programs()
-        # Independent textual extraction of the original workflow's heredoc.
-        workflow = (native.ROOT / ".github/workflows/dudect-nightly.yml").read_text()
+        # Independent textual extraction of the production nightly heredoc.
+        # After study isolation, that parser lives in dudect-main.yml.
+        workflow = (native.ROOT / ".github/workflows/dudect-main.yml").read_text()
         step = workflow.split("      - name: Parse and gate\n", 1)[1]
         cls.original = textwrap.dedent(step.split("          python3 - <<'PY'\n", 1)[1].split("          PY\n", 1)[0])
 
@@ -115,11 +116,11 @@ class ParserTests(unittest.TestCase):
             root = Path(tmp)
             for name in (".github/scripts/check_assurance_policy.py", ".github/scripts/v115_nightly.py", ".github/workflows/ci.yml",
                          ".github/workflows/gitleaks.yml", ".github/workflows/dudect-pr.yml",
-                         ".github/workflows/dudect-nightly.yml", "crates/gmcrypto-core/benches/timing_leaks.rs"):
+                         ".github/workflows/dudect-main.yml", "crates/gmcrypto-core/benches/timing_leaks.rs"):
                 dest = root / name
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(native.ROOT / name, dest)
-            nightly = root / ".github/workflows/dudect-nightly.yml"
+            nightly = root / ".github/workflows/dudect-main.yml"
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(native.reviewed_programs(root)[1], self.source)
             nightly.write_text(nightly.read_text().replace('"ct_sm4_ctr_encrypt": 0.20', '"ct_sm4_ctr_encrypt": 0.99'))
@@ -159,7 +160,7 @@ class SequenceTests(unittest.TestCase):
             # Source fingerprints are tested with real files in ParserTests;
             # these fixtures isolate command order and stopping behavior.
             for name in ("Cargo.toml", "crates/gmcrypto-core/Cargo.toml", "crates/gmcrypto-simd/Cargo.toml",
-                         "crates/gmcrypto-core/benches/timing_leaks.rs", ".github/workflows/dudect-nightly.yml",
+                         "crates/gmcrypto-core/benches/timing_leaks.rs", ".github/workflows/dudect-main.yml",
                          ".github/scripts/check_assurance_policy.py", ".github/scripts/native_gfni.py"):
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)

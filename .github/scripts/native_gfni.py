@@ -177,7 +177,7 @@ def qualify(output, env):
         result["parser_ast_sha256"] = ast_hash
         result["source_sha256"] = {p: digest(ROOT / p) for p in (
             "Cargo.toml", "crates/gmcrypto-core/Cargo.toml", "crates/gmcrypto-simd/Cargo.toml",
-            "crates/gmcrypto-core/benches/timing_leaks.rs", ".github/workflows/dudect-nightly.yml",
+            "crates/gmcrypto-core/benches/timing_leaks.rs", ".github/workflows/dudect-main.yml",
             ".github/scripts/check_assurance_policy.py", ".github/scripts/native_gfni.py")}
         result["stage"] = "effective Rust toolchain and locked graph"
         run(["bash", "-euo", "pipefail", "-c", guard], "toolchain.log")
