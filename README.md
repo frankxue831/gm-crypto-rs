@@ -74,7 +74,7 @@ instead. `gmcrypto-simd` is an internal backend — do not depend on it directly
 | X.509-with-SM2 leaf parse + verify, linear chain verify | GM/T 0015 | `x509` |
 | TLCP key schedule, record protection, `[sign, enc]` pair verify | GB/T 38636-2020 | `tlcp` |
 | RustCrypto `digest` / `cipher` / `aead` trait fits | — | `*-traits` |
-| Table-less bitsliced SM4 S-box; AVX2 / NEON packed batches | — | `sm4-bitsliced[-simd]` |
+| Table-less bitsliced SM4 S-box; AVX2 / NEON packed batches; GFNI S-box on supported `x86_64` | — | `sm4-bitsliced[-simd]` |
 
 Three crates, released together at one lockstep version:
 
@@ -82,7 +82,7 @@ Three crates, released together at one lockstep version:
 |---|---|
 | [`gmcrypto-core`](https://crates.io/crates/gmcrypto-core) | The `no_std + alloc` crypto core, `unsafe_code = "forbid"`. The Rust API. |
 | [`gmcrypto-c`](https://crates.io/crates/gmcrypto-c) | C ABI, cdylib + staticlib: 112 entry points, committed [`gmcrypto.h`](crates/gmcrypto-c/include/gmcrypto.h) drift-checked in CI. A default build exports the whole surface. |
-| [`gmcrypto-simd`](https://crates.io/crates/gmcrypto-simd) | Internal AVX2 / NEON / CLMUL / PMULL backend. No stable Rust API. |
+| [`gmcrypto-simd`](https://crates.io/crates/gmcrypto-simd) | Internal AVX2 / GFNI / NEON / CLMUL / PMULL backend. No stable Rust API. |
 
 ## Why this rather than the alternatives
 

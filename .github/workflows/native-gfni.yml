@@ -1,0 +1,46 @@
+name: Native GFNI qualification
+
+# One explicit draw of the ordinary hosted pool, never a CPU search. A missing
+# detector is NOT QUALIFIED. This neither runs nor repins the frozen v1.15 study.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-gfni-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    name: Native GFNI (${{ matrix.features }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      RUSTUP_TOOLCHAIN: 1.95.0
+      CARGO_TERM_COLOR: never
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - sm4-bitsliced-simd
+          - sm4-bitsliced-simd,sm4-aead,sm4-xts,sm2-key-exchange,tlcp
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14.8'
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: Detect, check outputs, then measure on this VM
+        env:
+          MATRIX_FEATURES: ${{ matrix.features }}
+        run: python3 .github/scripts/native_gfni.py --output "$RUNNER_TEMP/native-gfni"
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-gfni-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/native-gfni/
+          retention-days: 30
+          if-no-files-found: error

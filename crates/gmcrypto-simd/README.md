@@ -28,8 +28,13 @@ architecture intrinsics:
 
 | | `x86_64` | `aarch64` | elsewhere |
 |---|---|---|---|
-| SM4 S-box | AVX2, 8 / 32 bytes per call, runtime-detected with scalar fallback | NEON, 16 bytes per call, compile-time baseline | scalar bitsliced |
+| SM4 S-box | GFNI, 4 / 32 bytes per call; AVX2 fallback for packed batches; runtime-detected with scalar fallback | NEON, 16 bytes per call, compile-time baseline | scalar bitsliced |
 | GHASH multiply | CLMUL, runtime-detected | PMULL64, runtime-detected | constant-time software |
+
+GFNI is compiled on Rust 1.89 or newer and selected only when the CPU has
+GFNI, AVX2 and OS-enabled AVX-512 state. Rust 1.85 remains supported through
+the existing fallback paths. Enable `gmcrypto-core/sm4-bitsliced-simd` to
+use the SM4 backend; `sm4-aead` alone uses this crate for GHASH.
 
 It exists for exactly one reason: `core::arch` intrinsics are `unsafe fn`,
 and `#[target_feature(enable = "…")]` is the only stable-Rust mechanism on
@@ -46,8 +51,8 @@ or runtime-detect precondition. Same posture as the `gmcrypto-c` FFI shim.
   may change or disappear in any release without a major bump. The supported
   surfaces are the `gmcrypto-core` Rust API and the `gmcrypto-c` C ABI.
 - **Lockstep-versioned** with its siblings: `gmcrypto-core` pins this crate
-  at an exact `=1.11.2`, and all three crates publish together. Mixing
-  versions is not a supported configuration.
+  at the exact same workspace version, and all three crates publish together.
+  Mixing versions is not a supported configuration.
 
 Correctness is not taken on trust from the intrinsics: lane-equivalence tests
 cross-check both the scalar and the SIMD paths against an inline copy of the

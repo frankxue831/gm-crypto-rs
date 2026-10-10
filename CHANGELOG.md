@@ -5,6 +5,16 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-10-10
+
+Publishes the merged GFNI improvements (#224, #226). All three workspace
+crates publish together. The v1.14 and v1.15 assurance cycles do not
+publish crates.
+
+The frozen v1.15 study measures its pinned pre-GFNI source, not this
+candidate. Its calibration does not validate the new GFNI build, and this
+release does not change its protocol, thresholds, or activation criteria.
+
 ### Added
 
 - **GFNI SM4 S-box on x86_64** (v1.16,
@@ -21,6 +31,15 @@ the project follows [Semantic Versioning](https://semver.org/).
   `build.rs` in `gmcrypto-simd`; MSRV stays 1.85 and older compilers build
   the previous code. No public API change. CI gains an Intel SDE job that
   asserts the GFNI path runs.
+
+### Fixed
+
+- Rust 1.99 build compatibility through the internal `cpufeatures` 0.3.1
+  dependency and equivalent test-assertion updates, with warnings still
+  denied. Workspace resolver 3 prefers Rust-1.85-compatible dependency
+  versions during fresh resolution; the advertised MSRV remains 1.85.
+- Render the x86-only `sbox_x4_avx2` helper name without a broken rustdoc
+  link when documenting the SIMD crate on aarch64.
 
 ## [1.13.0] - 2026-09-04
 

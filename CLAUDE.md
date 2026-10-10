@@ -30,14 +30,26 @@ Release state table below and in `docs/`.
 
 | | |
 |---|---|
-| Live on crates.io | **`1.13.0`** — all three crates, 2026-09-04 from `5c0ae59` (publish delegated for this release); tag `v1.13.0` on `origin`, ED25519-verified. Previous: `1.12.0` 2026-09-04 from `b0c6679`, tag `v1.12.0` ED25519-verified |
-| Workspace version | `1.13.0` = live. The next bump is the release-prep PR of the next publishing cycle. A new minor does not always mean crates.io (v0.14 / v1.10 / v1.14 / v1.15 are assurance cycles); don't bump or publish for a no-crate-change cycle |
-| Gate #1 | `docs/ECOSYSTEM.md` §8 must PASS before every publish; latest record `docs/v1.13.0-gate1-evidence.md`. The gated SHA is never the release SHA: the gate attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty, and a PR touching those re-owes it. Running the gate script is ordinary agent work; publishing is not |
+| Live on crates.io | **`1.16.0`** — all three crates, 2026-10-10 from `2a7c880` (published by the maintainer); tag `v1.16.0` on `origin`, ED25519-verified. Previous: `1.13.0` 2026-09-04 from `5c0ae59`, tag `v1.13.0` ED25519-verified |
+| Workspace version | `1.16.0` = live. The next bump is the release-prep PR of the next publishing cycle. A new minor does not always mean crates.io (v0.14 / v1.10 / v1.14 / v1.15 are assurance cycles); don't bump or publish for a no-crate-change cycle |
+| Gate #1 | `docs/ECOSYSTEM.md` §8 must PASS before every publish; latest record `docs/v1.16.0-gate1-evidence.md` (gated SHA `ea9c0e5`). The gated SHA is never the release SHA: the gate attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty, and a PR touching those re-owes it. Running the gate script is ordinary agent work; publishing is not |
 
 `cargo publish` and the SSH-signed tag are the **maintainer's authenticated
 call** — the agent path is branch + PR. The 1.11.0, 1.12.0 and 1.13.0
 publishes were explicit per-release delegations, not a standing grant; the
-tags have always been the maintainer's.
+maintainer published 1.16.0. The tags have always been the maintainer's.
+
+### v1.16 — GFNI S-box; PUBLISHED 2026-10-10
+
+1.16.0 is live from `2a7c880` (tag `v1.16.0`, ED25519-verified). Gate #1
+PASSed at `ea9c0e5`; native GFNI qualification and the maintainer's
+acceptance for the SIMD-only leg are in `docs/native-gfni-qualification.md`,
+"1.16.0 result". Narrative: `docs/version-history.md`.
+
+The v1.15 calibration through 2026-11-09 stays on its frozen pre-GFNI source;
+it does not validate this release. Study isolation is tracked in #227.
+Do not repin the study, restart its calendar, or transfer its evidence to
+the GFNI implementation.
 
 ### v1.15 — noise-twin calibration (assurance cycle; direction approved 2026-09-27)
 
@@ -69,12 +81,9 @@ v1.14 F21 result stands (`docs/f21-finalize-result.md`).
 
 ## Open backlog
 
-- v1.16 GFNI S-box (replaces AVX-512 `sbox_x64`): merged 2026-09-30 as
-  #224 (`sbox_x32`, 9fec750) and #226 (`sbox_x4`, 6a53156), spec
-  `docs/v1.16-scope.md`. `crates/` changed after the v1.15 C0, so the
-  calibration's source pin or start date is an open Owner decision
-  (`docs/v1.15-calibration-freeze.md`; PR #227), and Gate #1 is owed
-  again before any publish.
+- Core's crate-level docs (`gmcrypto-core/src/lib.rs`, `sm4-bitsliced-simd`
+  entry) still describe AVX2 / NEON packing only, not the GFNI S-box. Fold
+  the fix into the next `crates/` change; on its own it re-owes Gate #1.
 - **F21** `ct_sm4_cbc_unpad` — composite window blind
   (`docs/v1.10-scope.md` Q10.9); narrow `finalize()` window distinguishable on
   the pinned local host only (`docs/f21-finalize-result.md`, v1.14): a

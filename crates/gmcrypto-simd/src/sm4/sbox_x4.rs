@@ -21,7 +21,7 @@
 //! - **other `x86_64`:** exactly four scalar gate-circuit calls. AVX2 is
 //!   not the production branch: the 10% improvement rule could not
 //!   be measured on the `AArch64` implementation host. The AVX2
-//!   candidate remains [`sbox_x4_avx2`] for tests. Must not call
+//!   candidate remains `sbox_x4_avx2` for tests. Must not call
 //!   [`super::sbox_x8::sbox_x8`] (its non-AVX2 fallback is eight
 //!   scalar calls).
 //! - **other targets:** [`sbox_x4_scalar`].
