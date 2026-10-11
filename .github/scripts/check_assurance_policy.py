@@ -17,7 +17,7 @@ def read(path: str) -> str:
 CI = read(".github/workflows/ci.yml")
 GITLEAKS = read(".github/workflows/gitleaks.yml")
 DUDECT_PR = read(".github/workflows/dudect-pr.yml")
-DUDECT_NIGHTLY = read(".github/workflows/dudect-nightly.yml")
+DUDECT_NIGHTLY = read(".github/workflows/dudect-main.yml")
 TIMING = read("crates/gmcrypto-core/benches/timing_leaks.rs")
 
 
@@ -487,7 +487,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "cargo-deny": "efc9a2787bc8b48022d35d3419af0e9987c6a11c3a5c44959fc93b1d33be9174",
         "gitleaks scan": "c7889df5e874f1a5cee871c24cd49cc539d845c0627861e49b1a9e6335d1c15f",
         "PR dudect": "8cf76b3c24c5ed8276c718f51849fbaf3a3cb7459278d797f9ae354815b9e9df",
-        "nightly dudect": "400a8e198cc072b6735a16c132595d03fbef3da1c69181a3b476fcf3e78f1ff8",
+        "nightly dudect": "ad3df5c7f838a3a33adc161e1344db833ddbea35631a7685dab8ea88a2b92d74",
     }
     for label, expected_fingerprint in reviewed_job_fingerprints.items():
         require(
@@ -1278,42 +1278,12 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         'cargo bench --bench timing_leaks --features "$FEATURES" 2>&1 | tee "dudect-$i.log"\n'
         "done"
     )
-    nightly_helper_sha = "9304fbebfadcc72b02550908f8c7e2046293dfd98886d43988308c008734a74c"
-    require(
-        "nightly capture helper matches reviewed bytes",
-        hashlib.sha256(read(".github/scripts/v115_nightly.py").encode()).hexdigest() == nightly_helper_sha,
-    )
-    nightly_producer_canonical = (
-        "set -euxo pipefail\n"
-        "printf '%s\\n' '" + nightly_helper_sha + "  .github/scripts/v115_nightly.py' | sha256sum --check\n"
-        'python3 .github/scripts/v115_nightly.py route --root . --freeze docs/v1.15-execution-freeze.json --leg "$MATRIX_FEATURES" > v115-route.txt\n'
-        'if [ "$(cat v115-route.txt)" = "capture" ]; then\n'
-        'python3 .github/scripts/v115_nightly.py capture --root . --freeze docs/v1.15-execution-freeze.json\n'
-        'else\n'
-        + dudect_producer_canonical.removeprefix("set -euxo pipefail\n").replace(
-            'tee "dudect-$i.log"', 'tee "dudect-nightly-$i.log"')
-        + "\nfi"
-    )
+    nightly_producer_canonical = dudect_producer_canonical.replace(
+        'tee "dudect-$i.log"', 'tee "dudect-nightly-$i.log"')
     require(
         "nightly capture API permission is read-only",
         active_source_lines(indented_block(dudect_nightly, "permissions:", 0))
         == ["permissions:", "  contents: read", "  actions: read"],
-    )
-    require(
-        "nightly capture upload is exact and survives failures",
-        active_source_lines(step_named(dudect_jobs["nightly"], "Upload v1.15 capture")) == [
-            "      - name: Upload v1.15 capture",
-            "        if: ${{ always() && steps.dudect.outputs.capture_artifact != '' }}",
-            "        uses: actions/upload-artifact@v7",
-            "        with:",
-            "          name: ${{ steps.dudect.outputs.capture_artifact }}",
-            "          path: |",
-            "            v115-capture/",
-            "            capture-job.json",
-            "            v115-route.json",
-            "          retention-days: 90",
-            "          if-no-files-found: warn",
-        ],
     )
     dudect_capture_canonical = (
         "set +e\n"
@@ -1385,7 +1355,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
             f"- name: {dudect_producer_names[workflow_name]}",
             "- name: Parse and gate",
             "- name: Upload raw log",
-        ) + (("- name: Upload v1.15 capture",) if workflow_name == "nightly" else ())
+        )
         has_exact_if = (
             key_count(dudect_job, "if", 4) == 1
             and mapping_block(dudect_job, "if", 4) == skip_ci_if
@@ -1487,8 +1457,8 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
                 f"          DUDECT_SAMPLES: {config['samples']}",
                 f"          DUDECT_RUNS: {config['runs']}",
                 "          MATRIX_FEATURES: ${{ matrix.features }}",
-            ] + (["          GH_TOKEN: ${{ github.token }}"] if workflow_name == "nightly" else [])
-            and (scalar(producer, "id", 8) == "dudect" if workflow_name == "nightly" else key_count(producer, "id", 8) == 0)
+            ]
+            and key_count(producer, "id", 8) == 0
         )
         require(f"{workflow_name} dudect producer contract is exact", producer_contract)
         require(f"{workflow_name} dudect producer metadata is exact", producer_contract)
@@ -4334,27 +4304,6 @@ def mutation_self_test() -> list[str]:
         ),
     )
 
-    for label, before, after in (
-        ("helper checksum skipped", " | sha256sum --check", " | cat"),
-        ("route failure swallowed", " > v115-route.txt", " > v115-route.txt || true"),
-        ("in-window capture bypassed", '= "capture" ]; then', '= "disabled" ]; then'),
-        ("wrong execution freeze", "--freeze docs/v1.15-execution-freeze.json --leg", "--freeze unchecked.json --leg"),
-    ):
-        must_reject(
-            "nightly capture " + label, "nightly dudect producer script is exact",
-            dudect_nightly=replace_in_step(DUDECT_NIGHTLY, "full",
-                "Run dudect harness (nightly budget, 5 runs for median)", before, after, label),
-        )
-    must_reject(
-        "nightly capture lost on failed job", "nightly capture upload is exact and survives failures",
-        dudect_nightly=replace_in_step(DUDECT_NIGHTLY, "full", "Upload v1.15 capture",
-            "always() &&", "success() &&", "capture upload failure retention"),
-    )
-    must_reject(
-        "nightly capture artifact provenance lost", "nightly capture upload is exact and survives failures",
-        dudect_nightly=replace_in_step(DUDECT_NIGHTLY, "full", "Upload v1.15 capture",
-            "name: ${{ steps.dudect.outputs.capture_artifact }}", "name: arbitrary", "capture artifact name"),
-    )
     must_reject(
         "nightly capture API write permission", "nightly capture API permission is read-only",
         dudect_nightly=DUDECT_NIGHTLY.replace("  actions: read", "  actions: write", 1),

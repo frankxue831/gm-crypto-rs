@@ -44,7 +44,21 @@ def validate_freeze(frozen):
             raise ValueError('all six frozen input hashes required')
 
 
-def bind_capture(run, job, artifacts, archives, source_contents, frozen):
+ISOLATION_HELPER = '.github/scripts/v115_isolated.py'
+
+
+def validate_isolation(isolation, frozen):
+    if isolation is None:
+        return
+    if (isolation.get('schema') != 1
+            or any(isolation.get(k) != frozen.get(k) for k in ('repository', 'workflow_path', 'workflow_id'))
+            or not re.fullmatch(r'[0-9a-f]{40}', isolation.get('source_sha', ''))
+            or isolation.get('freeze_sha256') != digest(canonical(frozen))
+            or any(not SHA256.fullmatch(isolation.get(k, '')) for k in ('workflow_sha256', 'helper_sha256'))):
+        raise ValueError('reviewed isolation amendment bound to the original freeze required')
+
+
+def bind_capture(run, job, artifacts, archives, source_contents, frozen, *, isolation=None):
     """Return binding/qualification result, preserving issues and parsed observations.
 
     run is the exact attempt API response; job comes from that attempt's full job
@@ -55,6 +69,7 @@ def bind_capture(run, job, artifacts, archives, source_contents, frozen):
     records. The caller must use the read-only collector's preserved provenance.
     """
     validate_freeze(frozen)
+    validate_isolation(isolation, frozen)
     issues = []
     names = frozen['job_names_by_leg']
     legs = [leg for leg, name in names.items() if name == job.get('name')]
@@ -79,7 +94,18 @@ def bind_capture(run, job, artifacts, archives, source_contents, frozen):
     if job.get('run_id') != run['id'] or job.get('run_attempt') != run['run_attempt']:
         issues.append('job-attempt-mismatch')
     identities = frozen['identity_sha256_by_leg'][leg]
-    for path, expected in [(WORKFLOW, frozen['workflow_sha256']), (PRODUCER, identities['capture-source.py'])]:
+    workflow_bytes = source_contents.get((head, WORKFLOW))
+    isolated = (isolation is not None and isinstance(workflow_bytes, bytes)
+                and digest(workflow_bytes) == isolation['workflow_sha256'])
+    if isolated:
+        # API/artifact provenance retains the launcher SHA. Only the measured
+        # checkout identity passed to the unchanged producer/qualifier differs.
+        api_job['head_sha'] = isolation['source_sha']
+        expected_sources = [(WORKFLOW, isolation['workflow_sha256']),
+                            (ISOLATION_HELPER, isolation['helper_sha256'])]
+    else:
+        expected_sources = [(WORKFLOW, frozen['workflow_sha256']), (PRODUCER, identities['capture-source.py'])]
+    for path, expected in expected_sources:
         data = source_contents.get((head, path))
         if not isinstance(data, bytes) or digest(data) != expected:
             issues.append('executed-source-mismatch:' + path)
@@ -123,4 +149,4 @@ def bind_capture(run, job, artifacts, archives, source_contents, frozen):
             except (ValueError, KeyError, TypeError, zipfile.BadZipFile, RuntimeError, NotImplementedError) as error:
                 issues.append('malformed-capture-archive:' + str(error))
     return dict(binding_qualified=not issues and result is not None, issues=sorted(set(issues)),
-                job=api_job, artifact_id=artifact_id, capture=result)
+                job=api_job, run_head_sha=head, artifact_id=artifact_id, capture=result)

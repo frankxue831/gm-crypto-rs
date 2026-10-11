@@ -75,12 +75,12 @@ def gh_get(endpoint):
 
 
 class Collector:
-    def __init__(self, output, get=gh_get):
+    def __init__(self, output, get=gh_get, *, schema=2):
         self.output = Path(output)
         self.output.mkdir(parents=True, exist_ok=False)
         (self.output / 'raw').mkdir()
         self.get = get
-        self.record = dict(schema=1, repository=REPOSITORY, started_at=utc_now(),
+        self.record = dict(schema=schema, repository=REPOSITORY, started_at=utc_now(),
                            status='collecting', requests=[], runs=[], attempts=[], artifacts=[], sources=[])
         self.save()
 
@@ -217,6 +217,8 @@ class Collector:
                     raise ValueError('run repository identity mismatch')
                 self.source(run['head_sha'], path)
                 self.source(run['head_sha'], PRODUCER)
+                if self.record['schema'] >= 2:
+                    self.source(run['head_sha'], '.github/scripts/v115_isolated.py')
                 for attempt in range(1, positive(run.get('run_attempt')) + 1):
                     endpoint = f'/actions/runs/{run_id}/attempts/{attempt}'
                     metadata = self.json(endpoint)

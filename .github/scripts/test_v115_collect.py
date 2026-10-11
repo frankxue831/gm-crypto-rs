@@ -48,7 +48,10 @@ def fixture():
 def fake_get(responses):
     def get(endpoint):
         if not endpoint.startswith(BASE):raise AssertionError(endpoint)
-        value=responses[endpoint[len(BASE):]]
+        relative=endpoint[len(BASE):]
+        if relative.startswith('/contents/.github/scripts/v115_isolated.py?ref=') and relative not in responses:
+            raise ApiError(404,'helper absent on legacy revision')
+        value=responses[relative]
         if isinstance(value,Exception):raise value
         return value if isinstance(value,bytes) else json.dumps(value).encode()
     return get
@@ -62,7 +65,7 @@ class CollectorTests(unittest.TestCase):
             self.assertEqual([a['jobs'][0]['conclusion'] for a in r['attempts']],['failure','success'])
             self.assertEqual([a['run_attempt'] for a in r['attempts']],[1,2])
             self.assertEqual(r['artifacts'][0]['status'],'verified')
-            self.assertEqual(len(r['sources']),2)
+            self.assertEqual(len(r['sources']),3)
             for path,sha in r['files'].items():self.assertEqual(hashlib.sha256((root/path).read_bytes()).hexdigest(),sha)
             self.assertNotIn('capture_qualified',r)
 

@@ -164,5 +164,40 @@ class ReplayTests(unittest.TestCase):
             self.assertTrue(r['window_complete']);self.assertEqual(len(r['missing_dates']),168)
             self.assertEqual(r['status'],'insufficient evidence');self.assertEqual(len(r['fallback']),18)
 
+    def test_mixed_legacy_and_isolated_census_keeps_both_heads_and_first_attempt(self):
+        specs=[dict(started='2030-01-01T05:00:00Z'),dict(started='2030-01-02T05:00:00Z')]
+        responses,frozen=study(specs)
+        original_head=responses['/actions/runs/1/attempts/1']['head_sha']
+        head='b'*40;workflow=b'isolated reviewed workflow';helper=b'isolated reviewed helper'
+        run=responses['/actions/runs/2/attempts/1'];run['head_sha']=head
+        responses['/actions/runs/2/artifacts?per_page=100&page=1']['artifacts'][0]['workflow_run']['head_sha']=head
+        for path,source in ((WORKFLOW,workflow),('.github/scripts/v115_isolated.py',helper),(PRODUCER,b'unused current-main producer')):
+            responses['/contents/'+path+'?ref='+head]={'type':'file','path':path,'encoding':'base64','content':base64.b64encode(source).decode()}
+        amendment=dict(schema=1,repository=run['repository']['full_name'],workflow_path=WORKFLOW,workflow_id=7,
+                       source_sha=original_head,freeze_sha256=digest(canonical(frozen)),
+                       workflow_sha256=digest(workflow),helper_sha256=digest(helper))
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'c'
+            with patch('v115_collect.utc_now',return_value=SNAPSHOT):
+                Collector(root,fake_get(responses)).collect('dudect-nightly.yml')
+            c,files,h=verified_collection(root)
+            result=calibration_report(c,files,frozen,h,NOW,isolation=amendment)
+            self.assertEqual([j['eligible'] for j in result['jobs']],[True,True])
+            self.assertEqual([j['head_sha'] for j in result['jobs']],[original_head,head])
+            self.assertEqual([j['source_sha'] for j in result['jobs']],[original_head,original_head])
+            self.assertEqual(len(result['missing_dates']),166)
+            self.assertFalse(result['activation_authorized'])
+            legacy_only=calibration_report(c,files,frozen,h,NOW)
+            self.assertEqual([j['eligible'] for j in legacy_only['jobs']],[True,False])
+
+    def test_original_schema_one_archives_still_replay(self):
+        responses,frozen=study([{}])
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'c'
+            with patch('v115_collect.utc_now',return_value=SNAPSHOT):
+                Collector(root,fake_get(responses),schema=1).collect('dudect-nightly.yml')
+            c,files,h=verified_collection(root)
+            self.assertTrue(calibration_report(c,files,frozen,h,NOW)['jobs'][0]['eligible'])
+
 
 if __name__=='__main__':unittest.main()
