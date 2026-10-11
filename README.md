@@ -8,6 +8,8 @@ with constant-time discipline that is **measured in CI**, not just intended.
 [![MSRV](https://img.shields.io/badge/MSRV-1.85-blue.svg)](https://github.com/frankxue831/gm-crypto-rs#stability--semver)
 [![License](https://img.shields.io/crates/l/gmcrypto-core.svg)](https://crates.io/crates/gmcrypto-core)
 
+**Try it in the browser:** [gm-crypto-web](https://www.frankxue.dev/gm-crypto-web/) runs SM2 / SM3 / SM4 locally through this crate compiled to WASM (unaudited demo; do not use production keys).
+
 For Rust services that must speak GB/T 32918 / 32905 / 32907 and want a
 `no_std` core with no C dependency — and for C, C++, Python, Go and Zig
 callers through a complete, always-on C ABI. Every secret-touching path is
