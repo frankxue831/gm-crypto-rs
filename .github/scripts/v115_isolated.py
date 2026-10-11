@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 WORKFLOW = '.github/workflows/dudect-nightly.yml'
 HELPER = '.github/scripts/v115_isolated.py'
@@ -64,17 +65,23 @@ def metadata(control, root, amendment, frozen, leg, env, get):
             or event not in ('schedule', 'workflow_dispatch')
             or (event == 'schedule' and run.get('head_branch') != 'main')):
         raise ValueError('Actions launcher provenance mismatch')
-    jobs = []
-    page = 1
-    while True:
-        batch = get(f'/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100&page={page}')['jobs']
-        jobs.extend(batch)
-        if len(batch) < 100:
+    # The running job can lag in the jobs listing; retry as v115_nightly.job_metadata does.
+    for retry in range(4):
+        jobs = []
+        page = 1
+        while True:
+            batch = get(f'/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100&page={page}')['jobs']
+            jobs.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+            if page > 100:
+                raise ValueError('unexpected job pagination')
+        matches = [job for job in jobs if job.get('name') == frozen['job_names_by_leg'].get(leg)]
+        if len(matches) == 1:
             break
-        page += 1
-        if page > 100:
-            raise ValueError('unexpected job pagination')
-    matches = [job for job in jobs if job.get('name') == frozen['job_names_by_leg'].get(leg)]
+        if retry < 3:
+            time.sleep(2)
     if len(matches) != 1:
         raise ValueError('exactly one frozen feature-leg job required')
     job = matches[0]

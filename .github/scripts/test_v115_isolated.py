@@ -44,6 +44,29 @@ class IsolationTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         isolated.metadata(root,root,{'source_sha':'a'*40},f,'default',env,get)
 
+    def test_job_listing_lag_is_retried_then_refused(self):
+        for visible_after,expect in ((2,'ok'),(None,'refuse')):
+            with self.subTest(visible_after=visible_after),tempfile.TemporaryDirectory() as tmp:
+                root=Path(tmp);f,env,base,_,_,job,run=fixture(root)
+                run.update(repository={'full_name':isolated.REPOSITORY},head_repository={'full_name':isolated.REPOSITORY})
+                listings=[]
+                def get(endpoint):
+                    if '/jobs?' in endpoint:
+                        listings.append(endpoint)
+                        shown=visible_after is not None and len(listings)>visible_after
+                        return dict(jobs=[job] if shown else [],total_count=int(shown))
+                    return base(endpoint)
+                with patch.object(isolated,'checkout_head',return_value='a'*40),\
+                        patch.object(isolated.time,'sleep') as sleep:
+                    if expect=='ok':
+                        meta,_=isolated.metadata(root,root,{'source_sha':'a'*40},f,'default',env,get)
+                        self.assertEqual(meta['job_id'],job['id'])
+                        self.assertEqual((len(listings),sleep.call_count),(3,2))
+                    else:
+                        with self.assertRaisesRegex(ValueError,'exactly one frozen feature-leg job'):
+                            isolated.metadata(root,root,{'source_sha':'a'*40},f,'default',env,get)
+                        self.assertEqual((len(listings),sleep.call_count),(4,3))
+
     def test_verified_launcher_rejects_workflow_helper_freeze_or_source_drift(self):
         repository=Path(__file__).resolve().parents[2]
         import subprocess
