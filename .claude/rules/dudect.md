@@ -29,7 +29,7 @@ conclusions; every red needs a ledger entry.
 
 ## Editing the gates
 
-- Both dudect jobs require job-level `RUSTUP_TOOLCHAIN: 1.95.0` and an
+- Production dudect jobs require job-level `RUSTUP_TOOLCHAIN: 1.95.0` and an
   effective rustc/cargo/active-toolchain check before cache/build. The root
   stable override defeated the old action-only pin; neither the action tag
   nor a setup message proves effective identity. Preserve these checks and
@@ -84,3 +84,13 @@ conclusions; every red needs a ledger entry.
   uncalibrated for it, and the harness's printed `max tau` is unreliable in
   that regime — normalise `|max t|` by the declared budget instead. No gate,
   no promotion.
+
+## Isolated v1.15 study
+
+`dudect-main.yml` owns current-main nightly regression coverage and the production
+policy fingerprints; `dudect-nightly.yml` preserves the frozen study's workflow
+ID and census. The study measures the full SHA in `docs/v1.15-isolation.json`,
+using the unchanged original producer and execution freeze. Do not apply a
+main-wide merge hold after isolation qualification. Study-launcher changes
+still require review and explicit evidence identity updates. Never apply a
+study-derived bound automatically to newer crypto/build or runner identities.

@@ -35,7 +35,7 @@ def verified_collection(root):
     root = Path(root)
     index_bytes = (root / 'collection.json').read_bytes()
     original = json.loads(index_bytes)
-    if (original.get('schema') != 1 or original.get('repository') != REPOSITORY
+    if (original.get('schema') not in (1, 2) or original.get('repository') != REPOSITORY
             or original.get('status') != 'complete'
             or not re.fullmatch(r'\.github/workflows/[A-Za-z0-9_-]+\.ya?ml',original.get('workflow_path',''))):
         raise ValueError('complete authenticated workflow collection required')
@@ -74,7 +74,7 @@ def verified_collection(root):
         used.add(name)
         return data
     with tempfile.TemporaryDirectory(prefix='v115-replay-') as scratch:
-        rebuilt = ReplayCollector(Path(scratch)/'copy', get).collect(Path(original['workflow_path']).name)
+        rebuilt = ReplayCollector(Path(scratch)/'copy', get, schema=original['schema']).collect(Path(original['workflow_path']).name)
     if index != len(requests) or used != set(files):
         raise ValueError('unreplayed requests or response files')
     for field in ('repository','workflow_id','workflow_path','runs','attempts','artifacts','sources'):
@@ -87,7 +87,7 @@ def verified_collection(root):
     return rebuilt, files, digest(index_bytes)
 
 
-def qualified_window(collection, files, frozen, start, end, now):
+def qualified_window(collection, files, frozen, start, end, now, *, isolation=None):
     """Bind every census row before aggregating; inputs come from verified_collection."""
     validate_freeze(frozen)
     if type(start) is not date or type(end) is not date:
@@ -137,7 +137,7 @@ def qualified_window(collection, files, frozen, start, end, now):
             # Unknown in-window strata already raised before archive inspection.
             binding = dict(binding_qualified=False,issues=['unknown-descriptive-stratum'],capture=None,artifact_id=None)
         else:
-            binding = bind_capture(run,job,artifacts_by_run.get(run['id'],[]),archives,sources,frozen)
+            binding = bind_capture(run,job,artifacts_by_run.get(run['id'],[]),archives,sources,frozen,isolation=isolation)
         capture = binding['capture']
         metadata = capture['metadata'] if capture else {}
         output = capture.get('output') if capture else None
@@ -147,7 +147,7 @@ def qualified_window(collection, files, frozen, start, end, now):
             cpu = normalize_cpu(metadata.get('cpu'))
         except ValueError:
             pass
-        record = dict(row,artifact_id=binding['artifact_id'],binding_qualified=binding['binding_qualified'],eligible=eligible,
+        record = dict(row,source_sha=binding.get('job',{}).get('head_sha'),artifact_id=binding['artifact_id'],binding_qualified=binding['binding_qualified'],eligible=eligible,
                       issues=binding['issues'],cpu=cpu,raw_cpu=metadata.get('cpu'),image_version=metadata.get('image_version'),
                       kernel=metadata.get('kernel'),job_status=job.get('status'),job_conclusion=job.get('conclusion'))
         job_records.append(record)
@@ -176,11 +176,11 @@ def qualified_window(collection, files, frozen, start, end, now):
                  passes=passes, existing_gate_breaches=breaches), groups, observed)
 
 
-def calibration_report(collection, files, frozen, corpus_hash, now):
+def calibration_report(collection, files, frozen, corpus_hash, now, *, isolation=None):
     """Use only verified_collection output; no caller eligibility flags are read."""
     start = date.fromisoformat(frozen['calibration_start'])
     end = date.fromisoformat(frozen['calibration_end'])
-    census, groups, observed = qualified_window(collection, files, frozen, start, end, now)
+    census, groups, observed = qualified_window(collection, files, frozen, start, end, now, isolation=isolation)
     window_complete = census['window_complete']
     cells = []
     for leg,cpu in sorted(observed):
@@ -196,7 +196,7 @@ def calibration_report(collection, files, frozen, corpus_hash, now):
     environments = sorted({(r['feature_leg'],r['cpu'],r['image_version'],r['kernel']) for r in census['jobs'] if r['eligible']})
     extractors = {name:digest((Path(__file__).parent/name).read_bytes()) for name in
                   ('v115_replay.py','v115_collect.py','v115_capture_binding.py','v115_evidence.py','v115_gate_rules.py')}
-    return dict(schema=1,extractor_sha256=extractors,environment_manifest=[dict(feature_leg=leg,cpu=cpu,image_version=image,kernel=kernel)
+    return dict(schema=1,isolation_sha256=digest(canonical(isolation)) if isolation else None,extractor_sha256=extractors,environment_manifest=[dict(feature_leg=leg,cpu=cpu,image_version=image,kernel=kernel)
                 for leg,cpu,image,kernel in environments],rule_version=RULE_VERSION,corpus_sha256=corpus_hash,freeze_sha256=digest(canonical(frozen)),
                 calibration_start=start.isoformat(),calibration_end=end.isoformat(),**census,
                 status='window-incomplete' if not window_complete else 'candidate-review-required' if proposed else 'insufficient evidence',
@@ -210,7 +210,7 @@ def write_census_csv(report, output):
              'selection','eligible','pass_number','target','seed','n_millions','max_t','max_tau','malformed')
     with (output/'passes.csv').open('w',newline='') as stream:
         writer=csv.DictWriter(stream,fieldnames=columns,extrasaction='ignore');writer.writeheader();writer.writerows(report['passes'])
-    job_columns=('run_id','job_id','run_attempt','event','head_sha','job_name','started_at','utc_date','feature_leg','cpu','raw_cpu',
+    job_columns=('run_id','job_id','run_attempt','event','head_sha','source_sha','job_name','started_at','utc_date','feature_leg','cpu','raw_cpu',
                  'image_version','kernel','artifact_id','job_status','job_conclusion','selection','binding_qualified','eligible','issues')
     with (output/'jobs.csv').open('w',newline='') as stream:
         writer=csv.DictWriter(stream,fieldnames=job_columns,extrasaction='ignore');writer.writeheader()
@@ -227,10 +227,12 @@ def main():
     parser.add_argument('--collection',required=True,type=Path)
     parser.add_argument('--freeze',required=True,type=Path)
     parser.add_argument('--output',required=True,type=Path)
+    parser.add_argument('--isolation',type=Path,help='reviewed study-isolation amendment')
     args = parser.parse_args()
     collection,files,corpus_hash = verified_collection(args.collection)
     frozen = json.loads(args.freeze.read_text())
-    report = calibration_report(collection,files,frozen,corpus_hash,datetime.now(timezone.utc))
+    report = calibration_report(collection,files,frozen,corpus_hash,datetime.now(timezone.utc),
+                                isolation=json.loads(args.isolation.read_text()) if args.isolation else None)
     args.output.mkdir(parents=True,exist_ok=False)
     (args.output/'calibration.json').write_bytes(canonical(report))
     write_census_csv(report, args.output)

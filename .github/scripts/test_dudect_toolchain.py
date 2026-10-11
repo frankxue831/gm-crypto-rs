@@ -16,10 +16,10 @@ ACTIVE = "1.95.0-x86_64-unknown-linux-gnu (overridden by environment variable RU
 
 class ToolchainTests(unittest.TestCase):
     def guards(self):
-        for filename in ("dudect-pr.yml", "dudect-nightly.yml"):
+        for filename in ("dudect-pr.yml", "dudect-main.yml", "dudect-nightly.yml"):
             text = (ROOT / ".github/workflows" / filename).read_text()
-            match = re.search(r"      - name: " + NAME + r"\n(.*?)(?=      - uses: Swatinem/rust-cache@v2)", text, re.S)
-            self.assertIsNotNone(match, f"{filename}: missing verification before cache")
+            match = re.search(r"      - name: " + NAME + r"\n(.*?)(?=      - (?:uses|name):)", text, re.S)
+            self.assertIsNotNone(match, f"{filename}: missing effective toolchain verification")
             self.assertIn("    env:\n      RUSTUP_TOOLCHAIN: 1.95.0\n", text)
             body = re.search(r"          python3 - <<'PY'\n(.*?)          PY\n", match[1], re.S)
             self.assertIsNotNone(body, f"{filename}: missing executable identity check")

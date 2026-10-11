@@ -121,6 +121,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--calibration-collection', required=True, type=Path)
     parser.add_argument('--calibration-freeze', required=True, type=Path)
+    parser.add_argument('--calibration-isolation', type=Path)
     parser.add_argument('--collection', required=True, type=Path)
     parser.add_argument('--freeze', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
@@ -128,7 +129,8 @@ def main():
     now = datetime.now(timezone.utc)
     c, files, h = verified_collection(args.calibration_collection)
     calibration_freeze = json.loads(args.calibration_freeze.read_text())
-    calibration = calibration_report(c, files, calibration_freeze, h, now)
+    calibration = calibration_report(c, files, calibration_freeze, h, now,
+        isolation=json.loads(args.calibration_isolation.read_text()) if args.calibration_isolation else None)
     c, files, h = verified_collection(args.collection)
     frozen = json.loads(args.freeze.read_text())
     report = confirmation_report(c, files, frozen, h, calibration, calibration_freeze, now)
