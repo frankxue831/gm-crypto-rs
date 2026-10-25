@@ -14,7 +14,7 @@ all-at-once. See `docs/v0.20-scope.md`.
 This crate is its **own** Cargo workspace (note the empty `[workspace]` table in
 `Cargo.toml`) and is **excluded** from the published 3-crate workspace. Its
 `libfuzzer-sys` / `arbitrary` deps never enter the published dependency graph.
-It is **unpublished** and **nightly-only** — MSRV 1.85 does not apply here.
+It is **unpublished** and **nightly-only** — MSRV 1.87 does not apply here.
 
 ## Prerequisites (one-time)
 

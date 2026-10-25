@@ -5,8 +5,27 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+<!-- Draft for 1.17.0 (Frank to confirm). Per the README policy ("An MSRV bump
+is a minor, not a patch") this ships as 1.17.0. The alternative is 1.16.1,
+which would also require amending that README policy line. -->
+
+### Changed
+
+- **MSRV is now Rust 1.87** (was 1.85). Per the README stability policy an
+  MSRV bump is a minor release, so this is planned as 1.17.0 rather than
+  1.16.1.
+- **Signing is slower.** `sign_raw_with_id` measured about 60% slower in a
+  local measurement (about 92 µs → 148 µs on one shared x86_64 Linux host):
+  roughly +11% from `ctutils` 0.4.5 and roughly +45% from `crypto-bigint`
+  0.7.6. Wire output is unchanged. A formal benchmark on CI hardware is
+  pending; this figure will be replaced with the measured number.
+
 ### Security
 
+- `crypto-bigint` 0.7.8 and `ctutils` 0.4.5 (what fresh resolution now
+  selects) fix
+  [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387.html)
+  and [RUSTSEC-2026-0385](https://rustsec.org/advisories/RUSTSEC-2026-0385.html).
 - **MSRV raised 1.85 → 1.87** to floor `crypto-bigint` at 0.7.6
   ([RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387.html)).
   `crypto-bigint` 0.7.6 requires `ctutils ^0.4.5`, so the transitive `ctutils`

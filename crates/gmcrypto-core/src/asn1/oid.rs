@@ -8,7 +8,7 @@
 //! Encoding is computed at compile time via [`encoded_len`] +
 //! [`encode`] — `const fn` with `while` loops, no `unsafe`, no
 //! proc macros, no build script (matches the `sm4::cipher::CK`
-//! pattern). MSRV 1.85 + edition 2024 supports this.
+//! pattern). MSRV 1.87 + edition 2024 supports this.
 //!
 //! All seven OIDs cross-validated against the DER bytes published
 //! in their authoritative specs (RFC 5912 §6 for PKCS-related,

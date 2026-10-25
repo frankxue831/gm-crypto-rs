@@ -52,7 +52,7 @@ crate-type = ["rlib"]
 # `cpufeatures` release is an internal-only bump (not a `gmcrypto-core` SemVer
 # event).
 # 0.3.1 fixes macro-generated deprecation errors on Rust 1.99 and retains
-# Rust 1.85 support; keep both architecture requirements at that minimum.
+# Rust 1.87 (MSRV) support; keep both architecture requirements at that minimum.
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 cpufeatures = "0.3.1"
 

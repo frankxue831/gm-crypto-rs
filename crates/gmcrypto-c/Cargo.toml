@@ -107,7 +107,7 @@ manual_let_else = "allow"
 missing_const_for_fn = "allow"
 unnecessary_box_returns = "allow"
 # cbindgen recognizes byte-literal `CStr::from_bytes_with_nul`; the
-# `c"..."` literal form is post-MSRV 1.85.
+# `c"..."` literal form is post-MSRV 1.87.
 manual_c_str_literals = "allow"
 # Long doc comments on the FFI module + per-entry-point bullets.
 doc_markdown = "allow"

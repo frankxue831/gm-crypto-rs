@@ -7,7 +7,7 @@ paths:
 # SIMD backend and the S-box
 
 `gmcrypto-simd` (AVX2 / NEON + GHASH) is where `unsafe` is quarantined:
-`unsafe_code = "warn"`, `core::arch` + `#[target_feature]` on MSRV 1.85,
+`unsafe_code = "warn"`, `core::arch` + `#[target_feature]` on MSRV 1.87,
 `// SAFETY:` on every block. Reached only through core's opt-in features
 `sm4-bitsliced-simd` or `sm4-aead`.
 
@@ -36,7 +36,7 @@ paths:
   Flags. Its code is behind
   `cfg(gmcrypto_simd_gfni)`, which `build.rs` emits only on rustc >= 1.89
   (GFNI stabilized there); keep every GFNI item behind that cfg and
-  `target_arch = "x86_64"`, or the 1.85 MSRV build breaks. The derived
+  `target_arch = "x86_64"`, or the 1.87 MSRV build breaks. The derived
   constants in `sm4/gfni.rs` are checked by a portable test; don't
   hand-edit them. `simd-x86-sde` is the only job guaranteed to run the
   GFNI path.

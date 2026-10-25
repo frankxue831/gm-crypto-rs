@@ -1,6 +1,6 @@
 //! Constant-time-designed pure-Rust SM2 / SM3 / SM4 primitives.
 //!
-//! `no_std` + `alloc`, no C dependency, MSRV 1.85. Every secret-touching path
+//! `no_std` + `alloc`, no C dependency, MSRV 1.87. Every secret-touching path
 //! is written against [`subtle`](https://docs.rs/subtle)'s constant-time
 //! primitives — no `==`, no `if`, no `bool` on a secret-derived value — and
 //! guarded in CI by a [`dudect`](https://docs.rs/dudect-bencher)-based
