@@ -11,6 +11,7 @@
 use crate::sm2::comb_table::{NUM_WINDOWS, WINDOW_BITS, comb_table};
 use crate::sm2::curve::Fn;
 use crate::sm2::point::ProjectivePoint;
+use crypto_bigint::{Limb, U256};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
 /// Variable-base scalar multiplication k·P.
@@ -18,6 +19,14 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 /// Constant-time-designed: the operation count and code path do not depend
 /// on bits of `k` or coordinates of `P`. Table lookup uses constant-time
 /// linear scan; window pre-build is unconditional.
+///
+/// The scalar is first lifted to `k' = k + n` or `k' = k + 2n` (whichever
+/// lies in `[2^256, 2^257)`; `n·P = O` so `k'·P = k·P`). Bit 256 of `k'` is
+/// therefore always set, the accumulator is `P` after the first window, and
+/// every doubling in the loop acts on a point that is not the identity. This
+/// removes the identity-accumulator path that `crypto-bigint` 0.7.6+'s
+/// Montgomery multiplication times differently from the generic path on some
+/// CPUs (v1.17 finding; see `docs/version-history.md`).
 #[must_use]
 pub fn mul_var(k: &Fn, p: &ProjectivePoint) -> ProjectivePoint {
     let mut table: [ProjectivePoint; 16] = [ProjectivePoint::identity(); 16];
@@ -26,20 +35,28 @@ pub fn mul_var(k: &Fn, p: &ProjectivePoint) -> ProjectivePoint {
         table[i] = table[i - 1].add(p);
     }
 
-    // Read the scalar as 64 nibbles (256 bits / 4 = 64 windows), MSB-first.
-    let k_be = k.retrieve().to_be_bytes();
+    // Lift k < n to k' in [2^256, 2^257): k + n when that carries out of
+    // 256 bits, else k + 2n (2n > 2^256, and k + 2n < 2^257 exactly when
+    // k + n < 2^256). The carry is the bit-256 of k'; the selection is
+    // constant-time.
+    let n = Fn::MODULUS.as_ref();
+    let (lifted_once, carry) = k.retrieve().carrying_add(n, Limb::ZERO);
+    let (lifted_twice, _) = lifted_once.carrying_add(n, Limb::ZERO);
+    #[allow(clippy::cast_possible_truncation)]
+    let carried = Choice::from((carry.0 & 1) as u8);
+    let low = U256::conditional_select(&lifted_twice, &lifted_once, carried);
 
-    let mut acc = ProjectivePoint::identity();
-    let mut first = true;
+    // Window 0 is bit 256 alone (nibble value 1): acc = P. Then read the
+    // remaining 256 bits as 64 nibbles, MSB-first.
+    let k_be = low.to_be_bytes();
+    let mut acc = *p;
 
     for byte in k_be.as_ref() {
         // High nibble first.
         let nibbles = [byte >> 4, byte & 0x0F];
         for &nib in &nibbles {
-            if !first {
-                // Shift the accumulator left by 4 bits via four doublings.
-                acc = acc.double().double().double().double();
-            }
+            // Shift the accumulator left by 4 bits via four doublings.
+            acc = acc.double().double().double().double();
             // Constant-time linear scan: pick table[nib] without branching.
             let mut chosen = ProjectivePoint::identity();
             for (i, entry) in table.iter().enumerate() {
@@ -48,7 +65,6 @@ pub fn mul_var(k: &Fn, p: &ProjectivePoint) -> ProjectivePoint {
                 chosen = ProjectivePoint::conditional_select(&chosen, entry, take);
             }
             acc = acc.add(&chosen);
-            first = false;
         }
     }
     acc
@@ -105,7 +121,6 @@ pub fn mul_g(k: &Fn) -> ProjectivePoint {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crypto_bigint::U256;
 
     #[test]
     fn scalar_one_is_identity_op() {
@@ -189,6 +204,11 @@ mod tests {
         let n = *Fn::MODULUS.as_ref();
         let n_minus_one = n.wrapping_sub(&U256::ONE);
         let n_minus_two = n_minus_one.wrapping_sub(&U256::ONE);
+        // 2^256 - n: the smallest k whose lift k + n carries out of 256
+        // bits (mul_var's scalar lift switches from k + 2n to k + n here).
+        let two256_minus_n = U256::ZERO.wrapping_sub(&n);
+        let lift_edge_below = two256_minus_n.wrapping_sub(&U256::ONE);
+        let lift_edge_above = two256_minus_n.wrapping_add(&U256::ONE);
 
         // Small + boundary values.
         let small_scalars: alloc::vec::Vec<U256> = [
@@ -202,6 +222,9 @@ mod tests {
             U256::from_u64(0xFFFF_FFFF_FFFF_FFFF),
             n_minus_two,
             n_minus_one,
+            lift_edge_below,
+            two256_minus_n,
+            lift_edge_above,
         ]
         .into_iter()
         .collect();
