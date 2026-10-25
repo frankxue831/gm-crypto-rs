@@ -43,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 > ⚠️ **Not independently audited.** No third-party / external security audit has
 > been performed. Assurance is internal: a multi-model adversarial pre-publish
 > re-audit (see [`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md)), in-CI KAT vectors,
-> in-CI gmssl 3.2.0 interop (13/13, cross-validated against a pinned from-source
+> in-CI gmssl 3.2.0 interop (all 13 tests, run with `sm4-aead`; cross-validated against a pinned from-source
 > build of the reference implementation; currently non-gating), an in-CI `dudect`
 > timing-leak harness, and a 35-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
 > project with no support SLA. Review the code and **use at your own risk.** See
@@ -57,7 +57,7 @@ cargo add gmcrypto-core
 
 ```toml
 [dependencies]
-gmcrypto-core = "1.11"
+gmcrypto-core = "1.16"
 getrandom = { version = "0.4", default-features = false, features = ["sys_rng"] }
 ```
 
@@ -244,8 +244,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 The same surfaces are reachable from C through `gmcrypto-c`; ten shipped
 [examples](crates/gmcrypto-c/examples/) — SM2 signing, streaming GCM,
 single-shot and length-committed streaming CCM, XTS sectors, key exchange,
-X.509, a TLCP handshake and pair verification — are compiled in CI against the
-committed header with `-Wall -Wextra -Werror`.
+X.509, a TLCP handshake and pair verification — are syntax-checked in CI against
+the committed header (`cc -std=c11 -Wall -Wextra -Werror -fsyntax-only`). CI does
+not link or run them; the
+[link recipe](crates/gmcrypto-c/README.md#linking-against-c) builds and runs one.
 
 ## Stability & SemVer
 
@@ -297,8 +299,8 @@ DUDECT_SAMPLES=10000 cargo bench --bench timing_leaks --features crypto-bigint-s
 **v3.2.0** to enable — this is what Homebrew currently ships):
 
 ```bash
-GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl                    # 11 tests
-GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl --features sm4-aead  # 13 tests
+GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl                    # 11 tests (no SM4-GCM)
+GMCRYPTO_GMSSL=1 cargo test --test interop_gmssl --features sm4-aead  # all 13 tests, as CI runs it
 ```
 
 The suite **pins its oracle version** and fails with an `ORACLE DRIFT` message
@@ -322,7 +324,7 @@ its default graph. Wasm callers enable it in *their* `Cargo.toml`:
 
 ```toml
 [dependencies]
-gmcrypto-core = "1.11"
+gmcrypto-core = "1.16"
 getrandom = { version = "0.4", default-features = false, features = ["wasm_js"] }
 ```
 
