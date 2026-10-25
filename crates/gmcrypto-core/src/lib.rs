@@ -231,3 +231,14 @@ impl core::fmt::Display for Error {
 }
 
 impl core::error::Error for Error {}
+
+/// The repository README, compiled and run by `cargo test --doc` so its Rust
+/// samples cannot drift from the API (#241, M2). Exists only under
+/// `cfg(doctest)`: never built into the library, never part of the public
+/// API. Gated on the two features the README's "More examples" samples need
+/// (`sm2-key-exchange`, `x509`). CI's existing `cargo test --workspace` step
+/// runs it: workspace feature unification enables both via `gmcrypto-c`'s
+/// dependency on this crate. `--all-features` covers it too.
+#[cfg(all(doctest, feature = "sm2-key-exchange", feature = "x509"))]
+#[doc = include_str!("../../../README.md")]
+pub struct ReadmeDoctests;
