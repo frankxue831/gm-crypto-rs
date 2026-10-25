@@ -1,4 +1,4 @@
-//! SM2 public-key decryption (GB/T 32918.4-2017 §7).
+//! SM2 public-key decryption (GB/T 32918.4-2016 §7).
 //!
 //! # Algorithm
 //!

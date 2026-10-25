@@ -1,4 +1,4 @@
-//! SM2 elliptic curve cryptography (GB/T 32918-2017).
+//! SM2 elliptic curve cryptography (GB/T 32918 — parts 1–4: 2016, part 5: 2017).
 //!
 //! SM2 is the Chinese national public-key algorithm: a 256-bit prime-field
 //! curve with its own signature and public-key-encryption schemes. It is not
