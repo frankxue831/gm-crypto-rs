@@ -416,12 +416,13 @@ nonce becomes a noise source distributing uniformly across both classes).
 `d`-class harness could not see. Well under threshold; no leak detected at
 that threshold. Worth noting the elevated signal exists.
 
-After the RUSTSEC-2026-0387 upgrade (`crypto-bigint` 0.7.6 or later), local
-interleaved A/B runs show a stable, version-related increase in the
-`ct_sign_k_class` reading (median `|tau|` about 0.03–0.04 on 0.7.5 versus
-about 0.11 on 0.7.6–0.7.8, stable up to 1.5M samples); the cause is
-under investigation, and the reading remains below both the 0.20 composite
-gate and the 0.55 sentinel.
+`ct_sign_k_class` median `|tau|` rose from about 0.02–0.04 on crypto-bigint
+0.7.5 to about 0.09–0.11 on 0.7.6–0.7.8. Local investigation attributes the
+class-dependent work to the bench harness, which builds the class-specific
+RNG inside the timed window; with that construction moved outside the
+window, both versions read at noise level. Why 0.7.6+ amplifies this harness
+effect is still under investigation. Readings remain below both the 0.20
+composite gate and the 0.55 sentinel.
 
 ### v1.0 constant-time baseline (settled — v0.18 / v0.19 / v0.20)
 
