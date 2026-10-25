@@ -63,7 +63,7 @@ cpufeatures = "0.3.1"
 # v0.5 W4 phase 2 / Q5.11 addendum — `unsafe_code = "forbid"` is
 # impossible on this crate: AVX2 intrinsics in `core::arch::x86_64`
 # are `unsafe fn`, and `#[target_feature(enable = "avx2")] unsafe fn`
-# is the only stable Rust mechanism on MSRV 1.85 that combines
+# is the only stable Rust mechanism on MSRV 1.87 that combines
 # runtime AVX2 dispatch with intrinsic calls. Every `unsafe` block
 # in this crate carries a `// SAFETY:` comment naming the AVX2
 # precondition. `gmcrypto-core` itself stays `forbid` workspace-wide.

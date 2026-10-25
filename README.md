@@ -5,7 +5,7 @@ with constant-time discipline that is **measured in CI**, not just intended.
 
 [![Crates.io](https://img.shields.io/crates/v/gmcrypto-core.svg)](https://crates.io/crates/gmcrypto-core)
 [![Documentation](https://docs.rs/gmcrypto-core/badge.svg)](https://docs.rs/gmcrypto-core)
-[![MSRV](https://img.shields.io/badge/MSRV-1.85-blue.svg)](https://github.com/frankxue831/gm-crypto-rs#stability--semver)
+[![MSRV](https://img.shields.io/badge/MSRV-1.87-blue.svg)](https://github.com/frankxue831/gm-crypto-rs#stability--semver)
 [![License](https://img.shields.io/crates/l/gmcrypto-core.svg)](https://crates.io/crates/gmcrypto-core)
 
 **Try it in the browser:** [gm-crypto-web](https://www.frankxue.dev/gm-crypto-web/) runs SM2 / SM3 / SM4 locally through this crate compiled to WASM (unaudited demo; do not use production keys).
@@ -218,7 +218,7 @@ committed header with `-Wall -Wextra -Werror`.
   release.
 - **Wire output is byte-identical to 0.16.0:** SM2 signatures and ciphertexts,
   every SM4 mode.
-- **MSRV is 1.85** (edition 2024). An MSRV bump is a minor, not a patch.
+- **MSRV is 1.87** (edition 2024). An MSRV bump is a minor, not a patch.
 - **Features are additive**, `default = []`, all eleven opt-in.
 - **No `crypto-bigint` type in the always-on API.** Byte-adjacent types take
   and return `[u8; 32]`. The one exception is the opt-in `crypto-bigint-scalar`

@@ -32,13 +32,13 @@ architecture intrinsics:
 | GHASH multiply | CLMUL, runtime-detected | PMULL64, runtime-detected | constant-time software |
 
 GFNI is compiled on Rust 1.89 or newer and selected only when the CPU has
-GFNI, AVX2 and OS-enabled AVX-512 state. Rust 1.85 remains supported through
+GFNI, AVX2 and OS-enabled AVX-512 state. Rust 1.87 (the MSRV) remains supported through
 the existing fallback paths. Enable `gmcrypto-core/sm4-bitsliced-simd` to
 use the SM4 backend; `sm4-aead` alone uses this crate for GHASH.
 
 It exists for exactly one reason: `core::arch` intrinsics are `unsafe fn`,
 and `#[target_feature(enable = "…")]` is the only stable-Rust mechanism on
-MSRV 1.85 that combines runtime CPU dispatch with intrinsic calls. Putting
+MSRV 1.87 that combines runtime CPU dispatch with intrinsic calls. Putting
 that here keeps `gmcrypto-core` at `unsafe_code = "forbid"` — every `unsafe`
 block in this crate carries a `// SAFETY:` comment naming its architectural
 or runtime-detect precondition. Same posture as the `gmcrypto-c` FFI shim.

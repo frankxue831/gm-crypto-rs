@@ -99,7 +99,7 @@ v1.14 F21 result stands (`docs/f21-finalize-result.md`).
 - `unsafe_code = "forbid"` on `gmcrypto-core`. Don't add `unsafe`.
   Exceptions (`unsafe_code = "warn"`, `// SAFETY:` on every block):
   `gmcrypto-c` (raw-pointer FFI) and `gmcrypto-simd` (`core::arch` +
-  `#[target_feature]` on MSRV 1.85).
+  `#[target_feature]` on MSRV 1.87).
 - `#![no_std]` + `alloc` only in `crates/gmcrypto-core/src/`. No `std::` paths.
   No generic `std` feature. A future file helper would be named like
   `std-file-io`. `gmcrypto-c` is `std`-OK.
@@ -116,7 +116,8 @@ v1.14 F21 result stands (`docs/f21-finalize-result.md`).
   lives in tests/benches/workflows only.
 - `Cargo.lock` is gitignored (lib-crate). Don't `git add` it. Anchor is
   `/Cargo.lock` (root only) so `fuzz/Cargo.lock` stays committed.
-- MSRV **1.85**, edition **2024**. Don't use `Integer::is_multiple_of` (1.87).
+- MSRV **1.87**, edition **2024** (raised from 1.85 for the
+  RUSTSEC-2026-0387 `crypto-bigint` 0.7.6 floor). Don't use post-1.87 APIs.
   The one exception is `gmcrypto-simd`'s GFNI path, compiled only on rustc
   >= 1.89 via its `build.rs` cfg (`.claude/rules/simd.md`).
 - `sign_raw_with_id` is `#[doc(hidden)] pub` for dudect only — **not SemVer**.
@@ -145,8 +146,8 @@ cargo test -p gmcrypto-core --features aead-traits
 cargo deny --exclude-dev check   # cargo generate-lockfile first
 cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509,gmcrypto-core/tlcp,gmcrypto-core/aead-traits --exclude-dev check
 
-cargo +1.85 build -p gmcrypto-core
-cargo +1.85 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar,sm2-key-exchange,x509,tlcp,aead-traits
+cargo +1.87 build -p gmcrypto-core
+cargo +1.87 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar,sm2-key-exchange,x509,tlcp,aead-traits
 cargo build -p gmcrypto-core --no-default-features
 
 # wasm32: caller-supplied RNG; these features are pure-core/no_std.

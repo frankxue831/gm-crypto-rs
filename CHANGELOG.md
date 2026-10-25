@@ -5,6 +5,16 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **MSRV raised 1.85 → 1.87** to floor `crypto-bigint` at 0.7.6
+  ([RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387.html)).
+  `crypto-bigint` 0.7.6 requires `ctutils ^0.4.5`, so the transitive `ctutils`
+  is floored above its fixed release as well. MSRV-aware resolution on Rust
+  1.85 previously selected the affected `crypto-bigint` 0.7.5 / `ctutils`
+  0.4.2. `fuzz/Cargo.lock` moves to `crypto-bigint` 0.7.8 / `ctutils` 0.4.5.
+  An MSRV bump is a minor release.
+
 ## [1.16.0] - 2026-10-10
 
 Publishes the merged GFNI improvements (#224, #226). All three workspace

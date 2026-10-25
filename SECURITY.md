@@ -168,7 +168,7 @@ them is why the always-on bench vector has 16 entries against 12 `ct_*`:
 
 Both GFNI paths are compiled only with rustc >= 1.89; the cached detector
 requires GFNI, AVX2 and OS-enabled AVX-512 state. Older compilers, including
-MSRV 1.85, retain the applicable non-GFNI paths. A timing run covers the
+MSRV 1.87, retain the applicable non-GFNI paths. A timing run covers the
 backend actually selected on that runner; a CPU model string alone does not
 establish GFNI execution.
 

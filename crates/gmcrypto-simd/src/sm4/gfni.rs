@@ -54,7 +54,7 @@ pub unsafe fn sbox_round_128(x: __m128i) -> __m128i {
 #[cfg(all(target_arch = "x86_64", gmcrypto_simd_gfni))]
 #[target_feature(enable = "gfni,avx2")]
 // Compiled only on rustc >= 1.89 (build.rs cfg), where these intrinsics are
-// stable; `incompatible_msrv` compares them against the workspace MSRV 1.85.
+// stable; `incompatible_msrv` compares them against the workspace MSRV 1.87.
 // The matrix casts reinterpret bits for the i64 intrinsic argument.
 #[allow(
     unsafe_op_in_unsafe_fn,

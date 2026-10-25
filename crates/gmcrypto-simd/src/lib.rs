@@ -48,7 +48,7 @@
 //! - `sm4::sbox_x32::sbox_x32_gfni` and [`has_gfni_avx2`]: the SM4
 //!   S-box in two GFNI instructions per 32 bytes, selected by
 //!   `sbox_x32` where detected. Compiled only on x86_64 with rustc >=
-//!   1.89 (a `build.rs` version check; MSRV stays 1.85). See
+//!   1.89 (a `build.rs` version check; MSRV is 1.87). See
 //!   `docs/v1.16-scope.md`.
 //!
 //! [`gmcrypto-c`]: https://docs.rs/gmcrypto-c
@@ -58,7 +58,7 @@
 // backend (mirroring `gmcrypto-c`'s FFI-shim posture).
 // `core::arch::*` intrinsics are all `unsafe fn`, and
 // `#[target_feature(enable = "...")] unsafe fn` is the only
-// stable-Rust path on MSRV 1.85 to combine runtime CPU dispatch
+// stable-Rust path on MSRV 1.87 to combine runtime CPU dispatch
 // with intrinsic calls. Every `unsafe` block / fn declaration
 // carries a `// SAFETY:` comment naming the architectural /
 // runtime-detect precondition. The Cargo.toml lint
