@@ -8,7 +8,7 @@ The receipts the case study leans on most live at the repo root and in the crate
 
 - [SECURITY.md](../SECURITY.md) — threat model, constant-time posture, the dudect gate policy, and the v0.1 leak narrative.
 - [CLAUDE.md](../CLAUDE.md) — the project's living memory: hard constraints, the dudect gate table, the architecture map, the *Don't* list.
-- [version-history.md](version-history.md) — the per-cycle narrative (v0.8 → v1.16, newest-first): what each cycle shipped, what it deliberately excluded, and why. Split out of CLAUDE.md, where it had grown to 42% of a file re-read at every session.
+- [version-history.md](version-history.md) — the per-cycle narrative (v0.8 → v1.17, newest-first): what each cycle shipped, what it deliberately excluded, and why. Split out of CLAUDE.md, where it had grown to 42% of a file re-read at every session.
 - [crates/gmcrypto-core/benches/timing_leaks.rs](../crates/gmcrypto-core/benches/timing_leaks.rs) — the dudect timing harness (24 bench functions: 20 `ct_*` targets, the `negative_control`, and 3 runner-noise probes).
 - [fuzz/](../fuzz/) — the 35 fuzz targets plus the run/seed runbook.
 
