@@ -3,11 +3,7 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
-
-<!-- Draft for 1.17.0 (Frank to confirm). Per the README policy ("An MSRV bump
-is a minor, not a patch") this ships as 1.17.0. The alternative is 1.16.1,
-which would also require amending that README policy line. -->
+## [1.17.0] - 2026-10-25
 
 ### Changed
 
