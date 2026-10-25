@@ -241,7 +241,9 @@ impl core::error::Error for Error {}
 /// dependency on this crate. `--all-features` covers it too.
 // WARNING: these README doctests depend on `sm2-key-exchange` and `x509`
 // being enabled in CI. If `gmcrypto-c` stops enabling either feature, CI
-// silently stops running them. Tracked under "Later" in #241.
+// silently stops running them. `cargo test -p gmcrypto-core` on its own
+// (default features) does not run the README samples at all. Tracked under
+// "Later" in #241.
 #[cfg(all(doctest, feature = "sm2-key-exchange", feature = "x509"))]
 #[doc = include_str!("../../../README.md")]
 pub struct ReadmeDoctests;
