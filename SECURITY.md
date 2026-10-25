@@ -418,8 +418,8 @@ that threshold. Worth noting the elevated signal exists.
 
 After the RUSTSEC-2026-0387 upgrade (`crypto-bigint` 0.7.6 or later), local
 interleaved A/B runs show a stable, version-related increase in the
-`ct_sign_k_class` reading (median `|tau|` about 0.04 on 0.7.5 versus about
-0.10–0.12 on 0.7.6–0.7.8, unchanged from 100K to 1M samples); the cause is
+`ct_sign_k_class` reading (median `|tau|` about 0.03–0.04 on 0.7.5 versus
+about 0.11 on 0.7.6–0.7.8, stable up to 1.5M samples); the cause is
 under investigation, and the reading remains below both the 0.20 composite
 gate and the 0.55 sentinel.
 
