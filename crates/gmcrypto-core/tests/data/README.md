@@ -71,7 +71,7 @@ iterations, per the guidance in [`crate::kdf::pbkdf2_hmac_sm3`].
 ## v0.8 W3 — SM4-CCM reference oracle
 
 `sm4_ccm_oracle.c` is a ~80-line C harness that calls OpenSSL 3.x's
-EVP `SM4-CCM` cipher (OID `1.2.156.10197.1.104.9`, GB/T 0009 /
+EVP `SM4-CCM` cipher (OID `1.2.156.10197.1.104.9`, GM/T 0009 /
 RFC 8998). Used to generate the static KAT vectors embedded in
 `tests/sm4_ccm_kat.rs`.
 

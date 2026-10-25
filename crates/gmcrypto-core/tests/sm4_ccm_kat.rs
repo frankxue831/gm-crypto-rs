@@ -1,7 +1,7 @@
 //! v0.8 W3 — SM4-CCM Known-Answer Tests.
 //!
 //! Cross-validate `sm4::mode_ccm` byte-for-byte against the OpenSSL 3.x
-//! EVP `SM4-CCM` cipher (OID `1.2.156.10197.1.104.9`, GB/T 0009 /
+//! EVP `SM4-CCM` cipher (OID `1.2.156.10197.1.104.9`, GM/T 0009 /
 //! RFC 8998).
 //!
 //! ## Provenance

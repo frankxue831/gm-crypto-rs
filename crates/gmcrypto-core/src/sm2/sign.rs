@@ -1,4 +1,4 @@
-//! SM2 sign and verify (GB/T 32918.2-2017).
+//! SM2 sign and verify (GB/T 32918.2-2016).
 
 use crate::asn1::sig::encode_sig;
 use crate::sm2::curve::{Fn, Fp, GX_HEX, GY_HEX, b};
