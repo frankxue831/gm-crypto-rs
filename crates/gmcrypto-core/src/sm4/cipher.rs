@@ -246,7 +246,7 @@ impl Sm4Cipher {
     /// decrypt round loop on `SIMD_BATCH` blocks in lockstep; the
     /// per-round `tau` (4 byte S-box lookups per block) gets fanned
     /// out across the full SIMD register width via
-    /// `gmcrypto_simd::sm4::sbox_x32` (x86_64 AVX2: 8 blocks × 4 =
+    /// `gmcrypto_simd::sm4::sbox_x32` (`x86_64` AVX2: 8 blocks × 4 =
     /// 32 bytes packed in `__m256i`) or `sbox_x16` (aarch64 NEON:
     /// 4 blocks × 4 = 16 bytes packed in `uint8x16_t`). On other
     /// targets, `SIMD_BATCH = 1` and this falls back to a single
@@ -306,7 +306,7 @@ impl Sm4Cipher {
 
 /// v0.6 W6 — compile-time batch size for [`Sm4Cipher::decrypt_blocks_simd`].
 ///
-/// - 8 on x86_64 (AVX2 `__m256i` = 32 bytes = 8 blocks × 4 `tau` bytes).
+/// - 8 on `x86_64` (AVX2 `__m256i` = 32 bytes = 8 blocks × 4 `tau` bytes).
 /// - 4 on aarch64 (NEON `uint8x16_t` = 16 bytes = 4 blocks × 4 `tau` bytes).
 /// - 1 elsewhere (`decrypt_blocks_simd` collapses to `decrypt_block`).
 #[cfg(all(feature = "sm4-bitsliced-simd", target_arch = "x86_64"))]
