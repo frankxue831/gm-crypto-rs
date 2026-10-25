@@ -53,7 +53,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```bash
 cargo add gmcrypto-core
-cargo add getrandom --no-default-features --features sys_rng
 ```
 
 ```toml
