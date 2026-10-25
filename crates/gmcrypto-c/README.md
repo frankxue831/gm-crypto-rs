@@ -114,11 +114,19 @@ on every PR.
 
 ## Linking against C
 
+Run these from the repository root. Put the library **after** the
+source file: GNU `ld` resolves symbols left to right, so
+`-lgmcrypto_c` before `sm2_sign.c` fails with undefined references.
+
 ```bash
+# Build the shared and static libraries into target/release.
+cargo build -p gmcrypto-c --release
+
 # Compile a C consumer against the shared library.
 gcc -I crates/gmcrypto-c/include \
+    crates/gmcrypto-c/examples/sm2_sign.c \
     -L target/release -lgmcrypto_c \
-    examples/sm2_sign.c -o sm2_sign
+    -o sm2_sign
 
 # Run (set LD_LIBRARY_PATH on Linux / DYLD_LIBRARY_PATH on macOS):
 LD_LIBRARY_PATH=target/release ./sm2_sign
@@ -128,7 +136,7 @@ Static linking:
 
 ```bash
 gcc -I crates/gmcrypto-c/include \
-    examples/sm2_sign.c \
+    crates/gmcrypto-c/examples/sm2_sign.c \
     target/release/libgmcrypto_c.a \
     -o sm2_sign-static
 ./sm2_sign-static

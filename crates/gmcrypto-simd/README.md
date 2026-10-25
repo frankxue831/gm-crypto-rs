@@ -14,7 +14,7 @@ If you are here because you searched for SM4, the crate you want is
 
 ```toml
 [dependencies]
-gmcrypto-core = { version = "1.11", features = ["sm4-bitsliced-simd"] }
+gmcrypto-core = { version = "1.16", features = ["sm4-bitsliced-simd"] }
 ```
 
 That pulls this crate in automatically. `sm4-aead` does too, for GHASH.
