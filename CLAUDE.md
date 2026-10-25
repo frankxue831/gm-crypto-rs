@@ -31,13 +31,21 @@ Release state table below and in `docs/`.
 | | |
 |---|---|
 | Live on crates.io | **`1.16.0`** — all three crates, 2026-10-10 from `2a7c880` (published by the maintainer); tag `v1.16.0` on `origin`, ED25519-verified. Previous: `1.13.0` 2026-09-04 from `5c0ae59`, tag `v1.13.0` ED25519-verified |
-| Workspace version | `1.16.0` = live. The next bump is the release-prep PR of the next publishing cycle. A new minor does not always mean crates.io (v0.14 / v1.10 / v1.14 / v1.15 are assurance cycles); don't bump or publish for a no-crate-change cycle |
+| Workspace version | `1.17.0` = release candidate on PR #246 (RUSTSEC-2026-0387/0385, MSRV 1.87), not yet published; crates.io is still `1.16.0`. A new minor does not always mean crates.io (v0.14 / v1.10 / v1.14 / v1.15 are assurance cycles); don't bump or publish for a no-crate-change cycle |
 | Gate #1 | `docs/ECOSYSTEM.md` §8 must PASS before every publish; latest record `docs/v1.16.0-gate1-evidence.md` (gated SHA `ea9c0e5`). The gated SHA is never the release SHA: the gate attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty, and a PR touching those re-owes it. Running the gate script is ordinary agent work; publishing is not |
 
 `cargo publish` and the SSH-signed tag are the **maintainer's authenticated
 call** — the agent path is branch + PR. The 1.11.0, 1.12.0 and 1.13.0
 publishes were explicit per-release delegations, not a standing grant; the
 maintainer published 1.16.0. The tags have always been the maintainer's.
+
+### v1.17 — RUSTSEC-2026-0387/0385, MSRV 1.87; NOT YET PUBLISHED
+
+1.17.0 is prepared on PR #246: `crypto-bigint` floored at 0.7.6 (fresh
+resolution 0.7.8, `ctutils` 0.4.5), MSRV 1.85 → 1.87, SM2 signing about 60%
+slower locally. Publishing needs the maintainer's separate go-ahead and a
+Gate #1 PASS on the release tree first (this PR touches `crates/` and
+`Cargo.toml`). The `ct_sign_k_class` harness fix follows as its own PR.
 
 ### v1.16 — GFNI S-box; PUBLISHED 2026-10-10
 

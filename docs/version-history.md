@@ -19,6 +19,19 @@ only a condensed current-release block — see its `Don't` section.
 
 ## Cycles
 
+**v1.17 — RUSTSEC-2026-0387 / RUSTSEC-2026-0385 and MSRV 1.87; NOT YET
+PUBLISHED (1.17.0 prepared in #246).**
+`crypto-bigint` is floored at 0.7.6, which requires `ctutils ^0.4.5`; fresh
+resolution selects `crypto-bigint` 0.7.8 and `ctutils` 0.4.5. 0.7.6 needs Rust
+1.87, so the MSRV moves from 1.85 to 1.87 and ships as a minor, per the README
+policy. SM2 signing measured about 60% slower locally; wire output is
+unchanged. `ct_sign_k_class` median `|tau|` rose from about 0.02–0.04 to about
+0.09–0.13 under the new dependency; local investigation attributes the
+class-dependent work to the bench harness building its RNG inside the timed
+window, and the harness fix follows as a separate tests-only PR. Readings stay
+below the 0.20 composite gate and the 0.55 sentinel. The release-prep commits
+ride on #246 itself. Gate #1 and the publish remain the maintainer's next steps.
+
 **v1.16 — GFNI SM4 S-box; PUBLISHED 2026-10-10 from `2a7c880` (1.16.0, all
 three crates; published by the maintainer).**
 The batch and four-byte paths merged on 2026-09-30 in #224 (`9fec750`)
