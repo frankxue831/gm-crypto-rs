@@ -43,9 +43,13 @@ maintainer published 1.16.0. The tags have always been the maintainer's.
 
 1.17.0 is prepared on PR #246: `crypto-bigint` floored at 0.7.6 (fresh
 resolution 0.7.8, `ctutils` 0.4.5), MSRV 1.85 → 1.87, SM2 signing about 60%
-slower locally. Publishing needs the maintainer's separate go-ahead and a
-Gate #1 PASS on the release tree first (this PR touches `crates/` and
-`Cargo.toml`). The `ct_sign_k_class` harness fix follows as its own PR.
+slower locally. `sm2::mul_var` lifts its scalar to `k + n` / `k + 2n` so no
+doubling acts on the identity: `crypto-bigint` 0.7.6+ timed that path
+differently on the EPYC 7763 runner class (`ct_mul_var` 0.05–0.35; study
+and fix in `docs/version-history.md`). Publishing needs the maintainer's
+separate go-ahead and a Gate #1 PASS on the release tree first (this PR
+touches `crates/` and `Cargo.toml`). The `ct_sign_k_class` harness fix
+follows as its own PR.
 The #241 docs PRs (#243 README samples doctested, #245 version strings and
 C linking recipe, bumped to `"1.17"`) land on top before the gate runs on
 the final tip; #244 is subsumed by this PR's identical `cipher.rs` edit.

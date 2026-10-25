@@ -18,6 +18,15 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- `sm2::mul_var` (variable-base k·P: encryption, decryption, key exchange)
+  now lifts the scalar to `k + n` or `k + 2n` before the window loop, so the
+  accumulator is never the point at infinity and every doubling acts on a
+  real point (four extra doublings per call, about +1.5%). Under
+  `crypto-bigint` 0.7.6+ the dudect `ct_mul_var` target, whose
+  small-scalar class walks 63 windows on the identity, read a median
+  `|tau|` of 0.05–0.35 on the EPYC 7763 runner class only (0.01 before the
+  upgrade, 0.01 on every other runner class); the lifted loop reads at the
+  noise floor on the same runner class. Results are unchanged (`n·P = O`).
 - Fixes [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387.html)
   and [RUSTSEC-2026-0385](https://rustsec.org/advisories/RUSTSEC-2026-0385.html)
   by flooring `crypto-bigint` at 0.7.6 (which requires `ctutils ^0.4.5`);
