@@ -23,9 +23,17 @@ use getrandom::SysRng; // any `rand_core::TryCryptoRng`; this crate ships no RNG
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let digest = sm3::hash(b"hello");                     // SM3: 32 bytes
+    assert_eq!(digest.len(), 32);
 
-    let key = Sm2PrivateKey::from_bytes_be(&secret_32)    // your scalar, big-endian
-        .into_option().ok_or("scalar out of range")?;
+    // New SM2 key: 32 random bytes, retried in the ~2^-32 case they fall
+    // outside [1, n-2]. (Or load one: `pkcs8`, `sec1`, `pem` modules.)
+    let key = loop {
+        let mut secret_32 = [0u8; 32];
+        getrandom::fill(&mut secret_32)?;
+        if let Some(key) = Sm2PrivateKey::from_bytes_be(&secret_32).into_option() {
+            break key;
+        }
+    };
     let sig = sign_with_id(&key, DEFAULT_SIGNER_ID, b"hello", &mut SysRng)?;
     assert!(verify_with_id(&key.public_key(), DEFAULT_SIGNER_ID, b"hello", &sig));
     Ok(())
@@ -172,17 +180,39 @@ ephemeral cannot be reused and neither side sees the key before the peer's
 confirmation tag verifies:
 
 ```rust
+// Cargo.toml: gmcrypto-core with features = ["sm2-key-exchange"]
+use gmcrypto_core::sm2::Sm2PrivateKey;
 use gmcrypto_core::sm2::key_exchange::{Sm2KxInitiator, Sm2KxResponder};
+use getrandom::SysRng;
 
-let init = Sm2KxInitiator::new(&key_a, &pub_b, b"A-id", b"B-id", 32)?;
-let (r_a, init_waiting) = init.produce_ephemeral(&mut rng)?;      // R_A -> B
+fn random_key() -> Result<Sm2PrivateKey, Box<dyn std::error::Error>> {
+    loop {
+        let mut secret_32 = [0u8; 32];
+        getrandom::fill(&mut secret_32)?;
+        if let Some(key) = Sm2PrivateKey::from_bytes_be(&secret_32).into_option() {
+            return Ok(key);
+        }
+    }
+}
 
-let resp = Sm2KxResponder::new(&key_b, &pub_a, b"A-id", b"B-id", 32)?;
-let (r_b, s_b, resp_waiting) = resp.respond(&r_a, &mut rng)?;      // (R_B, S_B) -> A
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut rng = SysRng;
+    // Long-term keys; in practice each side knows only its own private key
+    // and the peer's public key.
+    let (key_a, key_b) = (random_key()?, random_key()?);
+    let (pub_a, pub_b) = (key_a.public_key(), key_b.public_key());
 
-let (k_a, s_a) = init_waiting.confirm(&r_b, &s_b)?;               // verifies S_B; S_A -> B
-let k_b = resp_waiting.finish(&s_a)?;                             // verifies S_A
-assert_eq!(k_a.as_bytes(), k_b.as_bytes());
+    let init = Sm2KxInitiator::new(&key_a, &pub_b, b"A-id", b"B-id", 32)?;
+    let (r_a, init_waiting) = init.produce_ephemeral(&mut rng)?;      // R_A -> B
+
+    let resp = Sm2KxResponder::new(&key_b, &pub_a, b"A-id", b"B-id", 32)?;
+    let (r_b, s_b, resp_waiting) = resp.respond(&r_a, &mut rng)?;      // (R_B, S_B) -> A
+
+    let (k_a, s_a) = init_waiting.confirm(&r_b, &s_b)?;               // verifies S_B; S_A -> B
+    let k_b = resp_waiting.finish(&s_a)?;                             // verifies S_A
+    assert_eq!(k_a.as_bytes(), k_b.as_bytes());
+    Ok(())
+}
 ```
 
 **X.509-with-SM2** (`x509`) — parse a DER v3 leaf and verify its SM2-with-SM3
@@ -191,11 +221,23 @@ these wire `tbsCertificate` bytes"; no clock, no extension interpretation, no
 revocation:
 
 ```rust
+// Cargo.toml: gmcrypto-core with features = ["x509"]
 use gmcrypto_core::x509::Certificate;
 
-let cert = Certificate::from_der(&leaf_der).ok_or("not a GM/T 0015 cert")?;
-assert!(cert.verify_signature(&issuer_public_key));
-let _validity = (cert.not_before(), cert.not_after());  // exposed, never compared
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // DER files; these two are the repo's test fixtures (run from
+    // crates/gmcrypto-core) — substitute your own leaf and issuer.
+    let leaf_der = std::fs::read("tests/data/x509_leaf.der")?;
+    let issuer_der = std::fs::read("tests/data/x509_ca.der")?;
+
+    let issuer = Certificate::from_der(&issuer_der).ok_or("not a GM/T 0015 cert")?;
+    let issuer_public_key = issuer.subject_public_key();
+
+    let cert = Certificate::from_der(&leaf_der).ok_or("not a GM/T 0015 cert")?;
+    assert!(cert.verify_signature(&issuer_public_key));
+    let _validity = (cert.not_before(), cert.not_after());  // exposed, never compared
+    Ok(())
+}
 ```
 
 The same surfaces are reachable from C through `gmcrypto-c`; ten shipped
