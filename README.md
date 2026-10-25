@@ -53,6 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```bash
 cargo add gmcrypto-core
+cargo add getrandom --no-default-features --features sys_rng
 ```
 
 ```toml
@@ -225,8 +226,9 @@ revocation:
 use gmcrypto_core::x509::Certificate;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // DER files; these two are the repo's test fixtures (run from
-    // crates/gmcrypto-core) — substitute your own leaf and issuer.
+    // Replace these two paths with your own leaf and issuer certificates
+    // (DER). The paths shown are this repo's test fixtures, so the example
+    // only runs as-is from crates/gmcrypto-core, where it is a doctest.
     let leaf_der = std::fs::read("tests/data/x509_leaf.der")?;
     let issuer_der = std::fs::read("tests/data/x509_ca.der")?;
 
