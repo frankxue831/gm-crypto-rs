@@ -132,6 +132,7 @@ use gmcrypto_core::sm2::{
 };
 use gmcrypto_core::sm4::Sm4Cipher;
 use rand_core::{TryCryptoRng, TryRng};
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
 /// Default per-bench sample count (smoke). Overridable via `DUDECT_SAMPLES`.
 const DEFAULT_SAMPLES: usize = 100_000;
@@ -210,6 +211,185 @@ fn ct_mul_var(runner: &mut CtRunner, rng: &mut BenchRng) {
     for _ in 0..sample_count() {
         let (class, k) = if rng.random::<bool>() {
             (Class::Left, &small)
+        } else {
+            (Class::Right, &large)
+        };
+        runner.run_one(class, || mul_var(k, &g));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// v1.17 research probes (research/v1.17-mulvar-isolate; never merged).
+// Split the ct_mul_var elevation seen on EPYC 7763 under crypto-bigint 0.7.6+
+// into its parts. Each probe batches the operation so one sample is a few
+// microseconds. Left class = the all-zero / identity operands the k = 1
+// class of ct_mul_var produces; Right class = generic operands.
+// ---------------------------------------------------------------------------
+
+const fn probe_rand_fp(hex: &str) -> Fp {
+    Fp::new(&U256::from_be_hex(hex))
+}
+
+const PROBE_A: &str = "32C4AE2C1F1981195F9904466A39C9948FE30BBFF2660BE1715A4589334C74C7";
+const PROBE_B: &str = "BC3736A2F4F6779C59BDCEE36B692153D0A9877CC62A474002DF32E52139F0A0";
+const PROBE_C: &str = "28E9FA9E9D9F5E344D5A9E4BCF6509A7F39789F515AB8F92DDBCBD414D940E93";
+
+/// 256 chained field multiplications: zero × zero vs random × random.
+fn probe_fp_mul(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let zero = Fp::new(&U256::ZERO);
+    let (a, b) = (probe_rand_fp(PROBE_A), probe_rand_fp(PROBE_B));
+    for _ in 0..sample_count() {
+        let (class, x, y) = if rng.random::<bool>() {
+            (Class::Left, zero, zero)
+        } else {
+            (Class::Right, a, b)
+        };
+        runner.run_one(class, || {
+            let mut acc = x;
+            for _ in 0..256 {
+                acc *= y;
+            }
+            std::hint::black_box(acc)
+        });
+    }
+}
+
+/// 256 chained field squarings (`x * x`, as point.rs writes them).
+fn probe_fp_square(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let zero = Fp::new(&U256::ZERO);
+    let a = probe_rand_fp(PROBE_A);
+    for _ in 0..sample_count() {
+        let (class, x) = if rng.random::<bool>() {
+            (Class::Left, zero)
+        } else {
+            (Class::Right, a)
+        };
+        runner.run_one(class, || {
+            let mut acc = x;
+            for _ in 0..256 {
+                acc *= acc;
+            }
+            std::hint::black_box(acc)
+        });
+    }
+}
+
+/// 512 chained field add/sub pairs: zeros vs randoms.
+fn probe_fp_addsub(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let zero = Fp::new(&U256::ZERO);
+    let (ra, rb, rc) = (
+        probe_rand_fp(PROBE_A),
+        probe_rand_fp(PROBE_B),
+        probe_rand_fp(PROBE_C),
+    );
+    for _ in 0..sample_count() {
+        let (class, start, addend, subtrahend) = if rng.random::<bool>() {
+            (Class::Left, zero, zero, zero)
+        } else {
+            (Class::Right, ra, rb, rc)
+        };
+        runner.run_one(class, || {
+            let mut acc = start;
+            for _ in 0..512 {
+                acc = (acc + addend) - subtrahend;
+            }
+            std::hint::black_box(acc)
+        });
+    }
+}
+
+/// 16 chained point doublings: identity vs generator.
+fn probe_pt_double(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let id = ProjectivePoint::identity();
+    let g = ProjectivePoint::generator();
+    for _ in 0..sample_count() {
+        let (class, p) = if rng.random::<bool>() {
+            (Class::Left, id)
+        } else {
+            (Class::Right, g)
+        };
+        runner.run_one(class, || {
+            let mut acc = p;
+            for _ in 0..16 {
+                acc = acc.double();
+            }
+            std::hint::black_box(acc)
+        });
+    }
+}
+
+/// 16 chained point additions: identity + identity vs acc + G.
+fn probe_pt_add(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let id = ProjectivePoint::identity();
+    let g = ProjectivePoint::generator();
+    let g2 = g.double();
+    for _ in 0..sample_count() {
+        let (class, p, q) = if rng.random::<bool>() {
+            (Class::Left, id, id)
+        } else {
+            (Class::Right, g2, g)
+        };
+        runner.run_one(class, || {
+            let mut acc = p;
+            for _ in 0..16 {
+                acc = acc.add(&q);
+            }
+            std::hint::black_box(acc)
+        });
+    }
+}
+
+/// 16-entry constant-time point scan: select index 0 vs index 15.
+fn probe_pt_select16(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let g = ProjectivePoint::generator();
+    let mut table: [ProjectivePoint; 16] = [ProjectivePoint::identity(); 16];
+    table[1] = g;
+    for i in 2..16 {
+        table[i] = table[i - 1].add(&g);
+    }
+    for _ in 0..sample_count() {
+        let (class, nib) = if rng.random::<bool>() {
+            (Class::Left, 0u8)
+        } else {
+            (Class::Right, 15u8)
+        };
+        runner.run_one(class, || {
+            let mut chosen = ProjectivePoint::identity();
+            for _ in 0..4 {
+                for (i, entry) in table.iter().enumerate() {
+                    #[allow(clippy::cast_possible_truncation)]
+                    let take: Choice = (i as u8).ct_eq(&nib);
+                    chosen = ProjectivePoint::conditional_select(&chosen, entry, take);
+                }
+            }
+            std::hint::black_box(chosen)
+        });
+    }
+}
+
+/// Reference: the production targets, under the `probe_` filter.
+fn probe_ref_mul_var(runner: &mut CtRunner, rng: &mut BenchRng) {
+    ct_mul_var(runner, rng);
+}
+fn probe_ref_mul_g(runner: &mut CtRunner, rng: &mut BenchRng) {
+    ct_mul_g(runner, rng);
+}
+
+/// `mul_var` with a one-bit scalar at the top (2^255) vs n-5: both classes
+/// double real points after the first window, so only the 63 identity
+/// additions of the k = 1 class are gone. Splits "identity doublings"
+/// from "identity additions" at the production call.
+fn probe_mul_var_topbit(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let top = Scalar::new(&U256::from_be_hex(
+        "8000000000000000000000000000000000000000000000000000000000000000",
+    ));
+    let large = Scalar::new(&U256::from_be_hex(
+        "FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFF7203DF6B21C6052B53BBF40939D5411E",
+    ));
+    let g = ProjectivePoint::generator();
+    for _ in 0..sample_count() {
+        let (class, k) = if rng.random::<bool>() {
+            (Class::Left, &top)
         } else {
             (Class::Right, &large)
         };
@@ -1218,6 +1398,51 @@ fn main() {
             name: BenchName("ct_mul_var"),
             seed: None,
             benchfn: ct_mul_var,
+        },
+        BenchMetadata {
+            name: BenchName("probe_fp_mul"),
+            seed: None,
+            benchfn: probe_fp_mul,
+        },
+        BenchMetadata {
+            name: BenchName("probe_fp_square"),
+            seed: None,
+            benchfn: probe_fp_square,
+        },
+        BenchMetadata {
+            name: BenchName("probe_fp_addsub"),
+            seed: None,
+            benchfn: probe_fp_addsub,
+        },
+        BenchMetadata {
+            name: BenchName("probe_pt_double"),
+            seed: None,
+            benchfn: probe_pt_double,
+        },
+        BenchMetadata {
+            name: BenchName("probe_pt_add"),
+            seed: None,
+            benchfn: probe_pt_add,
+        },
+        BenchMetadata {
+            name: BenchName("probe_pt_select16"),
+            seed: None,
+            benchfn: probe_pt_select16,
+        },
+        BenchMetadata {
+            name: BenchName("probe_ref_mul_var"),
+            seed: None,
+            benchfn: probe_ref_mul_var,
+        },
+        BenchMetadata {
+            name: BenchName("probe_ref_mul_g"),
+            seed: None,
+            benchfn: probe_ref_mul_g,
+        },
+        BenchMetadata {
+            name: BenchName("probe_mul_var_topbit"),
+            seed: None,
+            benchfn: probe_mul_var_topbit,
         },
         BenchMetadata {
             name: BenchName("ct_sign"),
