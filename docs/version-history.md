@@ -29,7 +29,22 @@ unchanged. `ct_sign_k_class` median `|tau|` rose from about 0.02–0.04 to about
 0.09–0.13 under the new dependency; local investigation attributes the
 class-dependent work to the bench harness building its RNG inside the timed
 window, and the harness fix follows as a separate tests-only PR. Readings stay
-below the 0.20 composite gate and the 0.55 sentinel. The release-prep commits
+below the 0.20 composite gate and the 0.55 sentinel. A second reading did
+not: `ct_mul_var` on the EPYC 7763 runner class rose from about 0.01 to
+0.05–0.35 per pass under `crypto-bigint` 0.7.6+ (unchanged on 9V45 and the
+Xeons). A same-runner study on a research branch ran field, point and
+scalar-multiplication probes under `crypto-bigint` 0.7.5 / 0.7.6 / 0.7.8 and
+`ctutils` 0.4.2 / 0.4.5 and attributed it to `crypto-bigint` 0.7.6+ (its
+constant-time Montgomery rewrite) acting on the harness's small-scalar
+class, whose accumulator is the point at infinity for 63 of the 64 windows;
+`ctutils` alone and a scalar with its top bit set were quiet. `mul_var` now
+lifts the scalar to `k + n` or `k + 2n` so no doubling ever acts on the
+identity; the lifted loop reads at the noise floor on the same runner class.
+The default `dudect-main` leg no longer fits its 40-minute budget on the
+7763 (about 11 minutes per 100K pass, five passes plus the build); raising
+that one workflow's timeout is a separate policy-script change, since
+`check_assurance_policy.py` pins the number for the frozen study and the
+main watch together. The release-prep commits
 ride on #246 itself, which also adopts `is_multiple_of` on public lengths and
 folds in the GFNI line the core crate docs had owed since v1.16. The CI job
 names carry the new MSRV, so the `main` ruleset's two required MSRV checks
