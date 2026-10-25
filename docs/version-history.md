@@ -30,7 +30,15 @@ unchanged. `ct_sign_k_class` median `|tau|` rose from about 0.02–0.04 to about
 class-dependent work to the bench harness building its RNG inside the timed
 window, and the harness fix follows as a separate tests-only PR. Readings stay
 below the 0.20 composite gate and the 0.55 sentinel. The release-prep commits
-ride on #246 itself. Gate #1 and the publish remain the maintainer's next steps.
+ride on #246 itself, which also adopts `is_multiple_of` on public lengths and
+folds in the GFNI line the core crate docs had owed since v1.16. The CI job
+names carry the new MSRV, so the `main` ruleset's two required MSRV checks
+must be renamed by the maintainer before the merge. The #241 docs PRs (#243
+README samples doctested, #245 version strings and C linking recipe) land on
+top before Gate #1 runs on the final tip; #244 is subsumed. Per ECOSYSTEM §3,
+`gmcrypto-envelope-lite` (MSRV 1.85 CI) and `gm-crypto-rs-demo` (`=1.16.0`)
+each owe a follow-up once 1.17.0 is live. Gate #1 and the publish remain the
+maintainer's next steps.
 
 **v1.16 — GFNI SM4 S-box; PUBLISHED 2026-10-10 from `2a7c880` (1.16.0, all
 three crates; published by the maintainer).**

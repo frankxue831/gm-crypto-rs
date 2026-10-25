@@ -46,6 +46,13 @@ resolution 0.7.8, `ctutils` 0.4.5), MSRV 1.85 → 1.87, SM2 signing about 60%
 slower locally. Publishing needs the maintainer's separate go-ahead and a
 Gate #1 PASS on the release tree first (this PR touches `crates/` and
 `Cargo.toml`). The `ct_sign_k_class` harness fix follows as its own PR.
+The #241 docs PRs (#243 README samples doctested, #245 version strings and
+C linking recipe, bumped to `"1.17"`) land on top before the gate runs on
+the final tip; #244 is subsumed by this PR's identical `cipher.rs` edit.
+
+Downstream: `docs/ECOSYSTEM.md` §3 ties the ecosystem MSRV to core's
+`rust-version`, so `gmcrypto-envelope-lite` (MSRV 1.85 CI job) and
+`gm-crypto-rs-demo` (`=1.16.0` pin) each owe a follow-up once 1.17.0 is live.
 
 ### v1.16 — GFNI S-box; PUBLISHED 2026-10-10
 
@@ -89,9 +96,10 @@ v1.14 F21 result stands (`docs/f21-finalize-result.md`).
 
 ## Open backlog
 
-- Core's crate-level docs (`gmcrypto-core/src/lib.rs`, `sm4-bitsliced-simd`
-  entry) still describe AVX2 / NEON packing only, not the GFNI S-box. Fold
-  the fix into the next `crates/` change; on its own it re-owes Gate #1.
+- `ct_sign_k_class` bench harness builds the class-specific RNG inside the
+  timed window (v1.17 finding, SECURITY.md); move it outside in its own PR so
+  the reading returns to noise level. Why `crypto-bigint` 0.7.6+ amplifies
+  the effect is unexplained.
 - **F21** `ct_sm4_cbc_unpad` — composite window blind
   (`docs/v1.10-scope.md` Q10.9); narrow `finalize()` window distinguishable on
   the pinned local host only (`docs/f21-finalize-result.md`, v1.14): a
