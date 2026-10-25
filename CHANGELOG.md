@@ -5,34 +5,27 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-<!-- Draft for 1.17.0 (Frank to confirm). Per the README policy ("An MSRV bump
-is a minor, not a patch") this ships as 1.17.0. The alternative is 1.16.1,
-which would also require amending that README policy line. -->
-
 ### Changed
 
-- **MSRV is now Rust 1.87** (was 1.85). Per the README stability policy an
-  MSRV bump is a minor release, so this is planned as 1.17.0 rather than
-  1.16.1.
-- **Signing is slower.** `sign_raw_with_id` measured about 60% slower in a
-  local measurement (about 92 µs → 148 µs on one shared x86_64 Linux host):
-  roughly +11% from `ctutils` 0.4.5 and roughly +45% from `crypto-bigint`
-  0.7.6. Wire output is unchanged. A formal benchmark on CI hardware is
-  pending; this figure will be replaced with the measured number.
+- **MSRV is now Rust 1.87** (was 1.85).
+- **SM2 operations are slower** (field arithmetic in `crypto-bigint` 0.7.6+).
+  Signing (`sign_raw_with_id`) measured about 60% slower locally (about
+  92 µs → 148 µs on one shared x86_64 Linux host: roughly +11% from `ctutils`
+  0.4.5 and roughly +45% from `crypto-bigint` 0.7.6); other SM2 operations
+  were not measured separately. Wire output is unchanged. A formal benchmark
+  on CI hardware is pending; this figure will be replaced with the measured
+  number.
 
 ### Security
 
-- `crypto-bigint` 0.7.8 and `ctutils` 0.4.5 (what fresh resolution now
-  selects) fix
-  [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387.html)
-  and [RUSTSEC-2026-0385](https://rustsec.org/advisories/RUSTSEC-2026-0385.html).
-- **MSRV raised 1.85 → 1.87** to floor `crypto-bigint` at 0.7.6
-  ([RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387.html)).
-  `crypto-bigint` 0.7.6 requires `ctutils ^0.4.5`, so the transitive `ctutils`
-  is floored above its fixed release as well. MSRV-aware resolution on Rust
-  1.85 previously selected the affected `crypto-bigint` 0.7.5 / `ctutils`
-  0.4.2. `fuzz/Cargo.lock` moves to `crypto-bigint` 0.7.8 / `ctutils` 0.4.5.
-  An MSRV bump is a minor release.
+- Fixes [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387.html)
+  and [RUSTSEC-2026-0385](https://rustsec.org/advisories/RUSTSEC-2026-0385.html)
+  by flooring `crypto-bigint` at 0.7.6 (which requires `ctutils ^0.4.5`);
+  fresh resolution selects `crypto-bigint` 0.7.8 and `ctutils` 0.4.5. The
+  MSRV moves to 1.87 because `crypto-bigint` 0.7.6 requires it: MSRV-aware
+  resolution on Rust 1.85 previously selected the affected `crypto-bigint`
+  0.7.5 / `ctutils` 0.4.2. `fuzz/Cargo.lock` moves to `crypto-bigint` 0.7.8 /
+  `ctutils` 0.4.5.
 
 ## [1.16.0] - 2026-10-10
 

@@ -413,8 +413,8 @@ nonce becomes a noise source distributing uniformly across both classes).
 
 `ct_sign_k_class` measuring `|tau| = 0.0708` at 100K samples (vs. `ct_sign`'s
 0.0044) suggests the nonce path has slight signal elevation that the
-`d`-class harness could not see. Well under threshold; not a leak. Worth
-noting the elevated signal exists.
+`d`-class harness could not see. Well under threshold; no leak detected at
+that threshold. Worth noting the elevated signal exists.
 
 After the RUSTSEC-2026-0387 upgrade (`crypto-bigint` 0.7.6 or later), local
 interleaved A/B runs show a stable, version-related increase in the
