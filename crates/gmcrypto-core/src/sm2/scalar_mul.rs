@@ -35,20 +35,9 @@ pub fn mul_var(k: &Fn, p: &ProjectivePoint) -> ProjectivePoint {
         table[i] = table[i - 1].add(p);
     }
 
-    // Lift k < n to k' in [2^256, 2^257): k + n when that carries out of
-    // 256 bits, else k + 2n (2n > 2^256, and k + 2n < 2^257 exactly when
-    // k + n < 2^256). The carry is the bit-256 of k'; the selection is
-    // constant-time.
-    let n = Fn::MODULUS.as_ref();
-    let (lifted_once, carry) = k.retrieve().carrying_add(n, Limb::ZERO);
-    let (lifted_twice, _) = lifted_once.carrying_add(n, Limb::ZERO);
-    #[allow(clippy::cast_possible_truncation)]
-    let carried = Choice::from((carry.0 & 1) as u8);
-    let low = U256::conditional_select(&lifted_twice, &lifted_once, carried);
-
     // Window 0 is bit 256 alone (nibble value 1): acc = P. Then read the
-    // remaining 256 bits as 64 nibbles, MSB-first.
-    let k_be = low.to_be_bytes();
+    // remaining 256 bits of the lifted scalar as 64 nibbles, MSB-first.
+    let k_be = lift_scalar(k).to_be_bytes();
     let mut acc = *p;
 
     for byte in k_be.as_ref() {
@@ -68,6 +57,22 @@ pub fn mul_var(k: &Fn, p: &ProjectivePoint) -> ProjectivePoint {
         }
     }
     acc
+}
+
+/// Lift `k < n` to `k' = k + n` or `k + 2n`, whichever lies in
+/// `[2^256, 2^257)`, and return its low 256 bits; bit 256 of `k'` is always
+/// set and is implicit in the caller's first window.
+///
+/// `k + n` is taken when it carries out of 256 bits; otherwise `k + 2n`
+/// (`2n > 2^256`, and `k + 2n < 2^257` exactly when `k + n < 2^256`). The
+/// selection is a constant-time select on the carry.
+fn lift_scalar(k: &Fn) -> U256 {
+    let n = Fn::MODULUS.as_ref();
+    let (lifted_once, carry) = k.retrieve().carrying_add(n, Limb::ZERO);
+    let (lifted_twice, _) = lifted_once.carrying_add(n, Limb::ZERO);
+    #[allow(clippy::cast_possible_truncation)]
+    let carried = Choice::from((carry.0 & 1) as u8);
+    U256::conditional_select(&lifted_twice, &lifted_once, carried)
 }
 
 /// Fixed-base scalar multiplication k·G. Used in signing.
@@ -252,6 +257,65 @@ mod tests {
             assert!(
                 bool::from(lhs.ct_eq(&rhs)),
                 "mul_g != mul_var for k = {k_u:#X}"
+            );
+        }
+    }
+
+    /// The lift itself: for every boundary k, `2^256 + low` is k + n or
+    /// k + 2n, so k' lies in [2^256, 2^257) and k' ≡ k (mod n).
+    #[test]
+    fn lift_scalar_lands_in_the_257_bit_band() {
+        use crypto_bigint::U512;
+        let n = *Fn::MODULUS.as_ref();
+        let two256_minus_n = U256::ZERO.wrapping_sub(&n);
+        let n_wide = U512::from(&n);
+        let two256: U512 = U512::ONE.shl(256);
+        for k_u in [
+            U256::ZERO,
+            U256::ONE,
+            two256_minus_n.wrapping_sub(&U256::ONE),
+            two256_minus_n,
+            two256_minus_n.wrapping_add(&U256::ONE),
+            n.wrapping_sub(&U256::ONE),
+        ] {
+            let low = lift_scalar(&Fn::new(&k_u));
+            let lifted = two256.wrapping_add(&U512::from(&low));
+            let k_wide = U512::from(&k_u);
+            let k_plus_n = k_wide.wrapping_add(&n_wide);
+            let k_plus_two_n = k_plus_n.wrapping_add(&n_wide);
+            assert!(
+                lifted == k_plus_n || lifted == k_plus_two_n,
+                "lift of {k_u:#X} is neither k + n nor k + 2n"
+            );
+            assert!(
+                lifted >= two256 && lifted < two256.shl(1),
+                "lift of {k_u:#X} is outside [2^256, 2^257)"
+            );
+        }
+    }
+
+    /// Non-generator base: k·(2G) must equal (2k mod n)·G from the
+    /// independent comb path, at the lift boundaries and the group edges.
+    #[test]
+    fn mul_var_non_generator_base_at_lift_boundaries() {
+        let g = ProjectivePoint::generator();
+        let two_g = g.double();
+        let n = *Fn::MODULUS.as_ref();
+        let two256_minus_n = U256::ZERO.wrapping_sub(&n);
+        for k_u in [
+            U256::ZERO,
+            U256::ONE,
+            two256_minus_n.wrapping_sub(&U256::ONE),
+            two256_minus_n,
+            two256_minus_n.wrapping_add(&U256::ONE),
+            n.wrapping_sub(&U256::ONE),
+        ] {
+            let k = Fn::new(&k_u);
+            let lhs = mul_var(&k, &two_g);
+            let rhs = mul_g(&(k + k));
+            assert!(
+                bool::from(lhs.ct_eq(&rhs)),
+                "k·(2G) != (2k)·G for k = {k_u:#X}"
             );
         }
     }
