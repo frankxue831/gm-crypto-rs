@@ -5,6 +5,10 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+<!-- Draft for 1.17.0 (Frank to confirm). Per the README policy ("An MSRV bump
+is a minor, not a patch") this ships as 1.17.0. The alternative is 1.16.1,
+which would also require amending that README policy line. -->
+
 ### Changed
 
 - **MSRV is now Rust 1.87** (was 1.85).
