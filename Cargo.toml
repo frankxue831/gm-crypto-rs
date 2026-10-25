@@ -50,7 +50,7 @@ rust-version = "1.87"
 # 0.7.6 is the first release with the RUSTSEC-2026-0387 fix and requires
 # Rust 1.87; it also requires `ctutils ^0.4.5`, which floors the transitive
 # `ctutils` above its own advisory fix (0.4.4) without a direct dependency.
-crypto-bigint = { version = "0.7.6", default-features = false, features = ["subtle", "zeroize"] }
+crypto-bigint = { version = "=0.7.6", default-features = false, features = ["subtle", "zeroize"] }
 subtle = { version = "2.6.1", default-features = false }
 zeroize = { version = "1.8.2", default-features = false, features = ["derive", "alloc"] }
 rand_core = { version = "0.10.1", default-features = false }
