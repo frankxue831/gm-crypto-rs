@@ -23,7 +23,8 @@
 //!   password so both succeed via identical control flow (v0.3 W2).
 //! - `ct_sign`              — `sign_raw_with_id`, class-split by private key `d`.
 //! - `ct_sign_k_class`      — `sign_raw_with_id`, class-split by nonce `k`
-//!   magnitude (`d` held fixed, both retry nonces class-tied via [`ClassKRng`]).
+//!   magnitude (`d` held fixed, both retry nonces class-tied via [`ClassKRng`];
+//!   both classes' RNGs are built outside the timed window).
 //! - `ct_sm2_decrypt`       — SM2 decrypt, class-split by recipient `d_B`,
 //!   fixed ciphertext (encrypted to a third party so both classes fail at
 //!   the MAC check via identical control flow; v0.2 Phase 3).
@@ -73,6 +74,14 @@
 //! contaminate the signal (the second nonce becomes a noise source
 //! distributing uniformly across both classes).
 //!
+//! Both classes' [`ClassKRng`] values are built once, before the sample
+//! loop, and rewound in the input-generation phase of every sample; the
+//! timed closure holds a `RefCell` borrow (one flag check, identical for
+//! both classes) and the `sign_raw_with_id` call. Until 2026-10-26
+//! the closure also branched on the class and constructed that class's
+//! RNG inside the window, so the two classes did different setup work
+//! before signing started (the v1.17 finding recorded in `SECURITY.md`).
+//!
 //! # Why we gate on `|tau|`, not `|t|`
 //!
 //! `|t|` grows as `tau · sqrt(N)`, so any fixed `|t|` threshold becomes
@@ -119,6 +128,7 @@
 //! gate is on the scale-free `tau`, not the budget-dependent `t`):
 //! `^bench\s+(\S+)\s*\.+\s*:.*?max tau\s*=\s*([+\-]?\d+\.\d+)`.
 
+use core::cell::RefCell;
 use core::convert::Infallible;
 use crypto_bigint::U256;
 use dudect_bencher::ctbench::{BenchMetadata, BenchName, BenchOpts, run_benches_console};
@@ -269,12 +279,22 @@ fn ct_sign(runner: &mut CtRunner, rng: &mut BenchRng) {
 /// `sample_nonzero_scalar` (`candidate != 0 && candidate < n`) accepts
 /// in one shot, so the bench's loop count is deterministic and the
 /// timed window doesn't pick up rejection-sampling jitter.
+///
+/// One value per class lives for the whole bench; [`ClassKRng::reset`]
+/// rewinds it before each sample so every sample draws the same
+/// class-tied sequence from the first fill, exactly as a freshly
+/// constructed value would.
 struct ClassKRng {
     pair: [U256; 2],
     cursor: usize,
 }
 
 impl ClassKRng {
+    /// Rewind to the first pair element. Called outside the timed window.
+    const fn reset(&mut self) {
+        self.cursor = 0;
+    }
+
     /// Two small nonces: 1 and 3.
     const fn new_left() -> Self {
         Self {
@@ -333,25 +353,32 @@ impl TryCryptoRng for ClassKRng {}
 /// distributes uniformly across `ct_sign`'s `d`-class split, so it is
 /// structurally undetectable there. This target inverts the class
 /// assignment.
+///
+/// Both classes' [`ClassKRng`] values are built before the sample loop and
+/// the per-sample class draw selects a reference, the same shape as
+/// `ct_sign`'s `&key_small` / `&key_large`. The RNG is rewound in the
+/// input-generation phase, so the timed closure does no class-dependent
+/// setup: `run_one` takes `Fn`, so the mutable RNG state is reached through
+/// a `RefCell` borrow — one borrow-flag check, identical for both classes —
+/// and the rest of the window is the `sign_raw_with_id` call.
 fn ct_sign_k_class(runner: &mut CtRunner, rng: &mut BenchRng) {
     let key = Sm2PrivateKey::from_scalar(U256::from_be_hex(
         "3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8",
     ))
     .expect("fixed sample D in [1, n-2]");
+    let k_rng_left = RefCell::new(ClassKRng::new_left());
+    let k_rng_right = RefCell::new(ClassKRng::new_right());
     for _ in 0..sample_count() {
-        let class = if rng.random::<bool>() {
-            Class::Left
+        let (class, k_rng) = if rng.random::<bool>() {
+            (Class::Left, &k_rng_left)
         } else {
-            Class::Right
+            (Class::Right, &k_rng_right)
         };
-        let is_left = matches!(class, Class::Left);
+        // Input-generation phase: rewind before the window opens.
+        k_rng.borrow_mut().reset();
         runner.run_one(class, || {
-            let mut k_rng = if is_left {
-                ClassKRng::new_left()
-            } else {
-                ClassKRng::new_right()
-            };
-            sign_raw_with_id(&key, DEFAULT_SIGNER_ID, b"timing target", &mut k_rng)
+            let mut k_rng = k_rng.borrow_mut();
+            sign_raw_with_id(&key, DEFAULT_SIGNER_ID, b"timing target", &mut *k_rng)
         });
     }
 }
