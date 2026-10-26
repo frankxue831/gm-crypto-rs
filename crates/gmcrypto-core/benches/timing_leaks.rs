@@ -265,25 +265,31 @@ fn ct_sign(runner: &mut CtRunner, rng: &mut BenchRng) {
     }
 }
 
-/// Deterministic per-class RNG that emits a class-tied **pair** of `k`
-/// values across two `fill_bytes(&mut [u8; 32])` calls.
+/// Deterministic per-class RNG whose `fill_bytes(&mut [u8; 32])` calls
+/// alternate between two class-tied `k` values.
 ///
 /// `sign_raw_with_id` runs `SIGN_RETRY_BUDGET = 2` iterations, each
-/// drawing a fresh nonce via `sample_nonzero_scalar`. A class label that
-/// only controls the first `k` and lets the second be fresh-random
-/// contaminates the harness — the second nonce becomes a noise source
-/// that distributes uniformly across both classes. See W0 in the
-/// v0.2 scope document.
+/// drawing a nonce via `sample_nonzero_scalar`, which makes
+/// `NONCE_SAMPLE_BUDGET = 4` fills and keeps the first valid draw. Each
+/// retry's four fills therefore start at an even cursor, so **both**
+/// retry nonces are `pair[0]` (1 on the left, `n-5` on the right);
+/// `pair[1]` is filled and discarded. A class label that only controls
+/// the first `k` and lets the second be fresh-random would contaminate
+/// the harness — the second nonce becomes a noise source that
+/// distributes uniformly across both classes. See W0 in the v0.2 scope
+/// document.
 ///
 /// Both pair elements are chosen so that the validity check inside
 /// `sample_nonzero_scalar` (`candidate != 0 && candidate < n`) accepts
-/// in one shot, so the bench's loop count is deterministic and the
-/// timed window doesn't pick up rejection-sampling jitter.
+/// every fill, so the bench's loop count is deterministic and the timed
+/// window doesn't pick up rejection-sampling jitter. `pair[1]` stays so
+/// the fill sequence is byte-for-byte the one the recorded readings were
+/// taken with.
 ///
 /// One value per class lives for the whole bench; [`ClassKRng::reset`]
 /// rewinds it before each sample so every sample draws the same
 /// class-tied sequence from the first fill, exactly as a freshly
-/// constructed value would.
+/// constructed value would (the only state is the cursor).
 struct ClassKRng {
     pair: [U256; 2],
     cursor: usize,
@@ -295,7 +301,7 @@ impl ClassKRng {
         self.cursor = 0;
     }
 
-    /// Two small nonces: 1 and 3.
+    /// Small class: fills alternate 1 and 3; every retry selects 1.
     const fn new_left() -> Self {
         Self {
             pair: [U256::from_u64(1), U256::from_u64(3)],
@@ -303,9 +309,10 @@ impl ClassKRng {
         }
     }
 
-    /// Two large nonces: `n-5` and `n-7` (the SM2 curve order ends in
-    /// `...39D54123`). Both well within `[1, n-1]` and so accepted by
-    /// `sample_nonzero_scalar`'s `candidate < n` check on first try.
+    /// Large class: fills alternate `n-5` and `n-7` (the SM2 curve order
+    /// ends in `...39D54123`); every retry selects `n-5`. Both well within
+    /// `[1, n-1]` and so accepted by `sample_nonzero_scalar`'s
+    /// `candidate < n` check on every fill.
     const fn new_right() -> Self {
         Self {
             pair: [
