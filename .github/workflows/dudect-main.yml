@@ -61,7 +61,7 @@ jobs:
     # 10m37s–10m49s per 100K pass on a 7763 (run 40199657298, cancelled in
     # pass 4 at 40m), the full-feature leg 8m03s–8m17s per pass (run
     # 40272785298, cancelled in pass 5 at 40m); 9V45 / Xeon 8573C legs take
-    # 5m13s–5m35s per pass. Worst measured need is 5 × ~11 min ≈ 54 min
+    # 5m09s–5m44s per pass. Worst measured need is 5 × ~11 min ≈ 54 min
     # with a warm rust-cache; 75 min covers that plus a cold-cache bench
     # build with about 20% headroom. Only this workflow moves: the frozen
     # v1.15 study (`dudect-nightly.yml`) keeps its own 40 and is not read by
