@@ -417,12 +417,17 @@ nonce becomes a noise source distributing uniformly across both classes).
 that threshold. Worth noting the elevated signal exists.
 
 `ct_sign_k_class` median `|tau|` rose from about 0.02–0.04 on crypto-bigint
-0.7.5 to about 0.09–0.13 on 0.7.6 and 0.7.8. Local investigation attributes the
-class-dependent work to the bench harness, which builds the class-specific
-RNG inside the timed window; with that construction moved outside the
-window, both versions read at noise level. Why 0.7.6+ amplifies this harness
-effect is still under investigation. Readings remain below both the 0.20
-composite gate and the 0.55 sentinel.
+0.7.5 to about 0.09–0.13 on 0.7.6 and 0.7.8 in local and PR-smoke readings;
+hosted 100K nightlies read medians of 0.11–0.38 across EPYC 7763 and 9V45
+legs before the upgrade (2026-10-25, 0.7.5) and 0.02–0.18 on 9V45 and 9V74
+after it (2026-10-26, 0.7.10), with 0.26–0.35 per pass on a 7763 leg that
+timed out before its median. Local investigation attributes the class-dependent
+work to the bench harness, which builds the class-specific RNG inside the
+timed window; with that construction moved outside the window, both versions
+read at noise level. Why 0.7.6+ amplifies this harness effect locally is
+still under investigation. The target is a non-blocking sentinel (gross
+regression gate 0.55), not a composite-gate target; readings remain below
+the sentinel.
 
 ### v1.0 constant-time baseline (settled — v0.18 / v0.19 / v0.20)
 
