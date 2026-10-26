@@ -60,7 +60,9 @@ blocks. **Never edit committed evidence docs to silence P2s.**
   sort is lexicographic (`v1.11.0` < `v1.2.0`) — use `--sort=-v:refname`.
 - Release-prep PR (no source): workspace version, both sibling pins,
   `fuzz/Cargo.lock` path-dep refresh, CHANGELOG heading, CLAUDE.md release
-  table + current-cycle block, `version-history.md` paragraph.
+  table + current-cycle block, `version-history.md` paragraph. On a minor
+  bump, also the `gmcrypto-core = "X.Y"` snippets: `README.md` (Installation
+  and wasm32), core `lib.rs` Usage, `crates/gmcrypto-simd/README.md`.
 
 ## docs.rs render
 
