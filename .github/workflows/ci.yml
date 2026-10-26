@@ -214,7 +214,7 @@ jobs:
     # opt-in feature combos) still compile on the pinned MSRV. Saves
     # ~30s per CI run vs. running the full test+clippy matrix twice.
     # See discussion in rust-lang/api-guidelines#231.
-    name: build (Rust 1.85 MSRV)
+    name: build (Rust 1.87 MSRV)
     runs-on: macos-14
     if: >-
       !contains(github.event.pull_request.title, '[skip ci]') &&
@@ -228,16 +228,16 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - name: Install Rust 1.85
+      - name: Install Rust 1.87
         # `@stable` is the action's release tag (not the toolchain);
-        # `toolchain:` picks the Rust version per Cargo's MSRV (1.85).
+        # `toolchain:` picks the Rust version per Cargo's MSRV (1.87).
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.85"
+          toolchain: "1.87"
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: msrv-1.85
+          shared-key: msrv-1.87
       - name: cargo build (all targets)
         run: cargo build --workspace --all-targets
       - name: cargo build with opt-in features
@@ -292,15 +292,15 @@ jobs:
       # the GFNI path's `incompatible_msrv` allowances (v1.16).
       - name: cargo clippy -p gmcrypto-simd (x86_64)
         run: cargo clippy -p gmcrypto-simd --all-targets -- -D warnings
-      # v1.16 — x86_64 on rustc 1.85-1.88 is the only configuration where
+      # v1.16 — x86_64 on rustc 1.87-1.88 is the only configuration where
       # the build.rs `gmcrypto_simd_gfni` cfg is off and the GFNI code must
       # compile out; the MSRV job runs on aarch64, where it is excluded by
       # target_arch anyway. Build that configuration here.
-      - name: cargo +1.85 build (x86_64, GFNI cfg off)
+      - name: cargo +1.87 build (x86_64, GFNI cfg off)
         run: |
-          rustup toolchain install 1.85 --profile minimal
-          cargo +1.85 build -p gmcrypto-simd --all-targets
-          cargo +1.85 build -p gmcrypto-core --features sm4-bitsliced-simd,sm4-aead
+          rustup toolchain install 1.87 --profile minimal
+          cargo +1.87 build -p gmcrypto-simd --all-targets
+          cargo +1.87 build -p gmcrypto-core --features sm4-bitsliced-simd,sm4-aead
       - name: cargo test -p gmcrypto-core --features sm4-bitsliced-simd (x86_64 composition)
         run: cargo test -p gmcrypto-core --features sm4-bitsliced-simd
       - name: cargo test -p gmcrypto-core --features sm4-aead,sm4-bitsliced-simd (x86_64 composition)
@@ -677,7 +677,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: [stable, "1.85"]
+        toolchain: [stable, "1.87"]
     steps:
       - uses: actions/checkout@v7
       - name: Install Rust ${{ matrix.toolchain }}

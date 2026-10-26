@@ -168,7 +168,7 @@ them is why the always-on bench vector has 16 entries against 12 `ct_*`:
 
 Both GFNI paths are compiled only with rustc >= 1.89; the cached detector
 requires GFNI, AVX2 and OS-enabled AVX-512 state. Older compilers, including
-MSRV 1.85, retain the applicable non-GFNI paths. A timing run covers the
+MSRV 1.87, retain the applicable non-GFNI paths. A timing run covers the
 backend actually selected on that runner; a CPU model string alone does not
 establish GFNI execution.
 
@@ -413,8 +413,16 @@ nonce becomes a noise source distributing uniformly across both classes).
 
 `ct_sign_k_class` measuring `|tau| = 0.0708` at 100K samples (vs. `ct_sign`'s
 0.0044) suggests the nonce path has slight signal elevation that the
-`d`-class harness could not see. Well under threshold; not a leak. Worth
-noting the elevated signal exists.
+`d`-class harness could not see. Well under threshold; readings stayed below
+that threshold. Worth noting the elevated signal exists.
+
+`ct_sign_k_class` median `|tau|` rose from about 0.02–0.04 on crypto-bigint
+0.7.5 to about 0.09–0.13 on 0.7.6 and 0.7.8. Local investigation attributes the
+class-dependent work to the bench harness, which builds the class-specific
+RNG inside the timed window; with that construction moved outside the
+window, both versions read at noise level. Why 0.7.6+ amplifies this harness
+effect is still under investigation. Readings remain below both the 0.20
+composite gate and the 0.55 sentinel.
 
 ### v1.0 constant-time baseline (settled — v0.18 / v0.19 / v0.20)
 

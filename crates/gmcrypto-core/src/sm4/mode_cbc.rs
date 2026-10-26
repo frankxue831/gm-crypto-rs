@@ -102,7 +102,7 @@ pub fn encrypt(key: &[u8; KEY_SIZE], iv: &[u8; BLOCK_SIZE], plaintext: &[u8]) ->
 #[allow(clippy::missing_panics_doc)]
 pub fn decrypt(key: &[u8; KEY_SIZE], iv: &[u8; BLOCK_SIZE], ciphertext: &[u8]) -> Option<Vec<u8>> {
     // Length is public; reject obviously-malformed inputs.
-    if ciphertext.is_empty() || ciphertext.len() % BLOCK_SIZE != 0 {
+    if ciphertext.is_empty() || !ciphertext.len().is_multiple_of(BLOCK_SIZE) {
         return None;
     }
 
@@ -191,7 +191,7 @@ pub(crate) fn strip_pkcs7_block(block: &[u8; BLOCK_SIZE]) -> Option<usize> {
 fn strip_pkcs7_ct(buf: &mut Vec<u8>) -> Option<()> {
     let n = buf.len();
     // Length is public — these bounds checks don't leak secrets.
-    if n == 0 || n % BLOCK_SIZE != 0 {
+    if n == 0 || !n.is_multiple_of(BLOCK_SIZE) {
         return None;
     }
 

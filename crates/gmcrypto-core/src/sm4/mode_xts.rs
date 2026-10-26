@@ -271,11 +271,11 @@ fn process_sectors(
     encrypt: bool,
 ) -> Option<()> {
     // 1. sector_size: a whole number of blocks within [16, 16 MiB].
-    if !(BLOCK_SIZE..=MAX_LEN).contains(&sector_size) || sector_size % BLOCK_SIZE != 0 {
+    if !(BLOCK_SIZE..=MAX_LEN).contains(&sector_size) || !sector_size.is_multiple_of(BLOCK_SIZE) {
         return None;
     }
     // 2. buf must be a whole multiple of sector_size (0 sectors allowed).
-    if buf.len() % sector_size != 0 {
+    if !buf.len().is_multiple_of(sector_size) {
         return None;
     }
     let sector_count = buf.len() / sector_size;

@@ -96,7 +96,7 @@ jobs:
       # drift axis: the 2026-05-12 ubuntu-24.04 image refresh rolled Rust
       # 1.94.1 → 1.95.0 and shifted the ct_fn_invert / ct_fp_invert noise
       # floor (docs/v0.5-dudect-recalibration.md). Pin captured empirically
-      # from the "Capture runner environment" rustc -Vv; MUST be >= MSRV 1.85.
+      # from the "Capture runner environment" rustc -Vv; MUST be >= MSRV 1.87.
       # A DELIBERATE bump is a reviewed re-baseline: bump here, dispatch the
       # nightly several times, confirm medians stable, record the new floor
       # (with ImageVersion + kernel) in docs/v0.5-dudect-recalibration.md.

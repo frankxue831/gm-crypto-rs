@@ -32,7 +32,7 @@ The core workspace family (`gmcrypto-core`, `gmcrypto-c`, and `gmcrypto-simd`) s
 
 A caret requirement removes the pin bump that would otherwise announce a core upgrade downstream, so from this point the compatibility gate in section 8 is the only mechanism that tests a core candidate against this crate.
 
-The ecosystem MSRV equals the published `rust-version` of `gmcrypto-core`, currently Rust 1.85. An official crate must not require a newer toolchain without a charter update, and every MSRV increase must be recorded in the affected changelogs.
+The ecosystem MSRV equals the published `rust-version` of `gmcrypto-core`, currently Rust 1.87. An official crate must not require a newer toolchain without a charter update, and every MSRV increase must be recorded in the affected changelogs.
 
 **Verification:** inspect the core workspace version and exact member requirements, inspect each official downstream `Cargo.toml`, and run its MSRV CI job. Lockstep release behavior and the publication-time caret transition are policy-only release checks.
 

@@ -34,8 +34,8 @@ use super::scalar::{A_ROWS, AFFINE_B, SM4_GF_POLY};
 /// Caller must guarantee AVX2 support on the host CPU.
 #[target_feature(enable = "avx2")]
 // `cast_possible_wrap`: `as i8` reinterprets a byte constant's bits for
-// `_mm256_set1_epi8`; the wrap is the intent (`u8::cast_signed` is 1.87,
-// above MSRV 1.85).
+// `_mm256_set1_epi8`; the wrap is the intent (kept as `as i8` rather than
+// `u8::cast_signed`, stable since 1.87).
 #[allow(unsafe_op_in_unsafe_fn, clippy::cast_possible_wrap)]
 pub(super) unsafe fn gf_mul(mut a: __m256i, mut b: __m256i) -> __m256i {
     let mut r = _mm256_setzero_si256();

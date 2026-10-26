@@ -1,7 +1,7 @@
 //! Compiler-version gate for the GFNI S-box (v1.16 Q16.2).
 //!
 //! The `gfni` target feature and its intrinsics were stabilized in Rust
-//! 1.89.0 (rust-lang/rust#138940). The workspace MSRV is 1.85, so the GFNI
+//! 1.89.0 (rust-lang/rust#138940). The workspace MSRV is 1.87, so the GFNI
 //! path is compiled only when the compiler is new enough. Shared by
 //! `build.rs` and `tests/build_version.rs`.
 

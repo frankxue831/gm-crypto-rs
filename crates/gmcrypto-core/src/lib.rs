@@ -1,6 +1,6 @@
 //! Constant-time-designed pure-Rust SM2 / SM3 / SM4 primitives.
 //!
-//! `no_std` + `alloc`, no C dependency, MSRV 1.85. Every secret-touching path
+//! `no_std` + `alloc`, no C dependency, MSRV 1.87. Every secret-touching path
 //! is written against [`subtle`](https://docs.rs/subtle)'s constant-time
 //! primitives — no `==`, no `if`, no `bool` on a secret-derived value — and
 //! guarded in CI by a [`dudect`](https://docs.rs/dudect-bencher)-based
@@ -108,8 +108,11 @@
 //!   with the same property; this one is faster under SIMD.
 //! - `sm4-bitsliced-simd` — packs that bitsliced S-box into AVX2 (`x86_64`) or
 //!   NEON (aarch64) lanes for the batch paths, with runtime detection and a
-//!   scalar fallback. Implies `sm4-bitsliced`; pulls `gmcrypto-simd`, where
-//!   the crate's only `unsafe` lives.
+//!   scalar fallback. On `x86_64` CPUs with GFNI, AVX2 and OS-enabled AVX-512
+//!   state (and a compiler at Rust 1.89 or newer), the S-box is computed with
+//!   `GF2P8AFFINEQB` / `GF2P8AFFINEINVQB` instead, for the batch paths and
+//!   the single-block and key-setup paths. Implies `sm4-bitsliced`; pulls
+//!   `gmcrypto-simd`, where the crate's only `unsafe` lives.
 //!
 //! **Ecosystem trait fits** — each pulls one pre-1.0 `RustCrypto` crate, so a
 //! breaking release of *that* crate is not covered by this crate's `SemVer`:

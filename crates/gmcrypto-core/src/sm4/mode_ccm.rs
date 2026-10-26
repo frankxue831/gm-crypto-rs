@@ -410,7 +410,7 @@ pub(super) fn format_aad_into(out: &mut Vec<u8>, aad: &[u8]) {
         out.extend_from_slice(&(alen as u64).to_be_bytes());
     }
     out.extend_from_slice(aad);
-    while out.len() % BLOCK_SIZE != 0 {
+    while !out.len().is_multiple_of(BLOCK_SIZE) {
         out.push(0);
     }
 }

@@ -551,7 +551,7 @@ pub fn deprotect_cbc(
         return None; // IV + minimum body (0 plaintext + 32 MAC + 16 pad block)
     }
     let body_len = record.len() - 16;
-    if body_len % 16 != 0 {
+    if !body_len.is_multiple_of(16) {
         return None;
     }
     if body_len > MAX_PLAINTEXT + MAC_LEN + 16 {

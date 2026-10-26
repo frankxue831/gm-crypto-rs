@@ -31,13 +31,32 @@ Release state table below and in `docs/`.
 | | |
 |---|---|
 | Live on crates.io | **`1.16.0`** — all three crates, 2026-10-10 from `2a7c880` (published by the maintainer); tag `v1.16.0` on `origin`, ED25519-verified. Previous: `1.13.0` 2026-09-04 from `5c0ae59`, tag `v1.13.0` ED25519-verified |
-| Workspace version | `1.16.0` = live. The next bump is the release-prep PR of the next publishing cycle. A new minor does not always mean crates.io (v0.14 / v1.10 / v1.14 / v1.15 are assurance cycles); don't bump or publish for a no-crate-change cycle |
+| Workspace version | `1.17.0` = release candidate on PR #246 (RUSTSEC-2026-0387/0385, MSRV 1.87), not yet published; crates.io is still `1.16.0`. A new minor does not always mean crates.io (v0.14 / v1.10 / v1.14 / v1.15 are assurance cycles); don't bump or publish for a no-crate-change cycle |
 | Gate #1 | `docs/ECOSYSTEM.md` §8 must PASS before every publish; latest record `docs/v1.16.0-gate1-evidence.md` (gated SHA `ea9c0e5`). The gated SHA is never the release SHA: the gate attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty, and a PR touching those re-owes it. Running the gate script is ordinary agent work; publishing is not |
 
 `cargo publish` and the SSH-signed tag are the **maintainer's authenticated
 call** — the agent path is branch + PR. The 1.11.0, 1.12.0 and 1.13.0
 publishes were explicit per-release delegations, not a standing grant; the
 maintainer published 1.16.0. The tags have always been the maintainer's.
+
+### v1.17 — RUSTSEC-2026-0387/0385, MSRV 1.87; NOT YET PUBLISHED
+
+1.17.0 is prepared on PR #246: `crypto-bigint` floored at 0.7.6 (fresh
+resolution 0.7.8, `ctutils` 0.4.5), MSRV 1.85 → 1.87, SM2 signing about 60%
+slower locally. `sm2::mul_var` lifts its scalar to `k + n` / `k + 2n` so no
+doubling acts on the identity: `crypto-bigint` 0.7.6+ timed that path
+differently on the EPYC 7763 runner class (`ct_mul_var` 0.05–0.35; study
+and fix in `docs/version-history.md`). Publishing needs the maintainer's
+separate go-ahead and a Gate #1 PASS on the release tree first (this PR
+touches `crates/` and `Cargo.toml`). The `ct_sign_k_class` harness fix
+follows as its own PR.
+The #241 docs PRs (#243 README samples doctested, #245 version strings and
+C linking recipe, bumped to `"1.17"`) land on top before the gate runs on
+the final tip; #244 is subsumed by this PR's identical `cipher.rs` edit.
+
+Downstream: `docs/ECOSYSTEM.md` §3 ties the ecosystem MSRV to core's
+`rust-version`, so `gmcrypto-envelope-lite` (MSRV 1.85 CI job) and
+`gm-crypto-rs-demo` (`=1.16.0` pin) each owe a follow-up once 1.17.0 is live.
 
 ### v1.16 — GFNI S-box; PUBLISHED 2026-10-10
 
@@ -81,9 +100,10 @@ v1.14 F21 result stands (`docs/f21-finalize-result.md`).
 
 ## Open backlog
 
-- Core's crate-level docs (`gmcrypto-core/src/lib.rs`, `sm4-bitsliced-simd`
-  entry) still describe AVX2 / NEON packing only, not the GFNI S-box. Fold
-  the fix into the next `crates/` change; on its own it re-owes Gate #1.
+- `ct_sign_k_class` bench harness builds the class-specific RNG inside the
+  timed window (v1.17 finding, SECURITY.md); move it outside in its own PR so
+  the reading returns to noise level. Why `crypto-bigint` 0.7.6+ amplifies
+  the effect is unexplained.
 - **F21** `ct_sm4_cbc_unpad` — composite window blind
   (`docs/v1.10-scope.md` Q10.9); narrow `finalize()` window distinguishable on
   the pinned local host only (`docs/f21-finalize-result.md`, v1.14): a
@@ -99,7 +119,7 @@ v1.14 F21 result stands (`docs/f21-finalize-result.md`).
 - `unsafe_code = "forbid"` on `gmcrypto-core`. Don't add `unsafe`.
   Exceptions (`unsafe_code = "warn"`, `// SAFETY:` on every block):
   `gmcrypto-c` (raw-pointer FFI) and `gmcrypto-simd` (`core::arch` +
-  `#[target_feature]` on MSRV 1.85).
+  `#[target_feature]` on MSRV 1.87).
 - `#![no_std]` + `alloc` only in `crates/gmcrypto-core/src/`. No `std::` paths.
   No generic `std` feature. A future file helper would be named like
   `std-file-io`. `gmcrypto-c` is `std`-OK.
@@ -116,7 +136,8 @@ v1.14 F21 result stands (`docs/f21-finalize-result.md`).
   lives in tests/benches/workflows only.
 - `Cargo.lock` is gitignored (lib-crate). Don't `git add` it. Anchor is
   `/Cargo.lock` (root only) so `fuzz/Cargo.lock` stays committed.
-- MSRV **1.85**, edition **2024**. Don't use `Integer::is_multiple_of` (1.87).
+- MSRV **1.87**, edition **2024** (raised from 1.85 for the
+  RUSTSEC-2026-0387 `crypto-bigint` 0.7.6 floor). Don't use post-1.87 APIs.
   The one exception is `gmcrypto-simd`'s GFNI path, compiled only on rustc
   >= 1.89 via its `build.rs` cfg (`.claude/rules/simd.md`).
 - `sign_raw_with_id` is `#[doc(hidden)] pub` for dudect only — **not SemVer**.
@@ -145,8 +166,8 @@ cargo test -p gmcrypto-core --features aead-traits
 cargo deny --exclude-dev check   # cargo generate-lockfile first
 cargo deny --features gmcrypto-core/digest-traits,gmcrypto-core/cipher-traits,gmcrypto-core/sm4-bitsliced,gmcrypto-core/sm4-bitsliced-simd,gmcrypto-core/sm4-aead,gmcrypto-core/sm4-xts,gmcrypto-core/crypto-bigint-scalar,gmcrypto-core/sm2-key-exchange,gmcrypto-core/x509,gmcrypto-core/tlcp,gmcrypto-core/aead-traits --exclude-dev check
 
-cargo +1.85 build -p gmcrypto-core
-cargo +1.85 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar,sm2-key-exchange,x509,tlcp,aead-traits
+cargo +1.87 build -p gmcrypto-core
+cargo +1.87 build -p gmcrypto-core --features digest-traits,cipher-traits,sm4-bitsliced,sm4-bitsliced-simd,sm4-aead,sm4-xts,crypto-bigint-scalar,sm2-key-exchange,x509,tlcp,aead-traits
 cargo build -p gmcrypto-core --no-default-features
 
 # wasm32: caller-supplied RNG; these features are pure-core/no_std.

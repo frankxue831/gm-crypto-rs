@@ -41,7 +41,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 # no-confirm KX, record protect/deprotect, chain/pair verify) is always-on;
 # tlcp::chain needs all(tlcp,x509) and the GCM record carrier needs sm4-aead,
 # both already present, so no regen-header IMPLY hack and gmcrypto.h == default.
-gmcrypto-core = { path = "../gmcrypto-core", version = "=1.16.0", features = ["sm4-aead", "sm4-xts", "sm2-key-exchange", "x509", "tlcp"] }
+gmcrypto-core = { path = "../gmcrypto-core", version = "=1.17.0", features = ["sm4-aead", "sm4-xts", "sm2-key-exchange", "x509", "tlcp"] }
 getrandom.workspace = true
 rand_core.workspace = true
 
@@ -106,8 +106,8 @@ option_if_let_else = "allow"
 manual_let_else = "allow"
 missing_const_for_fn = "allow"
 unnecessary_box_returns = "allow"
-# cbindgen recognizes byte-literal `CStr::from_bytes_with_nul`; the
-# `c"..."` literal form is post-MSRV 1.85.
+# cbindgen recognizes byte-literal `CStr::from_bytes_with_nul`, so keep
+# that form instead of `c"..."` literals (stable since Rust 1.77).
 manual_c_str_literals = "allow"
 # Long doc comments on the FFI module + per-entry-point bullets.
 doc_markdown = "allow"
