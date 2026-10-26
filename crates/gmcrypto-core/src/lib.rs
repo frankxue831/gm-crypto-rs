@@ -231,3 +231,19 @@ impl core::fmt::Display for Error {
 }
 
 impl core::error::Error for Error {}
+
+/// The repository README, compiled and run by `cargo test --doc` so its Rust
+/// samples cannot drift from the API (#241, M2). Exists only under
+/// `cfg(doctest)`: never built into the library, never part of the public
+/// API. Gated on the two features the README's "More examples" samples need
+/// (`sm2-key-exchange`, `x509`). CI's existing `cargo test --workspace` step
+/// runs it: workspace feature unification enables both via `gmcrypto-c`'s
+/// dependency on this crate. `--all-features` covers it too.
+// WARNING: these README doctests depend on `sm2-key-exchange` and `x509`
+// being enabled in CI. If `gmcrypto-c` stops enabling either feature, CI
+// silently stops running them. `cargo test -p gmcrypto-core` on its own
+// (default features) does not run the README samples at all. Tracked under
+// "Later" in #241.
+#[cfg(all(doctest, feature = "sm2-key-exchange", feature = "x509"))]
+#[doc = include_str!("../../../README.md")]
+pub struct ReadmeDoctests;
