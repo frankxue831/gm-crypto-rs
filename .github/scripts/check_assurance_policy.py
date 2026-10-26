@@ -17,6 +17,8 @@ def read(path: str) -> str:
 CI = read(".github/workflows/ci.yml")
 GITLEAKS = read(".github/workflows/gitleaks.yml")
 DUDECT_PR = read(".github/workflows/dudect-pr.yml")
+# "nightly" below is the current-main 100K×5 watch (`dudect-main.yml`). The
+# frozen v1.15 study (`dudect-nightly.yml`) is not read or pinned here.
 DUDECT_NIGHTLY = read(".github/workflows/dudect-main.yml")
 TIMING = read("crates/gmcrypto-core/benches/timing_leaks.rs")
 
@@ -487,7 +489,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "cargo-deny": "efc9a2787bc8b48022d35d3419af0e9987c6a11c3a5c44959fc93b1d33be9174",
         "gitleaks scan": "c7889df5e874f1a5cee871c24cd49cc539d845c0627861e49b1a9e6335d1c15f",
         "PR dudect": "8cf76b3c24c5ed8276c718f51849fbaf3a3cb7459278d797f9ae354815b9e9df",
-        "nightly dudect": "ad3df5c7f838a3a33adc161e1344db833ddbea35631a7685dab8ea88a2b92d74",
+        "nightly dudect": "5d49dad849096d4ad83f0b94bc59863d94041b59d297b7228fb48eda7cffa819",
     }
     for label, expected_fingerprint in reviewed_job_fingerprints.items():
         require(
@@ -1252,7 +1254,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         },
         "nightly": {
             "name": "timing-leak nightly (100K×5 median, |tau|<=0.20, features=${{ matrix.features }})",
-            "timeout": "40",
+            "timeout": "75",
             "samples": '"100000"',
             "runs": '"5"',
             "has_skip_if": False,
@@ -3283,8 +3285,8 @@ def mutation_self_test() -> list[str]:
         dudect_nightly=replace_in_job(
             DUDECT_NIGHTLY,
             "full",
-            "    timeout-minutes: 40\n",
-            "    timeout-minutes: 4\n",
+            "    timeout-minutes: 75\n",
+            "    timeout-minutes: 7\n",
             "nightly timeout",
         ),
     )
