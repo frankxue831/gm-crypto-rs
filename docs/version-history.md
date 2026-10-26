@@ -19,8 +19,9 @@ only a condensed current-release block — see its `Don't` section.
 
 ## Cycles
 
-**v1.17 — RUSTSEC-2026-0387 / RUSTSEC-2026-0385 and MSRV 1.87; NOT YET
-PUBLISHED (1.17.0 prepared in #246).**
+**v1.17 — RUSTSEC-2026-0387 / RUSTSEC-2026-0385, MSRV 1.87 and the `mul_var`
+scalar lift; PUBLISHED 2026-10-26 from `41d54a5` (1.17.0, all three crates;
+published by the maintainer).**
 `crypto-bigint` is floored at 0.7.6, which requires `ctutils ^0.4.5`; fresh
 resolution selects `crypto-bigint` 0.7.8 and `ctutils` 0.4.5. 0.7.6 needs Rust
 1.87, so the MSRV moves from 1.85 to 1.87 and ships as a minor, per the README
@@ -52,11 +53,38 @@ must be renamed by the maintainer before the merge. The #241 docs PRs (#243
 README samples doctested, #245 version strings and C linking recipe) land on
 top before Gate #1 runs on the final tip; #244 is subsumed. Per ECOSYSTEM §3,
 `gmcrypto-envelope-lite` (MSRV 1.85 CI) and `gm-crypto-rs-demo` (`=1.16.0`)
-each owe a follow-up once 1.17.0 is live. Gate #1 and the publish remain the
-maintainer's next steps.
+each owe a follow-up once 1.17.0 is live. Gate #1 PASSed on the assembled
+candidate `c400444` against `gmcrypto-envelope-lite` `96c62c1` (#247); #246
+merged as `f60d352` with the #248 lift squashed in, after the maintainer set
+the `main` ruleset's unattributed-changes approval to false and the classic
+branch protection's MSRV check names to 1.87, then #243, #245, #247 and #249
+(CHANGELOG heading dated 2026-10-26) landed in that order and #244 was closed
+as subsumed. The maintainer published simd, core and c from `41d54a5` on
+2026-10-26 and pushed the ED25519-signed tag `v1.17.0`. The publish verify
+builds resolved `crypto-bigint` 0.7.10 and `ctutils` 0.4.6 rather than the
+0.7.8 / 0.4.5 the candidate was tested with: upstream yanked 0.7.8 on
+2026-10-25, 0.7.9 followed the same day, and 0.7.10 (2026-10-26) optimises
+the Montgomery carry propagation and vendors the primitives back from
+`ctutils`, removing the per-limb `Choice` conversions in the inner loop that
+the isolation study implicated; the floor and the lift do not depend on the
+exact version. The first scheduled `dudect-main` on the merged tree
+(2026-10-26, `f60d352`, resolving 0.7.10) read `ct_mul_var` at 0.004–0.024
+per pass on an EPYC 7763 and at 0.005–0.040 on 9V45 and 9V74, with
+`ct_mul_g` and `ct_sign` at noise; its `ct_sign_k_class` sentinel read
+0.26–0.35 on the 7763 leg and 0.17–0.19 on 9V74, in the same band as the
+2026-10-25 pre-upgrade nightly under 0.7.5 (0.11–0.38 across 7763 and 9V45
+legs), below the 0.55 sentinel and non-blocking; the 7763 full-feature leg
+hit the 40-minute timeout before its gate step, as the default leg had on
+the #246 branch. Post-publish page checks: docs.rs built all three crates,
+the `gmcrypto-core` feature-badge counts equal 1.16.0's, each crates.io page
+renders its own README with the `"1.17"` snippets, and the registry shows
+`rust-version` 1.87.
 
 **v1.16 — GFNI SM4 S-box; PUBLISHED 2026-10-10 from `2a7c880` (1.16.0, all
 three crates; published by the maintainer).**
+Gate #1 PASSed at `ea9c0e5`; native GFNI qualification and the maintainer's
+acceptance for the SIMD-only leg are in `docs/native-gfni-qualification.md`,
+"1.16.0 result".
 The batch and four-byte paths merged on 2026-09-30 in #224 (`9fec750`)
 and #226 (`6a53156`), following the x86 SIMD lint fixes in #225.
 The candidate keeps the three workspace crates in lockstep and their sibling

@@ -30,7 +30,9 @@ the project follows [Semantic Versioning](https://semver.org/).
 - Fixes [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387.html)
   and [RUSTSEC-2026-0385](https://rustsec.org/advisories/RUSTSEC-2026-0385.html)
   by flooring `crypto-bigint` at 0.7.6 (which requires `ctutils ^0.4.5`);
-  fresh resolution selects `crypto-bigint` 0.7.8 and `ctutils` 0.4.5. The
+  at release, fresh resolution selects `crypto-bigint` 0.7.10 and `ctutils`
+  0.4.6 (the candidate was tested on 0.7.8 / 0.4.5; upstream yanked 0.7.8 on
+  2026-10-25). The
   MSRV moves to 1.87 because `crypto-bigint` 0.7.6 requires it: MSRV-aware
   resolution on Rust 1.85 previously selected the affected `crypto-bigint`
   0.7.5 / `ctutils` 0.4.2. `fuzz/Cargo.lock` moves to `crypto-bigint` 0.7.8 /

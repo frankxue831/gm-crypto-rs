@@ -30,45 +30,39 @@ Release state table below and in `docs/`.
 
 | | |
 |---|---|
-| Live on crates.io | **`1.16.0`** — all three crates, 2026-10-10 from `2a7c880` (published by the maintainer); tag `v1.16.0` on `origin`, ED25519-verified. Previous: `1.13.0` 2026-09-04 from `5c0ae59`, tag `v1.13.0` ED25519-verified |
-| Workspace version | `1.17.0` = release candidate on PR #246 (RUSTSEC-2026-0387/0385, MSRV 1.87), not yet published; crates.io is still `1.16.0`. A new minor does not always mean crates.io (v0.14 / v1.10 / v1.14 / v1.15 are assurance cycles); don't bump or publish for a no-crate-change cycle |
-| Gate #1 | `docs/ECOSYSTEM.md` §8 must PASS before every publish; latest record `docs/v1.17.0-gate1-evidence.md` (gated SHA `c400444`, branch `gate/v1.17.0-candidate-2`; PASS 2026-10-26 against downstream `96c62c1`). The gated SHA is never the release SHA: the gate attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty, and a PR touching those re-owes it. Running the gate script is ordinary agent work; publishing is not |
+| Live on crates.io | **`1.17.0`** — all three crates, 2026-10-26 from `41d54a5` (published by the maintainer); tag `v1.17.0` on `origin`, ED25519-verified. Previous: `1.16.0` 2026-10-10 from `2a7c880`, tag `v1.16.0` ED25519-verified |
+| Workspace version | `1.17.0` = live. The next bump is the release-prep PR of the next publishing cycle. A new minor does not always mean crates.io (v0.14 / v1.10 / v1.14 / v1.15 are assurance cycles); don't bump or publish for a no-crate-change cycle |
+| Gate #1 | `docs/ECOSYSTEM.md` §8 must PASS before every publish; latest record `docs/v1.17.0-gate1-evidence.md` (gated SHA `c400444`, branch `gate/v1.17.0-candidate-2`; PASS 2026-10-26 against downstream `96c62c1`; attached to the 1.17.0 release tip `41d54a5`). The gated SHA is never the release SHA: the gate attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty, and a PR touching those re-owes it. Running the gate script is ordinary agent work; publishing is not |
 
 `cargo publish` and the SSH-signed tag are the **maintainer's authenticated
 call** — the agent path is branch + PR. The 1.11.0, 1.12.0 and 1.13.0
 publishes were explicit per-release delegations, not a standing grant; the
 maintainer published 1.16.0. The tags have always been the maintainer's.
 
-### v1.17 — RUSTSEC-2026-0387/0385, MSRV 1.87; NOT YET PUBLISHED
+### v1.17 — RUSTSEC-2026-0387/0385, MSRV 1.87, `mul_var` lift; PUBLISHED 2026-10-26
 
-1.17.0 is prepared on PR #246: `crypto-bigint` floored at 0.7.6 (fresh
-resolution 0.7.8, `ctutils` 0.4.5), MSRV 1.85 → 1.87, SM2 signing about 60%
-slower locally. `sm2::mul_var` lifts its scalar to `k + n` / `k + 2n` so no
-doubling acts on the identity: `crypto-bigint` 0.7.6+ timed that path
-differently on the EPYC 7763 runner class (`ct_mul_var` 0.05–0.35; study
-and fix in `docs/version-history.md`). Publishing needs the maintainer's
-separate go-ahead and a Gate #1 PASS on the release tree first (this PR
-touches `crates/` and `Cargo.toml`). The `ct_sign_k_class` harness fix
-follows as its own PR.
-The #241 docs PRs (#243 README samples doctested, #245 version strings and
-C linking recipe, bumped to `"1.17"`) land on top before the gate runs on
-the final tip; #244 is subsumed by this PR's identical `cipher.rs` edit.
+1.17.0 is live from `41d54a5` (tag `v1.17.0`, ED25519-verified):
+`crypto-bigint` floored at 0.7.6 for RUSTSEC-2026-0387/0385, MSRV 1.85 →
+1.87, SM2 signing about 60% slower locally, and `sm2::mul_var` lifting its
+scalar to `k + n` / `k + 2n` so no doubling acts on the identity (the
+`ct_mul_var` elevation on the EPYC 7763 runner class under 0.7.6+; study
+and fix in `docs/version-history.md`). Gate #1 PASSed at `c400444` and
+attaches to the release tip. Fresh resolution at publish time was
+`crypto-bigint` 0.7.10 / `ctutils` 0.4.6, not the 0.7.8 / 0.4.5 the
+candidate was tested with: upstream yanked 0.7.8 on 2026-10-25, and 0.7.10
+drops the per-limb `Choice` conversions in the Montgomery inner loop that
+the study implicated. The first scheduled `dudect-main` on the merged tree
+under 0.7.10 read `ct_mul_var` at the noise floor on every runner class it
+drew, a 7763 included.
+
+The v1.15 calibration through 2026-11-09 stays on its frozen pre-GFNI
+source; it does not validate this release (study isolation: #227). Do not
+repin the study, restart its calendar, or transfer its evidence.
 
 Downstream: `docs/ECOSYSTEM.md` §3 ties the ecosystem MSRV to core's
 `rust-version`, so `gmcrypto-envelope-lite` (MSRV 1.85 CI job) and
-`gm-crypto-rs-demo` (`=1.16.0` pin) each owe a follow-up once 1.17.0 is live.
-
-### v1.16 — GFNI S-box; PUBLISHED 2026-10-10
-
-1.16.0 is live from `2a7c880` (tag `v1.16.0`, ED25519-verified). Gate #1
-PASSed at `ea9c0e5`; native GFNI qualification and the maintainer's
-acceptance for the SIMD-only leg are in `docs/native-gfni-qualification.md`,
-"1.16.0 result". Narrative: `docs/version-history.md`.
-
-The v1.15 calibration through 2026-11-09 stays on its frozen pre-GFNI source;
-it does not validate this release. Study isolation is tracked in #227.
-Do not repin the study, restart its calendar, or transfer its evidence to
-the GFNI implementation.
+`gm-crypto-rs-demo` (`=1.16.0` pin) each owe a follow-up now that 1.17.0
+is live.
 
 ### v1.15 — noise-twin calibration (assurance cycle; direction approved 2026-09-27)
 
@@ -101,9 +95,21 @@ v1.14 F21 result stands (`docs/f21-finalize-result.md`).
 ## Open backlog
 
 - `ct_sign_k_class` bench harness builds the class-specific RNG inside the
-  timed window (v1.17 finding, SECURITY.md); move it outside in its own PR so
-  the reading returns to noise level. Why `crypto-bigint` 0.7.6+ amplifies
-  the effect is unexplained.
+  timed window (v1.17 finding, SECURITY.md); move it outside in its own PR.
+  It is a non-blocking sentinel target (gross gate 0.55): hosted 100K
+  nightlies read medians of 0.11–0.38 across EPYC 7763 and 9V45 legs before
+  the upgrade (2026-10-25, `crypto-bigint` 0.7.5) and 0.02–0.18 on 9V45 and
+  9V74 after it (2026-10-26, 0.7.10), with 0.26–0.35 per pass on a 7763 leg
+  that timed out before its median. Why 0.7.6+ amplified the effect locally
+  is unexplained.
+- `dudect-main` legs that draw an EPYC 7763 hit the 40-minute job timeout
+  since SM2 slowed (default leg on the #246 branch; full-feature leg on
+  `main` 2026-10-26). `check_assurance_policy.py` pins that timeout together
+  with the frozen `dudect-nightly` study, so raising it is its own reviewed
+  policy-script PR, not a workflow edit.
+- `fuzz/Cargo.lock` pins `crypto-bigint` 0.7.8, yanked upstream on
+  2026-10-25; the fuzz nightly still builds from the lock. The next
+  fuzz-touching PR refreshes it to 0.7.10 / `ctutils` 0.4.6.
 - **F21** `ct_sm4_cbc_unpad` — composite window blind
   (`docs/v1.10-scope.md` Q10.9); narrow `finalize()` window distinguishable on
   the pinned local host only (`docs/f21-finalize-result.md`, v1.14): a
