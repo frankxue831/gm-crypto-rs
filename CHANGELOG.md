@@ -3,7 +3,7 @@
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project follows [Semantic Versioning](https://semver.org/).
 
-## [1.17.0] - 2026-10-25
+## [1.17.0] - 2026-10-26
 
 ### Changed
 
