@@ -94,14 +94,11 @@ v1.14 F21 result stands (`docs/f21-finalize-result.md`).
 
 ## Open backlog
 
-- `ct_sign_k_class` bench harness builds the class-specific RNG inside the
-  timed window (v1.17 finding, SECURITY.md); move it outside in its own PR.
-  It is a non-blocking sentinel target (gross gate 0.55): hosted 100K
-  nightlies read medians of 0.11–0.38 across EPYC 7763 and 9V45 legs before
-  the upgrade (2026-10-25, `crypto-bigint` 0.7.5) and 0.02–0.18 on 9V45 and
-  9V74 after it (2026-10-26, 0.7.10), with 0.26–0.35 per pass on a 7763 leg
-  that timed out before its median. Why 0.7.6+ amplified the effect locally
-  is unexplained.
+- `ct_sign_k_class` harness fix (#252, 2026-10-26: class RNG built outside
+  the timed window; hosted smoke medians 0.022–0.026 on 9V74/9V45 against
+  0.09–0.13 before). Still owed: the first hosted 100K `dudect-main` reading
+  on the merged tree, recorded in SECURITY.md's `ct_sign_k_class` paragraph.
+  The target stays a non-blocking sentinel (gross gate 0.55).
 - `dudect-main` legs that draw an EPYC 7763 hit the 40-minute job timeout
   since SM2 slowed (default leg on the #246 branch; full-feature leg on
   `main` 2026-10-26). `check_assurance_policy.py` pins that timeout together
