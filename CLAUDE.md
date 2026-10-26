@@ -95,8 +95,8 @@ v1.14 F21 result stands (`docs/f21-finalize-result.md`).
 ## Open backlog
 
 - `ct_sign_k_class` harness fix (#252, 2026-10-26: class RNG built outside
-  the timed window; hosted smoke medians 0.022–0.026 on 9V74/9V45 against
-  0.09–0.13 before). Still owed: the first hosted 100K `dudect-main` reading
+  the timed window; hosted smoke medians 0.022–0.028 on EPYC 9V74/9V45 and
+  Xeon 6973P-C against 0.09–0.13 before). Still owed: the first hosted 100K `dudect-main` reading
   on the merged tree, recorded in SECURITY.md's `ct_sign_k_class` paragraph.
   The target stays a non-blocking sentinel (gross gate 0.55).
 - `dudect-main` legs that draw an EPYC 7763 hit the 40-minute job timeout

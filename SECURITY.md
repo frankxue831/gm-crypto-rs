@@ -428,12 +428,12 @@ RNGs before the sample loop and rewinds them outside the window, so the
 timed closure holds only the signing call. Local 100K readings on
 crypto-bigint 0.7.10: old harness `|tau|` 0.083–0.094 (`|t|` 11–21), new
 harness 0.009–0.012 (`|t|` at most 3.1). The first hosted PR smoke on the
-fix (10K×3 median) read 0.022–0.026 across EPYC 9V74 and 9V45 slots. Why
-0.7.6+ amplified the old harness artefact locally is unexplained; the
-first hosted 100K nightly on the merged tree is the remaining
-confirmation. The target is a non-blocking sentinel (gross regression
-gate 0.55), not a composite-gate target; readings remain below the
-sentinel.
+fix (10K×3 median) read 0.022–0.028 across EPYC 9V74, EPYC 9V45 and Xeon
+6973P-C slots. Why 0.7.6+ amplified the old harness artefact locally is
+unexplained; the first hosted 100K nightly on the merged tree is the
+remaining confirmation. The target is a non-blocking sentinel (gross
+regression gate 0.55), not a composite-gate target; readings remain below
+the sentinel.
 
 ### v1.0 constant-time baseline (settled — v0.18 / v0.19 / v0.20)
 
