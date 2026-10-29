@@ -1,5 +1,7 @@
 # gm-crypto-rs
 
+English | [中文](README.zh-CN.md)
+
 Pure-Rust SM2 / SM3 / SM4 — the Chinese national cryptographic algorithms —
 with constant-time discipline that is **measured in CI**, not just intended.
 
@@ -17,28 +19,23 @@ written against `subtle`'s constant-time primitives and guarded by a
 `dudect` timing-leak harness that blocks merges.
 
 ```rust
-use gmcrypto_core::sm2::{DEFAULT_SIGNER_ID, Sm2PrivateKey, sign_with_id, verify_with_id};
-use gmcrypto_core::sm3;
-use getrandom::SysRng; // any `rand_core::TryCryptoRng`; this crate ships no RNG
+use gmcrypto_core::{sm3, sm4};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let digest = sm3::hash(b"hello");                     // SM3: 32 bytes
+    let digest = sm3::hash(b"abc");                       // SM3: 32 bytes
     assert_eq!(digest.len(), 32);
 
-    // New SM2 key: 32 random bytes, retried in the ~2^-32 case they fall
-    // outside [1, n-2]. (Or load one: `pkcs8`, `sec1`, `pem` modules.)
-    let key = loop {
-        let mut secret_32 = [0u8; 32];
-        getrandom::fill(&mut secret_32)?;
-        if let Some(key) = Sm2PrivateKey::from_bytes_be(&secret_32).into_option() {
-            break key;
-        }
-    };
-    let sig = sign_with_id(&key, DEFAULT_SIGNER_ID, b"hello", &mut SysRng)?;
-    assert!(verify_with_id(&key.public_key(), DEFAULT_SIGNER_ID, b"hello", &sig));
+    // SM4-CBC with PKCS#7 padding. Key and IV come from a CSPRNG; never reuse an IV.
+    let (mut key, mut iv) = ([0u8; 16], [0u8; 16]);
+    getrandom::fill(&mut key)?;
+    getrandom::fill(&mut iv)?;
+    let ct = sm4::mode_cbc::encrypt(&key, &iv, b"hello sm4");
+    assert_eq!(sm4::mode_cbc::decrypt(&key, &iv, &ct).as_deref(), Some(&b"hello sm4"[..]));
     Ok(())
 }
 ```
+
+SM2 signing is the first of the [examples further down](#more-examples).
 
 > ⚠️ **Not independently audited.** No third-party / external security audit has
 > been performed. Assurance is internal: a multi-model adversarial pre-publish
@@ -109,14 +106,17 @@ Three crates, released together at one lockstep version:
 | **Production track record** | **thin — first published 2026** | years | years |
 
 A dash means "not offered as a documented feature", checked against each
-project's crates.io metadata and repository in July 2026 — not a claim that
-the work is absent from someone's tree, and worth re-checking before you rely
-on it.
+project's crates.io metadata and repository on 2026-10-28 (RustCrypto `sm2`
+0.14.0 at `RustCrypto/elliptic-curves@1892460`, `sm4` 0.6.0 at
+`RustCrypto/block-ciphers@b99ebe6`, `libsm` 0.6.1 at `citahub/libsm@6a5943c`)
+— not a claim that the work is absent from someone's tree, and worth
+re-checking before you rely on it.
 
 The last two rows are the honest counterweight and are meant to stay. If your
 priority is the longest field exposure, `libsm` has years of it and this does
-not. If your priority is verifiable constant-time discipline, a C ABI, or TLCP
-building blocks, none of the alternatives offer them.
+not. If your priority is a timing-leak check in CI or live interop tests against
+GmSSL: as of 2026-10-28, none of the others provides these as documented
+features.
 
 ## How "constant-time" is checked
 
@@ -173,6 +173,32 @@ ciphertexts and AEAD output byte-for-byte.
   peer I dialed". Binding an identity to an endpoint is the caller's, permanently.
 
 ## More examples
+
+**SM2 sign / verify** with the default signer ID:
+
+```rust
+use gmcrypto_core::sm2::{DEFAULT_SIGNER_ID, Sm2PrivateKey, sign_with_id, verify_with_id};
+use gmcrypto_core::sm3;
+use getrandom::SysRng; // any `rand_core::TryCryptoRng`; this crate ships no RNG
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let digest = sm3::hash(b"hello");                     // SM3: 32 bytes
+    assert_eq!(digest.len(), 32);
+
+    // New SM2 key: 32 random bytes, retried in the ~2^-32 case they fall
+    // outside [1, n-2]. (Or load one: `pkcs8`, `sec1`, `pem` modules.)
+    let key = loop {
+        let mut secret_32 = [0u8; 32];
+        getrandom::fill(&mut secret_32)?;
+        if let Some(key) = Sm2PrivateKey::from_bytes_be(&secret_32).into_option() {
+            break key;
+        }
+    };
+    let sig = sign_with_id(&key, DEFAULT_SIGNER_ID, b"hello", &mut SysRng)?;
+    assert!(verify_with_id(&key.public_key(), DEFAULT_SIGNER_ID, b"hello", &sig));
+    Ok(())
+}
+```
 
 **SM2 key exchange** (`sm2-key-exchange`) — authenticated two-party agreement
 with mandatory key confirmation. Each step consumes the state machine, so an
