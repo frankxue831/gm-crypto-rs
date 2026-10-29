@@ -93,35 +93,25 @@ Three crates, released together at one lockstep version:
 
 ## What this crate provides
 
-- **Timing checks in CI.** A `dudect` harness covers 20 secret-dependent
-  operations plus a negative control that must fire; 16 of them block merges.
-  It runs on pull requests that touch crypto code and nightly
-  ([`dudect-pr.yml`](.github/workflows/dudect-pr.yml),
-  [`dudect-nightly.yml`](.github/workflows/dudect-nightly.yml)). See
-  [how it's checked](#how-constant-time-is-checked) for what a pass does and
-  doesn't mean.
-- **Fuzzing in CI.** 35 `cargo-fuzz` targets run nightly
-  ([`fuzz-nightly.yml`](.github/workflows/fuzz-nightly.yml),
-  [`fuzz/fuzz_targets`](fuzz/fuzz_targets)).
-- **GmSSL interop.** Every CI run builds GmSSL 3.2.0 and compares signatures,
-  ciphertexts and AEAD output byte for byte in 13 tests
-  ([`ci.yml`](.github/workflows/ci.yml)).
-- **SM4 without secret-indexed lookups by default.** The S-box is a scan over
-  all 256 entries, at a real cost in speed; bitsliced and SIMD backends are
-  optional ([`sm4/cipher.rs`](crates/gmcrypto-core/src/sm4/cipher.rs)).
-- **A C ABI** with 112 entry points ([`gmcrypto-c`](crates/gmcrypto-c)).
-- **`no_std` + `alloc`**, with wasm32 builds in CI.
+| | This crate | Where to check |
+|---|---|---|
+| Timing checks in CI | ✅ `dudect` on 20 secret-dependent operations plus a negative control that must fire; 16 block merges. Runs on pull requests that touch crypto code, and nightly | [`dudect-pr.yml`](.github/workflows/dudect-pr.yml), [`dudect-nightly.yml`](.github/workflows/dudect-nightly.yml), [how it's checked](#how-constant-time-is-checked) |
+| Fuzzing in CI | ✅ 35 `cargo-fuzz` targets, nightly | [`fuzz-nightly.yml`](.github/workflows/fuzz-nightly.yml), [`fuzz/fuzz_targets`](fuzz/fuzz_targets) |
+| GmSSL 3.2.0 interop | ✅ 13 byte-for-byte tests (signatures, ciphertexts, AEAD) on every CI run | [`ci.yml`](.github/workflows/ci.yml) |
+| SM4 S-box | ✅ no secret-indexed table lookups by default (256-entry scan, slower; bitsliced / SIMD optional) | [`sm4/cipher.rs`](crates/gmcrypto-core/src/sm4/cipher.rs) |
+| C ABI | ✅ 112 entry points | [`gmcrypto-c`](crates/gmcrypto-c) |
+| `no_std` | ✅ `no_std` + `alloc`; wasm32 builds in CI | [`ci.yml`](.github/workflows/ci.yml) |
+| **External security audit** | **none** | [`SECURITY.md`](SECURITY.md) |
+| **Production track record** | **thin: first published 2026, one maintainer** | [`CHANGELOG.md`](CHANGELOG.md) |
 
-What it doesn't have: an external security audit, or a long production track
-record (first published 2026, one maintainer). RustCrypto's `sm2` / `sm3` /
-`sm4` and `libsm` are more mature and far more widely used; if you need a
-long track record, use them.
+If you need a long production track record, RustCrypto's `sm2` / `sm3` /
+`sm4` and `libsm` are more mature and far more widely used, and a better fit.
 
 ## How "constant-time" is checked
 
-The differentiator is not the design intent — [`RustCrypto/sm2`](https://docs.rs/sm2/)
-aims for constant-time too — it is the **in-CI regression gate**. Every PR
-and every night, a [`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
+The check is an **in-CI regression gate**, not just design intent. On every
+pull request that touches crypto code, and every night, a
+[`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
 times each secret-touching operation under two input classes and gates the
 per-target `|tau|` statistic. A deliberately leaky `negative_control` must
 fire on every run, proving the harness can still see a leak.

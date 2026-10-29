@@ -92,11 +92,20 @@ C 语言等调用方请用 [`gmcrypto-c`](crates/gmcrypto-c/README.md)。`gmcryp
 
 此外，CI 每次都会和 GmSSL 3.2.0（参考实现，固定版本从源码构建）跑 13 项互通测试，逐字节比对签名、密文和 AEAD 输出。这项测试目前不阻止合并。
 
-## 侧重点
+## 本库提供什么
 
-本项目的侧重点是：在 CI 里做计时检测和模糊测试，并提供 C ABI。
+| | 本库 | 在哪里核对 |
+|---|---|---|
+| CI 计时检测 | ✅ 用 `dudect` 检测 20 个涉及密钥的操作，外加一个必须被检出的对照组；其中 16 个超过阈值会阻止合并。改动密码学代码的 PR 和每晚都会跑 | [`dudect-pr.yml`](.github/workflows/dudect-pr.yml)、[`dudect-nightly.yml`](.github/workflows/dudect-nightly.yml) |
+| CI 模糊测试 | ✅ 35 个 `cargo-fuzz` 目标，每晚运行 | [`fuzz-nightly.yml`](.github/workflows/fuzz-nightly.yml)、[`fuzz/fuzz_targets`](fuzz/fuzz_targets) |
+| 与 GmSSL 3.2.0 互通 | ✅ 每次 CI 跑 13 项逐字节比对（签名、密文、AEAD） | [`ci.yml`](.github/workflows/ci.yml) |
+| SM4 S 盒 | ✅ 默认不用密钥相关的字节查表（扫描全部 256 项，速度较慢；可选 bitsliced / SIMD） | [`sm4/cipher.rs`](crates/gmcrypto-core/src/sm4/cipher.rs) |
+| C ABI | ✅ 112 个入口函数 | [`gmcrypto-c`](crates/gmcrypto-c) |
+| `no_std` | ✅ `no_std` + `alloc`；CI 构建 wasm32 | [`ci.yml`](.github/workflows/ci.yml) |
+| **第三方安全审计** | **没有** | [`SECURITY.md`](SECURITY.md) |
+| **实际使用记录** | **很少：2026 年首次发布，一个人维护** | [`CHANGELOG.md`](CHANGELOG.md) |
 
-`libsm` 和 RustCrypto 都是成熟的库，已经有多年的实际使用，用的人也多得多；本项目 2026 年才首次发布，也没有第三方审计。如果你最看重长期的实际使用记录，选它们更合适。每一项的链接见[英文 README](README.md#what-this-crate-provides)。
+如果你需要长期的实际使用记录，RustCrypto 的 `sm2` / `sm3` / `sm4` 和 `libsm` 更成熟、用的人也多得多，更适合你。
 
 ## 不包含什么
 
