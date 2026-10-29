@@ -94,7 +94,7 @@ C 语言等调用方请用 [`gmcrypto-c`](crates/gmcrypto-c/README.md)。`gmcryp
 
 ## 和其他实现的区别
 
-和 `libsm`、RustCrypto `sm2` / `sm4` 相比，本项目在 CI 里做计时检测，并和 GmSSL 实时跑互通测试。截至 2026-10-28（核对的是 RustCrypto `sm2` 0.14.0、`sm4` 0.6.0 和 `libsm` 0.6.1 的 crates.io 信息与仓库），其他几家都没有把这些作为文档化功能提供；这不代表它们的代码里一定没有，使用前建议自己再核对。
+和 `libsm`、RustCrypto `sm2` / `sm4` 相比，本项目在 CI 里做计时检测和模糊测试，并提供 C ABI。截至 2026-10-28（核对的是 RustCrypto `sm2` 0.14.0、`sm4` 0.6.0 和 `libsm` 0.6.1 的 crates.io 信息与仓库），其他几家都没有把这些作为文档化功能提供；这不代表它们的代码里一定没有，使用前建议自己再核对。
 
 反过来说，三者都没有第三方审计；`libsm` 和 RustCrypto 已经有多年的实际使用，本项目 2026 年才首次发布。如果你最看重长期的实际使用记录，它们更合适。详细对比表见[英文 README](README.md#why-this-rather-than-the-alternatives)。
 

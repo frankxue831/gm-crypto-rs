@@ -114,9 +114,8 @@ re-checking before you rely on it.
 
 The last two rows are the honest counterweight and are meant to stay. If your
 priority is the longest field exposure, `libsm` has years of it and this does
-not. If your priority is a timing-leak check in CI or live interop tests against
-GmSSL: as of 2026-10-28, none of the others provides these as documented
-features.
+not. If your priority is a timing-leak check in CI, fuzzing in CI, or a C ABI: as
+of 2026-10-28, none of the others provides these as documented features.
 
 ## How "constant-time" is checked
 
