@@ -92,11 +92,11 @@ C 语言等调用方请用 [`gmcrypto-c`](crates/gmcrypto-c/README.md)。`gmcryp
 
 此外，CI 每次都会和 GmSSL 3.2.0（参考实现，固定版本从源码构建）跑 13 项互通测试，逐字节比对签名、密文和 AEAD 输出。这项测试目前不阻止合并。
 
-## 和其他实现的区别
+## 侧重点
 
-和 `libsm`、RustCrypto `sm2` / `sm4` 相比，本项目在 CI 里做计时检测和模糊测试，并提供 C ABI。截至 2026-10-28（核对的是 RustCrypto `sm2` 0.14.0、`sm4` 0.6.0 和 `libsm` 0.6.1 的 crates.io 信息与仓库），其他几家都没有把这些作为文档化功能提供；这不代表它们的代码里一定没有，使用前建议自己再核对。
+本项目的侧重点是：在 CI 里做计时检测和模糊测试，并提供 C ABI。
 
-反过来说，三者都没有第三方审计；`libsm` 和 RustCrypto 已经有多年的实际使用，本项目 2026 年才首次发布。如果你最看重长期的实际使用记录，它们更合适。详细对比表见[英文 README](README.md#why-this-rather-than-the-alternatives)。
+`libsm` 和 RustCrypto 都是成熟的库，已经有多年的实际使用，用的人也多得多；本项目 2026 年才首次发布，也没有第三方审计。如果你最看重长期的实际使用记录，选它们更合适。每一项的链接见[英文 README](README.md#what-this-crate-provides)。
 
 ## 不包含什么
 

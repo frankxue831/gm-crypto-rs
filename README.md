@@ -91,31 +91,31 @@ Three crates, released together at one lockstep version:
 | [`gmcrypto-c`](https://crates.io/crates/gmcrypto-c) | C ABI, cdylib + staticlib: 112 entry points, committed [`gmcrypto.h`](crates/gmcrypto-c/include/gmcrypto.h) drift-checked in CI. A default build exports the whole surface. |
 | [`gmcrypto-simd`](https://crates.io/crates/gmcrypto-simd) | Internal AVX2 / GFNI / NEON / CLMUL / PMULL backend. No stable Rust API. |
 
-## Why this rather than the alternatives
+## What this crate provides
 
-| | gm-crypto-rs | `libsm` | RustCrypto `sm2` / `sm4` |
-|---|---|---|---|
-| SM2 + SM3 + SM4 in one crate | ✅ | ✅ | separate crates |
-| Timing-leak harness in CI | ✅ 20 `dudect` targets, 16 blocking | — | — |
-| Fuzzing | ✅ 35 targets, nightly | — | — |
-| C ABI | ✅ 112 entry points | — | — |
-| TLCP (GB/T 38636) toolkit | ✅ | — | — |
-| `no_std` | ✅ | not advertised | ✅ |
-| Enforced SemVer (`cargo-semver-checks`) | ✅ | — | — |
-| **External security audit** | **none** | none | none |
-| **Production track record** | **thin — first published 2026** | years | years |
+- **Timing checks in CI.** A `dudect` harness covers 20 secret-dependent
+  operations plus a negative control that must fire; 16 of them block merges.
+  It runs on pull requests that touch crypto code and nightly
+  ([`dudect-pr.yml`](.github/workflows/dudect-pr.yml),
+  [`dudect-nightly.yml`](.github/workflows/dudect-nightly.yml)). See
+  [how it's checked](#how-constant-time-is-checked) for what a pass does and
+  doesn't mean.
+- **Fuzzing in CI.** 35 `cargo-fuzz` targets run nightly
+  ([`fuzz-nightly.yml`](.github/workflows/fuzz-nightly.yml),
+  [`fuzz/fuzz_targets`](fuzz/fuzz_targets)).
+- **GmSSL interop.** Every CI run builds GmSSL 3.2.0 and compares signatures,
+  ciphertexts and AEAD output byte for byte in 13 tests
+  ([`ci.yml`](.github/workflows/ci.yml)).
+- **SM4 without secret-indexed lookups by default.** The S-box is a scan over
+  all 256 entries, at a real cost in speed; bitsliced and SIMD backends are
+  optional ([`sm4/cipher.rs`](crates/gmcrypto-core/src/sm4/cipher.rs)).
+- **A C ABI** with 112 entry points ([`gmcrypto-c`](crates/gmcrypto-c)).
+- **`no_std` + `alloc`**, with wasm32 builds in CI.
 
-A dash means "not offered as a documented feature", checked against each
-project's crates.io metadata and repository on 2026-10-28 (RustCrypto `sm2`
-0.14.0 at `RustCrypto/elliptic-curves@1892460`, `sm4` 0.6.0 at
-`RustCrypto/block-ciphers@b99ebe6`, `libsm` 0.6.1 at `citahub/libsm@6a5943c`)
-— not a claim that the work is absent from someone's tree, and worth
-re-checking before you rely on it.
-
-The last two rows are the honest counterweight and are meant to stay. If your
-priority is the longest field exposure, `libsm` has years of it and this does
-not. If your priority is a timing-leak check in CI, fuzzing in CI, or a C ABI: as
-of 2026-10-28, none of the others provides these as documented features.
+What it doesn't have: an external security audit, or a long production track
+record (first published 2026, one maintainer). RustCrypto's `sm2` / `sm3` /
+`sm4` and `libsm` are more mature and far more widely used; if you need a
+long track record, use them.
 
 ## How "constant-time" is checked
 
