@@ -24,6 +24,8 @@ getrandom = { version = "0.4", default-features = false, features = ["sys_rng"] 
 
 ## 最小示例：SM3 和 SM4
 
+**CBC 只提供保密性，不提供认证。** 以下示例只演示原始算法。需要认证加密时，请开启 `sm4-aead`，使用 SM4-GCM / SM4-CCM。如果协议必须使用 CBC，应采用先加密后 MAC：用独立的 HMAC-SM3 密钥认证 `IV || ciphertext`，并在**解密之前**验证标签。详见 [CBC 安全说明](crates/gmcrypto-core/src/sm4/mode_cbc.rs)。
+
 ```rust
 use gmcrypto_core::{sm3, sm4};
 
@@ -86,7 +88,7 @@ C 语言等调用方请用 [`gmcrypto-c`](crates/gmcrypto-c/README.md)。`gmcryp
 
 ## 计时检测是怎么做的
 
-涉及密钥的代码按常量时间的写法实现（基于 `subtle`）。项目在 CI 里用 [`dudect-bencher`](https://docs.rs/dudect-bencher/) 检查这一点：每个 PR 和每晚，对 20 个涉及密钥的操作分两类输入计时并比较。其中 16 个在 `|tau|` 超过 0.20 时阻止合并，另有一个故意泄漏的对照组每次都必须被检出，用来证明检测本身还有效。
+涉及密钥的代码按常量时间的写法实现（基于 `subtle`）。项目在 CI 里用 [`dudect-bencher`](https://docs.rs/dudect-bencher/) 检查这一点：改动密码学代码的 PR 和每晚，对 20 个涉及密钥的操作分两类输入计时并比较。其中 16 个在 `|tau|` 超过 0.20 时阻止合并，另有一个故意泄漏的对照组每次都必须被检出，用来证明检测本身还有效。
 
 这种检测只能说明**在给定样本量下没有检出**计时差异，不能证明没有。完整说明和历史数据见 [`SECURITY.md`](SECURITY.md)。
 
@@ -96,7 +98,7 @@ C 语言等调用方请用 [`gmcrypto-c`](crates/gmcrypto-c/README.md)。`gmcryp
 
 | | 本库 | 在哪里核对 |
 |---|---|---|
-| CI 计时检测 | ✅ 用 `dudect` 检测 20 个涉及密钥的操作，外加一个必须被检出的对照组；其中 16 个超过阈值会阻止合并。改动密码学代码的 PR 和每晚都会跑 | [`dudect-pr.yml`](.github/workflows/dudect-pr.yml)、[`dudect-nightly.yml`](.github/workflows/dudect-nightly.yml) |
+| CI 计时检测 | ✅ 用 `dudect` 检测 20 个涉及密钥的操作，外加一个必须被检出的对照组；其中 16 个超过阈值会阻止合并。改动密码学代码的 PR 和每晚都会跑 | [`dudect-pr.yml`](.github/workflows/dudect-pr.yml)、[`dudect-main.yml`](.github/workflows/dudect-main.yml) |
 | CI 模糊测试 | ✅ 35 个 `cargo-fuzz` 目标，每晚运行 | [`fuzz-nightly.yml`](.github/workflows/fuzz-nightly.yml)、[`fuzz/fuzz_targets`](fuzz/fuzz_targets) |
 | 与 GmSSL 3.2.0 互通 | ✅ 每次 CI 跑 13 项逐字节比对（签名、密文、AEAD） | [`ci.yml`](.github/workflows/ci.yml) |
 | SM4 S 盒 | ✅ 默认不用密钥相关的字节查表（扫描全部 256 项，速度较慢；可选 bitsliced / SIMD） | [`sm4/cipher.rs`](crates/gmcrypto-core/src/sm4/cipher.rs) |

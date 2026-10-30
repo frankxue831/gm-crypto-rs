@@ -18,6 +18,12 @@ callers through a complete, always-on C ABI. Every secret-touching path is
 written against `subtle`'s constant-time primitives and guarded by a
 `dudect` timing-leak harness that blocks merges.
 
+**CBC provides confidentiality only, not authenticity.** This example demonstrates
+the raw primitive. For authenticated encryption, use SM4-GCM / SM4-CCM with
+`sm4-aead`. If your protocol requires CBC, use encrypt-then-MAC with a separate
+HMAC-SM3 key: authenticate `IV || ciphertext` and verify the tag **before**
+decrypting. See the [CBC security guidance](crates/gmcrypto-core/src/sm4/mode_cbc.rs).
+
 ```rust
 use gmcrypto_core::{sm3, sm4};
 
@@ -95,7 +101,7 @@ Three crates, released together at one lockstep version:
 
 | | This crate | Where to check |
 |---|---|---|
-| Timing checks in CI | ✅ `dudect` on 20 secret-dependent operations plus a negative control that must fire; 16 block merges. Runs on pull requests that touch crypto code, and nightly | [`dudect-pr.yml`](.github/workflows/dudect-pr.yml), [`dudect-nightly.yml`](.github/workflows/dudect-nightly.yml), [how it's checked](#how-constant-time-is-checked) |
+| Timing checks in CI | ✅ `dudect` on 20 secret-dependent operations plus a negative control that must fire; 16 block merges. Runs on pull requests that touch crypto code, and nightly | [`dudect-pr.yml`](.github/workflows/dudect-pr.yml), [`dudect-main.yml`](.github/workflows/dudect-main.yml), [how it's checked](#how-constant-time-is-checked) |
 | Fuzzing in CI | ✅ 35 `cargo-fuzz` targets, nightly | [`fuzz-nightly.yml`](.github/workflows/fuzz-nightly.yml), [`fuzz/fuzz_targets`](fuzz/fuzz_targets) |
 | GmSSL 3.2.0 interop | ✅ 13 byte-for-byte tests (signatures, ciphertexts, AEAD) on every CI run | [`ci.yml`](.github/workflows/ci.yml) |
 | SM4 S-box | ✅ no secret-indexed table lookups by default (256-entry scan, slower; bitsliced / SIMD optional) | [`sm4/cipher.rs`](crates/gmcrypto-core/src/sm4/cipher.rs) |
