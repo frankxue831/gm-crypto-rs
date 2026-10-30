@@ -1,5 +1,7 @@
 # gm-crypto-rs
 
+English | [中文](README.zh-CN.md)
+
 Pure-Rust SM2 / SM3 / SM4 — the Chinese national cryptographic algorithms —
 with constant-time discipline that is **measured in CI**, not just intended.
 
@@ -16,29 +18,30 @@ callers through a complete, always-on C ABI. Every secret-touching path is
 written against `subtle`'s constant-time primitives and guarded by a
 `dudect` timing-leak harness that blocks merges.
 
+**CBC provides confidentiality only, not authenticity.** This example demonstrates
+the raw primitive. For authenticated encryption, use SM4-GCM / SM4-CCM with
+`sm4-aead`. If your protocol requires CBC, use encrypt-then-MAC with a separate
+HMAC-SM3 key: authenticate `IV || ciphertext` and verify the tag **before**
+decrypting. See the [CBC security guidance](crates/gmcrypto-core/src/sm4/mode_cbc.rs).
+
 ```rust
-use gmcrypto_core::sm2::{DEFAULT_SIGNER_ID, Sm2PrivateKey, sign_with_id, verify_with_id};
-use gmcrypto_core::sm3;
-use getrandom::SysRng; // any `rand_core::TryCryptoRng`; this crate ships no RNG
+use gmcrypto_core::{sm3, sm4};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let digest = sm3::hash(b"hello");                     // SM3: 32 bytes
+    let digest = sm3::hash(b"abc");                       // SM3: 32 bytes
     assert_eq!(digest.len(), 32);
 
-    // New SM2 key: 32 random bytes, retried in the ~2^-32 case they fall
-    // outside [1, n-2]. (Or load one: `pkcs8`, `sec1`, `pem` modules.)
-    let key = loop {
-        let mut secret_32 = [0u8; 32];
-        getrandom::fill(&mut secret_32)?;
-        if let Some(key) = Sm2PrivateKey::from_bytes_be(&secret_32).into_option() {
-            break key;
-        }
-    };
-    let sig = sign_with_id(&key, DEFAULT_SIGNER_ID, b"hello", &mut SysRng)?;
-    assert!(verify_with_id(&key.public_key(), DEFAULT_SIGNER_ID, b"hello", &sig));
+    // SM4-CBC with PKCS#7 padding. Key and IV come from a CSPRNG; never reuse an IV.
+    let (mut key, mut iv) = ([0u8; 16], [0u8; 16]);
+    getrandom::fill(&mut key)?;
+    getrandom::fill(&mut iv)?;
+    let ct = sm4::mode_cbc::encrypt(&key, &iv, b"hello sm4");
+    assert_eq!(sm4::mode_cbc::decrypt(&key, &iv, &ct).as_deref(), Some(&b"hello sm4"[..]));
     Ok(())
 }
 ```
+
+SM2 signing is the first of the [examples further down](#more-examples).
 
 > ⚠️ **Not independently audited.** No third-party / external security audit has
 > been performed. Assurance is internal: a multi-model adversarial pre-publish
@@ -94,35 +97,27 @@ Three crates, released together at one lockstep version:
 | [`gmcrypto-c`](https://crates.io/crates/gmcrypto-c) | C ABI, cdylib + staticlib: 112 entry points, committed [`gmcrypto.h`](crates/gmcrypto-c/include/gmcrypto.h) drift-checked in CI. A default build exports the whole surface. |
 | [`gmcrypto-simd`](https://crates.io/crates/gmcrypto-simd) | Internal AVX2 / GFNI / NEON / CLMUL / PMULL backend. No stable Rust API. |
 
-## Why this rather than the alternatives
+## What this crate provides
 
-| | gm-crypto-rs | `libsm` | RustCrypto `sm2` / `sm4` |
-|---|---|---|---|
-| SM2 + SM3 + SM4 in one crate | ✅ | ✅ | separate crates |
-| Timing-leak harness in CI | ✅ 20 `dudect` targets, 16 blocking | — | — |
-| Fuzzing | ✅ 35 targets, nightly | — | — |
-| C ABI | ✅ 112 entry points | — | — |
-| TLCP (GB/T 38636) toolkit | ✅ | — | — |
-| `no_std` | ✅ | not advertised | ✅ |
-| Enforced SemVer (`cargo-semver-checks`) | ✅ | — | — |
-| **External security audit** | **none** | none | none |
-| **Production track record** | **thin — first published 2026** | years | years |
+| | This crate | Where to check |
+|---|---|---|
+| Timing checks in CI | ✅ `dudect` on 20 secret-dependent operations plus a negative control that must fire; 16 block merges. Runs on pull requests that touch crypto code, and nightly | [`dudect-pr.yml`](.github/workflows/dudect-pr.yml), [`dudect-main.yml`](.github/workflows/dudect-main.yml), [how it's checked](#how-constant-time-is-checked) |
+| Fuzzing in CI | ✅ 35 `cargo-fuzz` targets, nightly | [`fuzz-nightly.yml`](.github/workflows/fuzz-nightly.yml), [`fuzz/fuzz_targets`](fuzz/fuzz_targets) |
+| GmSSL 3.2.0 interop | ✅ 13 byte-for-byte tests (signatures, ciphertexts, AEAD) on every CI run | [`ci.yml`](.github/workflows/ci.yml) |
+| SM4 S-box | ✅ no secret-indexed table lookups by default (256-entry scan, slower; bitsliced / SIMD optional) | [`sm4/cipher.rs`](crates/gmcrypto-core/src/sm4/cipher.rs) |
+| C ABI | ✅ 112 entry points | [`gmcrypto-c`](crates/gmcrypto-c) |
+| `no_std` | ✅ `no_std` + `alloc`; wasm32 builds in CI | [`ci.yml`](.github/workflows/ci.yml) |
+| **External security audit** | **none** | [`SECURITY.md`](SECURITY.md) |
+| **Production track record** | **thin: first published 2026, one maintainer** | [`CHANGELOG.md`](CHANGELOG.md) |
 
-A dash means "not offered as a documented feature", checked against each
-project's crates.io metadata and repository in July 2026 — not a claim that
-the work is absent from someone's tree, and worth re-checking before you rely
-on it.
-
-The last two rows are the honest counterweight and are meant to stay. If your
-priority is the longest field exposure, `libsm` has years of it and this does
-not. If your priority is verifiable constant-time discipline, a C ABI, or TLCP
-building blocks, none of the alternatives offer them.
+If you need a long production track record, RustCrypto's `sm2` / `sm3` /
+`sm4` and `libsm` are more mature and far more widely used, and a better fit.
 
 ## How "constant-time" is checked
 
-The differentiator is not the design intent — [`RustCrypto/sm2`](https://docs.rs/sm2/)
-aims for constant-time too — it is the **in-CI regression gate**. Every PR
-and every night, a [`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
+The check is an **in-CI regression gate**, not just design intent. On every
+pull request that touches crypto code, and every night, a
+[`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
 times each secret-touching operation under two input classes and gates the
 per-target `|tau|` statistic. A deliberately leaky `negative_control` must
 fire on every run, proving the harness can still see a leak.
@@ -173,6 +168,32 @@ ciphertexts and AEAD output byte-for-byte.
   peer I dialed". Binding an identity to an endpoint is the caller's, permanently.
 
 ## More examples
+
+**SM2 sign / verify** with the default signer ID:
+
+```rust
+use gmcrypto_core::sm2::{DEFAULT_SIGNER_ID, Sm2PrivateKey, sign_with_id, verify_with_id};
+use gmcrypto_core::sm3;
+use getrandom::SysRng; // any `rand_core::TryCryptoRng`; this crate ships no RNG
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let digest = sm3::hash(b"hello");                     // SM3: 32 bytes
+    assert_eq!(digest.len(), 32);
+
+    // New SM2 key: 32 random bytes, retried in the ~2^-32 case they fall
+    // outside [1, n-2]. (Or load one: `pkcs8`, `sec1`, `pem` modules.)
+    let key = loop {
+        let mut secret_32 = [0u8; 32];
+        getrandom::fill(&mut secret_32)?;
+        if let Some(key) = Sm2PrivateKey::from_bytes_be(&secret_32).into_option() {
+            break key;
+        }
+    };
+    let sig = sign_with_id(&key, DEFAULT_SIGNER_ID, b"hello", &mut SysRng)?;
+    assert!(verify_with_id(&key.public_key(), DEFAULT_SIGNER_ID, b"hello", &sig));
+    Ok(())
+}
+```
 
 **SM2 key exchange** (`sm2-key-exchange`) — authenticated two-party agreement
 with mandatory key confirmation. Each step consumes the state machine, so an
