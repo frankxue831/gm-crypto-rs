@@ -56,8 +56,8 @@ mod tests {
     use super::*;
     #[test]
     fn moduli_are_correct_size() {
-        assert_eq!(Fp::MODULUS.as_ref().bits(), 256);
-        assert_eq!(Fn::MODULUS.as_ref().bits(), 256);
+        assert_eq!(Fp::MODULUS.as_ref().leading_zeros(), 0);
+        assert_eq!(Fn::MODULUS.as_ref().leading_zeros(), 0);
     }
 
     #[test]
