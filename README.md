@@ -47,7 +47,8 @@ SM2 signing is the first of the [examples further down](#more-examples).
 > been performed. Assurance is internal: a multi-model adversarial pre-publish
 > re-audit (see [`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md)), in-CI KAT vectors,
 > in-CI gmssl 3.2.0 interop (all 13 tests, run with `sm4-aead`; cross-validated against a pinned from-source
-> build of the reference implementation; currently non-gating), an in-CI `dudect`
+> build of the reference implementation; a required check: a mismatch blocks merging, infrastructure
+> failures only skip), an in-CI `dudect`
 > timing-leak harness, and a 35-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
 > project with no support SLA. Review the code and **use at your own risk.** See
 > [`SECURITY.md`](SECURITY.md) for the threat model and disclosure process.
