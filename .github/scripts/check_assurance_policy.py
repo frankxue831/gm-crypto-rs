@@ -483,10 +483,10 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "nightly dudect": job(dudect_nightly, "full"),
     }
     reviewed_job_fingerprints = {
-        "build": "27c10b27626c4c1d541b90ce2eba2fc3468328c715415b5eb885c198992f154f",
-        "cabi": "4ff7eccfa333d3858ef97ceb3e517c043c44a962e7333976d21896cf1b404c31",
+        "build": "340d3054519b2405e0edc5559c9c2cc422e98f3f550678f41d178bbffd6975be",
+        "cabi": "e69eb1793f1e14937539ae746b682e408d14695dea07b66b24d6356bb7f20f82",
         "GmSSL": "796eafa03285b30a7b70389b5c4ddab6f064fae0339f3b898de0210a4601ab79",
-        "cargo-deny": "efc9a2787bc8b48022d35d3419af0e9987c6a11c3a5c44959fc93b1d33be9174",
+        "cargo-deny": "49166a885bcc9ca595b8f69bae732f84344df5e30a34993c696747b9304c2dce",
         "gitleaks scan": "c7889df5e874f1a5cee871c24cd49cc539d845c0627861e49b1a9e6335d1c15f",
         "PR dudect": "8cf76b3c24c5ed8276c718f51849fbaf3a3cb7459278d797f9ae354815b9e9df",
         "nightly dudect": "5d49dad849096d4ad83f0b94bc59863d94041b59d297b7228fb48eda7cffa819",
@@ -563,9 +563,10 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     require("build job contract is exact", build_contract)
     require(
         "build step prefix is exact",
-        step_headers(build)[:2]
+        step_headers(build)[:3]
         == (
             "- uses: actions/checkout@v7",
+            "- uses: actions/setup-python@v6",
             "- name: Verify assurance workflow policy",
         ),
     )
@@ -873,7 +874,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     )
     deny_job_contract = (
         scalar(deny, "name", 4) == "cargo-deny (no forbidden runtime deps)"
-        and scalar(deny, "runs-on", 4) == "macos-14"
+        and scalar(deny, "runs-on", 4) == "macos-15"
         and key_count(deny, "if", 4) == 1
         and mapping_block(deny, "if", 4) == skip_ci_if
         and scalar(deny, "timeout-minutes", 4) == "15"
@@ -3984,7 +3985,7 @@ def mutation_self_test() -> list[str]:
         ),
         (
             "cargo-deny job runner changes",
-            "    runs-on: macos-14\n",
+            "    runs-on: macos-15\n",
             "    runs-on: ubuntu-latest\n",
         ),
         (
