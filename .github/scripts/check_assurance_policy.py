@@ -483,7 +483,7 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
         "nightly dudect": job(dudect_nightly, "full"),
     }
     reviewed_job_fingerprints = {
-        "build": "aca91906e3055928d8dd204aa31ffc3d5806b9578e38e8f6cb61629f64f55aa0",
+        "build": "340d3054519b2405e0edc5559c9c2cc422e98f3f550678f41d178bbffd6975be",
         "cabi": "e69eb1793f1e14937539ae746b682e408d14695dea07b66b24d6356bb7f20f82",
         "GmSSL": "796eafa03285b30a7b70389b5c4ddab6f064fae0339f3b898de0210a4601ab79",
         "cargo-deny": "49166a885bcc9ca595b8f69bae732f84344df5e30a34993c696747b9304c2dce",
@@ -563,9 +563,10 @@ def audit(ci: str, gitleaks: str, dudect_pr: str, dudect_nightly: str, timing: s
     require("build job contract is exact", build_contract)
     require(
         "build step prefix is exact",
-        step_headers(build)[:2]
+        step_headers(build)[:3]
         == (
             "- uses: actions/checkout@v7",
+            "- uses: actions/setup-python@v6",
             "- name: Verify assurance workflow policy",
         ),
     )
