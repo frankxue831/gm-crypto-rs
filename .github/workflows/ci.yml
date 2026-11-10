@@ -3,7 +3,7 @@ name: CI
 # v0.17+ — GitHub-hosted runners.
 #
 # Most jobs (build / msrv / cabi / deny / wasm32) run on GitHub-hosted
-# `macos-14` (aarch64) — the same macOS-aarch64 platform the project
+# `macos-15` (aarch64) — the same macOS-aarch64 platform the project
 # targets (NEON SIMD + C-ABI coverage). Two jobs run on Linux/x86_64:
 # `simd-x86` (`ubuntu-latest`) exercises the AVX2 / PCLMULQDQ paths the
 # aarch64 hosts can't reach (F17), and `interop-gmssl` (`ubuntu-24.04`,
@@ -88,7 +88,7 @@ permissions:
 jobs:
   build:
     name: build & test (Rust stable)
-    runs-on: macos-14
+    runs-on: macos-15
     # Skip-CI gate for `pull_request` events (GitHub natively handles push).
     # Checks the PR title for `[skip ci]` etc. Same expression appears on
     # every job in this workflow — keep them in lock-step.
@@ -215,7 +215,7 @@ jobs:
     # ~30s per CI run vs. running the full test+clippy matrix twice.
     # See discussion in rust-lang/api-guidelines#231.
     name: build (Rust 1.87 MSRV)
-    runs-on: macos-14
+    runs-on: macos-15
     if: >-
       !contains(github.event.pull_request.title, '[skip ci]') &&
       !contains(github.event.pull_request.title, '[ci skip]') &&
@@ -246,7 +246,7 @@ jobs:
   simd-x86:
     # F17 — the SIMD backend's x86_64 intrinsic paths (AVX2 S-box via
     # sbox_x8/x32, PCLMULQDQ GHASH) are exercised by no other CI job: the
-    # build/test jobs run on macos-14 (aarch64), which only covers the
+    # build/test jobs run on macos-15 (aarch64), which only covers the
     # NEON/PMULL paths. This job runs gmcrypto-simd's correctness tests
     # (lane-equivalence, lane-position, ghash-KAT, software-vs-CLMUL) on an
     # x86_64 host so the AVX2/CLMUL code is gated in CI, not just nightly-fuzzed.
@@ -254,7 +254,7 @@ jobs:
     # Issue #163 follow-up (L0 evidence) — the three core-level steps below
     # are the ONLY x86_64 coverage of the `sm4-bitsliced-simd` COMPOSITION:
     # `tau` → `sbox_x4` (four scalar circuit calls on x86_64, a different
-    # branch from the NEON x16 staging that macos-14 tests), key schedule,
+    # branch from the NEON x16 staging that macos-15 tests), key schedule,
     # CBC/GCM/CCM/XTS modes, and runtime dispatch via `cpufeatures`.
     # `cargo test -p gmcrypto-simd` alone tests the primitive, not the
     # cipher built on it. The million-round KAT (GB/T 32907 A.1) is
@@ -287,7 +287,7 @@ jobs:
           shared-key: simd-x86
       - name: cargo test -p gmcrypto-simd (x86_64 AVX2 / CLMUL / GFNI paths)
         run: cargo test -p gmcrypto-simd
-      # The only clippy run that compiles the x86_64 SIMD code: the macos-14
+      # The only clippy run that compiles the x86_64 SIMD code: the macos-15
       # clippy passes in `build` never reach it (target_arch-gated). Covers
       # the GFNI path's `incompatible_msrv` allowances (v1.16).
       - name: cargo clippy -p gmcrypto-simd (x86_64)
@@ -558,7 +558,7 @@ jobs:
 
   cabi:
     name: gmcrypto-c FFI build + header drift
-    runs-on: macos-14
+    runs-on: macos-15
     if: >-
       !contains(github.event.pull_request.title, '[skip ci]') &&
       !contains(github.event.pull_request.title, '[ci skip]') &&
@@ -616,7 +616,7 @@ jobs:
 
   deny:
     name: cargo-deny (no forbidden runtime deps)
-    runs-on: macos-14
+    runs-on: macos-15
     if: >-
       !contains(github.event.pull_request.title, '[skip ci]') &&
       !contains(github.event.pull_request.title, '[ci skip]') &&
@@ -663,7 +663,7 @@ jobs:
 
   wasm32:
     name: build wasm32-unknown-unknown (Rust ${{ matrix.toolchain }})
-    runs-on: macos-14
+    runs-on: macos-15
     if: >-
       !contains(github.event.pull_request.title, '[skip ci]') &&
       !contains(github.event.pull_request.title, '[ci skip]') &&
