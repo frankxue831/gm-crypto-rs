@@ -94,11 +94,6 @@ v1.14 F21 result stands (`docs/f21-finalize-result.md`).
 
 ## Open backlog
 
-- `dudect-main` legs that draw an EPYC 7763 hit the 40-minute job timeout
-  since SM2 slowed (default leg on the #246 branch; full-feature leg on
-  `main` 2026-10-26). `check_assurance_policy.py` pins that timeout together
-  with the frozen `dudect-nightly` study, so raising it is its own reviewed
-  policy-script PR, not a workflow edit.
 - **F21** `ct_sm4_cbc_unpad` — composite window blind
   (`docs/v1.10-scope.md` Q10.9); narrow `finalize()` window distinguishable on
   the pinned local host only (`docs/f21-finalize-result.md`, v1.14): a
