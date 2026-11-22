@@ -1,9 +1,11 @@
 //! Constant-time-designed pure-Rust SM2 / SM3 / SM4 primitives.
 //!
 //! `no_std` + `alloc`, no C dependency, MSRV 1.87. Every secret-touching path
-//! is written against [`subtle`](https://docs.rs/subtle)'s constant-time
-//! primitives — no `==`, no `if`, no `bool` on a secret-derived value — and
-//! guarded in CI by a [`dudect`](https://docs.rs/dudect-bencher)-based
+//! is written to avoid data-dependent branches and secret-indexed lookups —
+//! using [`subtle`](https://docs.rs/subtle)'s constant-time primitives rather
+//! than `==`, `if`, or `bool` on secret-derived values (documented exceptions in
+//! [`SECURITY.md`](https://github.com/frankxue831/gm-crypto-rs/blob/main/SECURITY.md#other-known-limitations-non-goals)) —
+//! and checked in CI by a [`dudect`](https://docs.rs/dudect-bencher)-based
 //! detectable-leak regression harness. Failure modes are deliberately
 //! indistinguishable: fallible operations return one opaque [`Error`] or
 //! `None`, never a reason.
@@ -61,12 +63,12 @@
 //!
 //! | | |
 //! |---|---|
-//! | [`sm2`] | SM2 sign / verify, encrypt / decrypt (GB/T 32918). With `sm2-key-exchange`: `sm2::key_exchange`, GM/T 0003.3 key agreement |
+//! | [`sm2`] | SM2 sign / verify, encrypt / decrypt (GB/T 32918). With `sm2-key-exchange`: `sm2::key_exchange`, GB/T 32918.3-2016 key agreement |
 //! | [`sm3`] | SM3 hash (GB/T 32905), single-shot and streaming |
-//! | [`sm4`] | SM4 block cipher (GB/T 32907) with ECB / CBC / CTR. With `sm4-aead`: GCM, CCM, incremental GCM, length-committed streaming CCM. With `sm4-xts`: XTS |
+//! | [`sm4`] | SM4 block cipher (GB/T 32907) with ECB / CBC / CTR. With `sm4-aead`: GCM, CCM (RFC 8998), incremental GCM, length-committed streaming CCM. With `sm4-xts`: XTS |
 //! | [`hmac`] | HMAC-SM3 (RFC 2104), single-shot and streaming |
 //! | [`kdf`] | PBKDF2-HMAC-SM3 (RFC 8018 §5.2) |
-//! | [`asn1`] | Strict-canonical DER for the two SM2 wire structures: RFC 3279 signatures, GM/T 0009 ciphertexts |
+//! | [`asn1`] | Strict-canonical DER for the two SM2 wire structures: RFC 3279 signatures, GM/T 0009-2012 ciphertexts (superseded by GM/T 0009-2023; cf. GB/T 35276-2017) |
 //! | [`pem`], [`spki`], [`sec1`], [`pkcs8`] | RFC 7468 PEM, RFC 5280 `SubjectPublicKeyInfo`, RFC 5915 `ECPrivateKey`, RFC 5958 `OneAsymmetricKey` with PBES2 encryption |
 //! | `x509` | With `x509`: X.509-with-SM2 leaf parse and signature verify, linear chain verify. **No trust decisions** beyond structure |
 //! | `tlcp` | With `tlcp`: TLCP (GB/T 38636-2020) key schedule, record protection, and — with `x509` — `[sign, enc]` pair verification. **Not a protocol implementation** |
@@ -79,22 +81,23 @@
 //!
 //! **Capability features** — pure-core, no new dependency unless stated:
 //!
-//! - `sm4-aead` — SM4-GCM and SM4-CCM (`sm4::mode_gcm`, `sm4::mode_ccm`),
-//!   plus incremental-input GCM (`sm4::gcm_streaming`) and length-committed
-//!   streaming CCM (`sm4::ccm_streaming`). Pulls the
+//! - `sm4-aead` — SM4-GCM and SM4-CCM (RFC 8998; `sm4::mode_gcm`,
+//!   `sm4::mode_ccm`), plus incremental-input GCM (`sm4::gcm_streaming`) and
+//!   length-committed streaming CCM (`sm4::ccm_streaming`). Pulls the
 //!   workspace-internal `gmcrypto-simd` for GHASH (CLMUL / PMULL, with a
 //!   constant-time software fallback).
 //! - `sm4-xts` — SM4-XTS sector mode (`sm4::mode_xts`), per GB/T 17964-2021:
 //!   bit-reflected α-doubling, **not** IEEE 1619. Single-shot and in-place
 //!   multi-sector. Confidentiality only — XTS does not authenticate.
-//! - `sm2-key-exchange` — GM/T 0003.3 key agreement (`sm2::key_exchange`):
+//! - `sm2-key-exchange` — GB/T 32918.3-2016 key agreement (`sm2::key_exchange`):
 //!   consume-on-transition role state machines, single-use ephemerals, key
 //!   released only after the peer's confirmation tag verifies. The
 //!   standard-permitted no-confirmation completers are also provided for
 //!   protocols — TLCP among them — that carry confirmation themselves.
-//! - `x509` — X.509-with-SM2 certificate parse and signature verify (GM/T 0015
-//!   profile), strict DER, v3 only. Public inputs only, so no constant-time
-//!   obligation arises. Structural trust only — see the module docs.
+//! - `x509` — X.509-with-SM2 certificate parse and signature verify (GM/T
+//!   0015-2012 profile, superseded by GM/T 0015-2023), strict DER, v3 only.
+//!   Public inputs only, so no constant-time obligation arises. Structural
+//!   trust only — see the module docs.
 //! - `tlcp` — the TLCP (GB/T 38636-2020) crypto toolkit: `P_SM3` key
 //!   schedule, SM4-CBC and SM4-GCM record protection with a Lucky13-hardened
 //!   CBC deprotect, and with `x509` the `[sign, enc]` double-certificate pair
@@ -103,9 +106,10 @@
 //! **Implementation features** — byte-identical output, different code path:
 //!
 //! - `sm4-bitsliced` — routes the SM4 S-box through a table-less, gate-only
-//!   bitsliced inversion in GF(2^8). Constant-time by construction: no table
-//!   lookups, no branches on secret bits. The default path is a linear scan
-//!   with the same property; this one is faster under SIMD.
+//!   bitsliced inversion in GF(2^8), designed to be constant-time (no table
+//!   lookups, no secret-dependent branches) and `dudect`-checked. The default
+//!   path is a linear scan with the same design goal; this one is faster under
+//!   SIMD.
 //! - `sm4-bitsliced-simd` — packs that bitsliced S-box into AVX2 (`x86_64`) or
 //!   NEON (aarch64) lanes for the batch paths, with runtime detection and a
 //!   scalar fallback. On `x86_64` CPUs with GFNI, AVX2 and OS-enabled AVX-512

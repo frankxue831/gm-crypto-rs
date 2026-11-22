@@ -74,14 +74,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 | 功能 | 标准 | feature |
 |---|---|---|
-| SM2 签名 / 验签、加密 / 解密 | GB/T 32918，GM/T 0009 DER | 默认 |
+| SM2 签名 / 验签、加密 / 解密 | GB/T 32918，GM/T 0009-2012 DER（已被 GM/T 0009-2023 替代；参见 GB/T 35276-2017） | 默认 |
 | SM3、HMAC-SM3、PBKDF2-HMAC-SM3 | GB/T 32905，RFC 2104 / 8018 | 默认 |
 | SM4-ECB / CBC / CTR（一次性和流式） | GB/T 32907 | 默认 |
 | DER / PEM / SPKI / SEC1 / PKCS#8（含 PBES2 加密） | RFC 5280 / 5915 / 5958 / 7468 | 默认 |
-| SM4-GCM / SM4-CCM | — | `sm4-aead` |
+| SM4-GCM / SM4-CCM | RFC 8998 | `sm4-aead` |
 | SM4-XTS（仅保密性） | GB/T 17964-2021 | `sm4-xts` |
-| SM2 密钥交换（含密钥确认） | GM/T 0003.3 | `sm2-key-exchange` |
-| X.509（SM2）证书解析、验证和线性链验证 | GM/T 0015 | `x509` |
+| SM2 密钥交换（含密钥确认） | GB/T 32918.3-2016 | `sm2-key-exchange` |
+| X.509（SM2）证书解析、验证和线性链验证 | GM/T 0015-2012（已被 GM/T 0015-2023 替代） | `x509` |
 | TLCP 密钥派生、记录保护、签名 / 加密证书对验证 | GB/T 38636-2020 | `tlcp` |
 
 C 语言等调用方请用 [`gmcrypto-c`](crates/gmcrypto-c/README.md)。`gmcrypto-simd` 是内部后端，不要直接依赖。
@@ -97,7 +97,7 @@ C 语言等调用方请用 [`gmcrypto-c`](crates/gmcrypto-c/README.md)。`gmcryp
 
 这种检测只能说明**在给定样本量下没有检出**计时差异，不能证明没有。完整说明和历史数据见 [`SECURITY.md`](SECURITY.md)。
 
-此外，CI 每次都会和 GmSSL 3.2.0（参考实现，固定版本从源码构建）跑 13 项互通测试，逐字节比对签名、密文和 AEAD 输出。这是合并前必须通过的检查：输出不一致会阻止合并，只有构建环境等基础设施故障时才跳过。
+此外，CI 每次都会和 GmSSL 3.2.0（广泛使用的参考实现，固定版本从源码构建）跑 13 项互通测试：版本校验、SM2 签名交叉验签、SM2 与 SM4-CBC/CTR/GCM 密文交叉解密，以及 HMAC-SM3 / PBKDF2 逐字节比对（不含 CCM / XTS / 密钥交换 / X.509 / TLCP）。这是合并前必须通过的检查：输出不一致会阻止合并，只有构建环境等基础设施故障时才跳过。
 
 ## 本库提供什么
 
@@ -105,7 +105,7 @@ C 语言等调用方请用 [`gmcrypto-c`](crates/gmcrypto-c/README.md)。`gmcryp
 |---|---|---|
 | CI 计时检测 | ✅ 用 `dudect` 检测 20 个涉及密钥的操作，外加一个必须被检出的对照组；16 个在 PR 冒烟（10K×3）和每晚（100K×5）超阈值时使任务失败（`ct_sm4_cbc_decrypt_fanout` 在 EPYC 9V74 为 `0.55`），4 个为 PR 遥测 / 每晚 `0.55` 哨兵。仅在改动密码学代码的 PR 和每晚运行，非强制合并检查 | [`dudect-pr.yml`](.github/workflows/dudect-pr.yml)、[`dudect-main.yml`](.github/workflows/dudect-main.yml) |
 | CI 模糊测试 | ✅ 35 个 `cargo-fuzz` 目标，每晚运行 | [`fuzz-nightly.yml`](.github/workflows/fuzz-nightly.yml)、[`fuzz/fuzz_targets`](fuzz/fuzz_targets) |
-| 与 GmSSL 3.2.0 互通 | ✅ 每次 CI 跑 13 项逐字节比对（签名、密文、AEAD） | [`ci.yml`](.github/workflows/ci.yml) |
+| 与 GmSSL 3.2.0 互通 | ✅ 每次 CI 跑 13 项测试（版本校验、SM2 交叉验签、SM2 与 SM4-CBC/CTR/GCM 交叉解密、HMAC-SM3/PBKDF2 逐字节比对） | [`ci.yml`](.github/workflows/ci.yml) |
 | SM4 S 盒 | ✅ 默认不用密钥相关的字节查表（扫描全部 256 项，速度较慢；可选 bitsliced / SIMD） | [`sm4/cipher.rs`](crates/gmcrypto-core/src/sm4/cipher.rs) |
 | C ABI | ✅ 112 个入口函数 | [`gmcrypto-c`](crates/gmcrypto-c) |
 | `no_std` | ✅ `no_std` + `alloc`；CI 构建 wasm32 | [`ci.yml`](.github/workflows/ci.yml) |

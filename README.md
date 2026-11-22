@@ -3,7 +3,8 @@
 English | [中文](README.zh-CN.md)
 
 Pure-Rust SM2 / SM3 / SM4 — the Chinese national cryptographic algorithms —
-with constant-time discipline that is **measured in CI**, not just intended.
+with constant-time discipline that is **regression-tested for detectable timing
+leaks in CI** (`dudect` detects leaks; it does not prove their absence).
 
 [![Crates.io](https://img.shields.io/crates/v/gmcrypto-core.svg)](https://crates.io/crates/gmcrypto-core)
 [![Documentation](https://docs.rs/gmcrypto-core/badge.svg)](https://docs.rs/gmcrypto-core)
@@ -49,7 +50,7 @@ SM2 signing is the first of the [examples further down](#more-examples).
 > been performed. Assurance is internal: a multi-model adversarial pre-publish
 > re-audit (see [`docs/v1.0-reaudit.md`](docs/v1.0-reaudit.md)), in-CI KAT vectors,
 > in-CI gmssl 3.2.0 interop (all 13 tests, run with `sm4-aead`; cross-validated against a pinned from-source
-> build of the reference implementation; a required check: a mismatch blocks merging, infrastructure
+> build of a widely used reference implementation; a required check: a mismatch blocks merging, infrastructure
 > failures only skip), an in-CI `dudect`
 > timing-leak harness, and a 35-target `cargo-fuzz` suite. This is a solo-maintained, best-effort open-source
 > project with no support SLA. Review the code and **use at your own risk.** See
@@ -80,14 +81,14 @@ instead. `gmcrypto-simd` is an internal backend — do not depend on it directly
 
 | | Standard | Feature |
 |---|---|---|
-| SM2 sign / verify, encrypt / decrypt | GB/T 32918, GM/T 0009 DER | default |
+| SM2 sign / verify, encrypt / decrypt | GB/T 32918, GM/T 0009-2012 DER (superseded by GM/T 0009-2023; cf. GB/T 35276-2017) | default |
 | SM3 hash, HMAC-SM3, PBKDF2-HMAC-SM3 | GB/T 32905, RFC 2104 / 8018 | default |
 | SM4-ECB / CBC / CTR, single-shot and streaming | GB/T 32907 | default |
 | DER / PEM / SPKI / SEC1 / PKCS#8 (incl. PBES2-encrypted) | RFC 5280 / 5915 / 5958 / 7468 | default |
-| SM4-GCM / SM4-CCM AEAD, incremental-input GCM, length-committed streaming CCM | — | `sm4-aead` |
+| SM4-GCM / SM4-CCM AEAD, incremental-input GCM, length-committed streaming CCM | RFC 8998 | `sm4-aead` |
 | SM4-XTS sector mode (confidentiality only) | GB/T 17964-2021 | `sm4-xts` |
-| SM2 key exchange with key confirmation | GM/T 0003.3 | `sm2-key-exchange` |
-| X.509-with-SM2 leaf parse + verify, linear chain verify | GM/T 0015 | `x509` |
+| SM2 key exchange with key confirmation | GB/T 32918.3-2016 | `sm2-key-exchange` |
+| X.509-with-SM2 leaf parse + verify, linear chain verify | GM/T 0015-2012 (superseded by GM/T 0015-2023) | `x509` |
 | TLCP key schedule, record protection, `[sign, enc]` pair verify | GB/T 38636-2020 | `tlcp` |
 | RustCrypto `digest` / `cipher` / `aead` trait fits | — | `*-traits` |
 | Table-less bitsliced SM4 S-box; AVX2 / NEON packed batches; GFNI S-box on supported `x86_64` | — | `sm4-bitsliced[-simd]` |
@@ -106,7 +107,7 @@ Three crates, released together at one lockstep version:
 |---|---|---|
 | Timing checks in CI | ✅ `dudect` on 20 secret-dependent operations plus a negative control that must fire; 16 fail the job on PR smoke (10K×3) and nightly (100K×5, with a `0.55` EPYC 9V74 exception for `ct_sm4_cbc_decrypt_fanout`), 4 are PR telemetry / nightly `0.55` sentinels. Runs on PRs touching crypto code and nightly; not a required merge check | [`dudect-pr.yml`](.github/workflows/dudect-pr.yml), [`dudect-main.yml`](.github/workflows/dudect-main.yml), [how it's checked](#how-constant-time-is-checked) |
 | Fuzzing in CI | ✅ 35 `cargo-fuzz` targets, nightly | [`fuzz-nightly.yml`](.github/workflows/fuzz-nightly.yml), [`fuzz/fuzz_targets`](fuzz/fuzz_targets) |
-| GmSSL 3.2.0 interop | ✅ 13 byte-for-byte tests (signatures, ciphertexts, AEAD) on every CI run | [`ci.yml`](.github/workflows/ci.yml) |
+| GmSSL 3.2.0 interop | ✅ 13 tests on every CI run (version check, SM2 cross-verify, SM2 + SM4-CBC/CTR/GCM cross-decrypt, HMAC-SM3/PBKDF2 byte-equal) | [`ci.yml`](.github/workflows/ci.yml) |
 | SM4 S-box | ✅ no secret-indexed table lookups by default (256-entry scan, slower; bitsliced / SIMD optional) | [`sm4/cipher.rs`](crates/gmcrypto-core/src/sm4/cipher.rs) |
 | C ABI | ✅ 112 entry points | [`gmcrypto-c`](crates/gmcrypto-c) |
 | `no_std` | ✅ `no_std` + `alloc`; wasm32 builds in CI | [`ci.yml`](.github/workflows/ci.yml) |
@@ -168,8 +169,10 @@ its data are in [`SECURITY.md`](SECURITY.md) and
 
 Beyond timing: KAT vectors in CI, 35 `cargo-fuzz` targets run nightly, and an
 interop suite against a pinned from-source [GmSSL](https://github.com/guanzhi/GmSSL)
-3.2.0 — the reference implementation — cross-validating signatures,
-ciphertexts and AEAD output byte-for-byte.
+3.2.0 — a widely used reference implementation — covering SM2 signatures
+(cross-verify), SM2 and SM4-CBC/CTR/GCM ciphertexts (cross-decrypt), and
+HMAC-SM3 / PBKDF2 (byte-equal); CCM, XTS, key exchange, X.509, and TLCP are
+not part of the GmSSL interop suite.
 
 ## What this isn't
 
