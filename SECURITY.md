@@ -421,19 +421,25 @@ that threshold. Worth noting the elevated signal exists.
 hosted 100K nightlies read medians of 0.11–0.38 across EPYC 7763 and 9V45
 legs before the upgrade (2026-10-25, 0.7.5) and 0.02–0.18 on 9V45 and 9V74
 after it (2026-10-26, 0.7.10), with 0.26–0.35 per pass on a 7763 leg that
-timed out before its median. The class-dependent work was in the bench
-harness, which built the class-specific nonce RNG inside the timed window,
-behind a branch on the class; PR #252 (2026-10-26) builds both classes'
-RNGs before the sample loop and rewinds them outside the window, so the
-timed closure holds only the signing call. Local 100K readings on
-crypto-bigint 0.7.10: old harness `|tau|` 0.083–0.094 (`|t|` 11–21), new
-harness 0.009–0.012 (`|t|` at most 3.1). The first hosted PR smoke on the
-fix (10K×3 median) read 0.022–0.028 across EPYC 9V74, EPYC 9V45 and Xeon
-6973P-C slots. Why 0.7.6+ amplified the old harness artefact locally is
-unexplained; the first hosted 100K nightly on the merged tree is the
-remaining confirmation. The target is a non-blocking sentinel (gross
-regression gate 0.55), not a composite-gate target; readings remain below
-the sentinel.
+timed out before its median.
+
+PR #252 moved construction and reset of the class-specific nonce RNGs
+outside the timed window. In three local target-only runs at 100K samples
+on crypto-bigint 0.7.10, `|tau|` was 0.083–0.094 before the change
+(`|t|` 11–21) and 0.009–0.012 afterward (`|t|` at most 3.14). The hosted
+PR smoke medians (3 × 10K) were 0.022–0.028 across EPYC 9V74, EPYC 9V45
+and Xeon 6973P-C runners. The effect of crypto-bigint version on the old
+harness remains unexplained. [Local measurements and PR smoke](https://github.com/frankxue831/gm-crypto-rs/pull/252)
+
+The first scheduled `dudect-main` run on the merged change (`c14e7b8`,
+October 27) recorded median `|tau|` of 0.0067–0.0119 across four feature
+configurations, overlapping the local range. Each hosted median covers
+five 100K passes of the full suite. On October 28 the full-feature median
+on an EPYC 7763 rose to 0.0881 on the same commit. A gross regression
+above the 0.55 sentinel was not detected at this sample size. The higher
+per-pass readings cited in issue #253 came from the frozen pre-#252
+harness. The cause of the remaining variation on the revised harness is
+unresolved. [Per-pass readings, runners and measured revisions](docs/v0.5-dudect-recalibration.md#october-2026-signing-nonce-timing)
 
 ### v1.0 constant-time baseline (settled — v0.18 / v0.19 / v0.20)
 
