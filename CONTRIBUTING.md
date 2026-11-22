@@ -39,6 +39,19 @@ File an issue with:
 
 See [`SECURITY.md`](SECURITY.md) — use GitHub Security Advisories, not public issues.
 
+## Dev setup
+
+- **Rust toolchain:** `rust-toolchain.toml` selects `stable` with `rustfmt` and
+  `clippy` (MSRV is Rust 1.87).
+- **Nightly (optional):** needed only for building or running targets under
+  `fuzz/` (`cargo +nightly fuzz ...`) or checking `docs.rs` feature badges.
+- **Optional tools:** `cargo-deny` (`cargo install cargo-deny`) for local
+  dependency/advisory checks; **GmSSL v3.2.0** on `PATH` if you want to run
+  `interop_gmssl` locally; `rustup target add wasm32-unknown-unknown` for WASM
+  compile checks.
+- **Repo-root agent files:** `AGENTS.md`, `CLAUDE.md`, and `.claude/rules/`
+  are instructions for AI coding agents; human contributors can ignore them.
+
 ## Pull requests
 
 Before opening a PR:
