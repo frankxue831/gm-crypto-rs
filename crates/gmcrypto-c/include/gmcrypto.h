@@ -409,6 +409,68 @@ int gmcrypto_pbkdf2_hmac_sm3(const uint8_t *pwd,
 ;
 
 /*
+ RFC 5869 §2.2 **HKDF-Extract** over HMAC-SM3. Writes a fixed 32-byte
+ pseudorandom key (`PRK`) to `out_prk`.
+
+ Empty `salt` and empty `ikm` are valid, including `(NULL, 0)` and
+ `(non-null, 0)`. An empty `salt` is treated identically to 32 zero bytes.
+ Input buffers (`salt`, `ikm`) and `out_prk` MUST be disjoint. Callers are
+ responsible for wiping secret input buffers and `out_prk` when no longer
+ needed.
+ */
+
+int gmcrypto_hkdf_sm3_extract(const uint8_t *salt,
+                              uintptr_t salt_len,
+                              const uint8_t *ikm,
+                              uintptr_t ikm_len,
+                              uint8_t *out_prk)
+;
+
+/*
+ RFC 5869 §2.3 **HKDF-Expand** over HMAC-SM3.
+
+ Expands the fixed 32-byte pseudorandom key `prk` with context `info` into
+ `out` (`out_len` bytes). Valid output lengths are `1..=8160` (`255 * 32`).
+ Empty `info` is valid, including `(NULL, 0)` and `(non-null, 0)`.
+
+ Invalid output lengths (`0` or `> 8160`) and null pointers are rejected
+ **before** writing anything to `out` (even when `out` is non-null).
+ Input buffers (`prk`, `info`) and `out` MUST be disjoint. Callers are
+ responsible for wiping `prk` and `out`; temporary `PRK` copies in the shim
+ are wiped before return.
+ */
+
+int gmcrypto_hkdf_sm3_expand(const uint8_t *prk,
+                             const uint8_t *info,
+                             uintptr_t info_len,
+                             uint8_t *out,
+                             uintptr_t out_len)
+;
+
+/*
+ Single-shot **HKDF-SM3** (RFC 5869 extract-then-expand over HMAC-SM3).
+
+ Derives `out_len` bytes (`1..=8160`) into `out` from `(salt, ikm, info)`.
+ Empty `salt`, `ikm`, and `info` are valid, including `(NULL, 0)` and
+ `(non-null, 0)`. An empty `salt` is treated identically to 32 zero bytes.
+
+ Invalid output lengths (`0` or `> 8160`) and null pointers are rejected
+ **before** writing anything to `out`. Input buffers (`salt`, `ikm`,
+ `info`) and `out` MUST be disjoint. Callers are responsible for wiping
+ `ikm` and `out`; internal `PRK` and expansion states are wiped before return.
+ */
+
+int gmcrypto_hkdf_sm3(const uint8_t *salt,
+                      uintptr_t salt_len,
+                      const uint8_t *ikm,
+                      uintptr_t ikm_len,
+                      const uint8_t *info,
+                      uintptr_t info_len,
+                      uint8_t *out,
+                      uintptr_t out_len)
+;
+
+/*
  Construct an SM4 cipher from a 16-byte key. Returns NULL on null
  key.
  */
@@ -1037,6 +1099,42 @@ int gmcrypto_sm4_ccm_decryptor_finalize_verify(gmcrypto_sm4_ccm_decryptor_t *dec
  Returns NULL on out-of-range scalar (must be in `[1, n-2]`).
  */
  gmcrypto_sm2_privkey_t *gmcrypto_sm2_privkey_new(const uint8_t *d_be) ;
+
+/*
+ Generate a fresh SM2 private key (`d` in `[1, n-2]`) using the system RNG
+ (`getrandom::SysRng`).
+
+ Delegates to `Sm2PrivateKey::generate`'s fixed-budget constant-time sampler.
+ Returns an owned [`gmcrypto_sm2_privkey_t`] handle on success, or NULL on
+ RNG failure or sampler exhaustion. Free with [`gmcrypto_sm2_privkey_free`].
+ */
+ gmcrypto_sm2_privkey_t *gmcrypto_sm2_privkey_generate(void) ;
+
+/*
+ `_with_rng` variant of [`gmcrypto_sm2_privkey_generate`]: samples the key
+ using the caller's `rng_callback` and opaque `rng_context` instead of
+ `getrandom::SysRng`.
+
+ Delegates to `Sm2PrivateKey::generate`'s fixed-budget constant-time sampler
+ (always draws 4 × 32-byte blocks unless `rng_callback` returns non-zero).
+ Returns NULL if `rng_callback` is NULL, if `rng_callback` returns non-zero,
+ or if all 4 draws fall outside `[1, n-2]`. Free with
+ [`gmcrypto_sm2_privkey_free`].
+ */
+
+gmcrypto_sm2_privkey_t *gmcrypto_sm2_privkey_generate_with_rng(gmcrypto_rng_callback rng_callback,
+                                                               void *rng_context)
+;
+
+/*
+ Derive an independently owned SM2 public key handle from a private key.
+
+ Borrows `key` only for the duration of the call; the returned handle
+ remains valid after [`gmcrypto_sm2_privkey_free`] is called on `key`.
+ Returns NULL if `key` is NULL. Free the returned handle with
+ [`gmcrypto_sm2_pubkey_free`].
+ */
+ gmcrypto_sm2_pubkey_t *gmcrypto_sm2_privkey_public_key(const gmcrypto_sm2_privkey_t *key) ;
 
 /*
  Construct an SM2 public key from a SEC1 uncompressed-point byte
