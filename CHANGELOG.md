@@ -2788,8 +2788,8 @@ last two in a follow-up pass.
   Comb-table optimization deferred to v0.2.
 - **Variable-time-multiplier CPUs are out of scope.**
 
-[Unreleased]: https://github.com/frankxue831/gm-crypto-rs/compare/v1.17.0...HEAD
-[1.18.0]: https://github.com/frankxue831/gm-crypto-rs/compare/v1.17.0...630ee75e713a19bc3c3f6a4aed25e0f40f420e7a
+[Unreleased]: https://github.com/frankxue831/gm-crypto-rs/compare/v1.18.0...HEAD
+[1.18.0]: https://github.com/frankxue831/gm-crypto-rs/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/frankxue831/gm-crypto-rs/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/frankxue831/gm-crypto-rs/compare/v1.13.0...v1.16.0
 [1.13.0]: https://github.com/frankxue831/gm-crypto-rs/compare/v1.12.0...v1.13.0

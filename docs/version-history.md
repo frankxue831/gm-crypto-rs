@@ -20,8 +20,14 @@ only a condensed current-release block — see its `Don't` section.
 ## Cycles
 
 **v1.18 — HKDF-SM3, SM2 key generation and streaming signatures, SM4
-batching (1.18.0 release candidate).** HKDF-SM3 composes the existing
-HMAC-SM3 primitive. `Sm2PrivateKey::generate` handles bounded sampling,
+batching.** All three crates shipped as 1.18.0 on 2026-11-22 from `d6a6a9e`.
+Each published archive matched its crates.io checksum and recorded that commit.
+The SSH-signed tag `v1.18.0` verified with ED25519. The release commit matched
+the gated candidate `630ee75` across `crates/` and `Cargo.toml`. See the
+[Gate #1 evidence](v1.18.0-gate1-evidence.md).
+
+HKDF-SM3 composes the existing HMAC-SM3 primitive.
+`Sm2PrivateKey::generate` handles bounded sampling,
 and `Sm2Hasher` lets callers sign and verify messages in chunks while
 preserving the signer ID and public-key binding. Streaming GCM encryption
 and single-shot CBC decryption use the SM4 batch paths. SM4 modes also
