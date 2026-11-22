@@ -104,9 +104,6 @@ v1.14 F21 result stands (`docs/f21-finalize-result.md`).
   `main` 2026-10-26). `check_assurance_policy.py` pins that timeout together
   with the frozen `dudect-nightly` study, so raising it is its own reviewed
   policy-script PR, not a workflow edit.
-- `fuzz/Cargo.lock` pins `crypto-bigint` 0.7.8, yanked upstream on
-  2026-10-25; the fuzz nightly still builds from the lock. The next
-  fuzz-touching PR refreshes it to 0.7.10 / `ctutils` 0.4.6.
 - **F21** `ct_sm4_cbc_unpad` — composite window blind
   (`docs/v1.10-scope.md` Q10.9); narrow `finalize()` window distinguishable on
   the pinned local host only (`docs/f21-finalize-result.md`, v1.14): a
