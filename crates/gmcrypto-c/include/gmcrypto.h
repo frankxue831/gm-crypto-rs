@@ -237,6 +237,20 @@ typedef struct gmcrypto_sm4_ccm_decryptor_t gmcrypto_sm4_ccm_decryptor_t;
 typedef struct gmcrypto_sm4_ccm_encryptor_t gmcrypto_sm4_ccm_encryptor_t;
 
 /*
+ Opaque handle for a streaming SM4-CTR cipher (v1.19). Encryption and
+ decryption are symmetric XOR with the SM4 keystream.
+
+ The 128-bit initial counter increments as a big-endian integer modulo
+ `2^128`. Construct with [`gmcrypto_sm4_ctr_cipher_new`], process chunks
+ with [`gmcrypto_sm4_ctr_cipher_update`] (partial-block unused keystream
+ carries across calls), and release/wipe via
+ [`gmcrypto_sm4_ctr_cipher_free`] (`NULL` is a no-op; there is no
+ separate `_finalize`). **Confidentiality only — SM4-CTR does not
+ authenticate**, and callers MUST keep counter ranges disjoint per key.
+ */
+typedef struct gmcrypto_sm4_ctr_cipher_t gmcrypto_sm4_ctr_cipher_t;
+
+/*
  Opaque handle for a streaming (incremental-input, output-BUFFERED)
  SM4-GCM decryptor (v0.10 W2). Commit-on-verify:
  [`gmcrypto_sm4_gcm_decryptor_update`] buffers ciphertext and emits
@@ -494,8 +508,8 @@ int gmcrypto_hkdf_sm3(const uint8_t *salt,
  WARNING: this is the raw SM4 block, not a cipher mode. Calling it in a
  loop over a multi-block buffer is ECB — it leaks plaintext-block equality
  and has no semantic security. To encrypt messages use a mode
- (`gmcrypto_sm4_gcm_*` / `_ccm_*` authenticated; or `_cbc_*` / `_xts_*`
- confidentiality-only with a unique IV/tweak).
+ (`gmcrypto_sm4_gcm_*` / `_ccm_*` authenticated; or `_cbc_*` / `_ctr_*` /
+ `_xts_*` confidentiality-only with a unique IV/nonce/tweak).
  */
  int gmcrypto_sm4_encrypt_block(const gmcrypto_sm4_t *cipher, uint8_t *block) ;
 
@@ -651,6 +665,84 @@ int gmcrypto_sm4_cbc_decryptor_finalize(gmcrypto_sm4_cbc_decryptor_t *dec,
  already consumed the handle.
  */
  void gmcrypto_sm4_cbc_decryptor_free(gmcrypto_sm4_cbc_decryptor_t *dec) ;
+
+/*
+ SM4-CTR single-shot encrypt. `key` is 16 bytes; `iv` is the 16-byte initial
+ big-endian counter (incremented modulo `2^128` across blocks). Emits
+ `pt_len` bytes via `(out, out_capacity, out_actual_len)`.
+
+ `pt` and `out` MUST be disjoint for nonempty inputs. An empty plaintext
+ (`pt_len == 0`) accepts `(NULL, 0)` / `(non-null, 0)` for `pt` and `out`
+ and writes `*out_actual_len = 0`. **Confidentiality only — SM4-CTR does not
+ authenticate**, and callers MUST keep counter ranges disjoint per key.
+ */
+
+int gmcrypto_sm4_ctr_encrypt(const uint8_t *key,
+                             const uint8_t *iv,
+                             const uint8_t *pt,
+                             uintptr_t pt_len,
+                             uint8_t *out,
+                             uintptr_t out_capacity,
+                             uintptr_t *out_actual_len)
+;
+
+/*
+ SM4-CTR single-shot decrypt. Inverse of [`gmcrypto_sm4_ctr_encrypt`] with
+ identical key/initial-counter and disjoint-buffer contracts; emits
+ `ct_len` plaintext bytes. **Confidentiality only — SM4-CTR does not
+ authenticate.**
+ */
+
+int gmcrypto_sm4_ctr_decrypt(const uint8_t *key,
+                             const uint8_t *iv,
+                             const uint8_t *ct,
+                             uintptr_t ct_len,
+                             uint8_t *out,
+                             uintptr_t out_capacity,
+                             uintptr_t *out_actual_len)
+;
+
+/*
+ Construct a streaming SM4-CTR cipher from a 16-byte `key` and 16-byte
+ initial counter `iv` (incremented as a big-endian integer modulo `2^128`).
+ Both encryption and decryption use [`gmcrypto_sm4_ctr_cipher_update`].
+
+ Returns `NULL` if `key` or `iv` is null. Free with
+ [`gmcrypto_sm4_ctr_cipher_free`] (which completes and zeroizes the stream).
+ **Confidentiality only — never reuse counter blocks under a key.**
+ */
+ gmcrypto_sm4_ctr_cipher_t *gmcrypto_sm4_ctr_cipher_new(const uint8_t *key, const uint8_t *iv) ;
+
+/*
+ XOR `data` (`data_len` bytes) with the next `data_len` bytes of SM4-CTR
+ keystream and write the result to `out`, carrying unused keystream bytes
+ from partial blocks cleanly into the next update.
+
+ `data` and `out` MUST be disjoint for nonempty updates. Empty updates
+ (`data_len == 0`) accept `(NULL, 0)` and `(non-null, 0)` for both `data`
+ and `out`, write `*out_actual_len = 0`, and return [`GMCRYPTO_OK`].
+
+ `out_actual_len`, `data`, `out_capacity`, and (for nonempty output) `out`
+ are validated **before** advancing the stream. On short buffer
+ (`out_capacity < data_len`), writes `*out_actual_len = data_len`, writes
+ nothing to `out`, returns [`GMCRYPTO_ERR`], and leaves counter and
+ leftover keystream intact so callers can retry with an adequately sized
+ buffer.
+ */
+
+int gmcrypto_sm4_ctr_cipher_update(gmcrypto_sm4_ctr_cipher_t *cipher,
+                                   const uint8_t *data,
+                                   uintptr_t data_len,
+                                   uint8_t *out,
+                                   uintptr_t out_capacity,
+                                   uintptr_t *out_actual_len)
+;
+
+/*
+ Complete, zeroize, and free a streaming SM4-CTR cipher handle. Passing
+ `NULL` is a no-op.
+ */
+ void gmcrypto_sm4_ctr_cipher_free(gmcrypto_sm4_ctr_cipher_t *cipher) ;
 
 /*
  SM4-GCM single-shot encrypt. `ct_out` receives `pt_len` bytes (via

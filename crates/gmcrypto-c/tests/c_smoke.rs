@@ -44,7 +44,9 @@ use gmcrypto_c::{
     gmcrypto_sm4_cbc_decryptor_update, gmcrypto_sm4_cbc_encrypt,
     gmcrypto_sm4_cbc_encryptor_finalize, gmcrypto_sm4_cbc_encryptor_free,
     gmcrypto_sm4_cbc_encryptor_new, gmcrypto_sm4_cbc_encryptor_t,
-    gmcrypto_sm4_cbc_encryptor_update, gmcrypto_sm4_decrypt_block, gmcrypto_sm4_encrypt_block,
+    gmcrypto_sm4_cbc_encryptor_update, gmcrypto_sm4_ctr_cipher_free, gmcrypto_sm4_ctr_cipher_new,
+    gmcrypto_sm4_ctr_cipher_t, gmcrypto_sm4_ctr_cipher_update, gmcrypto_sm4_ctr_decrypt,
+    gmcrypto_sm4_ctr_encrypt, gmcrypto_sm4_decrypt_block, gmcrypto_sm4_encrypt_block,
     gmcrypto_sm4_free, gmcrypto_sm4_new, gmcrypto_sm4_t,
 };
 use hex_literal::hex;
@@ -1001,6 +1003,430 @@ fn sm4_cbc_streaming_free_null_is_noop() {
     // Both free fns accept NULL — must not crash.
     unsafe { gmcrypto_sm4_cbc_encryptor_free(ptr::null_mut()) };
     unsafe { gmcrypto_sm4_cbc_decryptor_free(ptr::null_mut()) };
+}
+
+// ============================================================
+// SM4-CTR — single-shot + streaming (v1.19)
+// ============================================================
+
+unsafe fn sm4_ctr_stream_run(
+    key: &[u8; 16],
+    iv: &[u8; 16],
+    input: &[u8],
+    chunks: &[usize],
+) -> Vec<u8> {
+    let cipher: *mut gmcrypto_sm4_ctr_cipher_t =
+        unsafe { gmcrypto_sm4_ctr_cipher_new(key.as_ptr(), iv.as_ptr()) };
+    assert!(!cipher.is_null());
+    let mut out = Vec::with_capacity(input.len());
+    let mut offset = 0usize;
+    let mut step_idx = 0usize;
+    while offset < input.len() {
+        let take = chunks[step_idx % chunks.len()].min(input.len() - offset);
+        let mut buf = vec![0u8; take];
+        let mut actual = 0usize;
+        assert_eq!(
+            unsafe {
+                gmcrypto_sm4_ctr_cipher_update(
+                    cipher,
+                    input[offset..].as_ptr(),
+                    take,
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    &mut actual,
+                )
+            },
+            GMCRYPTO_OK
+        );
+        assert_eq!(actual, take);
+        out.extend_from_slice(&buf);
+        offset += take;
+        step_idx += 1;
+    }
+    unsafe { gmcrypto_sm4_ctr_cipher_free(cipher) };
+    out
+}
+
+fn ecb_ctr_reference(key: &[u8; 16], iv: &[u8; 16], input: &[u8]) -> Vec<u8> {
+    let ecb = unsafe { gmcrypto_sm4_new(key.as_ptr()) };
+    assert!(!ecb.is_null());
+    let mut ctr = *iv;
+    let mut out = vec![0u8; input.len()];
+    for (idx, chunk) in out.chunks_mut(16).enumerate() {
+        let mut ks = ctr;
+        assert_eq!(
+            unsafe { gmcrypto_sm4_encrypt_block(ecb, ks.as_mut_ptr()) },
+            GMCRYPTO_OK
+        );
+        let src_chunk = &input[idx * 16..idx * 16 + chunk.len()];
+        for (dst, (p, k)) in chunk.iter_mut().zip(src_chunk.iter().zip(ks.iter())) {
+            *dst = p ^ k;
+        }
+        for b in ctr.iter_mut().rev() {
+            let (next, carry) = b.overflowing_add(1);
+            *b = next;
+            if !carry {
+                break;
+            }
+        }
+    }
+    unsafe { gmcrypto_sm4_free(ecb) };
+    out
+}
+
+#[test]
+fn sm4_ctr_oneshot_and_streaming_match_ecb_and_gmssl_kats() {
+    let gbt_key = hex!("0123456789abcdeffedcba9876543210");
+    let iv_zero = [0u8; 16];
+    let pt: Vec<u8> = (0u8..53).collect();
+    let expected = ecb_ctr_reference(&gbt_key, &iv_zero, &pt);
+
+    let mut ct = vec![0u8; pt.len()];
+    let mut ct_len = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_ctr_encrypt(
+                gbt_key.as_ptr(),
+                iv_zero.as_ptr(),
+                pt.as_ptr(),
+                pt.len(),
+                ct.as_mut_ptr(),
+                ct.len(),
+                &mut ct_len,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(ct_len, pt.len());
+    assert_eq!(ct, expected);
+
+    let mut dec = vec![0u8; pt.len()];
+    let mut dec_len = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_ctr_decrypt(
+                gbt_key.as_ptr(),
+                iv_zero.as_ptr(),
+                ct.as_ptr(),
+                ct.len(),
+                dec.as_mut_ptr(),
+                dec.len(),
+                &mut dec_len,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(dec_len, pt.len());
+    assert_eq!(dec, pt);
+
+    // Pinned GmSSL 3.2.0 `sm4_ctr` ciphertext vector (enc + dec + streaming).
+    let gm_key = [0xABu8; 16];
+    let gm_iv = [0xCDu8; 16];
+    let gm_pt = b"v0.7 W2 SM4-CTR cross-validation, partial-block tail xyz";
+    let gm_expected = hex!(
+        "841ef0e2abdb3ccfab937e471261ddbb12722aa11d36b2f6eed1e409a11b84ef"
+        "b93bd4b7fa094fb3f8c737be2848326763164c3fabf8f6a1"
+    );
+    let streamed_ct = unsafe { sm4_ctr_stream_run(&gm_key, &gm_iv, gm_pt, &[7, 16, 1, 13]) };
+    assert_eq!(streamed_ct.as_slice(), gm_expected.as_slice());
+    let streamed_pt = unsafe { sm4_ctr_stream_run(&gm_key, &gm_iv, &streamed_ct, &[3, 17]) };
+    assert_eq!(streamed_pt.as_slice(), gm_pt.as_slice());
+}
+
+#[test]
+fn sm4_ctr_zero_length_and_block_boundary_splits() {
+    let key = [0x24u8; 16];
+    let iv = [0x99u8; 16];
+    let empty: [u8; 0] = [];
+    let mut actual = 77usize;
+
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_ctr_encrypt(
+                key.as_ptr(),
+                iv.as_ptr(),
+                ptr::null(),
+                0,
+                ptr::null_mut(),
+                0,
+                &mut actual,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(actual, 0);
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_ctr_decrypt(
+                key.as_ptr(),
+                iv.as_ptr(),
+                empty.as_ptr(),
+                0,
+                empty.as_ptr().cast_mut(),
+                0,
+                &mut actual,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(actual, 0);
+
+    let pt: Vec<u8> = (0u8..100).collect();
+    let expected = gmcrypto_core::sm4::mode_ctr::encrypt(&key, &iv, &pt);
+
+    let cipher = unsafe { gmcrypto_sm4_ctr_cipher_new(key.as_ptr(), iv.as_ptr()) };
+    assert!(!cipher.is_null());
+    actual = 99;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_ctr_cipher_update(cipher, ptr::null(), 0, ptr::null_mut(), 0, &mut actual)
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(actual, 0);
+    unsafe { gmcrypto_sm4_ctr_cipher_free(cipher) };
+
+    for split in [1usize, 15, 16, 17, 31, 32, 33, 48, 100] {
+        let ct = unsafe { sm4_ctr_stream_run(&key, &iv, &pt, &[split]) };
+        assert_eq!(ct, expected, "encrypt mismatch at chunk {split}");
+        let dec = unsafe { sm4_ctr_stream_run(&key, &iv, &ct, &[split]) };
+        assert_eq!(dec, pt, "decrypt mismatch at chunk {split}");
+    }
+    assert_eq!(
+        unsafe { sm4_ctr_stream_run(&key, &iv, &pt, &[1, 3, 5, 7, 13, 17, 31]) },
+        expected
+    );
+}
+
+#[test]
+fn sm4_ctr_counter_carry_32bit_and_full_width_wrap() {
+    let key = hex!("fedcba98765432100123456789abcdef");
+    let data = vec![0x5Au8; 64];
+
+    // Crosses 32-bit boundary: ..._0000_0000_ffff_fffe -> +1 -> +2 (carry into byte 11).
+    let iv_carry32 = hex!("000000000000000000000000fffffffe");
+    let expected_carry32 = ecb_ctr_reference(&key, &iv_carry32, &data);
+    let mut oneshot = vec![0u8; 64];
+    let mut actual = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_ctr_encrypt(
+                key.as_ptr(),
+                iv_carry32.as_ptr(),
+                data.as_ptr(),
+                data.len(),
+                oneshot.as_mut_ptr(),
+                oneshot.len(),
+                &mut actual,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(oneshot, expected_carry32);
+    assert_eq!(
+        unsafe { sm4_ctr_stream_run(&key, &iv_carry32, &data, &[15, 17, 16, 16]) },
+        expected_carry32
+    );
+
+    // Full-width 2^128 wrap: ff..ff -> 00..00 -> 00..01.
+    let iv_wrap = [0xFFu8; 16];
+    let expected_wrap = ecb_ctr_reference(&key, &iv_wrap, &data);
+    assert_eq!(
+        unsafe { sm4_ctr_stream_run(&key, &iv_wrap, &data, &[5, 27, 32]) },
+        expected_wrap
+    );
+    assert_eq!(
+        unsafe { sm4_ctr_stream_run(&key, &iv_wrap, &expected_wrap, &[11, 21, 32]) },
+        data
+    );
+}
+
+unsafe fn ctr_update_ok(cipher: *mut gmcrypto_sm4_ctr_cipher_t, data: &[u8]) -> Vec<u8> {
+    let mut out = vec![0u8; data.len()];
+    let mut n = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_ctr_cipher_update(
+                cipher,
+                data.as_ptr(),
+                data.len(),
+                out.as_mut_ptr(),
+                out.len(),
+                &mut n,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(n, data.len());
+    out
+}
+
+#[test]
+fn sm4_ctr_mid_block_error_recovery_and_short_buffer_sentinel() {
+    let key = [0x13u8; 16];
+    let iv = [0x37u8; 16];
+    let cipher = unsafe { gmcrypto_sm4_ctr_cipher_new(key.as_ptr(), iv.as_ptr()) };
+    let ref_cipher = unsafe { gmcrypto_sm4_ctr_cipher_new(key.as_ptr(), iv.as_ptr()) };
+    assert!(!cipher.is_null() && !ref_cipher.is_null());
+
+    // Advance 5 bytes so leftover_pos == 5 mid-block.
+    let head = [0x11u8; 5];
+    let _ = unsafe { ctr_update_ok(cipher, &head) };
+    let _ = unsafe { ctr_update_ok(ref_cipher, &head) };
+
+    let tail: Vec<u8> = (0u8..27).collect();
+    let follow: Vec<u8> = (100u8..120).collect();
+    let ref_tail = unsafe { ctr_update_ok(ref_cipher, &tail) };
+    let ref_follow = unsafe { ctr_update_ok(ref_cipher, &follow) };
+
+    let mut n = 0usize;
+    // 1) Null `out` on nonempty input -> GMCRYPTO_ERR.
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_ctr_cipher_update(cipher, tail.as_ptr(), 27, ptr::null_mut(), 64, &mut n)
+        },
+        GMCRYPTO_ERR
+    );
+    // 2) Null `out_actual_len` -> GMCRYPTO_ERR.
+    let mut tmp = [0u8; 27];
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_ctr_cipher_update(
+                cipher,
+                tail.as_ptr(),
+                27,
+                tmp.as_mut_ptr(),
+                27,
+                ptr::null_mut(),
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    // 3) Short buffer -> reports 27, sentinel untouched, leftover + counter preserved.
+    let mut sentinel = [0xA5u8; 10];
+    n = 0;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_ctr_cipher_update(
+                cipher,
+                tail.as_ptr(),
+                27,
+                sentinel.as_mut_ptr(),
+                sentinel.len(),
+                &mut n,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(n, 27);
+    assert_eq!(sentinel, [0xA5u8; 10]);
+
+    // Valid retry must match uninterrupted reference byte-for-byte.
+    assert_eq!(unsafe { ctr_update_ok(cipher, &tail) }, ref_tail);
+    assert_eq!(unsafe { ctr_update_ok(cipher, &follow) }, ref_follow);
+
+    unsafe {
+        gmcrypto_sm4_ctr_cipher_free(cipher);
+        gmcrypto_sm4_ctr_cipher_free(ref_cipher);
+    }
+}
+
+#[test]
+fn sm4_ctr_null_rejections_short_oneshot_and_free_null() {
+    let key = [0u8; 16];
+    let iv = [0u8; 16];
+    let pt = [1u8; 20];
+    let mut out = [0x5Au8; 8];
+    let mut actual = 0usize;
+
+    unsafe { gmcrypto_sm4_ctr_cipher_free(ptr::null_mut()) };
+    assert!(unsafe { gmcrypto_sm4_ctr_cipher_new(ptr::null(), iv.as_ptr()) }.is_null());
+    assert!(unsafe { gmcrypto_sm4_ctr_cipher_new(key.as_ptr(), ptr::null()) }.is_null());
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_ctr_cipher_update(
+                ptr::null_mut(),
+                pt.as_ptr(),
+                4,
+                out.as_mut_ptr(),
+                8,
+                &mut actual,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_ctr_encrypt(
+                ptr::null(),
+                iv.as_ptr(),
+                pt.as_ptr(),
+                20,
+                out.as_mut_ptr(),
+                8,
+                &mut actual,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_ctr_encrypt(
+                key.as_ptr(),
+                ptr::null(),
+                pt.as_ptr(),
+                20,
+                out.as_mut_ptr(),
+                8,
+                &mut actual,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_ctr_encrypt(
+                key.as_ptr(),
+                iv.as_ptr(),
+                ptr::null(),
+                1,
+                out.as_mut_ptr(),
+                8,
+                &mut actual,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_ctr_encrypt(
+                key.as_ptr(),
+                iv.as_ptr(),
+                pt.as_ptr(),
+                20,
+                out.as_mut_ptr(),
+                out.len(),
+                &mut actual,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(actual, 20);
+    assert_eq!(out, [0x5Au8; 8]);
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm4_ctr_decrypt(
+                key.as_ptr(),
+                iv.as_ptr(),
+                pt.as_ptr(),
+                20,
+                ptr::null_mut(),
+                64,
+                &mut actual,
+            )
+        },
+        GMCRYPTO_ERR
+    );
 }
 
 // ============================================================

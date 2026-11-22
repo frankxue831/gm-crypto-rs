@@ -1,11 +1,12 @@
 //! C ABI for `gmcrypto-core`.
 //!
-//! Exposes SM2 (sign/verify, encrypt/decrypt, and — since v1.2 — the
-//! GM/T 0003.3 key exchange with key confirmation) / SM3 / SM4
-//! (ECB/CBC/GCM/CCM/XTS, with streaming CBC/GCM handles, a
+//! Exposes SM2 (message-level and streaming-hasher/digest sign/verify, key
+//! generation and public-key derivation, encrypt/decrypt, and — since v1.2 —
+//! the GM/T 0003.3 key exchange with key confirmation) / SM3 / SM4
+//! (ECB/CBC/CTR/GCM/CCM/XTS, with streaming CBC/CTR/GCM handles, a
 //! length-committed streaming CCM encryptor and an incremental-input
-//! buffered CCM decryptor) / HMAC-SM3 / PBKDF2-HMAC-SM3 plus SM2 key
-//! import/export and — since v1.4 — X.509-with-SM2 leaf certificate
+//! buffered CCM decryptor) / HKDF-SM3 / HMAC-SM3 / PBKDF2-HMAC-SM3 plus SM2
+//! key import/export and — since v1.4 — X.509-with-SM2 leaf certificate
 //! parse + signature verify (NO trust decisions) to C / C++ / Python /
 //! Go / Zig / Ruby callers via opaque handles and a cbindgen-generated
 //! header at `include/gmcrypto.h`.
@@ -106,7 +107,8 @@ use gmcrypto_core::sm2::key_exchange::{
 };
 use gmcrypto_core::sm3::{Sm3 as InnerSm3, hash as sm3_hash};
 use gmcrypto_core::sm4::{
-    Sm4CbcDecryptor as InnerSm4CbcDec, Sm4CbcEncryptor as InnerSm4CbcEnc, Sm4Cipher, mode_cbc,
+    Sm4CbcDecryptor as InnerSm4CbcDec, Sm4CbcEncryptor as InnerSm4CbcEnc, Sm4Cipher,
+    Sm4CtrCipher as InnerSm4CtrCipher, mode_cbc, mode_ctr,
 };
 // v0.9 W4 — single-shot AEAD (SM4-GCM / SM4-CCM) FFI. v0.23 W3 (A-1):
 // always compiled into the C ABI (the forwarding `sm4-aead` feature was
@@ -196,6 +198,20 @@ pub struct gmcrypto_sm4_cbc_encryptor_t {
 /// confirms it is the last block and validates the PKCS#7 padding.
 pub struct gmcrypto_sm4_cbc_decryptor_t {
     inner: InnerSm4CbcDec,
+}
+
+/// Opaque handle for a streaming SM4-CTR cipher (v1.19). Encryption and
+/// decryption are symmetric XOR with the SM4 keystream.
+///
+/// The 128-bit initial counter increments as a big-endian integer modulo
+/// `2^128`. Construct with [`gmcrypto_sm4_ctr_cipher_new`], process chunks
+/// with [`gmcrypto_sm4_ctr_cipher_update`] (partial-block unused keystream
+/// carries across calls), and release/wipe via
+/// [`gmcrypto_sm4_ctr_cipher_free`] (`NULL` is a no-op; there is no
+/// separate `_finalize`). **Confidentiality only — SM4-CTR does not
+/// authenticate**, and callers MUST keep counter ranges disjoint per key.
+pub struct gmcrypto_sm4_ctr_cipher_t {
+    inner: InnerSm4CtrCipher,
 }
 
 /// Opaque handle for a streaming (incremental-input) SM4-GCM encryptor
@@ -856,8 +872,8 @@ pub unsafe extern "C" fn gmcrypto_sm4_new(key: *const u8) -> *mut gmcrypto_sm4_t
 /// WARNING: this is the raw SM4 block, not a cipher mode. Calling it in a
 /// loop over a multi-block buffer is ECB — it leaks plaintext-block equality
 /// and has no semantic security. To encrypt messages use a mode
-/// (`gmcrypto_sm4_gcm_*` / `_ccm_*` authenticated; or `_cbc_*` / `_xts_*`
-/// confidentiality-only with a unique IV/tweak).
+/// (`gmcrypto_sm4_gcm_*` / `_ccm_*` authenticated; or `_cbc_*` / `_ctr_*` /
+/// `_xts_*` confidentiality-only with a unique IV/nonce/tweak).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_encrypt_block(
     cipher: *const gmcrypto_sm4_t,
@@ -1230,6 +1246,227 @@ pub unsafe extern "C" fn gmcrypto_sm4_cbc_decryptor_free(dec: *mut gmcrypto_sm4_
     }
     // SAFETY: dec came from Box::into_raw and has not been freed.
     drop(unsafe { Box::from_raw(dec) });
+}
+
+// ============================================================
+// SM4-CTR — single-shot + streaming (v1.19).
+//
+// Wraps `gmcrypto_core::sm4::mode_ctr` and `Sm4CtrCipher`. Encryption and
+// decryption use the same full-width 128-bit big-endian counter increment
+// modulo 2^128. Disjoint buffers required on nonempty calls. Validation on
+// `cipher_update` runs before mutating Rust stream state so failed calls
+// leave counter + leftover keystream intact for retry.
+// ============================================================
+
+type CtrFn = fn(&[u8; GMCRYPTO_SM4_KEY_SIZE], &[u8; GMCRYPTO_SM4_BLOCK_SIZE], &[u8]) -> Vec<u8>;
+
+#[derive(Clone, Copy)]
+struct CtrOutBuf {
+    ptr: *mut u8,
+    capacity: usize,
+    actual_len: *mut usize,
+}
+
+fn sm4_ctr_oneshot(
+    key: *const u8,
+    iv: *const u8,
+    input: *const u8,
+    input_len: usize,
+    out: CtrOutBuf,
+    op: CtrFn,
+) -> c_int {
+    ffi_guard(|| {
+        let k = match unsafe { try_slice(key, GMCRYPTO_SM4_KEY_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let iv_slice = match unsafe { try_slice(iv, GMCRYPTO_SM4_BLOCK_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let src = match unsafe { try_slice(input, input_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        if out.actual_len.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        // SAFETY: `out.actual_len` verified non-null above.
+        unsafe { ptr::write(out.actual_len, input_len) };
+        if input_len == 0 {
+            return GMCRYPTO_OK;
+        }
+        if input_len > out.capacity {
+            return GMCRYPTO_ERR;
+        }
+        let dst = match unsafe { try_slice_mut(out.ptr, input_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let k_arr: &[u8; GMCRYPTO_SM4_KEY_SIZE] = match k.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        let iv_arr: &[u8; GMCRYPTO_SM4_BLOCK_SIZE] = match iv_slice.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        let mut out_vec = op(k_arr, iv_arr, src);
+        dst.copy_from_slice(&out_vec);
+        out_vec.zeroize();
+        GMCRYPTO_OK
+    })
+}
+
+/// SM4-CTR single-shot encrypt. `key` is 16 bytes; `iv` is the 16-byte initial
+/// big-endian counter (incremented modulo `2^128` across blocks). Emits
+/// `pt_len` bytes via `(out, out_capacity, out_actual_len)`.
+///
+/// `pt` and `out` MUST be disjoint for nonempty inputs. An empty plaintext
+/// (`pt_len == 0`) accepts `(NULL, 0)` / `(non-null, 0)` for `pt` and `out`
+/// and writes `*out_actual_len = 0`. **Confidentiality only — SM4-CTR does not
+/// authenticate**, and callers MUST keep counter ranges disjoint per key.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_ctr_encrypt(
+    key: *const u8,
+    iv: *const u8,
+    pt: *const u8,
+    pt_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    sm4_ctr_oneshot(
+        key,
+        iv,
+        pt,
+        pt_len,
+        CtrOutBuf {
+            ptr: out,
+            capacity: out_capacity,
+            actual_len: out_actual_len,
+        },
+        mode_ctr::encrypt,
+    )
+}
+
+/// SM4-CTR single-shot decrypt. Inverse of [`gmcrypto_sm4_ctr_encrypt`] with
+/// identical key/initial-counter and disjoint-buffer contracts; emits
+/// `ct_len` plaintext bytes. **Confidentiality only — SM4-CTR does not
+/// authenticate.**
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_ctr_decrypt(
+    key: *const u8,
+    iv: *const u8,
+    ct: *const u8,
+    ct_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    sm4_ctr_oneshot(
+        key,
+        iv,
+        ct,
+        ct_len,
+        CtrOutBuf {
+            ptr: out,
+            capacity: out_capacity,
+            actual_len: out_actual_len,
+        },
+        mode_ctr::decrypt,
+    )
+}
+
+/// Construct a streaming SM4-CTR cipher from a 16-byte `key` and 16-byte
+/// initial counter `iv` (incremented as a big-endian integer modulo `2^128`).
+/// Both encryption and decryption use [`gmcrypto_sm4_ctr_cipher_update`].
+///
+/// Returns `NULL` if `key` or `iv` is null. Free with
+/// [`gmcrypto_sm4_ctr_cipher_free`] (which completes and zeroizes the stream).
+/// **Confidentiality only — never reuse counter blocks under a key.**
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_ctr_cipher_new(
+    key: *const u8,
+    iv: *const u8,
+) -> *mut gmcrypto_sm4_ctr_cipher_t {
+    let result = std::panic::catch_unwind(|| {
+        let k = unsafe { try_slice(key, GMCRYPTO_SM4_KEY_SIZE) }?;
+        let iv_slice = unsafe { try_slice(iv, GMCRYPTO_SM4_BLOCK_SIZE) }?;
+        let k_arr: &[u8; GMCRYPTO_SM4_KEY_SIZE] = k.try_into().ok()?;
+        let iv_arr: &[u8; GMCRYPTO_SM4_BLOCK_SIZE] = iv_slice.try_into().ok()?;
+        Some(Box::into_raw(Box::new(gmcrypto_sm4_ctr_cipher_t {
+            inner: InnerSm4CtrCipher::new(k_arr, iv_arr),
+        })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// XOR `data` (`data_len` bytes) with the next `data_len` bytes of SM4-CTR
+/// keystream and write the result to `out`, carrying unused keystream bytes
+/// from partial blocks cleanly into the next update.
+///
+/// `data` and `out` MUST be disjoint for nonempty updates. Empty updates
+/// (`data_len == 0`) accept `(NULL, 0)` and `(non-null, 0)` for both `data`
+/// and `out`, write `*out_actual_len = 0`, and return [`GMCRYPTO_OK`].
+///
+/// `out_actual_len`, `data`, `out_capacity`, and (for nonempty output) `out`
+/// are validated **before** advancing the stream. On short buffer
+/// (`out_capacity < data_len`), writes `*out_actual_len = data_len`, writes
+/// nothing to `out`, returns [`GMCRYPTO_ERR`], and leaves counter and
+/// leftover keystream intact so callers can retry with an adequately sized
+/// buffer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_ctr_cipher_update(
+    cipher: *mut gmcrypto_sm4_ctr_cipher_t,
+    data: *const u8,
+    data_len: usize,
+    out: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if cipher.is_null() || out_actual_len.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let input = match unsafe { try_slice(data, data_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: `out_actual_len` verified non-null above.
+        unsafe { ptr::write(out_actual_len, data_len) };
+        if data_len == 0 {
+            return GMCRYPTO_OK;
+        }
+        if data_len > out_capacity {
+            return GMCRYPTO_ERR;
+        }
+        let dst = match unsafe { try_slice_mut(out, data_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: `cipher` non-null per check above; `input` and `dst` are
+        // disjoint and exact length `data_len`.
+        let c = unsafe { &mut *cipher };
+        c.inner.update(input, dst);
+        GMCRYPTO_OK
+    })
+}
+
+/// Complete, zeroize, and free a streaming SM4-CTR cipher handle. Passing
+/// `NULL` is a no-op.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm4_ctr_cipher_free(cipher: *mut gmcrypto_sm4_ctr_cipher_t) {
+    let _ = std::panic::catch_unwind(|| {
+        if cipher.is_null() {
+            return;
+        }
+        // SAFETY: `cipher` came from `Box::into_raw` and has not been freed.
+        drop(unsafe { Box::from_raw(cipher) });
+    });
 }
 
 // ============================================================

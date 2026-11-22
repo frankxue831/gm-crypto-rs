@@ -100,7 +100,7 @@ Three crates, released together at one lockstep version:
 | Crate | Role |
 |---|---|
 | [`gmcrypto-core`](https://crates.io/crates/gmcrypto-core) | The `no_std + alloc` crypto core, `unsafe_code = "forbid"`. The Rust API. |
-| [`gmcrypto-c`](https://crates.io/crates/gmcrypto-c) | C ABI, cdylib + staticlib: 112 entry points, committed [`gmcrypto.h`](crates/gmcrypto-c/include/gmcrypto.h) drift-checked in CI. A default build exports the whole surface. |
+| [`gmcrypto-c`](https://crates.io/crates/gmcrypto-c) | C ABI, cdylib + staticlib: 131 entry points, committed [`gmcrypto.h`](crates/gmcrypto-c/include/gmcrypto.h) drift-checked in CI. A default build exports the whole surface. |
 | [`gmcrypto-simd`](https://crates.io/crates/gmcrypto-simd) | Internal AVX2 / GFNI / NEON / CLMUL / PMULL backend. No stable Rust API. |
 
 ## What this crate provides
@@ -111,7 +111,7 @@ Three crates, released together at one lockstep version:
 | Fuzzing in CI | ✅ 35 `cargo-fuzz` targets, nightly | [`fuzz-nightly.yml`](.github/workflows/fuzz-nightly.yml), [`fuzz/fuzz_targets`](fuzz/fuzz_targets) |
 | GmSSL 3.2.0 interop | ✅ 13 tests on every CI run (version check, SM2 cross-verify, SM2 + SM4-CBC/CTR/GCM cross-decrypt, HMAC-SM3/PBKDF2 byte-equal) | [`ci.yml`](.github/workflows/ci.yml) |
 | SM4 S-box | ✅ no secret-indexed table lookups by default (256-entry scan, slower; bitsliced / SIMD optional) | [`sm4/cipher.rs`](crates/gmcrypto-core/src/sm4/cipher.rs) |
-| C ABI | ✅ 112 entry points | [`gmcrypto-c`](crates/gmcrypto-c) |
+| C ABI | ✅ 131 entry points | [`gmcrypto-c`](crates/gmcrypto-c) |
 | `no_std` | ✅ `no_std` + `alloc`; wasm32 builds in CI | [`ci.yml`](.github/workflows/ci.yml) |
 | **External security audit** | **none** | [`SECURITY.md`](SECURITY.md) |
 | **Production track record** | **thin: first published 2026, one maintainer** | [`CHANGELOG.md`](CHANGELOG.md) |

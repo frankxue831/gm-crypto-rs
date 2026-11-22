@@ -33,8 +33,10 @@ Output artifacts land in `target/release/`:
 ## Coverage (complete, always-on)
 
 The C ABI is **complete and always-on**: a default `cargo build -p gmcrypto-c`
-exports the full surface — SM2 / SM3 / SM4-ECB+CBC / HMAC-SM3 / PBKDF2-HMAC-SM3
-**plus** everything in the table below: the remaining SM4 modes, SM2 key
+exports the full surface (131 entry points) — SM2 (message-level +
+streaming hasher/precomputed-digest sign & verify + keygen) / SM3 / SM4-ECB+CBC+CTR /
+HKDF-SM3 / HMAC-SM3 / PBKDF2-HMAC-SM3 **plus** everything in the table below:
+the remaining SM4 modes, SM2 key
 exchange, X.509 parse and chain verification, and the TLCP toolkit. As of **v0.23** the AEAD/XTS symbols
 are no longer behind opt-in cargo features (the former `sm4-aead` / `sm4-xts`
 forwarding features were removed), so the committed
@@ -43,6 +45,9 @@ no feature flags are needed.
 
 | Mode | Symbols | Example |
 |---|---|---|
+| HKDF-SM3 KDF (RFC 5869 extract, expand, one-shot; v1.19) | `gmcrypto_hkdf_sm3_{extract,expand}` / `gmcrypto_hkdf_sm3` | — |
+| SM2 key generation, streaming digest hasher, and digest sign/verify (v1.19) | `gmcrypto_sm2_privkey_{generate,generate_with_rng,public_key}` / `gmcrypto_sm2_hasher_{new,new_with_id,update,finalize,free}` / `gmcrypto_sm2_{sign_digest,sign_digest_with_rng,verify_digest}` | [`examples/sm2_sign.c`](examples/sm2_sign.c) |
+| SM4-CTR single-shot & streaming (128-bit BE counter mod `2^128`; confidentiality only; v1.19) | `gmcrypto_sm4_ctr_{encrypt,decrypt}` / `gmcrypto_sm4_ctr_cipher_{new,update,free}` | — |
 | SM4-GCM / SM4-CCM AEAD (single-shot + streaming SM4-GCM + length-committed streaming SM4-CCM encryptor / incremental-input buffered decryptor, v1.13) | `gmcrypto_sm4_gcm_*` / `gmcrypto_sm4_ccm_*` | [`examples/sm4_gcm_streaming.c`](examples/sm4_gcm_streaming.c), [`examples/sm4_ccm.c`](examples/sm4_ccm.c), [`examples/sm4_ccm_streaming.c`](examples/sm4_ccm_streaming.c) |
 | SM4-XTS tweakable disk/sector mode (GB/T 17964-2021): single-shot + in-place multi-sector | `gmcrypto_sm4_xts_{encrypt,decrypt}` / `gmcrypto_sm4_xts_{encrypt,decrypt}_sectors` | [`examples/sm4_xts_sector.c`](examples/sm4_xts_sector.c), [`examples/sm4_xts_multisector.c`](examples/sm4_xts_multisector.c) |
 | SM2 key exchange (GM/T 0003.3) with key confirmation (v1.2): two opaque role handles; `_confirm`/`_finish` consume + free; `_with_rng` variants for caller-supplied randomness | `gmcrypto_sm2_kx_initiator_{new,new_with_rng,confirm,free}` / `gmcrypto_sm2_kx_responder_{new,respond,respond_with_rng,finish,free}` | [`examples/sm2_key_exchange.c`](examples/sm2_key_exchange.c) |
@@ -202,7 +207,8 @@ freed.
 
 ## RNG sourcing
 
-Randomized entry points (`gmcrypto_sm2_sign`, `gmcrypto_sm2_encrypt`,
+Randomized entry points (`gmcrypto_sm2_privkey_generate`,
+`gmcrypto_sm2_sign`, `gmcrypto_sm2_sign_digest`, `gmcrypto_sm2_encrypt`,
 `gmcrypto_sm2_encrypt_c1c3c2`, `gmcrypto_sm2_privkey_to_pkcs8`,
 `gmcrypto_sm2_kx_initiator_new`, `gmcrypto_sm2_kx_responder_respond`,
 `gmcrypto_sm2_kx_responder_respond_unconfirmed`, and
@@ -211,7 +217,8 @@ internally.
 
 For caller-supplied randomness (HSMs, deterministic KATs, or custom
 entropy sources), pass a `gmcrypto_rng_callback` plus opaque `void *`
-context to the `_with_rng` variants: `gmcrypto_sm2_sign_with_rng`,
+context to the `_with_rng` variants: `gmcrypto_sm2_privkey_generate_with_rng`,
+`gmcrypto_sm2_sign_with_rng`, `gmcrypto_sm2_sign_digest_with_rng`,
 `gmcrypto_sm2_encrypt_with_rng`,
 `gmcrypto_sm2_kx_initiator_new_with_rng`,
 `gmcrypto_sm2_kx_responder_respond_with_rng`,
