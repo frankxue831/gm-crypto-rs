@@ -31,38 +31,21 @@ Release state table below and in `docs/`.
 | | |
 |---|---|
 | Live on crates.io | **`1.17.0`** — all three crates, 2026-10-26 from `41d54a5` (published by the maintainer); tag `v1.17.0` on `origin`, ED25519-verified. Previous: `1.16.0` 2026-10-10 from `2a7c880`, tag `v1.16.0` ED25519-verified |
-| Workspace version | `1.17.0` = live. The next bump is the release-prep PR of the next publishing cycle. A new minor does not always mean crates.io (v0.14 / v1.10 / v1.14 / v1.15 are assurance cycles); don't bump or publish for a no-crate-change cycle |
-| Gate #1 | `docs/ECOSYSTEM.md` §8 must PASS before every publish; latest record `docs/v1.17.0-gate1-evidence.md` (gated SHA `c400444`, branch `gate/v1.17.0-candidate-2`; PASS 2026-10-26 against downstream `96c62c1`; attached to the 1.17.0 release tip `41d54a5`). The gated SHA is never the release SHA: the gate attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty, and a PR touching those re-owes it. Running the gate script is ordinary agent work; publishing is not |
+| Workspace version | `1.18.0` release candidate. Bump all three crates and their exact sibling pins together for a publishing cycle. Assurance-only cycles keep the workspace version. |
+| Gate #1 | 1.18.0 passed on 2026-11-22 at `630ee75` against downstream `f79543c`. See [the gate evidence](docs/v1.18.0-gate1-evidence.md). `docs/ECOSYSTEM.md` §8 requires a PASS before each publish. The evidence attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty. Rerun the gate if that diff shows changes. Running the gate script is ordinary agent work. |
 
 `cargo publish` and the SSH-signed tag are the **maintainer's authenticated
 call** — the agent path is branch + PR. The 1.11.0, 1.12.0 and 1.13.0
 publishes were explicit per-release delegations, not a standing grant; the
 maintainer published 1.16.0. The tags have always been the maintainer's.
 
-### v1.17 — RUSTSEC-2026-0387/0385, MSRV 1.87, `mul_var` lift; PUBLISHED 2026-10-26
+### v1.18 — core API additions and SM4 batching
 
-1.17.0 is live from `41d54a5` (tag `v1.17.0`, ED25519-verified):
-`crypto-bigint` floored at 0.7.6 for RUSTSEC-2026-0387/0385, MSRV 1.85 →
-1.87, SM2 signing about 60% slower locally, and `sm2::mul_var` lifting its
-scalar to `k + n` / `k + 2n` so no doubling acts on the identity (the
-`ct_mul_var` elevation on the EPYC 7763 runner class under 0.7.6+; study
-and fix in `docs/version-history.md`). Gate #1 PASSed at `c400444` and
-attaches to the release tip. Fresh resolution at publish time was
-`crypto-bigint` 0.7.10 / `ctutils` 0.4.6, not the 0.7.8 / 0.4.5 the
-candidate was tested with: upstream yanked 0.7.8 on 2026-10-25, and 0.7.10
-drops the per-limb `Choice` conversions in the Montgomery inner loop that
-the study implicated. The first scheduled `dudect-main` on the merged tree
-under 0.7.10 read `ct_mul_var` at the noise floor on every runner class it
-drew, a 7763 included.
-
-The v1.15 calibration through 2026-11-09 stays on its frozen pre-GFNI
-source; it does not validate this release (study isolation: #227). Do not
-repin the study, restart its calendar, or transfer its evidence.
-
-Downstream: `docs/ECOSYSTEM.md` §3 ties the ecosystem MSRV to core's
-`rust-version`, so `gmcrypto-envelope-lite` (MSRV 1.85 CI job) and
-`gm-crypto-rs-demo` (`=1.16.0` pin) each owe a follow-up now that 1.17.0
-is live.
+The release candidate adds HKDF-SM3, SM2 key generation, streaming SM2
+hashing and prehashed signatures. SM4 streaming GCM encryption and
+single-shot CBC decryption now use the batch cipher paths. The C ABI and
+Rust 1.87 minimum carry forward. See `docs/v1.18-scope.md` for the scope
+and the C APIs deferred to v1.19.
 
 ### v1.15 — noise-twin calibration (assurance cycle; direction approved 2026-09-27)
 

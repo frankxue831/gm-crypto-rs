@@ -19,6 +19,16 @@ only a condensed current-release block — see its `Don't` section.
 
 ## Cycles
 
+**v1.18 — HKDF-SM3, SM2 key generation and streaming signatures, SM4
+batching (1.18.0 release candidate).** HKDF-SM3 composes the existing
+HMAC-SM3 primitive. `Sm2PrivateKey::generate` handles bounded sampling,
+and `Sm2Hasher` lets callers sign and verify messages in chunks while
+preserving the signer ID and public-key binding. Streaming GCM encryption
+and single-shot CBC decryption use the SM4 batch paths. SM4 modes also
+wipe temporary keystream and plaintext buffers. The C documentation now
+matches the exported symbols. C ABI additions and compressed SEC1 support
+are deferred to v1.19. See [the v1.18 scope](v1.18-scope.md).
+
 **v1.17 — RUSTSEC-2026-0387 / RUSTSEC-2026-0385, MSRV 1.87 and the `mul_var`
 scalar lift; PUBLISHED 2026-10-26 from `41d54a5` (1.17.0, all three crates;
 published by the maintainer).**

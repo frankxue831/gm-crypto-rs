@@ -2,8 +2,8 @@
 
 `gmcrypto-core` uses `default = []`. The default build gives you the `no_std + alloc` core with zero optional dependencies:
 
-- **SM2:** sign/verify (`GB/T 32918.2`), encrypt/decrypt (`GB/T 32918.4`, `GM/T 0009` DER and raw `C1‖C3‖C2`)
-- **SM3:** hash (`GB/T 32905`), HMAC-SM3 (`RFC 2104`), PBKDF2-HMAC-SM3 (`RFC 8018`)
+- **SM2:** key generation, one-shot and streaming message hashing for sign/verify (`GB/T 32918.2`), encrypt/decrypt (`GB/T 32918.4`, `GM/T 0009` DER and raw `C1‖C3‖C2`)
+- **SM3:** hash (`GB/T 32905`), HMAC-SM3 (`RFC 2104`), PBKDF2-HMAC-SM3 (`RFC 8018`), HKDF-SM3 (`RFC 5869`)
 - **SM4:** ECB, CBC, CTR (single-shot and streaming, `GB/T 32907`)
 - **Codecs:** DER signatures/ciphertexts, PEM (`RFC 7468`), SEC1 (`RFC 5915`), PKCS#8 + PBES2 (`RFC 5958` / `8018`), SPKI (`RFC 5280`)
 
@@ -29,11 +29,11 @@ Everything else is additive and opt-in.
 
 - **General service (signing + authenticated encryption):**
   ```toml
-  gmcrypto-core = { version = "1.17", features = ["sm4-aead", "sm4-bitsliced-simd"] }
+  gmcrypto-core = { version = "1.18", features = ["sm4-aead", "sm4-bitsliced-simd"] }
   ```
 - **TLCP toolkit (all four SM2-family suites + cert pair verification + ECDHE):**
   ```toml
-  gmcrypto-core = { version = "1.17", features = ["tlcp", "x509", "sm4-aead", "sm2-key-exchange"] }
+  gmcrypto-core = { version = "1.18", features = ["tlcp", "x509", "sm4-aead", "sm2-key-exchange"] }
   ```
 - **`wasm32-unknown-unknown`:**
   Enable any pure-core / `no_std` feature set (`sm4-aead`, `sm4-bitsliced-simd`, `sm4-xts`, `sm2-key-exchange`, `x509`, `tlcp`, `*-traits`) and add `getrandom` with its `wasm_js` feature in your own `Cargo.toml` to pass `SysRng` to SM2 operations.
