@@ -92,8 +92,9 @@ use gmcrypto_core::hmac::{HmacSm3 as InnerHmacSm3, hmac_sm3};
 use gmcrypto_core::kdf::{hkdf_sm3, hkdf_sm3_expand, hkdf_sm3_extract, pbkdf2_hmac_sm3};
 use gmcrypto_core::sm2::raw_ciphertext::{decode_c1c2c3_legacy, decode_c1c3c2, encode_c1c3c2};
 use gmcrypto_core::sm2::{
-    DEFAULT_SIGNER_ID, Sm2PrivateKey, Sm2PublicKey, decrypt as sm2_decrypt, encrypt as sm2_encrypt,
-    sign_with_id, verify_with_id,
+    DEFAULT_SIGNER_ID, Sm2Digest, Sm2Hasher as InnerSm2Hasher, Sm2PrivateKey, Sm2PublicKey,
+    decrypt as sm2_decrypt, encrypt as sm2_encrypt, sign_digest, sign_with_id, verify_digest,
+    verify_with_id,
 };
 // v1.2 — SM2 key-exchange (GM/T 0003.3) FFI. Always compiled into the
 // C ABI (the v0.23 W3 posture: `sm2-key-exchange` is enabled
@@ -253,6 +254,18 @@ pub struct gmcrypto_sm2_privkey_t {
 /// Opaque handle for an SM2 public key.
 pub struct gmcrypto_sm2_pubkey_t {
     inner: Sm2PublicKey,
+}
+
+/// Opaque handle for a streaming GB/T 32918.2 SM2 digest hasher computing
+/// `e = SM3(Z_A || M)`. Construct with [`gmcrypto_sm2_hasher_new`] (binds
+/// `DEFAULT_SIGNER_ID`) or [`gmcrypto_sm2_hasher_new_with_id`] (explicit ID),
+/// absorb message chunks via [`gmcrypto_sm2_hasher_update`], and finish with
+/// exactly one terminal call: [`gmcrypto_sm2_hasher_finalize`] (which
+/// consumes and frees the handle even on output error) **or**
+/// [`gmcrypto_sm2_hasher_free`] (abort path). Do NOT call `_free` after
+/// `_finalize`.
+pub struct gmcrypto_sm2_hasher_t {
+    inner: InnerSm2Hasher,
 }
 
 /// Opaque handle for an SM2 key-exchange INITIATOR (party A; GM/T
@@ -3139,6 +3152,284 @@ pub unsafe extern "C" fn gmcrypto_sm2_encrypt_with_rng(
             Err(_) => return GMCRYPTO_ERR,
         };
         unsafe { write_output(&ct, out_der_ct, out_capacity, out_actual_len) }
+    })
+}
+
+// ============================================================
+// SM2 — streaming hasher and precomputed-digest sign / verify (v1.19).
+//
+// Exposes `gmcrypto_sm2_hasher_*` (streaming `e = SM3(Z_A || M)`) and
+// `gmcrypto_sm2_{sign,verify}_digest` (acting on that 32-byte `e`).
+// Caller-owned 32-byte digest buffers (`GMCRYPTO_SM3_DIGEST_SIZE`) rather
+// than a heap digest handle; see `docs/v1.19-scope.md` Q19.3.
+// ============================================================
+
+/// Construct a streaming SM2 hasher bound to `public_key` and
+/// [`DEFAULT_SIGNER_ID`] (`"1234567812345678"`, 16 bytes), immediately
+/// computing and absorbing `Z_A`.
+///
+/// Returns `NULL` if `public_key` is null or invalid. Pair a non-null handle
+/// with **exactly one** terminal call: [`gmcrypto_sm2_hasher_finalize`] or
+/// [`gmcrypto_sm2_hasher_free`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_hasher_new(
+    public_key: *const gmcrypto_sm2_pubkey_t,
+) -> *mut gmcrypto_sm2_hasher_t {
+    let result = std::panic::catch_unwind(|| {
+        if public_key.is_null() {
+            return None;
+        }
+        // SAFETY: `public_key` is non-null per the check above and borrowed
+        // only to compute `Z_A` during construction.
+        let pk = unsafe { &*public_key };
+        let inner = InnerSm2Hasher::new_default_id(&pk.inner)?;
+        Some(Box::into_raw(Box::new(gmcrypto_sm2_hasher_t { inner })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// Construct a streaming SM2 hasher bound to `public_key` and an explicit
+/// `id` (`id_len` bytes), immediately computing and absorbing `Z_A`.
+///
+/// **Zero-length ID semantics differ from message-level SM2 C calls:**
+/// both `(NULL, 0)` and `(non-null, 0)` hash a literal empty signer ID `""`
+/// (`ENTL_A = 0x0000`). In contrast, `gmcrypto_sm2_sign` /
+/// `gmcrypto_sm2_verify` treat `signer_id_len == 0` as `DEFAULT_SIGNER_ID`.
+/// Use [`gmcrypto_sm2_hasher_new`] when you want `DEFAULT_SIGNER_ID`.
+///
+/// Returns `NULL` if `public_key` is null/invalid, if `id` is null with
+/// `id_len > 0`, or if `id_len > 8191` (`MAX_ID_LEN`). Pair a non-null
+/// handle with **exactly one** terminal call:
+/// [`gmcrypto_sm2_hasher_finalize`] or [`gmcrypto_sm2_hasher_free`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_hasher_new_with_id(
+    public_key: *const gmcrypto_sm2_pubkey_t,
+    id: *const u8,
+    id_len: usize,
+) -> *mut gmcrypto_sm2_hasher_t {
+    let result = std::panic::catch_unwind(|| {
+        if public_key.is_null() {
+            return None;
+        }
+        let id_slice = unsafe { try_slice(id, id_len) }?;
+        // SAFETY: `public_key` is non-null per the check above and borrowed
+        // only to compute `Z_A` during construction.
+        let pk = unsafe { &*public_key };
+        let inner = InnerSm2Hasher::new(&pk.inner, id_slice)?;
+        Some(Box::into_raw(Box::new(gmcrypto_sm2_hasher_t { inner })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// Absorb a message chunk (`data`, `data_len` bytes) into a streaming SM2
+/// hasher. Empty chunks (`data_len == 0`, including `(NULL, 0)`) are valid
+/// no-ops.
+///
+/// Returns [`GMCRYPTO_OK`] on success, or [`GMCRYPTO_ERR`] if `hasher` is
+/// null or `data` is null with `data_len > 0` (leaving `hasher` untouched).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_hasher_update(
+    hasher: *mut gmcrypto_sm2_hasher_t,
+    data: *const u8,
+    data_len: usize,
+) -> c_int {
+    ffi_guard(|| {
+        if hasher.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let chunk = match unsafe { try_slice(data, data_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: `hasher` non-null per check above; caller guarantees unique
+        // access for the duration of this call.
+        let h = unsafe { &mut *hasher };
+        h.inner.update(chunk);
+        GMCRYPTO_OK
+    })
+}
+
+/// Consume the streaming SM2 hasher and write the 32-byte GB/T 32918.2
+/// digest `e = SM3(Z_A || M)` (`GMCRYPTO_SM3_DIGEST_SIZE`) to `out_digest`.
+///
+/// **Consumes and frees any non-null `hasher` handle even when `out_digest`
+/// is null (`GMCRYPTO_ERR`)** — do NOT call [`gmcrypto_sm2_hasher_free`] on
+/// the handle afterwards.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_hasher_finalize(
+    hasher: *mut gmcrypto_sm2_hasher_t,
+    out_digest: *mut u8,
+) -> c_int {
+    ffi_guard(|| {
+        if hasher.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        // SAFETY: `hasher` came from `Box::into_raw`; take ownership before
+        // validating `out_digest` so the handle is freed even on output error.
+        let boxed = unsafe { Box::from_raw(hasher) };
+        let digest = boxed.inner.finalize();
+        let out = match unsafe { try_slice_mut(out_digest, GMCRYPTO_SM3_DIGEST_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        out.copy_from_slice(digest.as_bytes());
+        GMCRYPTO_OK
+    })
+}
+
+/// Free a streaming SM2 hasher without finalizing (abort path). Passing
+/// `NULL` is a no-op. Do NOT call after [`gmcrypto_sm2_hasher_finalize`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_hasher_free(hasher: *mut gmcrypto_sm2_hasher_t) {
+    let _ = std::panic::catch_unwind(|| {
+        if hasher.is_null() {
+            return;
+        }
+        // SAFETY: `hasher` came from `Box::into_raw` and has not been freed.
+        drop(unsafe { Box::from_raw(hasher) });
+    });
+}
+
+/// Sign a precomputed 32-byte GB/T 32918.2 digest `digest` (`e = SM3(Z_A || M)`)
+/// using `key` and system randomness (`getrandom::SysRng`), writing the
+/// DER-encoded `SEQUENCE { r, s }` signature via the
+/// `(out_der_sig, out_capacity, out_actual_len)` convention.
+///
+/// **CRITICAL CONTRACT — `e = SM3(Z_A || M)` REQUIRED:** `digest` MUST be the
+/// 32-byte identity- and key-bound GB/T 32918.2 digest `e = SM3(Z_A || M)`
+/// (for example produced by [`gmcrypto_sm2_hasher_new`] +
+/// [`gmcrypto_sm2_hasher_finalize`]), **NOT** a plain `SM3(M)` digest. A
+/// caller passing precomputed bytes owns the signer-ID and public-key (`Z_A`)
+/// binding; this entry point cannot infer or verify `Z_A` from 32 raw bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_sign_digest(
+    key: *const gmcrypto_sm2_privkey_t,
+    digest: *const u8,
+    out_der_sig: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if key.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let d = match unsafe { try_slice(digest, GMCRYPTO_SM3_DIGEST_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let d_arr: [u8; GMCRYPTO_SM3_DIGEST_SIZE] = match d.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        // SAFETY: `key` non-null per check above.
+        let k = unsafe { &*key };
+        let mut rng = getrandom::SysRng;
+        let sm2_digest = Sm2Digest::from_precomputed_z_hash(d_arr);
+        let sig = match sign_digest(&k.inner, &sm2_digest, &mut rng) {
+            Ok(s) => s,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        unsafe { write_output(&sig, out_der_sig, out_capacity, out_actual_len) }
+    })
+}
+
+/// `_with_rng` variant of [`gmcrypto_sm2_sign_digest`], drawing signing
+/// randomness from `rng_callback` (`rng_context`) instead of
+/// `getrandom::SysRng`.
+///
+/// **CRITICAL CONTRACT — `e = SM3(Z_A || M)` REQUIRED:** `digest` MUST be the
+/// fixed 32-byte identity-bound digest `e = SM3(Z_A || M)`, **NOT** raw
+/// `SM3(M)`. Callers supplying a precomputed digest own the `(key, signer_id)`
+/// `Z_A` binding.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_sign_digest_with_rng(
+    key: *const gmcrypto_sm2_privkey_t,
+    digest: *const u8,
+    rng_callback: gmcrypto_rng_callback,
+    rng_context: *mut c_void,
+    out_der_sig: *mut u8,
+    out_capacity: usize,
+    out_actual_len: *mut usize,
+) -> c_int {
+    ffi_guard(|| {
+        if key.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let callback = match rng_callback {
+            Some(cb) => cb,
+            None => return GMCRYPTO_ERR,
+        };
+        let d = match unsafe { try_slice(digest, GMCRYPTO_SM3_DIGEST_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let d_arr: [u8; GMCRYPTO_SM3_DIGEST_SIZE] = match d.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        // SAFETY: `key` non-null per check above.
+        let k = unsafe { &*key };
+        let mut rng = CallbackRng {
+            callback,
+            context: rng_context,
+        };
+        let sm2_digest = Sm2Digest::from_precomputed_z_hash(d_arr);
+        let sig = match sign_digest(&k.inner, &sm2_digest, &mut rng) {
+            Ok(s) => s,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        unsafe { write_output(&sig, out_der_sig, out_capacity, out_actual_len) }
+    })
+}
+
+/// Verify a DER-encoded `(r, s)` signature against a precomputed 32-byte
+/// GB/T 32918.2 digest `digest` (`e = SM3(Z_A || M)`) under public `key`.
+///
+/// **CRITICAL CONTRACT — `e = SM3(Z_A || M)` REQUIRED:** `digest` MUST be the
+/// 32-byte identity-bound digest `e = SM3(Z_A || M)` matching `key` and its
+/// signer ID (for example from [`gmcrypto_sm2_hasher_finalize`]), **NOT**
+/// plain `SM3(M)`. Callers supplying external bytes own the key and signer-ID
+/// (`Z_A`) binding.
+///
+/// Returns [`GMCRYPTO_OK`] if valid, or [`GMCRYPTO_ERR`] for any failure
+/// (signature mismatch, malformed DER, identity public key, or null args).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_verify_digest(
+    key: *const gmcrypto_sm2_pubkey_t,
+    digest: *const u8,
+    der_sig: *const u8,
+    der_sig_len: usize,
+) -> c_int {
+    ffi_guard(|| {
+        if key.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        let d = match unsafe { try_slice(digest, GMCRYPTO_SM3_DIGEST_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let d_arr: [u8; GMCRYPTO_SM3_DIGEST_SIZE] = match d.try_into() {
+            Ok(a) => a,
+            Err(_) => return GMCRYPTO_ERR,
+        };
+        let sig = match unsafe { try_slice(der_sig, der_sig_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        // SAFETY: `key` non-null per check above.
+        let k = unsafe { &*key };
+        let sm2_digest = Sm2Digest::from_precomputed_z_hash(d_arr);
+        if verify_digest(&k.inner, &sm2_digest, sig) {
+            GMCRYPTO_OK
+        } else {
+            GMCRYPTO_ERR
+        }
     })
 }
 
