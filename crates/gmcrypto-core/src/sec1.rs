@@ -20,10 +20,12 @@
 //! # SEC1 point encoding
 //!
 //! `encode_uncompressed_point` / `decode_uncompressed_point`
-//! handle the 65-byte `04 || X || Y` form (SEC1 §2.3.3). The
-//! decoder rejects the identity point `00`, the compressed
-//! forms `02`/`03 || X` (deferred to v0.4), and any off-curve
-//! `(X, Y)`.
+//! handle the 65-byte `04 || X || Y` form (SEC1 §2.3.3), which
+//! [`encode`], [`decode`], [`crate::spki`], and [`crate::sm2::Sm2PublicKey::from_sec1_bytes`]
+//! require. `encode_compressed_point` / `decode_compressed_point` handle
+//! the 33-byte `02/03 || X` form (SEC1 §§2.3.3–2.3.4) used exclusively by
+//! [`crate::sm2::Sm2PublicKey::to_sec1_compressed`] and
+//! [`crate::sm2::Sm2PublicKey::from_sec1_compressed`].
 //!
 //! # Failure-mode invariant
 //!
@@ -33,20 +35,75 @@
 
 use crate::asn1::oid::SM2P256V1;
 use crate::asn1::{reader, writer};
-use crate::sm2::curve::{Fn, Fp};
+use crate::sm2::curve::{Fn, Fp, b};
 use crate::sm2::encrypt::{point_on_curve, projective_from_affine};
 use crate::sm2::point::ProjectivePoint;
 use alloc::vec::Vec;
 use crypto_bigint::U256;
-use subtle::ConstantTimeLess;
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, ConstantTimeLess};
 use zeroize::Zeroize;
 
+/// SEC1 compressed-point even-Y tag byte (`02 || X`).
+const SEC1_TAG_COMPRESSED_EVEN: u8 = 0x02;
+/// SEC1 compressed-point odd-Y tag byte (`03 || X`).
+const SEC1_TAG_COMPRESSED_ODD: u8 = 0x03;
+/// SEC1 compressed-point total byte length (`1 + 32`).
+pub(crate) const SEC1_COMPRESSED_LEN: usize = 33;
 /// SEC1 uncompressed-point tag byte (`04 || X || Y`).
 pub(crate) const SEC1_TAG_UNCOMPRESSED: u8 = 0x04;
 /// SEC1 uncompressed-point total byte length (`1 + 32 + 32`).
 pub(crate) const SEC1_UNCOMPRESSED_LEN: usize = 65;
 /// RFC 5915 `ECPrivateKey` version number (always `ecPrivkeyVer1 = 1`).
 const ECPRIVKEY_VER1: u8 = 1;
+/// Modular square-root exponent `(p + 1) / 4` since SM2 `p ≡ 3 (mod 4)`.
+const FP_SQRT_EXP: U256 = (*Fp::MODULUS.as_ref())
+    .wrapping_add(&U256::ONE)
+    .shr_vartime(2);
+
+/// Encode `(x, y)` field elements as a 33-byte SEC1 compressed point
+/// (`02 || X` for even `y`, `03 || X` for odd `y`).
+#[must_use]
+pub(crate) fn encode_compressed_point(x: &Fp, y: &Fp) -> [u8; SEC1_COMPRESSED_LEN] {
+    let y_be = y.retrieve().to_be_bytes();
+    let mut out = [0u8; SEC1_COMPRESSED_LEN];
+    out[0] = SEC1_TAG_COMPRESSED_EVEN | (y_be[31] & 1);
+    out[1..33].copy_from_slice(&x.retrieve().to_be_bytes());
+    out
+}
+
+/// Decode a 33-byte SEC1 compressed point (`02/03 || X`) into a validated
+/// [`ProjectivePoint`], rejecting wrong lengths, invalid tags (`00`, `04`,
+/// hybrid `06`/`07`, etc.), `X >= p`, quadratic non-residues, and any parity or
+/// curve mismatch.
+#[must_use]
+pub(crate) fn decode_compressed_point(input: &[u8]) -> Option<ProjectivePoint> {
+    if input.len() != SEC1_COMPRESSED_LEN {
+        return None;
+    }
+    let want_odd: u8 = match input[0] {
+        SEC1_TAG_COMPRESSED_EVEN => 0,
+        SEC1_TAG_COMPRESSED_ODD => 1,
+        _ => return None,
+    };
+    let x_u = U256::from_be_slice(&input[1..33]);
+    let p = *Fp::MODULUS.as_ref();
+    if !bool::from(x_u.ct_lt(&p)) {
+        return None;
+    }
+    let x = Fp::new(&x_u);
+    let three = Fp::new(&U256::from_u64(3));
+    let rhs = x * x * x - three * x + b();
+    let y0 = rhs.pow(&FP_SQRT_EXP);
+    if !bool::from((y0 * y0).retrieve().ct_eq(&rhs.retrieve())) {
+        return None;
+    }
+    let y0_odd = y0.retrieve().to_be_bytes()[31] & 1;
+    let y = Fp::conditional_select(&y0, &(-y0), Choice::from(y0_odd ^ want_odd));
+    if (y.retrieve().to_be_bytes()[31] & 1) != want_odd || !point_on_curve(&x, &y) {
+        return None;
+    }
+    Some(projective_from_affine(x, y))
+}
 
 /// Encode `(x, y)` field elements as a 65-byte SEC1 uncompressed point.
 ///
@@ -425,5 +482,82 @@ mod tests {
         let mut buf = [0u8; 32];
         buf.copy_from_slice(&n_bytes);
         assert!(validate_scalar(&buf).is_none());
+    }
+
+    #[test]
+    fn compressed_point_round_trip_and_exponent_identity() {
+        let p = *Fp::MODULUS.as_ref();
+        let four_exp = FP_SQRT_EXP.shl_vartime(2);
+        assert_eq!(four_exp.wrapping_sub(&U256::ONE), p);
+
+        let g = ProjectivePoint::generator();
+        let (gx, gy) = g.to_affine().expect("G finite");
+        let g_comp = encode_compressed_point(&gx, &gy);
+        let expected_g: [u8; 33] = [
+            0x02, 0x32, 0xC4, 0xAE, 0x2C, 0x1F, 0x19, 0x81, 0x19, 0x5F, 0x99, 0x04, 0x46, 0x6A,
+            0x39, 0xC9, 0x94, 0x8F, 0xE3, 0x0B, 0xBF, 0xF2, 0x66, 0x0B, 0xE1, 0x71, 0x5A, 0x45,
+            0x89, 0x33, 0x4C, 0x74, 0xC7,
+        ];
+        assert_eq!(g_comp, expected_g);
+        let rec_g = decode_compressed_point(&g_comp).expect("decode G");
+        assert!(bool::from(rec_g.ct_eq(&g)));
+
+        let neg_gy = -gy;
+        let neg_g_comp = encode_compressed_point(&gx, &neg_gy);
+        let mut expected_neg_g = expected_g;
+        expected_neg_g[0] = 0x03;
+        assert_eq!(neg_g_comp, expected_neg_g);
+        let rec_neg_g = decode_compressed_point(&neg_g_comp).expect("decode -G");
+        let (rx, ry) = rec_neg_g.to_affine().expect("-G finite");
+        assert_eq!(rx.retrieve(), gx.retrieve());
+        assert_eq!(ry.retrieve(), neg_gy.retrieve());
+    }
+
+    #[test]
+    fn compressed_point_rejections_and_ecprivatekey_isolation() {
+        assert!(decode_compressed_point(&[]).is_none());
+        assert!(decode_compressed_point(&[0x00]).is_none());
+        assert!(decode_compressed_point(&[0x02; 32]).is_none());
+        assert!(decode_compressed_point(&[0x02; 34]).is_none());
+        assert!(decode_compressed_point(&[0x04; 65]).is_none());
+
+        let g = ProjectivePoint::generator();
+        let (gx, gy) = g.to_affine().expect("G finite");
+        let g_comp = encode_compressed_point(&gx, &gy);
+        for bad_tag in [0x00u8, 0x01, 0x04, 0x05, 0x06, 0x07, 0xFF] {
+            let mut bad = g_comp;
+            bad[0] = bad_tag;
+            assert!(decode_compressed_point(&bad).is_none());
+        }
+
+        let p = *Fp::MODULUS.as_ref();
+        for x_bad in [p, p.wrapping_add(&U256::ONE), U256::MAX] {
+            let mut bad = [0u8; 33];
+            bad[0] = 0x02;
+            bad[1..33].copy_from_slice(&x_bad.to_be_bytes());
+            assert!(decode_compressed_point(&bad).is_none());
+        }
+
+        // X = 2 is a quadratic non-residue on the SM2 curve.
+        let mut non_res = [0u8; 33];
+        non_res[32] = 0x02;
+        non_res[0] = 0x02;
+        assert!(decode_compressed_point(&non_res).is_none());
+        non_res[0] = 0x03;
+        assert!(decode_compressed_point(&non_res).is_none());
+
+        // RFC 5915 ECPrivateKey decoder still rejects 33-byte compressed publicKey.
+        let mut body = Vec::new();
+        writer::write_integer(&mut body, &[ECPRIVKEY_VER1]);
+        writer::write_octet_string(&mut body, &[0x42u8; 32]);
+        let mut params = Vec::new();
+        writer::write_oid(&mut params, SM2P256V1);
+        writer::write_context_tagged_explicit(&mut body, 0, &params);
+        let mut pk_bitstr = Vec::new();
+        writer::write_bit_string(&mut pk_bitstr, 0, &g_comp);
+        writer::write_context_tagged_explicit(&mut body, 1, &pk_bitstr);
+        let mut der = Vec::new();
+        writer::write_sequence(&mut der, &body);
+        assert!(decode(&der).is_none());
     }
 }

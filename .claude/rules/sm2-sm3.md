@@ -31,6 +31,11 @@ paths:
   zeroize** the `[u8; 32]`. The FFI name stays `gmcrypto_sm2_privkey_to_sec1_be`.
 - Don't invent a second RNG-callback shape; `CallbackRng` already covers key
   exchange and TLCP records. `getrandom` is a direct workspace dep (`sys_rng`).
+- `Sm2PublicKey::{to_sec1_compressed, from_sec1_compressed}` are additive
+  bare-point helpers (SEC1 §2.3.3–2.3.4). Keep `Sm2PublicKey::from_sec1_bytes`,
+  `spki::decode`, `sec1::decode`, and `gmcrypto-c`'s `gmcrypto_sm2_pubkey_new`
+  strictly uncompressed (`65` bytes); keep field/sqrt helpers in `sec1.rs`
+  `pub(crate)` or private.
 
 ## SM3 / HMAC / KDF
 

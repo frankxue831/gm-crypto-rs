@@ -123,7 +123,7 @@ the signal is the per-target trend, not an absolute number.
 | `fuzz_asn1_reader` | low-level DER reader primitives |
 | `fuzz_sm2_ciphertext_der` | `asn1::ciphertext::decode` (GM/T 0009) |
 | `fuzz_sm2_raw_ciphertext` | `decode_c1c3c2` + `decode_c1c2c3_legacy` |
-| `fuzz_sm2_pubkey_sec1` | `Sm2PublicKey::from_sec1_bytes` |
+| `fuzz_sm2_pubkey_sec1` | `Sm2PublicKey::{from_sec1_bytes, from_sec1_compressed}` (+ byte-idempotent re-encoding) |
 | `fuzz_sm2_decrypt` | `sm2::decrypt` (fixed key; parse + KDF + MAC) |
 | `fuzz_sm2_verify` | `verify_with_id` (fixed key; sig DER parse) |
 | `fuzz_sm2_kx` | key-exchange initiator `confirm` (fixed keys; adversarial peer `R_B`+`S_B`) |

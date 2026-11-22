@@ -112,6 +112,8 @@ pub mod gmcrypto_core::sm2::public_key
 pub struct gmcrypto_core::sm2::public_key::Sm2PublicKey
 impl gmcrypto_core::sm2::public_key::Sm2PublicKey
 pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::from_sec1_bytes(&[u8]) -> core::option::Option<Self>
+pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::from_sec1_compressed(&[u8]) -> core::option::Option<Self>
+pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::to_sec1_compressed(&self) -> [u8; 33]
 pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::to_sec1_uncompressed(&self) -> [u8; 65]
 impl subtle::ConstantTimeEq for gmcrypto_core::sm2::public_key::Sm2PublicKey
 pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::ct_eq(&self, &Self) -> subtle::Choice
@@ -164,6 +166,8 @@ pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::drop(&mut self)
 pub struct gmcrypto_core::sm2::Sm2PublicKey
 impl gmcrypto_core::sm2::public_key::Sm2PublicKey
 pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::from_sec1_bytes(&[u8]) -> core::option::Option<Self>
+pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::from_sec1_compressed(&[u8]) -> core::option::Option<Self>
+pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::to_sec1_compressed(&self) -> [u8; 33]
 pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::to_sec1_uncompressed(&self) -> [u8; 65]
 impl subtle::ConstantTimeEq for gmcrypto_core::sm2::public_key::Sm2PublicKey
 pub fn gmcrypto_core::sm2::public_key::Sm2PublicKey::ct_eq(&self, &Self) -> subtle::Choice
