@@ -147,7 +147,7 @@ impl GcmTagLen {
 /// `ciphertext.len() == plaintext.len()` and `tag.len() == 16`.
 ///
 /// Returns `None` when `plaintext.len() > 2^36 − 32` bytes
-/// ([`GCM_MAX_PT_BYTES`]): past that limit the 32-bit GCTR counter
+/// (`GCM_MAX_PT_BYTES`): past that limit the 32-bit GCTR counter
 /// wraps and keystream is reused (NIST SP 800-38D §5.2.1.1). This is a
 /// length-range reject, not a failure-mode distinction; it mirrors the
 /// streaming-encryptor poison. The bound is unreachable at sane sizes
@@ -241,7 +241,7 @@ pub fn decrypt(
 /// length changes.
 ///
 /// Returns `None` for the same `> 2^36 − 32`-byte plaintext ceiling as
-/// [`encrypt`] ([`GCM_MAX_PT_BYTES`]).
+/// [`encrypt`] (`GCM_MAX_PT_BYTES`).
 #[must_use]
 pub fn encrypt_with_tag_len(
     key: &[u8; KEY_SIZE],

@@ -19,7 +19,7 @@
 //!
 //! # SEC1 point encoding
 //!
-//! [`encode_uncompressed_point`] / [`decode_uncompressed_point`]
+//! `encode_uncompressed_point` / `decode_uncompressed_point`
 //! handle the 65-byte `04 || X || Y` form (SEC1 §2.3.3). The
 //! decoder rejects the identity point `00`, the compressed
 //! forms `02`/`03 || X` (deferred to v0.4), and any off-curve

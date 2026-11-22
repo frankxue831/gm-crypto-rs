@@ -12,12 +12,12 @@ use zeroize::ZeroizeOnDrop;
 ///
 /// # Construction
 ///
-/// Two always-on public constructors:
+/// Two public constructors:
 ///
 /// - [`Sm2PrivateKey::from_bytes_be`] — **recommended.** Takes a
 ///   32-byte big-endian scalar slice; the caller never has to name
 ///   `crypto_bigint::U256`.
-/// - [`Sm2PrivateKey::from_scalar`] (gated behind the
+/// - `Sm2PrivateKey::from_scalar` (gated behind the
 ///   `crypto-bigint-scalar` feature flag) — takes a
 ///   `crypto_bigint::U256` directly, for callers already carrying
 ///   that dependency.
@@ -61,7 +61,7 @@ impl Sm2PrivateKey {
     /// **Recommended public constructor.** Callers don't need to
     /// name `crypto_bigint::U256` and the SDK keeps its `crypto-bigint`
     /// transitive-dep major version a private implementation detail.
-    /// Same constant-time `[1, n-2]` range check as [`Self::from_scalar`].
+    /// Same constant-time `[1, n-2]` range check as `Self::from_scalar`.
     ///
     /// Returns `CtOption::none()` for any out-of-range input
     /// (`d == 0`, `d == n - 1`, or `d > n - 1`).

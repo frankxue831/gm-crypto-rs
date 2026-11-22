@@ -57,7 +57,7 @@
 //! point on a different curve sharing the same `x` coordinate as a
 //! point on SM2; multiplying by the secret `d_B` then leaks bits of
 //! `d_B` via the small-order subgroup of the rogue curve. The
-//! [`crate::sm2::encrypt::point_on_curve`] check is the standard
+//! `crate::sm2::encrypt::point_on_curve` check is the standard
 //! defense.
 
 use crate::asn1::ciphertext::decode;
