@@ -10,9 +10,9 @@ We aim to acknowledge within 5 business days. There is no bug bounty.
 
 On a confirmed vulnerability, the fix ships in a new release of the latest
 supported minor (see below), accompanied by a published **GitHub Security
-Advisory** — which syndicates to the GitHub Advisory Database, so `cargo audit`
-/ RustSec consumers are notified — and a CVE requested via the advisory when
-warranted. Affected crates.io versions are **yanked** when a safe upgrade exists
+Advisory** (with a CVE requested via the advisory when warranted), and we will
+file a **RustSec** advisory so `cargo audit` users are notified. Affected
+crates.io versions are **yanked** when a safe upgrade exists
 and the flaw is remotely exploitable (yanking blocks new resolutions without
 deleting the version, so it never breaks existing pinned `Cargo.lock` builds).
 Because the three crates release in lockstep at one exact version, a fix is
@@ -65,10 +65,12 @@ NOT in scope.
 
 ## Constant-time posture
 
-`gmcrypto-core` is **constant-time-designed** — every secret-dependent operation
-is implemented through `subtle`-style masked selection rather than data-dependent
-branches, and the SM2 sign retry loop runs a fixed number of iterations
-regardless of which (if any) candidate is valid.
+`gmcrypto-core` is **constant-time-designed** — secret-dependent operations are
+written to avoid `==`, `if`, or `bool` on secret-derived values via
+`subtle`-style masked selection (documented exceptions under
+[Other known limitations](#other-known-limitations-non-goals) and B-9 below),
+and the SM2 sign retry loop runs a fixed number of iterations regardless of
+which (if any) candidate is valid.
 
 The in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
 (`benches/timing_leaks.rs`) ships **20 real `ct_*` targets** (12 always-on
@@ -132,8 +134,9 @@ wiring). The authoritative per-target thresholds live in
 - `ct_hmac_sm3` — HMAC-SM3 keyed MAC, class-split by two fixed keys over a
   fixed-length message (v0.2 W3). **DEMOTED 2026-06-17** to PR-smoke telemetry +
   a nightly gross-regression sentinel `@0.55` — the 4th two-input class-split
-  target hit by the `ubuntu-24.04` image-noise (constant-time *by construction*,
-  so it can only measure two-input noise; the 06-14 nightly median crossed 0.20
+  target hit by the `ubuntu-24.04` image-noise (designed to be constant-time —
+  no secret-indexed table lookups or secret-dependent branches — while this
+  target is telemetry/sentinel-only; the 06-14 nightly median crossed 0.20
   co-spiking with the invert pair). **HONEST RESIDUAL:** unlike the invert pair
   (backstopped by `ct_sign`), the HMAC primitive has **NO direct non-composite
   backstop** after this — only the *diluted* `ct_pkcs8_decrypt` (iterated PBKDF2)
@@ -503,7 +506,10 @@ hardening gap"):
   measurement. It will **not** be revisited by re-tuning shared-CI thresholds, and
   **not** via PR-executing public self-hosted CI (remote-code-execution risk,
   rejected at v0.17). This baseline does not block v1.0 — the constant-time
-  *design* is unchanged and complete; only the *measurability* of two short
+  *design* is unchanged (outside the documented residuals under
+  [Other known limitations](#other-known-limitations-non-goals) and B-9 below:
+  SM2-encrypt KDF retry, DER encoding of public `(r, s)`, and
+  variable-latency-multiply CPUs); only the *measurability* of the short
   diagnostics on noisy shared CI is bounded.
 
 ### Constant-time posture clarification (B-10)
@@ -511,14 +517,18 @@ hardening gap"):
 The implementation is constant-time **up to the single unavoidable public
 validity bit** that must affect observable behavior — e.g. signature-valid /
 tag-valid / decode-ok deciding `Some` vs `None`, `Ok` vs `Err`, or `true` vs
-`false`. **No secret-dependent work or timing precedes that decision:** the full
+`false` — outside the documented residuals below (B-9 short-plaintext
+SM2-encrypt KDF retry, DER encoding of public `(r, s)`, and
+variable-latency-multiply CPUs). **No secret-dependent work or timing precedes
+that decision:** the full
 operation runs to completion (fixed-window scalar multiplication, constant-time
 S-box, masked padding strip, `subtle::ConstantTimeEq` tag/MAC compare), and only
 the final `Choice → bool` conversion branches — to choose the return shape and to
 zeroize on the failure arm. The "one bit" is inherent (a verify/decrypt API must
 report success or failure); it is not a leak of any secret beyond that bit. This
-is the project-wide posture; the per-mode notes below are its instances (CBC's
-single `None`, the AEAD constant-time tag compare, SM2 decrypt's zeroize-on-fail).
+is the project-wide posture (subject to the documented residuals above); the
+per-mode notes below are its instances (CBC's single `None`, the AEAD
+constant-time tag compare, SM2 decrypt's zeroize-on-fail).
 
 ### v0.23 re-audit hardening
 
@@ -603,8 +613,9 @@ A caller that acts on bytes emitted before `finalize` is acting on data that may
 yet be rejected. `finalize` still returns a single `None` on any failure
 (length, padding, or otherwise — no padding-oracle distinction). Callers needing
 integrity use SM4-GCM / SM4-CCM, or wrap CBC in encrypt-then-MAC as above. (The
-v0.20 differential fuzzer proves the streaming decryptor is byte-identical to the
-single-shot `mode_cbc::decrypt` across arbitrary chunk boundaries.)
+v0.20 differential fuzzer checks that the streaming decryptor is byte-identical
+to the single-shot `mode_cbc::decrypt` across arbitrary chunk boundaries — no
+divergence found.)
 
 ### SM2 envelope encryption (Phase 3)
 
@@ -630,7 +641,8 @@ message lengths and reveals nothing about the recipient's private key. SM2
 **encrypt** is not a `dudect`-gated path (the gated SM2 paths are sign and
 decrypt); the retry behavior is documented here rather than gated.
 
-**Wire format.** GM/T 0009-2012 §6 DER is the primary wire format and
+**Wire format.** GM/T 0009-2012 §6 DER (superseded by GM/T 0009-2023; cf.
+GB/T 35276-2017) is the primary wire format and
 the only emit format until v0.3. v0.3 W4 added raw-byte concatenation
 helpers: `sm2::raw_ciphertext::encode_c1c3c2` / `decode_c1c3c2` for
 the modern `C1||C3||C2` ordering, and `decode_c1c2c3_legacy`

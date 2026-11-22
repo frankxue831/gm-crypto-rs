@@ -13,7 +13,8 @@
 //! All seven OIDs cross-validated against the DER bytes published
 //! in their authoritative specs (RFC 5912 §6 for PKCS-related,
 //! RFC 5480 §2 for `id-ecPublicKey`, GM/T 0006-2012 §3 and
-//! GM/T 0010-2012 §6 for the SM-flavored `1.2.156.10197.…` arcs).
+//! GM/T 0010-2012 §6 — superseded by the 2023 editions — for the
+//! SM-flavored `1.2.156.10197.…` arcs).
 
 /// Compute the encoded length of an OID's sub-identifier bytes.
 ///
@@ -103,7 +104,7 @@ const ENCODED_ID_EC_PUBLIC_KEY: [u8; LEN_ID_EC_PUBLIC_KEY] =
 pub const ID_EC_PUBLIC_KEY: &[u8] = &ENCODED_ID_EC_PUBLIC_KEY;
 
 /// `sm2p256v1`: 1.2.156.10197.1.301 — SPKI namedCurve parameter for
-/// the SM2 256-bit prime curve. GM/T 0006-2012.
+/// the SM2 256-bit prime curve. GM/T 0006-2012 (superseded by GM/T 0006-2023).
 const ARCS_SM2P256V1: &[u32] = &[1, 2, 156, 10197, 1, 301];
 const LEN_SM2P256V1: usize = encoded_len(ARCS_SM2P256V1);
 const ENCODED_SM2P256V1: [u8; LEN_SM2P256V1] = encode::<LEN_SM2P256V1>(ARCS_SM2P256V1);
@@ -114,7 +115,8 @@ pub const SM2P256V1: &[u8] = &ENCODED_SM2P256V1;
 ///
 /// `SignatureAlgorithm` OID for SM2 signing with SM3 digest.
 /// Reserved for future use; not used internally in v0.3, but
-/// encoded so W2 callers can refer to it. GM/T 0006-2012.
+/// encoded so W2 callers can refer to it. GM/T 0006-2012 (superseded by
+/// GM/T 0006-2023).
 const ARCS_SM2_SIGN_WITH_SM3: &[u32] = &[1, 2, 156, 10197, 1, 501];
 const LEN_SM2_SIGN_WITH_SM3: usize = encoded_len(ARCS_SM2_SIGN_WITH_SM3);
 const ENCODED_SM2_SIGN_WITH_SM3: [u8; LEN_SM2_SIGN_WITH_SM3] =
@@ -139,7 +141,8 @@ const ENCODED_PBES2: [u8; LEN_PBES2] = encode::<LEN_PBES2>(ARCS_PBES2);
 pub const PBES2: &[u8] = &ENCODED_PBES2;
 
 /// `id-hmacWithSM3`: 1.2.156.10197.1.401.2 — HMAC-SM3 OID, used as
-/// the PBKDF2 PRF identifier in PBES2 wrappings. GM/T 0006-2012.
+/// the PBKDF2 PRF identifier in PBES2 wrappings. GM/T 0006-2012 (superseded
+/// by GM/T 0006-2023).
 const ARCS_ID_HMAC_WITH_SM3: &[u32] = &[1, 2, 156, 10197, 1, 401, 2];
 const LEN_ID_HMAC_WITH_SM3: usize = encoded_len(ARCS_ID_HMAC_WITH_SM3);
 const ENCODED_ID_HMAC_WITH_SM3: [u8; LEN_ID_HMAC_WITH_SM3] =
@@ -150,7 +153,7 @@ pub const ID_HMAC_WITH_SM3: &[u8] = &ENCODED_ID_HMAC_WITH_SM3;
 /// `sm4-cbc`: 1.2.156.10197.1.104.2.
 ///
 /// `SM4-CBC` `EncryptionScheme` OID for PBES2 `EncryptionScheme`.
-/// GM/T 0006-2012.
+/// GM/T 0006-2012 (superseded by GM/T 0006-2023).
 const ARCS_SM4_CBC: &[u32] = &[1, 2, 156, 10197, 1, 104, 2];
 const LEN_SM4_CBC: usize = encoded_len(ARCS_SM4_CBC);
 const ENCODED_SM4_CBC: [u8; LEN_SM4_CBC] = encode::<LEN_SM4_CBC>(ARCS_SM4_CBC);
