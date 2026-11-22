@@ -30,18 +30,19 @@ Release state table below and in `docs/`.
 
 | | |
 |---|---|
-| Live on crates.io | **`1.17.0`** — all three crates, 2026-10-26 from `41d54a5` (published by the maintainer); tag `v1.17.0` on `origin`, ED25519-verified. Previous: `1.16.0` 2026-10-10 from `2a7c880`, tag `v1.16.0` ED25519-verified |
-| Workspace version | `1.18.0` release candidate. Bump all three crates and their exact sibling pins together for a publishing cycle. Assurance-only cycles keep the workspace version. |
-| Gate #1 | 1.18.0 passed on 2026-11-22 at `630ee75` against downstream `f79543c`. See [the gate evidence](docs/v1.18.0-gate1-evidence.md). `docs/ECOSYSTEM.md` §8 requires a PASS before each publish. The evidence attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty. Rerun the gate if that diff shows changes. Running the gate script is ordinary agent work. |
+| Live on crates.io | **`1.18.0`** — all three crates, published 2026-11-22 from `d6a6a9e`. Tag `v1.18.0` on `origin` has a verified ED25519 signature. The previous release was `1.17.0` on 2026-10-26 from `41d54a5`. |
+| Workspace version | `1.18.0` matches crates.io. Bump all three crates and their exact sibling pins together for a publishing cycle. Assurance-only cycles keep the workspace version. |
+| Gate #1 | Passed on 2026-11-22 at `630ee75` against downstream `f79543c`. The evidence applies to the published commit `d6a6a9e`. See [the gate evidence](docs/v1.18.0-gate1-evidence.md). `docs/ECOSYSTEM.md` §8 requires a PASS before each publish. The evidence attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty. Rerun the gate if that diff shows changes. Running the gate script is ordinary agent work. |
 
-`cargo publish` and the SSH-signed tag are the **maintainer's authenticated
-call** — the agent path is branch + PR. The 1.11.0, 1.12.0 and 1.13.0
-publishes were explicit per-release delegations, not a standing grant; the
-maintainer published 1.16.0. The tags have always been the maintainer's.
+The maintainer controls `cargo publish` and SSH tag signing. Agents need
+**explicit delegation for each release and action**. The usual agent path
+is branch + PR. The maintainer
+delegated publication for 1.11.0, 1.12.0 and 1.13.0, and both publication
+and tag signing for 1.18.0.
 
 ### v1.18 — core API additions and SM4 batching
 
-The release candidate adds HKDF-SM3, SM2 key generation, streaming SM2
+1.18.0 adds HKDF-SM3, SM2 key generation, streaming SM2
 hashing and prehashed signatures. SM4 streaming GCM encryption and
 single-shot CBC decryption now use the batch cipher paths. The C ABI and
 Rust 1.87 minimum carry forward. See `docs/v1.18-scope.md` for the scope
