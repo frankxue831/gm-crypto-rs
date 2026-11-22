@@ -218,4 +218,31 @@ mod tests {
         der.push(0x00);
         assert!(decode(&der).is_none());
     }
+
+    #[test]
+    fn rejects_compressed_point() {
+        let mut alg_inner = Vec::new();
+        writer::write_oid(&mut alg_inner, ID_EC_PUBLIC_KEY);
+        writer::write_oid(&mut alg_inner, SM2P256V1);
+        let mut alg_seq = Vec::new();
+        writer::write_sequence(&mut alg_seq, &alg_inner);
+
+        let g_comp =
+            crate::sm2::Sm2PublicKey::from_point(ProjectivePoint::generator()).to_sec1_compressed();
+        for tag in [0x02u8, 0x03] {
+            let mut key_bytes = g_comp;
+            key_bytes[0] = tag;
+            let mut bitstr = Vec::new();
+            writer::write_bit_string(&mut bitstr, 0, &key_bytes);
+            let mut body = Vec::new();
+            body.extend_from_slice(&alg_seq);
+            body.extend_from_slice(&bitstr);
+            let mut der = Vec::new();
+            writer::write_sequence(&mut der, &body);
+            assert!(
+                decode(&der).is_none(),
+                "SPKI must still reject 33-byte compressed keys"
+            );
+        }
+    }
 }

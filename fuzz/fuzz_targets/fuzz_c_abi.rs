@@ -105,14 +105,59 @@ fuzz_target!(|data: &[u8]| {
     // contract.
     unsafe {
         match op % FUZZ_OP_COUNT {
-            // (0) Single-shot SM3 over arbitrary bytes.
+            // (0) Single-shot SM3 + HKDF-SM3 over arbitrary bytes.
             0 => {
                 let mut digest = [0u8; GMCRYPTO_SM3_DIGEST_SIZE];
                 let _ = gmcrypto_sm3_hash(body.as_ptr(), body.len(), digest.as_mut_ptr());
+
+                let (salt, rest) = body.split_at(body.len() / 3);
+                let (ikm, info) = rest.split_at(rest.len() / 2);
+                let mut prk = [0u8; GMCRYPTO_SM3_DIGEST_SIZE];
+                assert_eq!(
+                    gmcrypto_hkdf_sm3_extract(
+                        salt.as_ptr(),
+                        salt.len(),
+                        ikm.as_ptr(),
+                        ikm.len(),
+                        prk.as_mut_ptr(),
+                    ),
+                    GMCRYPTO_OK
+                );
+                let out_len = body
+                    .first()
+                    .copied()
+                    .map_or(0, |b| usize::from(b).saturating_mul(33))
+                    .min(8200);
+                let mut okm_exp = vec![0u8; out_len.max(1)];
+                let mut okm_one = vec![0u8; out_len.max(1)];
+                let rc1 = gmcrypto_hkdf_sm3_expand(
+                    prk.as_ptr(),
+                    info.as_ptr(),
+                    info.len(),
+                    okm_exp.as_mut_ptr(),
+                    out_len,
+                );
+                let rc2 = gmcrypto_hkdf_sm3(
+                    salt.as_ptr(),
+                    salt.len(),
+                    ikm.as_ptr(),
+                    ikm.len(),
+                    info.as_ptr(),
+                    info.len(),
+                    okm_one.as_mut_ptr(),
+                    out_len,
+                );
+                assert_eq!(rc1, rc2);
+                if (1..=8160).contains(&out_len) {
+                    assert_eq!(rc1, GMCRYPTO_OK);
+                    assert_eq!(okm_exp[..out_len], okm_one[..out_len]);
+                } else {
+                    assert_eq!(rc1, GMCRYPTO_ERR);
+                }
             }
 
-            // (1) Streaming SM3 lifecycle: new -> update(chunks) -> finalize.
-            //     finalize() CONSUMES the handle, so it is NOT also freed.
+            // (1) Streaming SM3 + v1.19 SM2 keygen / streaming hasher / digest
+            //     sign+verify lifecycles. Every finalize consumes its handle.
             1 => {
                 let h = gmcrypto_sm3_new();
                 if !h.is_null() {
@@ -122,6 +167,63 @@ fuzz_target!(|data: &[u8]| {
                     let mut digest = [0u8; GMCRYPTO_SM3_DIGEST_SIZE];
                     let _ = gmcrypto_sm3_finalize(h, digest.as_mut_ptr());
                     // h was consumed by finalize(); do NOT free.
+                }
+
+                let sk =
+                    gmcrypto_sm2_privkey_generate_with_rng(Some(fixed_fill_rng), ptr::null_mut());
+                if !sk.is_null() {
+                    let pk = gmcrypto_sm2_privkey_public_key(sk);
+                    if !pk.is_null() {
+                        let hasher = if body.is_empty() {
+                            gmcrypto_sm2_hasher_new(pk)
+                        } else {
+                            let id_len = usize::from(body[0]).min(body.len() - 1);
+                            gmcrypto_sm2_hasher_new_with_id(pk, body[1..].as_ptr(), id_len)
+                        };
+                        if !hasher.is_null() {
+                            for chunk in body.chunks(11) {
+                                assert_eq!(
+                                    gmcrypto_sm2_hasher_update(hasher, chunk.as_ptr(), chunk.len(),),
+                                    GMCRYPTO_OK
+                                );
+                            }
+                            let mut digest = [0u8; GMCRYPTO_SM3_DIGEST_SIZE];
+                            assert_eq!(
+                                gmcrypto_sm2_hasher_finalize(hasher, digest.as_mut_ptr()),
+                                GMCRYPTO_OK
+                            );
+                            let mut sig = [0u8; 128];
+                            let mut sig_len = 0usize;
+                            if gmcrypto_sm2_sign_digest_with_rng(
+                                sk,
+                                digest.as_ptr(),
+                                Some(fixed_fill_rng),
+                                ptr::null_mut(),
+                                sig.as_mut_ptr(),
+                                sig.len(),
+                                &mut sig_len,
+                            ) == GMCRYPTO_OK
+                            {
+                                assert_eq!(
+                                    gmcrypto_sm2_verify_digest(
+                                        pk,
+                                        digest.as_ptr(),
+                                        sig.as_ptr(),
+                                        sig_len,
+                                    ),
+                                    GMCRYPTO_OK
+                                );
+                            }
+                            let _ = gmcrypto_sm2_verify_digest(
+                                pk,
+                                digest.as_ptr(),
+                                body.as_ptr(),
+                                body.len(),
+                            );
+                        }
+                        gmcrypto_sm2_pubkey_free(pk);
+                    }
+                    gmcrypto_sm2_privkey_free(sk);
                 }
             }
 
@@ -139,9 +241,8 @@ fuzz_target!(|data: &[u8]| {
                 }
             }
 
-            // (3) SM4-CBC decrypt: key / IV / ciphertext carved from the input.
-            //     CBC plaintext is never longer than the ciphertext, so an
-            //     out buffer of ct_len is always sufficient.
+            // (3) SM4-CBC decrypt + SM4-CTR single-shot/streaming differential:
+            //     key / IV / payload carved from the input.
             3 => {
                 if body.len() >= GMCRYPTO_SM4_KEY_SIZE + GMCRYPTO_SM4_BLOCK_SIZE {
                     let (key, r1) = body.split_at(GMCRYPTO_SM4_KEY_SIZE);
@@ -157,6 +258,60 @@ fuzz_target!(|data: &[u8]| {
                         out.len(),
                         &mut out_len,
                     );
+
+                    let mut ctr_ct = vec![0u8; ct.len().max(1)];
+                    let mut ctr_ct_len = 0usize;
+                    assert_eq!(
+                        gmcrypto_sm4_ctr_encrypt(
+                            key.as_ptr(),
+                            iv.as_ptr(),
+                            ct.as_ptr(),
+                            ct.len(),
+                            ctr_ct.as_mut_ptr(),
+                            ctr_ct.len(),
+                            &mut ctr_ct_len,
+                        ),
+                        GMCRYPTO_OK
+                    );
+                    assert_eq!(ctr_ct_len, ct.len());
+
+                    let cipher = gmcrypto_sm4_ctr_cipher_new(key.as_ptr(), iv.as_ptr());
+                    assert!(!cipher.is_null());
+                    let mut streamed = Vec::with_capacity(ct.len());
+                    for chunk in ct.chunks(5) {
+                        let mut c_out = vec![0u8; chunk.len()];
+                        let mut c_len = 0usize;
+                        assert_eq!(
+                            gmcrypto_sm4_ctr_cipher_update(
+                                cipher,
+                                chunk.as_ptr(),
+                                chunk.len(),
+                                c_out.as_mut_ptr(),
+                                c_out.len(),
+                                &mut c_len,
+                            ),
+                            GMCRYPTO_OK
+                        );
+                        streamed.extend_from_slice(&c_out[..c_len]);
+                    }
+                    gmcrypto_sm4_ctr_cipher_free(cipher);
+                    assert_eq!(streamed, ctr_ct[..ctr_ct_len]);
+
+                    let mut ctr_rt = vec![0u8; ct.len().max(1)];
+                    let mut ctr_rt_len = 0usize;
+                    assert_eq!(
+                        gmcrypto_sm4_ctr_decrypt(
+                            key.as_ptr(),
+                            iv.as_ptr(),
+                            ctr_ct.as_ptr(),
+                            ctr_ct_len,
+                            ctr_rt.as_mut_ptr(),
+                            ctr_rt.len(),
+                            &mut ctr_rt_len,
+                        ),
+                        GMCRYPTO_OK
+                    );
+                    assert_eq!(&ctr_rt[..ctr_rt_len], ct);
                 }
             }
 
@@ -221,6 +376,81 @@ fuzz_target!(|data: &[u8]| {
                     ),
                     GMCRYPTO_ERR
                 );
+                assert_eq!(
+                    gmcrypto_hkdf_sm3_extract(
+                        ptr::null(),
+                        1,
+                        body.as_ptr(),
+                        body.len(),
+                        digest.as_mut_ptr(),
+                    ),
+                    GMCRYPTO_ERR
+                );
+                assert_eq!(
+                    gmcrypto_hkdf_sm3_expand(
+                        ptr::null(),
+                        body.as_ptr(),
+                        body.len(),
+                        out.as_mut_ptr(),
+                        32
+                    ),
+                    GMCRYPTO_ERR
+                );
+                assert!(gmcrypto_sm2_privkey_generate_with_rng(None, ptr::null_mut()).is_null());
+                assert!(gmcrypto_sm2_privkey_public_key(ptr::null()).is_null());
+                assert!(gmcrypto_sm2_hasher_new(ptr::null()).is_null());
+                assert!(
+                    gmcrypto_sm2_hasher_new_with_id(ptr::null(), body.as_ptr(), body.len())
+                        .is_null()
+                );
+                assert_eq!(
+                    gmcrypto_sm2_hasher_update(ptr::null_mut(), body.as_ptr(), body.len()),
+                    GMCRYPTO_ERR
+                );
+                assert_eq!(
+                    gmcrypto_sm2_hasher_finalize(ptr::null_mut(), digest.as_mut_ptr()),
+                    GMCRYPTO_ERR
+                );
+                gmcrypto_sm2_hasher_free(ptr::null_mut());
+                assert_eq!(
+                    gmcrypto_sm2_sign_digest(
+                        ptr::null(),
+                        digest.as_ptr(),
+                        out.as_mut_ptr(),
+                        out.len(),
+                        &mut out_len,
+                    ),
+                    GMCRYPTO_ERR
+                );
+                assert_eq!(
+                    gmcrypto_sm2_verify_digest(ptr::null(), digest.as_ptr(), out.as_ptr(), 1),
+                    GMCRYPTO_ERR
+                );
+                assert_eq!(
+                    gmcrypto_sm4_ctr_encrypt(
+                        ptr::null(),
+                        ptr::null(),
+                        body.as_ptr(),
+                        body.len(),
+                        out.as_mut_ptr(),
+                        out.len(),
+                        &mut out_len,
+                    ),
+                    GMCRYPTO_ERR
+                );
+                assert!(gmcrypto_sm4_ctr_cipher_new(ptr::null(), ptr::null()).is_null());
+                assert_eq!(
+                    gmcrypto_sm4_ctr_cipher_update(
+                        ptr::null_mut(),
+                        body.as_ptr(),
+                        body.len(),
+                        out.as_mut_ptr(),
+                        out.len(),
+                        &mut out_len,
+                    ),
+                    GMCRYPTO_ERR
+                );
+                gmcrypto_sm4_ctr_cipher_free(ptr::null_mut());
             }
 
             // (7) SM2 key exchange (v1.2): fixed static keys + fixed 0x5A
@@ -502,7 +732,48 @@ fuzz_target!(|data: &[u8]| {
                         tiny.len(),
                         &mut out_len,
                     );
+                    let fixed_dig = [0x11u8; GMCRYPTO_SM3_DIGEST_SIZE];
+                    let _ = gmcrypto_sm2_sign_digest_with_rng(
+                        sk,
+                        fixed_dig.as_ptr(),
+                        Some(fixed_fill_rng),
+                        ptr::null_mut(),
+                        tiny.as_mut_ptr(),
+                        tiny.len(),
+                        &mut out_len,
+                    );
                     gmcrypto_sm2_privkey_free(sk);
+                }
+                if body.len() > GMCRYPTO_SM4_KEY_SIZE + GMCRYPTO_SM4_BLOCK_SIZE + 1 {
+                    let (key, r1) = body.split_at(GMCRYPTO_SM4_KEY_SIZE);
+                    let (iv, pt) = r1.split_at(GMCRYPTO_SM4_BLOCK_SIZE);
+                    assert_eq!(
+                        gmcrypto_sm4_ctr_encrypt(
+                            key.as_ptr(),
+                            iv.as_ptr(),
+                            pt.as_ptr(),
+                            pt.len(),
+                            tiny.as_mut_ptr(),
+                            tiny.len(),
+                            &mut out_len,
+                        ),
+                        GMCRYPTO_ERR
+                    );
+                    let cipher = gmcrypto_sm4_ctr_cipher_new(key.as_ptr(), iv.as_ptr());
+                    if !cipher.is_null() {
+                        assert_eq!(
+                            gmcrypto_sm4_ctr_cipher_update(
+                                cipher,
+                                pt.as_ptr(),
+                                pt.len(),
+                                tiny.as_mut_ptr(),
+                                tiny.len(),
+                                &mut out_len,
+                            ),
+                            GMCRYPTO_ERR
+                        );
+                        gmcrypto_sm4_ctr_cipher_free(cipher);
+                    }
                 }
             }
         }
