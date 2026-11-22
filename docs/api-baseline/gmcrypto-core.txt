@@ -101,6 +101,7 @@ pub struct gmcrypto_core::sm2::private_key::Sm2PrivateKey
 impl gmcrypto_core::sm2::private_key::Sm2PrivateKey
 pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::from_bytes_be(&[u8; 32]) -> subtle::CtOption<Self>
 pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::from_scalar(crypto_bigint::uint::U256) -> subtle::CtOption<Self>
+pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::generate<R: rand_core::TryCryptoRng>(&mut R) -> core::result::Result<Self, gmcrypto_core::Error>
 pub const fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::public_key(&self) -> gmcrypto_core::sm2::public_key::Sm2PublicKey
 pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::to_bytes_be(&self) -> [u8; 32]
 impl core::fmt::Debug for gmcrypto_core::sm2::private_key::Sm2PrivateKey
@@ -131,6 +132,7 @@ pub struct gmcrypto_core::sm2::Sm2PrivateKey
 impl gmcrypto_core::sm2::private_key::Sm2PrivateKey
 pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::from_bytes_be(&[u8; 32]) -> subtle::CtOption<Self>
 pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::from_scalar(crypto_bigint::uint::U256) -> subtle::CtOption<Self>
+pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::generate<R: rand_core::TryCryptoRng>(&mut R) -> core::result::Result<Self, gmcrypto_core::Error>
 pub const fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::public_key(&self) -> gmcrypto_core::sm2::public_key::Sm2PublicKey
 pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::to_bytes_be(&self) -> [u8; 32]
 impl core::fmt::Debug for gmcrypto_core::sm2::private_key::Sm2PrivateKey

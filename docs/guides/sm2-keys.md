@@ -4,24 +4,17 @@
 
 ## Generating a fresh key pair
 
-`gmcrypto-core` pulls no RNG into its dependency graph. Generate 32 bytes from a CSPRNG (for example `getrandom::fill`) and pass them to `Sm2PrivateKey::from_bytes_be`, which validates `d ∈ [1, n-2]` in constant time via `subtle::CtOption`. Rejection occurs with probability roughly `2^-32`; wipe the temporary `[u8; 32]` buffer after construction:
+`gmcrypto-core` pulls no RNG into its dependency graph. Pass any `rand_core::TryCryptoRng` (for example `getrandom::SysRng`) to `Sm2PrivateKey::generate`, which samples `d ∈ [1, n-2]` in constant time with a fixed 4-draw budget and wipes its temporary buffers internally:
 
 ```rust
+use getrandom::SysRng;
 use gmcrypto_core::sm2::Sm2PrivateKey;
-use zeroize::Zeroize;
 
-let mut raw = [0u8; 32];
-let key = loop {
-    getrandom::fill(&mut raw)?;
-    if let Some(k) = Sm2PrivateKey::from_bytes_be(&raw).into_option() {
-        raw.zeroize();
-        break k;
-    }
-};
+let key = Sm2PrivateKey::generate(&mut SysRng)?;
 let public = key.public_key();
 ```
 
-`Sm2PrivateKey` zeroizes its scalar on drop. If you export the raw scalar with `Sm2PrivateKey::to_bytes_be()`, you own zeroizing the returned `[u8; 32]`.
+If you already hold a raw 32-byte big-endian scalar, import it with `Sm2PrivateKey::from_bytes_be(&raw)` (constant-time `[1, n-2]` check returning `subtle::CtOption`) and wipe your `[u8; 32]` buffer afterwards. `Sm2PrivateKey` zeroizes its scalar on drop; if you export the raw scalar with `Sm2PrivateKey::to_bytes_be()`, you own zeroizing the returned `[u8; 32]`.
 
 ## Key and point encodings
 
