@@ -6,6 +6,12 @@ Please report security issues privately via a **GitHub Security Advisory** on
 this repository — open a draft advisory at
 <https://github.com/frankxue831/gm-crypto-rs/security/advisories/new>.
 
+**What to include:**
+- Affected crate(s), version, and enabled Cargo feature flags (or C ABI entry point).
+- Minimal reproduction steps or proof-of-concept input.
+- Expected vs. observed behavior and security impact.
+- For timing-leak reports: Rust toolchain version, OS, and CPU model (`dudect` results if available).
+
 We aim to acknowledge within 5 business days. There is no bug bounty.
 
 On a confirmed vulnerability, the fix ships in a new release of the latest
@@ -20,8 +26,48 @@ published across `gmcrypto-simd`, `gmcrypto-core`, and `gmcrypto-c` together.
 
 ## Supported versions
 
+| Version | Supported |
+|---|---|
+| `1.17.x` | Yes |
+| `< 1.17` | No |
+
 Only the latest released minor version receives security fixes. There is no
 LTS branch.
+
+## Threat model
+
+- **Deployment assumption:** server-side use on a dedicated, operator-trusted host
+  (no independent third-party audit; review the code and use at your own risk).
+- **In scope:** network MITM; malformed or adversarial untrusted inputs across all
+  decoders and verifiers (SM2 signatures/ciphertexts, ASN.1/DER, PEM, PKCS#8,
+  X.509, TLCP records); and timing side channels exercised by the in-CI
+  `dudect-bencher` harness.
+- **Out of scope:** side channels beyond what the `dudect` harness exercises
+  (including variable-latency-multiply CPUs and power/EM/fault attacks),
+  hardware-backed keys (HSM/SDF/SKF), TLS/TLCP protocol state machines and I/O,
+  certificate revocation (CRL/OCSP), and endpoint identity binding
+  (`x509::verify_chain` / `tlcp::chain::verify_pair` check structural trust only).
+
+## Contents
+
+**Detailed posture, history & guarantees**
+
+- [API stability & SemVer](#api-stability--semver)
+- [Constant-time posture](#constant-time-posture)
+  - [`crypto-bigint::ConstMontyForm::invert` — v0.1 vs. main](#crypto-bigintconstmontyforminvert--v01-vs-main)
+  - [`ct_sign_k_class` and the structural blind spot fix](#ct_sign_k_class-and-the-structural-blind-spot-fix)
+  - [v1.0 constant-time baseline (settled — v0.18 / v0.19 / v0.20)](#v10-constant-time-baseline-settled--v018--v019--v020)
+  - [Constant-time posture clarification (B-10)](#constant-time-posture-clarification-b-10)
+  - [v0.23 re-audit hardening](#v023-re-audit-hardening)
+  - [SM4 (W1) — S-box and CBC contract](#sm4-w1--s-box-and-cbc-contract)
+  - [SM2 envelope encryption (Phase 3)](#sm2-envelope-encryption-phase-3)
+- [Other known limitations (non-goals)](#other-known-limitations-non-goals)
+- [Failure-mode invariant (defense-in-depth)](#failure-mode-invariant-defense-in-depth)
+- [Logging & observability](#logging--observability)
+- [Parser fuzzing (v0.14)](#parser-fuzzing-v014)
+- [Compliance posture](#compliance-posture)
+
+---
 
 ## API stability & SemVer
 
@@ -56,12 +102,6 @@ API unless the opt-in `crypto-bigint-scalar` feature is enabled.
 
 See [`docs/v1.0-readiness.md`](docs/v1.0-readiness.md) for the full posture, the
 guard tooling, and the (now-resolved) §3.A decision.
-
-## Threat model
-
-Server-side use, dedicated host, operator-trusted. Network MITM is in scope;
-side channels beyond what the in-CI `dudect-bencher` harness exercises are
-NOT in scope.
 
 ## Constant-time posture
 

@@ -61,8 +61,9 @@ blocks. **Never edit committed evidence docs to silence P2s.**
 - Release-prep PR (no source): workspace version, both sibling pins,
   `fuzz/Cargo.lock` path-dep refresh, CHANGELOG heading, CLAUDE.md release
   table + current-cycle block, `version-history.md` paragraph. On a minor
-  bump, also the `gmcrypto-core = "X.Y"` snippets: `README.md` (Installation
-  and wasm32), core `lib.rs` Usage, `crates/gmcrypto-simd/README.md`.
+  bump, also the `gmcrypto-core = "X.Y"` snippets (`README.md` Installation
+  and wasm32, core `lib.rs` Usage, `crates/gmcrypto-simd/README.md`) and the
+  `SECURITY.md` supported-versions table (`X.Y.x`).
 
 ## docs.rs render
 
