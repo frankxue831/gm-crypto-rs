@@ -1,0 +1,10 @@
+{
+  "freeze_sha256": "f4015517e3bceef249415df40cbcda6f19b6307bb9469f4233bb1de45c7c861f",
+  "helper_sha256": "a0b6984b61d13504ee40792f28478361967a474026b555ac974d38fcf5200d9a",
+  "repository": "frankxue831/gm-crypto-rs",
+  "schema": 1,
+  "source_sha": "68e6ccdd5d407ecc89ec549442bd062bb9e0b317",
+  "workflow_id": 273624777,
+  "workflow_path": ".github/workflows/dudect-nightly.yml",
+  "workflow_sha256": "959f2a5717e6dd95f7e5b9af621d31d759dd1390368567f5d3b43aa1a072c1ab"
+}

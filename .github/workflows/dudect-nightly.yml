@@ -3,8 +3,6 @@ name: v1.15 frozen study (build-only on manual dispatch)
 # Existing workflow identity preserves the full first-attempt study census.
 # Current-main regression coverage lives in dudect-main.yml.
 on:
-  schedule:
-    - cron: '0 5 * * *'  # 05:00 UTC daily
   workflow_dispatch:
 
 # `cancel-in-progress: false` is intentional here — a partially-
