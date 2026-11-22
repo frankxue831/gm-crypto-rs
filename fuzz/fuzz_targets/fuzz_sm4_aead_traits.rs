@@ -48,7 +48,7 @@
 
 use aead::{Aead, KeyInit, Payload};
 use gmcrypto_core::sm4::KEY_SIZE;
-use gmcrypto_core::sm4::{Sm4Ccm, Sm4Gcm, mode_ccm, mode_gcm};
+use gmcrypto_core::sm4::{mode_ccm, mode_gcm, Sm4Ccm, Sm4Gcm};
 use libfuzzer_sys::fuzz_target;
 
 const NONCE_LEN: usize = 12;
