@@ -88,7 +88,12 @@ C 语言等调用方请用 [`gmcrypto-c`](crates/gmcrypto-c/README.md)。`gmcryp
 
 ## 计时检测是怎么做的
 
-涉及密钥的代码按常量时间的写法实现（基于 `subtle`）。项目在 CI 里用 [`dudect-bencher`](https://docs.rs/dudect-bencher/) 检查这一点：改动密码学代码的 PR 和每晚，对 20 个涉及密钥的操作分两类输入计时并比较。其中 16 个在 `|tau|` 超过 0.20 时阻止合并，另有一个故意泄漏的对照组每次都必须被检出，用来证明检测本身还有效。
+涉及密钥的代码按常量时间的写法实现（基于 `subtle`）。项目在 CI 里用 [`dudect-bencher`](https://docs.rs/dudect-bencher/) 做回归检测，分两套工作流，均**不是** `main` 分支的强制合并检查（required status check）：
+
+- **PR 冒烟**（[`dudect-pr.yml`](.github/workflows/dudect-pr.yml)，10K 样本 × 3 次取中位数）：仅在改动密码学代码、计时基准或该工作流路径的 PR 上运行（支持 `[skip ci]` 跳过）。16 个主要目标在中位数 `|tau| > 0.20` 时使任务失败（`ct_sm4_cbc_decrypt_fanout` 在 **AMD EPYC 9V74** runner 上放宽到 `0.55`，其余 CPU 含未知型号仍为 `0.20`）；其余 4 个目标（`ct_sign_k_class`、`ct_hmac_sm3`、`ct_fn_invert`、`ct_fp_invert`）在 PR 冒烟中仅作遥测输出，不阻塞任务。
+- **每晚深度检测**（[`dudect-main.yml`](.github/workflows/dudect-main.yml)，100K 样本 × 5 次取中位数）：每日定时或手动触发。上述 16 个主要目标沿用相同阈值（含 EPYC 9V74 上 `ct_sm4_cbc_decrypt_fanout` 的 `0.55` 例外），其余 4 个目标启用 `|tau| <= 0.55` 粗粒度回归哨兵（中位数超过 `0.55` 即失败）。
+
+两套工作流都会运行故意泄漏的对照组 `negative_control`，且要求每次运行的最小值满足 `min |tau| > 1.0`，否则任务失败，用来证明检测本身有效。签名路径中，`ct_sign` 仅按私钥 `d` 分组（每次样本使用新随机 nonce `k`），按 nonce `k` 幅度分组（固定 `d`、两个重试 nonce 均绑定到对应分组）的是 `ct_sign_k_class`。各目标完整列表见[英文 README](README.md#how-constant-time-is-checked)。
 
 这种检测只能说明**在给定样本量下没有检出**计时差异，不能证明没有。完整说明和历史数据见 [`SECURITY.md`](SECURITY.md)。
 
@@ -98,7 +103,7 @@ C 语言等调用方请用 [`gmcrypto-c`](crates/gmcrypto-c/README.md)。`gmcryp
 
 | | 本库 | 在哪里核对 |
 |---|---|---|
-| CI 计时检测 | ✅ 用 `dudect` 检测 20 个涉及密钥的操作，外加一个必须被检出的对照组；其中 16 个超过阈值会阻止合并。改动密码学代码的 PR 和每晚都会跑 | [`dudect-pr.yml`](.github/workflows/dudect-pr.yml)、[`dudect-main.yml`](.github/workflows/dudect-main.yml) |
+| CI 计时检测 | ✅ 用 `dudect` 检测 20 个涉及密钥的操作，外加一个必须被检出的对照组；16 个在 PR 冒烟（10K×3）和每晚（100K×5）超阈值时使任务失败（`ct_sm4_cbc_decrypt_fanout` 在 EPYC 9V74 为 `0.55`），4 个为 PR 遥测 / 每晚 `0.55` 哨兵。仅在改动密码学代码的 PR 和每晚运行，非强制合并检查 | [`dudect-pr.yml`](.github/workflows/dudect-pr.yml)、[`dudect-main.yml`](.github/workflows/dudect-main.yml) |
 | CI 模糊测试 | ✅ 35 个 `cargo-fuzz` 目标，每晚运行 | [`fuzz-nightly.yml`](.github/workflows/fuzz-nightly.yml)、[`fuzz/fuzz_targets`](fuzz/fuzz_targets) |
 | 与 GmSSL 3.2.0 互通 | ✅ 每次 CI 跑 13 项逐字节比对（签名、密文、AEAD） | [`ci.yml`](.github/workflows/ci.yml) |
 | SM4 S 盒 | ✅ 默认不用密钥相关的字节查表（扫描全部 256 项，速度较慢；可选 bitsliced / SIMD） | [`sm4/cipher.rs`](crates/gmcrypto-core/src/sm4/cipher.rs) |

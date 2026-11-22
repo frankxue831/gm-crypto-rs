@@ -15,8 +15,10 @@ with constant-time discipline that is **measured in CI**, not just intended.
 For Rust services that must speak GB/T 32918 / 32905 / 32907 and want a
 `no_std` core with no C dependency — and for C, C++, Python, Go and Zig
 callers through a complete, always-on C ABI. Every secret-touching path is
-written against `subtle`'s constant-time primitives and guarded by a
-`dudect` timing-leak harness that blocks merges.
+written against `subtle`'s constant-time primitives and checked by a
+`dudect` timing-leak smoke on PRs that touch crypto code (16 of 20 targets
+fail the job; not a required status check) plus a nightly 100K-sample run
+(see [thresholds below](#how-constant-time-is-checked)).
 
 **CBC provides confidentiality only, not authenticity.** This example demonstrates
 the raw primitive. For authenticated encryption, use SM4-GCM / SM4-CCM with
@@ -102,7 +104,7 @@ Three crates, released together at one lockstep version:
 
 | | This crate | Where to check |
 |---|---|---|
-| Timing checks in CI | ✅ `dudect` on 20 secret-dependent operations plus a negative control that must fire; 16 block merges. Runs on pull requests that touch crypto code, and nightly | [`dudect-pr.yml`](.github/workflows/dudect-pr.yml), [`dudect-main.yml`](.github/workflows/dudect-main.yml), [how it's checked](#how-constant-time-is-checked) |
+| Timing checks in CI | ✅ `dudect` on 20 secret-dependent operations plus a negative control that must fire; 16 fail the job on PR smoke (10K×3) and nightly (100K×5, with a `0.55` EPYC 9V74 exception for `ct_sm4_cbc_decrypt_fanout`), 4 are PR telemetry / nightly `0.55` sentinels. Runs on PRs touching crypto code and nightly; not a required merge check | [`dudect-pr.yml`](.github/workflows/dudect-pr.yml), [`dudect-main.yml`](.github/workflows/dudect-main.yml), [how it's checked](#how-constant-time-is-checked) |
 | Fuzzing in CI | ✅ 35 `cargo-fuzz` targets, nightly | [`fuzz-nightly.yml`](.github/workflows/fuzz-nightly.yml), [`fuzz/fuzz_targets`](fuzz/fuzz_targets) |
 | GmSSL 3.2.0 interop | ✅ 13 byte-for-byte tests (signatures, ciphertexts, AEAD) on every CI run | [`ci.yml`](.github/workflows/ci.yml) |
 | SM4 S-box | ✅ no secret-indexed table lookups by default (256-entry scan, slower; bitsliced / SIMD optional) | [`sm4/cipher.rs`](crates/gmcrypto-core/src/sm4/cipher.rs) |
@@ -116,38 +118,53 @@ If you need a long production track record, RustCrypto's `sm2` / `sm3` /
 
 ## How "constant-time" is checked
 
-The check is an **in-CI regression gate**, not just design intent. On every
-pull request that touches crypto code, and every night, a
-[`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
-times each secret-touching operation under two input classes and gates the
-per-target `|tau|` statistic. A deliberately leaky `negative_control` must
-fire on every run, proving the harness can still see a leak.
+The check is an **in-CI regression harness**, not just design intent. On pull
+requests touching allowlisted crypto, harness, or workflow paths
+([`dudect-pr.yml`](.github/workflows/dudect-pr.yml), 10K samples × 3 runs;
+honors `[skip ci]`) and every night
+([`dudect-main.yml`](.github/workflows/dudect-main.yml), 100K samples × 5 runs;
+daily cron and manual dispatch), a
+[`dudect-bencher`](https://docs.rs/dudect-bencher/) harness times each
+secret-touching operation under two input classes and checks the per-target
+multi-run median `|tau|` statistic. Neither workflow is a GitHub required
+status check on `main`. A deliberately leaky `negative_control` must fire on
+every run (`min |tau| > 1.0`), proving the harness can still see a leak.
 
-| Target | Secret it splits on | Gate |
-|---|---|---|
-| `ct_sign` | private key `d` and nonce `k` magnitude | 0.20 |
-| `ct_sign_k_class` | nonce only, fixed `d` — the leak `ct_sign` cannot see | sentinel 0.55 |
-| `ct_mul_g`, `ct_mul_var` | scalar | 0.20 |
-| `ct_sm2_decrypt` | recipient `d_B` | 0.20 |
-| `ct_sm2_key_exchange` (`sm2-key-exchange`) | initiator's static `d_A` | 0.20 |
-| `ct_sm4_key_schedule`, `ct_sm4_encrypt_block`, `ct_sm4_ctr_encrypt` | master key | 0.20 |
-| `ct_sm4_encrypt_block_bitsliced_simd`, `ct_sm4_cbc_decrypt_fanout` (`sm4-bitsliced-simd`) | master key, through the SIMD batch path | 0.20 |
-| `ct_sm4_gcm_decrypt`, `ct_sm4_gcm_decrypt_buffered`, `ct_sm4_ccm_decrypt` (`sm4-aead`) | master key, valid `(ct, tag)` for both classes | 0.20 |
-| `ct_sm4_xts_decrypt` (`sm4-xts`) | master key, over a ciphertext-stealing tail | 0.20 |
-| `ct_tlcp_cbc_deprotect` (`tlcp`) | recovered-fragment length, fixed key — the Lucky13 residual | 0.20 |
-| `ct_hmac_sm3` | key | sentinel 0.55 |
-| `ct_pkcs8_decrypt` | password bytes, both blobs valid | 0.20 |
-| `ct_fn_invert`, `ct_fp_invert` | field element, direct inversion diagnostics | sentinel 0.55 |
-| `negative_control` | deliberately leaky | must fire, `> 1.0` |
+| Target | Secret it splits on | PR smoke (10K×3) | Nightly (100K×5) |
+|---|---|---|---|
+| `ct_sign` | private key `d` only (fresh random nonce `k` per sample) | `≤ 0.20` | `≤ 0.20` |
+| `ct_sign_k_class` | nonce `k` magnitude (both retry nonces class-tied), fixed `d` — the leak `ct_sign` cannot see | telemetry | sentinel `≤ 0.55` |
+| `ct_mul_g`, `ct_mul_var` | scalar | `≤ 0.20` | `≤ 0.20` |
+| `ct_sm2_decrypt` | recipient `d_B` | `≤ 0.20` | `≤ 0.20` |
+| `ct_sm2_key_exchange` (`sm2-key-exchange`) | initiator's static `d_A` | `≤ 0.20` | `≤ 0.20` |
+| `ct_sm4_key_schedule`, `ct_sm4_encrypt_block`, `ct_sm4_ctr_encrypt` | master key | `≤ 0.20` | `≤ 0.20` |
+| `ct_sm4_encrypt_block_bitsliced_simd` (`sm4-bitsliced-simd`) | master key, single-block SIMD path | `≤ 0.20` | `≤ 0.20` |
+| `ct_sm4_cbc_decrypt_fanout` (`sm4-bitsliced-simd`) | master key, batched CBC decrypt fanout | `≤ 0.20`† | `≤ 0.20`† |
+| `ct_sm4_gcm_decrypt`, `ct_sm4_gcm_decrypt_buffered`, `ct_sm4_ccm_decrypt` (`sm4-aead`) | master key, valid `(ct, tag)` for both classes | `≤ 0.20` | `≤ 0.20` |
+| `ct_sm4_xts_decrypt` (`sm4-xts`) | master key, over a ciphertext-stealing tail | `≤ 0.20` | `≤ 0.20` |
+| `ct_tlcp_cbc_deprotect` (`tlcp`) | recovered-fragment length, fixed key — the Lucky13 residual | `≤ 0.20` | `≤ 0.20` |
+| `ct_hmac_sm3` | key | telemetry | sentinel `≤ 0.55` |
+| `ct_pkcs8_decrypt` | password bytes, both blobs valid | `≤ 0.20` | `≤ 0.20` |
+| `ct_fn_invert`, `ct_fp_invert` | field element, direct inversion diagnostics | telemetry | sentinel `≤ 0.55` |
+| `negative_control` | deliberately leaky | must fire, `min > 1.0` | must fire, `min > 1.0` |
 
-Sixteen of the twenty block a merge at `|tau| <= 0.20`. Four sit on a `0.55`
-gross-regression sentinel: they measure a composite window whose class split
-reads as noise on some hosted-runner CPUs, so they report as telemetry and
-only an egregious value fails. The harness reports detection events — **it
-does not prove constant-time.** A low `|tau|` means no leak was detected with
-the budget given, not that none exists. The full discipline, the hosted-runner
-noise history, and every demotion with its data are in [`SECURITY.md`](SECURITY.md)
-and [`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md).
+† `ct_sm4_cbc_decrypt_fanout` raises its threshold to `|tau| <= 0.55` on
+**AMD EPYC 9V74** runners only in both PR smoke and nightly runs (no-change
+medians reached `0.2904` on that SKU); every other CPU, including unknown
+SKUs, keeps `0.20`.
+
+Sixteen of the twenty `ct_*` targets fail the CI job when their multi-run
+median `|tau|` exceeds `0.20` (`0.55` on AMD EPYC 9V74 for
+`ct_sm4_cbc_decrypt_fanout`) in both PR smoke and nightly runs. The other four
+(`ct_sign_k_class`, `ct_hmac_sm3`, `ct_fn_invert`, `ct_fp_invert`) are
+**telemetry-only (non-blocking) on PR smoke** and fail **nightly** runs only
+above the `0.55` gross-regression sentinel: their two-input class split reads
+as runner-image noise above `0.20` on some hosted `ubuntu-24.04` CPUs. The
+harness reports detection events — **it does not prove constant-time.** A low
+`|tau|` means no leak was detected with the budget given, not that none exists.
+The full discipline, the hosted-runner noise history, and every demotion with
+its data are in [`SECURITY.md`](SECURITY.md) and
+[`docs/v0.5-dudect-recalibration.md`](docs/v0.5-dudect-recalibration.md).
 
 Beyond timing: KAT vectors in CI, 35 `cargo-fuzz` targets run nightly, and an
 interop suite against a pinned from-source [GmSSL](https://github.com/guanzhi/GmSSL)
