@@ -45,6 +45,12 @@
 use crate::sm4::cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
 use alloc::vec::Vec;
 use subtle::{ConditionallySelectable, ConstantTimeEq, ConstantTimeGreater};
+use zeroize::Zeroize;
+
+/// Stack batch size in SM4 blocks (16 blocks = 256 bytes) for SIMD fanout in
+/// [`decrypt`]. Multiple of both `x86_64` AVX2/GFNI (8 blocks) and `aarch64`
+/// NEON (4 blocks) while keeping stack footprint small for `no_std` callers.
+const BATCH: usize = 16;
 
 /// Encrypt `plaintext` in CBC mode with PKCS#7 padding.
 ///
@@ -97,7 +103,9 @@ pub fn encrypt(key: &[u8; KEY_SIZE], iv: &[u8; BLOCK_SIZE], plaintext: &[u8]) ->
 ///
 /// # Panics
 ///
-/// Never. Same `chunks_exact_mut(16)` infallibility as [`encrypt`].
+/// Never. Each `chunk` comes from `buf.chunks_mut(BATCH * BLOCK_SIZE)` on a
+/// validated `BLOCK_SIZE`-multiple buffer, so `chunks_exact(BLOCK_SIZE)` and
+/// `chunks_exact_mut(BLOCK_SIZE)` always yield exact `BLOCK_SIZE` slices.
 #[must_use]
 #[allow(clippy::missing_panics_doc)]
 pub fn decrypt(key: &[u8; KEY_SIZE], iv: &[u8; BLOCK_SIZE], ciphertext: &[u8]) -> Option<Vec<u8>> {
@@ -110,21 +118,42 @@ pub fn decrypt(key: &[u8; KEY_SIZE], iv: &[u8; BLOCK_SIZE], ciphertext: &[u8]) -
     let cipher = Sm4Cipher::new(key);
 
     let mut prev: [u8; BLOCK_SIZE] = *iv;
-    for chunk in buf.chunks_exact_mut(BLOCK_SIZE) {
-        let block: &mut [u8; BLOCK_SIZE] = chunk.try_into().expect("chunk is 16 bytes");
-        // Save the current ciphertext block before decryption — it
-        // becomes the next round's `prev`.
-        let saved = *block;
-        cipher.decrypt_block(block);
-        for i in 0..BLOCK_SIZE {
-            block[i] ^= prev[i];
+    let mut saved = [[0u8; BLOCK_SIZE]; BATCH];
+    let mut batch = [[0u8; BLOCK_SIZE]; BATCH];
+
+    for chunk in buf.chunks_mut(BATCH * BLOCK_SIZE) {
+        let n = chunk.len() / BLOCK_SIZE;
+        for (k, blk) in chunk.chunks_exact(BLOCK_SIZE).enumerate() {
+            saved[k].copy_from_slice(blk);
+            batch[k].copy_from_slice(blk);
         }
-        prev = saved;
+
+        cipher.decrypt_blocks(&mut batch[..n]);
+
+        for (b, &p) in batch[0].iter_mut().zip(&prev) {
+            *b ^= p;
+        }
+        for k in 1..n {
+            let chain = &saved[k - 1];
+            for (b, &p) in batch[k].iter_mut().zip(chain) {
+                *b ^= p;
+            }
+        }
+        prev = saved[n - 1];
+
+        for (k, out_blk) in chunk.chunks_exact_mut(BLOCK_SIZE).enumerate() {
+            out_blk.copy_from_slice(&batch[k]);
+        }
     }
+    batch.zeroize();
 
     // PKCS#7 strip. Constant-time scan over the final block; final
     // `Option<()>` is the one unavoidable bit of leakage.
-    strip_pkcs7_ct(&mut buf).map(|()| buf)
+    if strip_pkcs7_ct(&mut buf).is_none() {
+        buf.zeroize();
+        return None;
+    }
+    Some(buf)
 }
 
 /// Validate PKCS#7 padding in a final block and return how many **message**
@@ -352,5 +381,65 @@ mod tests {
         buf[14] = 0x04;
         buf[15] = 0x04;
         assert!(strip_pkcs7_ct(&mut buf).is_none());
+    }
+
+    #[test]
+    fn round_trip_multi_block_batch_boundaries() {
+        use crate::sm4::cbc_streaming::Sm4CbcDecryptor;
+
+        let key: [u8; 16] = [0x42; 16];
+        let iv: [u8; 16] = [0x33; 16];
+
+        for n_blocks in [1usize, 4, 8, 15, 16, 17, 32, 33] {
+            for pt_len in [n_blocks * BLOCK_SIZE - 5, (n_blocks - 1) * BLOCK_SIZE] {
+                #[allow(clippy::cast_possible_truncation)]
+                let pt: Vec<u8> = (0..pt_len)
+                    .map(|i| ((i.wrapping_mul(19)) ^ (i >> 4)) as u8)
+                    .collect();
+                let ct = encrypt(&key, &iv, &pt);
+                assert_eq!(ct.len(), n_blocks * BLOCK_SIZE);
+
+                let recovered = decrypt(&key, &iv, &ct).expect("decrypt must succeed");
+                assert_eq!(
+                    recovered, pt,
+                    "round-trip mismatch at n_blocks={n_blocks}, pt_len={pt_len}"
+                );
+
+                let mut stream_dec = Sm4CbcDecryptor::new(&key, &iv);
+                stream_dec.update(&ct);
+                let stream_recovered = stream_dec.finalize().expect("streaming decrypt");
+                assert_eq!(
+                    recovered, stream_recovered,
+                    "streaming parity mismatch at n_blocks={n_blocks}, pt_len={pt_len}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn decrypt_rejects_invalid_padding_across_batch_boundaries() {
+        let key: [u8; 16] = [0x42; 16];
+
+        for n_blocks in [1usize, 4, 8, 15, 16, 17, 32, 33] {
+            let mut iv: [u8; 16] = [0x33; 16];
+            let pt_len = n_blocks * BLOCK_SIZE - 5;
+            #[allow(clippy::cast_possible_truncation)]
+            let pt: Vec<u8> = (0..pt_len).map(|i| (i as u8).wrapping_mul(11)).collect();
+            let mut ct = encrypt(&key, &iv, &pt);
+            assert_eq!(ct.len(), n_blocks * BLOCK_SIZE);
+
+            // Corrupt the last decrypted padding byte (5 -> 4) while keeping the
+            // preceding 4 padding bytes equal to 5 so PKCS#7 fails deterministically.
+            if n_blocks == 1 {
+                iv[15] ^= 0x01;
+            } else {
+                let prev_last_idx = ct.len() - BLOCK_SIZE - 1;
+                ct[prev_last_idx] ^= 0x01;
+            }
+            assert!(
+                decrypt(&key, &iv, &ct).is_none(),
+                "invalid padding must be rejected at n_blocks={n_blocks}"
+            );
+        }
     }
 }

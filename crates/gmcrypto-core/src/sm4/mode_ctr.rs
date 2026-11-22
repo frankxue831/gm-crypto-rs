@@ -50,6 +50,8 @@
 
 use alloc::vec::Vec;
 
+use zeroize::Zeroize;
+
 use super::cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
 
 /// Encrypt `plaintext` under (`key`, `counter`) in SM4-CTR mode.
@@ -90,6 +92,7 @@ fn apply_keystream(key: &[u8; KEY_SIZE], counter: &[u8; BLOCK_SIZE], input: &[u8
         let lane = i % BLOCK_SIZE;
         out.push(b ^ keystream[block_idx][lane]);
     }
+    keystream.zeroize();
     out
 }
 

@@ -90,6 +90,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use subtle::ConstantTimeEq;
+use zeroize::Zeroize;
 
 use super::cipher::{BLOCK_SIZE, KEY_SIZE, Sm4Cipher};
 
@@ -361,6 +362,7 @@ pub(super) fn gctr(cipher: &Sm4Cipher, icb: &[u8; BLOCK_SIZE], input: &[u8], out
         let lane = i % BLOCK_SIZE;
         out[i] = b ^ keystream[block_idx][lane];
     }
+    keystream.zeroize();
 }
 
 /// Compute `J0` per NIST SP 800-38D §7.1 step 2.

@@ -52,6 +52,12 @@ use super::mode_gcm::{GcmTagLen, TAG_SIZE, derive_j0, gctr, inc32};
 /// `2^39 − 256` bits = `2^36 − 32` bytes.
 const GCM_MAX_PT_BYTES: u64 = (1u64 << 36) - 32;
 
+/// Stack batch size in SM4 blocks (16 blocks = 256 bytes) for SIMD fanout in
+/// [`Sm4GcmEncryptor::update`]. Multiple of both `x86_64` AVX2/GFNI (8 blocks)
+/// and `aarch64` NEON (4 blocks) while keeping stack footprint small for
+/// `no_std` callers.
+const BATCH: usize = 16;
+
 /// Running GHASH accumulator over `A ‖ 0^v ‖ C ‖ 0^u` followed by the
 /// trailing length block `[len_A]_64 ‖ [len_C]_64`.
 ///
@@ -248,15 +254,29 @@ impl Sm4GcmEncryptor {
             i += 1;
         }
 
-        // Full blocks via fresh keystream.
-        while chunk.len() - i >= BLOCK_SIZE {
-            self.ks = self.counter;
-            self.cipher.encrypt_block(&mut self.ks);
-            self.counter = inc32(&self.counter);
-            for lane in 0..BLOCK_SIZE {
-                out[i + lane] = chunk[i + lane] ^ self.ks[lane];
+        // Full blocks via stack-batched `encrypt_blocks` (SIMD fanout under
+        // `sm4-bitsliced-simd`, zero heap allocation, MSRV 1.87 compliant).
+        let remaining_full = (chunk.len() - i) / BLOCK_SIZE;
+        if remaining_full > 0 {
+            debug_assert_eq!(self.ks_pos, BLOCK_SIZE);
+            let mut ks_batch = [[0u8; BLOCK_SIZE]; BATCH];
+            let mut blocks_left = remaining_full;
+            while blocks_left > 0 {
+                let n = blocks_left.min(BATCH);
+                for slot in &mut ks_batch[..n] {
+                    *slot = self.counter;
+                    self.counter = inc32(&self.counter);
+                }
+                self.cipher.encrypt_blocks(&mut ks_batch[..n]);
+                for ks_block in &ks_batch[..n] {
+                    for lane in 0..BLOCK_SIZE {
+                        out[i + lane] = chunk[i + lane] ^ ks_block[lane];
+                    }
+                    i += BLOCK_SIZE;
+                }
+                blocks_left -= n;
             }
-            i += BLOCK_SIZE;
+            ks_batch.zeroize();
         }
 
         // Tail (< one block): generate a block, consume what's needed,
@@ -606,5 +626,77 @@ mod tests {
         }
         assert_eq!(ct, ref_ct);
         assert_eq!(enc.finalize(), ref_tag);
+    }
+
+    #[test]
+    fn encryptor_batch_boundary_lengths_match_single_shot() {
+        let aad = b"batch boundary aad";
+        for len in [0usize, 1, 15, 16, 17, 63, 64, 65, 128, 255, 256, 257, 520] {
+            let pt = make_payload(len);
+            let (ref_ct, ref_tag) =
+                mode_gcm::encrypt(&KEY, &NONCE_12, aad, &pt).expect("under ceiling");
+
+            // Single full-payload update.
+            let mut enc = Sm4GcmEncryptor::new(&KEY, &NONCE_12, aad);
+            let ct = enc.update(&pt).expect("under ceiling");
+            let tag = enc.finalize();
+            assert_eq!(ct, ref_ct, "single-update ct divergence at len {len}");
+            assert_eq!(tag, ref_tag, "single-update tag divergence at len {len}");
+
+            // Two-part split with an odd 5-byte prefix so leftover drain,
+            // stack batching (BATCH=16), and tail all execute in one call.
+            if len > 5 {
+                let mut enc = Sm4GcmEncryptor::new(&KEY, &NONCE_12, aad);
+                let mut split_ct = enc.update(&pt[..5]).expect("under ceiling");
+                split_ct.extend_from_slice(&enc.update(&pt[5..]).expect("under ceiling"));
+                let split_tag = enc.finalize();
+                assert_eq!(split_ct, ref_ct, "5+rest ct divergence at len {len}");
+                assert_eq!(split_tag, ref_tag, "5+rest tag divergence at len {len}");
+            }
+
+            // Odd chunk splits across batch boundaries.
+            for chunk in [1usize, 13, 63, 263] {
+                let mut enc = Sm4GcmEncryptor::new(&KEY, &NONCE_12, aad);
+                let mut chunk_ct = Vec::new();
+                for part in pt.chunks(chunk) {
+                    chunk_ct.extend_from_slice(&enc.update(part).expect("under ceiling"));
+                }
+                let chunk_tag = enc.finalize();
+                assert_eq!(
+                    chunk_ct, ref_ct,
+                    "chunked ct divergence at len {len}, chunk {chunk}"
+                );
+                assert_eq!(
+                    chunk_tag, ref_tag,
+                    "chunked tag divergence at len {len}, chunk {chunk}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn encryptor_leftover_and_batch_state_invariants() {
+        let aad = b"state invariants";
+        let mid = (BLOCK_SIZE - 5) + BATCH * BLOCK_SIZE;
+        let pt = make_payload(5 + mid + 3);
+        let (ref_ct, ref_tag) =
+            mode_gcm::encrypt(&KEY, &NONCE_12, aad, &pt).expect("under ceiling");
+
+        let mut enc = Sm4GcmEncryptor::new(&KEY, &NONCE_12, aad);
+        let mut ct = enc.update(&pt[..5]).expect("under ceiling");
+        assert_eq!(enc.ks_pos, 5);
+        assert_ne!(enc.ks, [0u8; BLOCK_SIZE]);
+
+        // Drains the 11 leftover bytes and processes one exact BATCH=16 run.
+        ct.extend_from_slice(&enc.update(&pt[5..5 + mid]).expect("under ceiling"));
+        assert_eq!(enc.ks_pos, BLOCK_SIZE);
+
+        // Trailing 3 bytes refill self.ks and leave ks_pos at 3.
+        ct.extend_from_slice(&enc.update(&pt[5 + mid..]).expect("under ceiling"));
+        assert_eq!(enc.ks_pos, 3);
+
+        let tag = enc.finalize();
+        assert_eq!(ct, ref_ct);
+        assert_eq!(tag, ref_tag);
     }
 }

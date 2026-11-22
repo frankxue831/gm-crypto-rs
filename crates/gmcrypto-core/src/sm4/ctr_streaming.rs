@@ -113,6 +113,7 @@ impl Sm4CtrCipher {
                     output[off + lane] = input[off + lane] ^ ks[lane];
                 }
             }
+            keystream.zeroize();
             self.counter = counter_add(&self.counter, full_blocks as u128);
             i += full_blocks * BLOCK_SIZE;
         }
