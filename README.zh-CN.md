@@ -18,11 +18,11 @@ cargo add gmcrypto-core
 
 ```toml
 [dependencies]
-gmcrypto-core = "1.17"
+gmcrypto-core = "1.18"
 getrandom = { version = "0.4", default-features = false, features = ["sys_rng"] }
 ```
 
-默认构建包含 SM2、SM3、SM4-ECB/CBC/CTR、HMAC-SM3、PBKDF2-HMAC-SM3，以及 DER / PEM / PKCS#8 编解码。其余功能需要打开 feature（见下表）。库本身不带随机数生成器，SM2 签名和加密接受任意 `rand_core::TryCryptoRng`，一般用 `getrandom` 的 `SysRng`。
+默认构建包含 SM2、SM3、SM4-ECB/CBC/CTR、HMAC-SM3、PBKDF2-HMAC-SM3、HKDF-SM3，以及 DER / PEM / PKCS#8 编解码。其余功能需要打开 feature（见下表）。库本身不带随机数生成器，SM2 签名和加密接受任意 `rand_core::TryCryptoRng`，一般用 `getrandom` 的 `SysRng`。
 
 ## 最小示例：SM3 和 SM4
 
@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 | 功能 | 标准 | feature |
 |---|---|---|
 | SM2 签名 / 验签、加密 / 解密 | GB/T 32918，GM/T 0009-2012 DER（已被 GM/T 0009-2023 替代；参见 GB/T 35276-2017） | 默认 |
-| SM3、HMAC-SM3、PBKDF2-HMAC-SM3 | GB/T 32905，RFC 2104 / 8018 | 默认 |
+| SM3、HMAC-SM3、PBKDF2-HMAC-SM3、HKDF-SM3 | GB/T 32905，RFC 2104 / 8018 / 5869 | 默认 |
 | SM4-ECB / CBC / CTR（一次性和流式） | GB/T 32907 | 默认 |
 | DER / PEM / SPKI / SEC1 / PKCS#8（含 PBES2 加密） | RFC 5280 / 5915 / 5958 / 7468 | 默认 |
 | SM4-GCM / SM4-CCM | RFC 8998 | `sm4-aead` |

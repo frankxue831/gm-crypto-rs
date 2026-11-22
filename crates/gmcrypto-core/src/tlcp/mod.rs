@@ -19,7 +19,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! gmcrypto-core = { version = "1.17", features = ["tlcp"] }
+//! gmcrypto-core = { version = "1.18", features = ["tlcp"] }
 //! ```
 //!
 //! # Example

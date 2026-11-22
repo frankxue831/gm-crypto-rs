@@ -66,12 +66,12 @@ cargo add gmcrypto-core
 
 ```toml
 [dependencies]
-gmcrypto-core = "1.17"
+gmcrypto-core = "1.18"
 getrandom = { version = "0.4", default-features = false, features = ["sys_rng"] }
 ```
 
 `default = []`. The base build is SM2, SM3, SM4-ECB/CBC/CTR, HMAC-SM3,
-PBKDF2-HMAC-SM3 and the DER / PEM / PKCS#8 codecs, with no optional
+PBKDF2-HMAC-SM3, HKDF-SM3 and the DER / PEM / PKCS#8 codecs, with no optional
 dependency. Everything else below is behind a feature flag. The crate
 deliberately pulls no RNG; SM2 signing and encryption take any
 `rand_core::TryCryptoRng`, and `getrandom`'s `SysRng` is the usual choice.
@@ -84,7 +84,7 @@ instead. `gmcrypto-simd` is an internal backend — do not depend on it directly
 | | Standard | Feature |
 |---|---|---|
 | SM2 sign / verify, encrypt / decrypt | GB/T 32918, GM/T 0009-2012 DER (superseded by GM/T 0009-2023; cf. GB/T 35276-2017) | default |
-| SM3 hash, HMAC-SM3, PBKDF2-HMAC-SM3 | GB/T 32905, RFC 2104 / 8018 | default |
+| SM3 hash, HMAC-SM3, PBKDF2-HMAC-SM3, HKDF-SM3 | GB/T 32905, RFC 2104 / 8018 / 5869 | default |
 | SM4-ECB / CBC / CTR, single-shot and streaming | GB/T 32907 | default |
 | DER / PEM / SPKI / SEC1 / PKCS#8 (incl. PBES2-encrypted) | RFC 5280 / 5915 / 5958 / 7468 | default |
 | SM4-GCM / SM4-CCM AEAD, incremental-input GCM, length-committed streaming CCM | RFC 8998 | `sm4-aead` |
@@ -375,7 +375,7 @@ its default graph. Wasm callers enable it in *their* `Cargo.toml`:
 
 ```toml
 [dependencies]
-gmcrypto-core = "1.17"
+gmcrypto-core = "1.18"
 getrandom = { version = "0.4", default-features = false, features = ["wasm_js"] }
 ```
 
