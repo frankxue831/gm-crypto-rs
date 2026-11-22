@@ -1,18 +1,54 @@
-# The method, by the receipts
+# Documentation
 
-These are the receipts behind the method described in [CASE-STUDY.md](../CASE-STUDY.md): a verification-first build in which a human owned scope, invariants, evidence standards, review pressure, and release authority, while the construction (the code and the tests) was done by an AI agent. Crypto was the stress test, not a safety proof: cheap, strong oracles (KAT vectors, dudect, fuzzers) plus independent adversarial review make a covered failure hard to hide, which is exactly why every claim below resolves to a committed artifact. This index groups the public process/audit docs so a reader can walk the trail from "what was promised" to "what was checked."
+## For users
 
-## Top-level evidence
+Start here if you are integrating `gmcrypto-core` or `gmcrypto-c` into an application:
 
-The receipts the case study leans on most live at the repo root and in the crate tree, not under `docs/`:
+### Guides
+
+- [Choosing Cargo features](guides/features.md) — default vs. opt-in features, `no_std`, `wasm32`, SIMD/GFNI, RustCrypto trait fits, and `gmcrypto-c`.
+- [Choosing an SM4 mode](guides/sm4-modes.md) — AEAD (`GCM` / `CCM`) vs. unauthenticated modes (`CBC` / `CTR` / `XTS` / `ECB`), IV/nonce rules, and streaming buffering.
+- [SM2 key formats and the default signer ID](guides/sm2-keys.md) — generating keys from a CSPRNG, raw scalars, SEC1, PKCS#8 (plain & PBES2 encrypted), PEM labels, SPKI, and `DEFAULT_SIGNER_ID`.
+- [Interoperability notes](guides/interop.md) — GmSSL 3.2.0 CI suite scope, wire-format conventions (`C1‖C3‖C2`, DER vs. raw), OpenSSL KATs, and `gm-crypto-web`.
+- [Migrating from 0.16 to 1.0](guides/migrating-0.16-to-1.0.md) — the single breaking upgrade in crate history (`Sm2PublicKey`, `[u8; 32]` decoupling, `TryCryptoRng`, fallible `mode_gcm::encrypt`, always-on C ABI).
+
+### API reference & policies
+
+- **Rust API reference (docs.rs):** [`gmcrypto-core`](https://docs.rs/gmcrypto-core) — key modules:
+  [`sm2`](https://docs.rs/gmcrypto-core/latest/gmcrypto_core/sm2/index.html) ·
+  [`sm3`](https://docs.rs/gmcrypto-core/latest/gmcrypto_core/sm3/index.html) ·
+  [`hmac`](https://docs.rs/gmcrypto-core/latest/gmcrypto_core/hmac/index.html) ·
+  [`kdf`](https://docs.rs/gmcrypto-core/latest/gmcrypto_core/kdf/index.html) ·
+  [`sm4`](https://docs.rs/gmcrypto-core/latest/gmcrypto_core/sm4/index.html) ·
+  [`pem`](https://docs.rs/gmcrypto-core/latest/gmcrypto_core/pem/index.html) ·
+  [`pkcs8`](https://docs.rs/gmcrypto-core/latest/gmcrypto_core/pkcs8/index.html) ·
+  [`sec1`](https://docs.rs/gmcrypto-core/latest/gmcrypto_core/sec1/index.html) ·
+  [`spki`](https://docs.rs/gmcrypto-core/latest/gmcrypto_core/spki/index.html) ·
+  [`x509`](https://docs.rs/gmcrypto-core/latest/gmcrypto_core/x509/index.html) ·
+  [`tlcp`](https://docs.rs/gmcrypto-core/latest/gmcrypto_core/tlcp/index.html)
+- **C ABI guide:** [`crates/gmcrypto-c/README.md`](../crates/gmcrypto-c/README.md)
+- **Security policy & threat model:** [`SECURITY.md`](../SECURITY.md)
+- **Release notes:** [`CHANGELOG.md`](../CHANGELOG.md)
+
+---
+
+## Project records
+
+*The method, by the receipts.* These are the receipts behind the method described in [CASE-STUDY.md](../CASE-STUDY.md): a verification-first build in which a human owned scope, invariants, evidence standards, review pressure, and release authority, while the construction (the code and the tests) was done by an AI agent. Crypto was the stress test, not a safety proof: cheap, strong oracles (KAT vectors, dudect, fuzzers) plus independent adversarial review make a covered failure hard to hide, which is exactly why every claim below resolves to a committed artifact. This index groups every public process/audit record under `docs/` so a reader can walk the trail from "what was promised" to "what was checked."
+
+### Top-level evidence & charters
+
+The receipts the case study leans on most live at the repo root, in the crate tree, and as repository-wide charters under `docs/`:
 
 - [SECURITY.md](../SECURITY.md) — threat model, constant-time posture, the dudect gate policy, and the v0.1 leak narrative.
 - [CLAUDE.md](../CLAUDE.md) — the project's living memory: hard constraints, the dudect gate table, the architecture map, the *Don't* list.
 - [version-history.md](version-history.md) — the per-cycle narrative (v0.8 → v1.17, newest-first): what each cycle shipped, what it deliberately excluded, and why. Split out of CLAUDE.md, where it had grown to 42% of a file re-read at every session.
+- [ECOSYSTEM.md](ECOSYSTEM.md) — Rust ecosystem charter: shared version/MSRV obligations and the §8 pre-publish downstream compatibility gate (Gate #1).
+- [disclosure-boundary.md](disclosure-boundary.md) — disclosure-boundary policy and review protocol for public docs and CI scanning.
 - [crates/gmcrypto-core/benches/timing_leaks.rs](../crates/gmcrypto-core/benches/timing_leaks.rs) — the dudect timing harness (24 bench functions: 20 `ct_*` targets, the `negative_control`, and 3 runner-noise probes).
 - [fuzz/](../fuzz/) — the 35 fuzz targets plus the run/seed runbook.
 
-## Scope docs (pre-registration)
+### Scope docs (pre-registration)
 
 Per-cycle charters — scope, forks, and sign-offs recorded for each cycle. The TLCP arc was pre-registered as a standalone v1.5 cycle before any TLCP code; the per-cycle scope docs record what's in/out and what "done" means (squash history doesn't independently prove scope-before-code for every cycle).
 
@@ -47,9 +83,13 @@ Per-cycle charters — scope, forks, and sign-offs recorded for each cycle. The 
 - [v1.9-scope.md](v1.9-scope.md) — v1.9 TLCP toolkit C FFI scope; Q9.1–Q9.8 (4 forks maintainer-locked).
 - [v1.10-scope.md](v1.10-scope.md) — v1.10 assurance cycle (non-publishing); Q10.1–Q10.8. Closes F16 by wiring gmssl interop into CI against a pinned from-source oracle — after finding the oracle had silently drifted to 3.2.0 and the "11/11" claim was unreproducible. Also refutes the F21 audit's suggested dudect class-split axis and records the three W2 outcomes committed in advance.
 - [v1.11-scope.md](v1.11-scope.md) — v1.11 `RustCrypto` `aead` 0.6 trait fit scope; Q11.1–Q11.10. Records the two constraints that are not free choices: `aead` 0.6 blanket-implements `Aead` for every `AeadInOut` (so a direct `impl Aead` cannot compile), and the CCM tag/nonce sets are sealed typenum bounds so an invalid combination is a compile error rather than a runtime `None`.
-- [v1.15-scope.md](v1.15-scope.md) — hosted-runner gate-calibration charter; retires the current twin-based relative proposal, requires a frozen derivation and prospective confirmation, and retains injected-leak controls before activation. Numerical protocol pending must-pin review.
+- [v1.12-scope.md](v1.12-scope.md) — v1.12 length-committed streaming SM4-CCM (`Sm4CcmEncryptor` / `Sm4CcmDecryptor`) scope and maintainer-signed forks.
+- [v1.13-scope.md](v1.13-scope.md) — v1.13 streaming-CCM C ABI + zeroize across the SM4 streaming family scope; Q13.1–Q13.17.
+- [v1.14-scope.md](v1.14-scope.md) — v1.14 F21 `finalize()` narrow-window study scope (assurance cycle, non-publishing).
+- [v1.15-scope.md](v1.15-scope.md) — hosted-runner gate-calibration charter; retires the current twin-based relative proposal, requires a frozen derivation and prospective confirmation, and retains injected-leak controls before activation.
+- [v1.16-scope.md](v1.16-scope.md) — v1.16 GFNI SM4 S-box behind `sbox_x32` scope (x86_64 runtime detection, rustc ≥ 1.89 `build.rs` cfg).
 
-## Design & decomposition
+### Design & decomposition
 
 The "what is this and how does it break down" layer — the TLCP arc map plus per-feature design docs the human wrote/signed before the plan.
 
@@ -57,8 +97,10 @@ The "what is this and how does it break down" layer — the TLCP arc map plus pe
 - [v1.1-sm2-key-exchange-design.md](v1.1-sm2-key-exchange-design.md) — SM2-KX (GM/T 0003.3) design doc — role state-machines, typestate, key-confirmation flow — backing the v1.1 plan.
 - [v1.3-x509-sm2-design.md](v1.3-x509-sm2-design.md) — X.509-with-SM2 leaf-cert design doc — strict in-repo DER profile, no-trust-decisions boundary — backing the v1.3 plan.
 - [sm4-single-block-simd-repair-design.md](sm4-single-block-simd-repair-design.md) — issue #163 design record: replace the wasteful one-byte-to-x8 adapter with a four-byte internal S-box dispatch, preserve the x16/x32 batch paths, and gate the repair with cross-architecture correctness, constant-time, portability, and performance evidence.
+- [2026-08-10-assurance-hardening-design.md](2026-08-10-assurance-hardening-design.md) — assurance-hardening design (August 2026).
+- [2026-08-11-pr149-review-remediation-design.md](2026-08-11-pr149-review-remediation-design.md) — PR #149 review remediation design.
 
-## Implementation plans & executed reviews
+### Implementation plans & executed reviews
 
 TDD task plans. The later TLCP plans (v1.6–v1.9) carry executed-review outcomes — an Opus/Fable reviewer that compiled the riskiest slices in a worktree (GO-WITH-FIXES, must-fixes folded); the earlier plans (v1.1/v1.3/v1.4) carry reviewed-plan amendments. The agent constructs; the review pressure is recorded here.
 
@@ -69,14 +111,17 @@ TDD task plans. The later TLCP plans (v1.6–v1.9) carry executed-review outcome
 - [v1.7-tlcp-record-protection-plan.md](v1.7-tlcp-record-protection-plan.md) — v1.7 TLCP record-protection plan + Fable-5 EXECUTED review (ran the Lucky13 core; caught 2 compile bugs + missing-ceiling chain-break + a false-assurance dudect axis).
 - [v1.8-tlcp-chain-verify-plan.md](v1.8-tlcp-chain-verify-plan.md) — v1.8 cert chain/pair-verify plan + Opus EXECUTED review (Tasks 1–5 against real minted certs; 9 clippy lints incl. a hard E0433, the S1 pair-binding gap).
 - [v1.9-tlcp-ffi-plan.md](v1.9-tlcp-ffi-plan.md) — v1.9 TLCP toolkit C FFI plan (Tasks 0–10) + Opus EXECUTED review (GO-WITH-FIXES, 6 must-fixes — two caught LIVE at compile time) + the 19-symbol census lock.
+- [2026-08-10-assurance-hardening-implementation-plan.md](2026-08-10-assurance-hardening-implementation-plan.md) — implementation plan for the August 2026 assurance-hardening design.
+- [2026-08-11-pr149-review-remediation-plan.md](2026-08-11-pr149-review-remediation-plan.md) — implementation plan for PR #149 review remediation.
 
-## Readiness & audits
+### Readiness, audits & release evidence
 
-Multi-model adversarial audits and GO/NO-GO gates standing between the work and an irreversible publish. The human owns the evidence bar and the release decision.
+Multi-model adversarial audits, release review checklists, hardware qualification records, and ECOSYSTEM §8 Gate #1 evidence standing between the work and an irreversible publish. The human owns the evidence bar and the release decision.
 
 - [v1.0-readiness.md](v1.0-readiness.md) — the v1.0 GO/NO-GO readiness report + the 1.0.0 publish runbook; §3.A = the crypto-bigint-exposure decision (resolved in v0.22).
 - [v1.0-reaudit.md](v1.0-reaudit.md) — multi-model pre-publish re-audit (Codex gpt-5.5 + Grok), four dimensions A–D; returned NO-GO-as-is with 2 API/ABI blockers + should-fixes (remediated in v0.23).
 - [pre-opensource-audit.md](pre-opensource-audit.md) — v0.17 pre-open-source audit (codex-reviewed plan) ahead of the private→public repo flip.
+- [2026-08-15-disclosure-audit.md](2026-08-15-disclosure-audit.md) — August 2026 public disclosure-boundary audit.
 - [audits/2026-06-02-release-readiness-synthesis.md](audits/2026-06-02-release-readiness-synthesis.md) — the 2026-06-02 release-readiness synthesis (0 blockers, GO-WITH-FOLLOWUP); rolls up the seven dimension audits below.
 - [audits/2026-06-02-api-abi-stability-audit.md](audits/2026-06-02-api-abi-stability-audit.md) — API/ABI stability dimension of the 2026-06-02 readiness audit.
 - [audits/2026-06-02-ci-gate-review.md](audits/2026-06-02-ci-gate-review.md) — CI-gate review dimension of the 2026-06-02 readiness audit.
@@ -85,17 +130,26 @@ Multi-model adversarial audits and GO/NO-GO gates standing between the work and 
 - [audits/2026-06-02-docs-vs-code-ci-consistency.md](audits/2026-06-02-docs-vs-code-ci-consistency.md) — docs-vs-code / CI-consistency dimension of the 2026-06-02 readiness audit.
 - [audits/2026-06-02-fuzz-coverage-gaps.md](audits/2026-06-02-fuzz-coverage-gaps.md) — fuzz-coverage-gaps dimension of the 2026-06-02 readiness audit.
 - [audits/2026-06-02-misuse-footgun-audit.md](audits/2026-06-02-misuse-footgun-audit.md) — misuse/footgun dimension of the 2026-06-02 readiness audit.
+- [native-gfni-qualification.md](native-gfni-qualification.md) — native GFNI hardware qualification record for the v1.16 SM4 S-box path.
 - [v0.1.0-release-review.md](v0.1.0-release-review.md) — v0.1.0 pre-publish reviewer checklist (the template these reviews follow).
 - [v0.2.0-release-review.md](v0.2.0-release-review.md) — v0.2.0 pre-publish reviewer checklist.
 - [v1.0.0-release-review.md](v1.0.0-release-review.md) — v1.0.0 pre-publish reviewer checklist (the deliberate first-stable-publish gate).
 - [v1.9.1-release-review.md](v1.9.1-release-review.md) — v1.9.1 pre-publish reviewer checklist (the licence-text packaging patch; adds the ECOSYSTEM §8 downstream compatibility gate and a decisive "is the licence actually in the archive" check).
 - [v1.9.1-gate1-evidence.md](v1.9.1-gate1-evidence.md) — the recorded two-phase ECOSYSTEM §8 Gate #1 run for 1.9.1 (both phases' results, tested commits, and a procedural note on the charter's phase-2 recipe). **1.9.1 was never published** — superseded when 1.11.0 shipped the same licence fix; both v1.9.1 docs are kept as the record of a prepared release.
 - [v1.11.0-release-review.md](v1.11.0-release-review.md) — v1.11.0 pre-publish reviewer checklist, and the **executed** record. Its headline check is inverted from 1.9.1's: an additive release asks "is `aead` absent from the default dep graph, and is the api-baseline diff `-0` removals?". Its OUTCOME section keeps what actually happened rather than rewriting the plan — the first publish command ran from the wrong directory, so `gmcrypto-simd 1.11.0` shipped as step 1 of the wrong release.
-- [v1.11.0-gate1-evidence.md](v1.11.0-gate1-evidence.md) — the two-phase ECOSYSTEM §8 Gate #1 run for 1.11.0 (PASS). §4 records a trap in the charter's own recipe: the phase-2 `[patch]` override must use a **relative** path, or the boundary scanner fails on the developer home directory embedded in the manifest — which reads as a candidate defect and is not.
+- [v1.11.0-gate1-evidence.md](v1.11.0-gate1-evidence.md) — the two-phase ECOSYSTEM §8 Gate #1 run for 1.11.0 (PASS).
+- [v1.11.1-release-review.md](v1.11.1-release-review.md) — v1.11.1 release review checklist (three-crate workspace).
+- [v1.11.1-gate1-evidence.md](v1.11.1-gate1-evidence.md) — ECOSYSTEM §8 Gate #1 evidence for 1.11.1.
+- [v1.11.2-release-review.md](v1.11.2-release-review.md) — v1.11.2 release review checklist (three-crate workspace).
+- [v1.11.2-gate1-evidence.md](v1.11.2-gate1-evidence.md) — ECOSYSTEM §8 Gate #1 evidence for 1.11.2.
+- [v1.12.0-gate1-evidence.md](v1.12.0-gate1-evidence.md) — ECOSYSTEM §8 Gate #1 evidence for 1.12.0.
+- [v1.13.0-gate1-evidence.md](v1.13.0-gate1-evidence.md) — ECOSYSTEM §8 Gate #1 evidence for 1.13.0.
+- [v1.16.0-gate1-evidence.md](v1.16.0-gate1-evidence.md) — ECOSYSTEM §8 Gate #1 evidence for 1.16.0.
+- [v1.17.0-gate1-evidence.md](v1.17.0-gate1-evidence.md) — ECOSYSTEM §8 Gate #1 evidence for 1.17.0.
 
-## KAT sourcing
+### KAT sourcing
 
-Where each known-answer-test vector came from and why that oracle is trustworthy — the evidence provenance behind every byte-for-byte cross-check.
+Where each known-answer-test vector came from and why that oracle is trustworthy — the evidence provenance behind every cross-check.
 
 - [v0.8-ccm-kat-sourcing.md](v0.8-ccm-kat-sourcing.md) — SM4-CCM KAT sourcing: OpenSSL 3.x EVP SM4-CCM (gmssl 3.1.1 lacks -ccm); embedded C harness + parametric coverage matrix.
 - [v0.12-xts-kat-sourcing.md](v0.12-xts-kat-sourcing.md) — SM4-XTS KAT sourcing: OpenSSL EVP SM4-XTS pinned to xts_standard=GB (gmssl lacks XTS).
@@ -104,13 +158,35 @@ Where each known-answer-test vector came from and why that oracle is trustworthy
 - [v1.7-kat-sourcing.md](v1.7-kat-sourcing.md) — TLCP record-protection KAT sourcing: OpenSSL EVP SM4-CBC + GmSSL sm3hmac (CBC) / GmSSL sm4 -gcm (GCM).
 - [v1.8-kat-sourcing.md](v1.8-kat-sourcing.md) — TLCP chain/pair KAT sourcing: the GmSSL 3-level chain fixtures (root → intermediate → [sign,enc] pair, gmssl-self-verified).
 
-## Constant-time recalibration
+### Constant-time recalibration & studies
 
-The longitudinal honesty ledger for the dudect timing gate — every time CI-runner noise moved the floor, what was tried, and what was falsified rather than papered over.
+The longitudinal honesty ledger for the dudect timing gate — every time CI-runner noise moved the floor, what was tried, and what was falsified rather than papered over — plus the v1.14 F21 study and the frozen v1.15 calibration study artifacts.
 
 - [v0.5-dudect-recalibration.md](v0.5-dudect-recalibration.md) — the running dudect noise-floor analysis: the 2026-05-12 runner-image shift, the v0.18 pin+median, the v0.19 relative-gate FALSIFICATION, and the 2026-06-07/06-17 sentinel demotions — the evidence trail behind the telemetry/sentinel posture.
+- [f21-finalize-preflight.md](f21-finalize-preflight.md) — F21 `finalize()` input and single-consumption preflight.
+- [f21-finalize-result.md](f21-finalize-result.md) — v1.14 F21 `finalize()` narrow-window study result.
+- **v1.15 hosted-runner calibration study (protocol, freeze & reports):**
+  - [v1.15-protocol.md](v1.15-protocol.md) — numerical protocol for hosted-runner candidate gates.
+  - [v1.15-calibration-freeze.md](v1.15-calibration-freeze.md) — calibration readiness, date declaration, and study-isolation amendment.
+  - [v1.15-evidence-format.md](v1.15-evidence-format.md) — evidence qualification interface.
+  - [v1.15-historical-evidence.md](v1.15-historical-evidence.md) — historical nightly corpus analysis.
+  - [v1.15-control-builds.md](v1.15-control-builds.md) — structural injected-leak control-build qualification.
+  - [v1.15-sentinel-investigation.md](v1.15-sentinel-investigation.md) — September 17 `ct_fp_invert` sentinel breach investigation.
+  - [v1.15-smoke-diagnostic.md](v1.15-smoke-diagnostic.md) — smoke diagnostic D1 result.
+- **v1.15 machine-readable manifests & corpus data:**
+  - [v1.15-archive-manifest.csv](v1.15-archive-manifest.csv) — archived nightly run manifest.
+  - [v1.15-calibration-isolation.json](v1.15-calibration-isolation.json) — calibration isolation metadata.
+  - [v1.15-isolation.json](v1.15-isolation.json) — frozen study source isolation pin.
+  - [v1.15-execution-freeze.json](v1.15-execution-freeze.json) — execution freeze parameters and calendar.
+  - [v1.15-capture-build-manifest.json](v1.15-capture-build-manifest.json) — capture build manifest.
+  - [v1.15-control-build-manifest.json](v1.15-control-build-manifest.json) — control build manifest.
+  - [v1.15-control-builds.csv](v1.15-control-builds.csv) — structural control-build measurements.
+  - [v1.15-nightly-corpus.csv](v1.15-nightly-corpus.csv) — aggregated nightly corpus data.
+  - [v1.15-nightly-samples.csv](v1.15-nightly-samples.csv) — per-run nightly sample records.
+  - [v1.15-nightly-summary.json](v1.15-nightly-summary.json) — summary statistics over the nightly corpus.
+  - [v1.15-smoke-diagnostic.csv](v1.15-smoke-diagnostic.csv) — smoke diagnostic D1 measurements.
 
-## API baselines
+### API baselines
 
 Committed cargo-public-api snapshots — the machine-checked drift contract that turns "we froze the API" into a CI gate, not a promise.
 

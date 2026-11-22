@@ -8,8 +8,10 @@ leaks in CI** (`dudect` detects leaks; it does not prove their absence).
 
 [![Crates.io](https://img.shields.io/crates/v/gmcrypto-core.svg)](https://crates.io/crates/gmcrypto-core)
 [![Documentation](https://docs.rs/gmcrypto-core/badge.svg)](https://docs.rs/gmcrypto-core)
-[![MSRV](https://img.shields.io/badge/MSRV-1.87-blue.svg)](https://github.com/frankxue831/gm-crypto-rs#stability--semver)
+[![MSRV](https://img.shields.io/badge/MSRV-1.87-blue.svg)](https://github.com/frankxue831/gm-crypto-rs#msrv)
 [![License](https://img.shields.io/crates/l/gmcrypto-core.svg)](https://crates.io/crates/gmcrypto-core)
+
+**Documentation:** [API reference (docs.rs)](https://docs.rs/gmcrypto-core) · [User guides](docs/README.md#for-users) · [Changelog](CHANGELOG.md)
 
 **Try it in the browser:** [gm-crypto-web](https://www.frankxue.dev/gm-crypto-web/) runs SM2 / SM3 / SM4 locally through this crate compiled to WASM (unaudited demo; do not use production keys).
 
@@ -291,11 +293,18 @@ the committed header (`cc -std=c11 -Wall -Wextra -Werror -fsyntax-only`). CI doe
 not link or run them; the
 [link recipe](crates/gmcrypto-c/README.md#linking-against-c) builds and runs one.
 
-## Stability & SemVer
+## MSRV
+
+The Minimum Supported Rust Version is **Rust 1.87** (edition 2024), checked in
+CI on native and `wasm32-unknown-unknown`. Raising the MSRV is treated as a
+minor release, never a patch. (The optional GFNI SM4 S-box path in
+`gmcrypto-simd` activates automatically on `rustc >= 1.89`.)
+
+## SemVer
 
 - **1.x is stable.** Every release since 1.0.0 has been additive;
   `cargo-semver-checks` gates breaking changes in CI. The only migration ever
-  required was 0.16 → 1.0.
+  required was [0.16 → 1.0](docs/guides/migrating-0.16-to-1.0.md).
 - **Covered:** the public Rust API of `gmcrypto-core` (snapshotted in
   [`docs/api-baseline/`](docs/api-baseline/), drift-checked in CI) and the
   `gmcrypto-c` C ABI (the committed header, drift-checked in CI).
@@ -305,7 +314,6 @@ not link or run them; the
   release.
 - **Wire output is byte-identical to 0.16.0:** SM2 signatures and ciphertexts,
   every SM4 mode.
-- **MSRV is 1.87** (edition 2024). An MSRV bump is a minor, not a patch.
 - **Features are additive**, `default = []`, all eleven opt-in.
 - **No `crypto-bigint` type in the always-on API.** Byte-adjacent types take
   and return `[u8; 32]`. The one exception is the opt-in `crypto-bigint-scalar`
@@ -316,12 +324,13 @@ not link or run them; the
   reason. PRs that distinguish failure modes are rejected — see
   [`SECURITY.md`](SECURITY.md).
 
-Release notes: [`CHANGELOG.md`](CHANGELOG.md), every published version. The
-per-cycle design records are under [`docs/`](docs/); the verification-first
-method behind them — pre-registered scope, adversarial review, executable
-evidence gates, failures kept as receipts — is in [`CASE-STUDY.md`](CASE-STUDY.md).
-The TLCP toolkit is complete as a toolkit; a sans-I/O protocol engine would be
-a separate crate and has not been committed to.
+Release notes: [`CHANGELOG.md`](CHANGELOG.md), every published version. User
+guides and per-cycle design records live under [`docs/`](docs/); the
+verification-first method behind them — pre-registered scope, adversarial
+review, executable evidence gates, failures kept as receipts — is in
+[`CASE-STUDY.md`](CASE-STUDY.md). The TLCP toolkit is complete as a toolkit; a
+sans-I/O protocol engine would be a separate crate and has not been committed
+to.
 
 ## Threat model
 

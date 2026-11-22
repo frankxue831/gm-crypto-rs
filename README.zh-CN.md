@@ -4,6 +4,8 @@
 
 纯 Rust 实现的国密算法 SM2 / SM3 / SM4（GB/T 32918 / 32905 / 32907），`no_std` 核心，不依赖 C 库；另提供 C ABI，可供 C、C++、Python、Go、Zig 调用。
 
+**文档：** [API 文档（docs.rs）](https://docs.rs/gmcrypto-core) · [用户指南](docs/README.md#for-users) · [更新日志](CHANGELOG.md)
+
 **先在浏览器里试试：** [gm-crypto-web](https://www.frankxue.dev/gm-crypto-web/?lang=zh) 用这个库编译成的 WebAssembly 在本地计算 SM2 / SM3 / SM4，不上传数据（未经审计的演示工具，请勿使用生产密钥）。
 
 > ⚠️ **未经第三方安全审计。** 这是个人维护的开源项目，2026 年首次发布，没有支持承诺。现有保障都来自项目内部：CI 里的标准向量测试、与 GmSSL 3.2.0 的互通测试、`dudect` 计时检测、35 个 `cargo-fuzz` 目标。请自行审阅代码后再使用。威胁模型和漏洞报告方式见 [`SECURITY.md`](SECURITY.md)。
@@ -121,6 +123,14 @@ C 语言等调用方请用 [`gmcrypto-c`](crates/gmcrypto-c/README.md)。`gmcryp
 - 不是 HSM / SDF / SKF 集成，也不是经过认证的密码模块。
 - 在乘法耗时依赖数据的 CPU（部分老 x86、部分嵌入式）上，常量时间写法不成立。
 - `verify_chain` / `verify_pair` 只做结构上的信任判断：返回 `true` 表示证书链连到了你提供的根，不代表对方就是你要连接的那个服务器。
+
+## MSRV
+
+最低支持 Rust 版本为 **Rust 1.87**（edition 2024），CI 在原生目标和 `wasm32-unknown-unknown` 上均做检查；提升 MSRV 属于 minor 变更而非 patch。
+
+## SemVer
+
+`1.x` 遵循语义化版本，`cargo-semver-checks` 在 CI 中检查破坏性变更（覆盖 `gmcrypto-core` 公开 Rust API 与 `gmcrypto-c` C ABI，不含 `#[doc(hidden)]` 项及内部后端 `gmcrypto-simd`）。历史唯一一次破坏性迁移见 [0.16 → 1.0 迁移指南](docs/guides/migrating-0.16-to-1.0.md)。
 
 ## 许可证
 
