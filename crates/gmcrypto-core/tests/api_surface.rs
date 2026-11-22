@@ -112,8 +112,8 @@ fn group_w1_reshaped_surface_exists() {
     const _: fn(&[u32]) -> [u8; 3] = gmcrypto_core::asn1::oid::encode::<3>;
 
     // The doc-hidden in-crate `BlockCipher` trait stays reachable as a bound.
-    fn _assert_block_cipher<T: BlockCipher>() {}
-    let _ = _assert_block_cipher::<gmcrypto_core::sm4::Sm4Cipher>;
+    fn assert_block_cipher<T: BlockCipher>() {}
+    const _: fn() = assert_block_cipher::<gmcrypto_core::sm4::Sm4Cipher>;
 
     // Runtime smoke: the reshaped `public_key()` returns an `Sm2PublicKey`
     // whose underlying point round-trips through the doc-hidden bridge.

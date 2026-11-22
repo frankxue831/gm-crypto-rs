@@ -39,9 +39,8 @@ fn make_blocks(n: usize) -> Vec<[u8; BLOCK_SIZE]> {
 fn encrypt_blocks_matches_per_block_at_every_length() {
     let cipher = Sm4Cipher::new(&KEY);
     for n in 0..=33 {
-        let blocks = make_blocks(n);
-        let mut batched = blocks.clone();
-        let mut sequential = blocks.clone();
+        let mut batched = make_blocks(n);
+        let mut sequential = batched.clone();
 
         cipher.encrypt_blocks(&mut batched);
         for block in &mut sequential {
@@ -59,9 +58,8 @@ fn encrypt_blocks_matches_per_block_at_every_length() {
 fn decrypt_blocks_matches_per_block_at_every_length() {
     let cipher = Sm4Cipher::new(&KEY);
     for n in 0..=33 {
-        let blocks = make_blocks(n);
-        let mut batched = blocks.clone();
-        let mut sequential = blocks.clone();
+        let mut batched = make_blocks(n);
+        let mut sequential = batched.clone();
 
         cipher.decrypt_blocks(&mut batched);
         for block in &mut sequential {
