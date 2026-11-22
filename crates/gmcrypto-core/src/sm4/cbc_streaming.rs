@@ -222,11 +222,11 @@ impl Sm4CbcDecryptor {
     /// incoming `data` holds enough buffered ciphertext for a full
     /// SIMD batch (`SIMD_BATCH` blocks — 8 on `x86_64`, 4 on `aarch64`,
     /// 1 elsewhere), the batched path
-    /// [`super::cipher::Sm4Cipher::decrypt_blocks_simd`] fans the
+    /// `super::cipher::Sm4Cipher::decrypt_blocks_simd` fans the
     /// per-round `tau` across the full SIMD register width via
-    /// [`gmcrypto_simd::sm4::sbox_x32`] / [`gmcrypto_simd::sm4::sbox_x16`].
+    /// `gmcrypto_simd::sm4::sbox_x32` / `gmcrypto_simd::sm4::sbox_x16`.
     /// Behavior is byte-identical to the per-block
-    /// [`Self::decrypt_one`] path (Q5.10's "no new public Rust
+    /// `Self::decrypt_one` path (Q5.10's "no new public Rust
     /// surface" carries through — only the internal loop shape
     /// changes).
     pub fn update(&mut self, mut data: &[u8]) {

@@ -130,7 +130,7 @@
 //!   that crate's blanket impl. Thin wrappers over `mode_gcm` / `mode_ccm`;
 //!   every failure becomes the one opaque `aead::Error`. Implies `sm4-aead`
 //!   (`aead = "0.6"`).
-//! - `crypto-bigint-scalar` — [`sm2::Sm2PrivateKey::from_scalar`], taking a
+//! - `crypto-bigint-scalar` — `sm2::Sm2PrivateKey::from_scalar`, taking a
 //!   `crypto_bigint::U256` directly. The always-on `from_bytes_be` is the
 //!   recommended constructor; this exists for callers who already hold the
 //!   scalar as that type and accept `crypto-bigint`'s major-version contract.

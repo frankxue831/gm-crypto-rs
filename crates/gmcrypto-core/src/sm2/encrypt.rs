@@ -95,7 +95,7 @@ const ENCRYPT_RETRY_BUDGET: usize = 64;
 /// `rng` must be a [`rand_core::TryCryptoRng`] (the fallible
 /// cryptographic-RNG trait). With a CSPRNG, encrypt failure probability
 /// is `≤ 2^-512` for any plaintext length — see the
-/// [`ENCRYPT_RETRY_BUDGET`] table for the per-length math.
+/// `ENCRYPT_RETRY_BUDGET` table for the per-length math.
 ///
 /// # RNG bound
 ///
@@ -110,7 +110,7 @@ const ENCRYPT_RETRY_BUDGET: usize = 64;
 /// identity point (a malicious caller could construct one via
 /// [`Sm2PublicKey::from_point`]), if the supplied RNG fails (collapsed
 /// to `Failed`, never a panic), if `plaintext.len()` exceeds the SM2
-/// KDF counter ceiling ([`KDF_MAX_OUTPUT`]), or if every retry produced
+/// KDF counter ceiling (`KDF_MAX_OUTPUT`), or if every retry produced
 /// an all-zeros KDF output.
 pub fn encrypt<R: TryCryptoRng>(
     public: &Sm2PublicKey,

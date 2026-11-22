@@ -36,7 +36,7 @@ pub fn encode_sig(r: &[u8; 32], s: &[u8; 32]) -> Vec<u8> {
 ///
 /// v0.22 reshaped the return from `(U256, U256)` to `([u8; 32], [u8; 32])`
 /// (Q22.4); the accept/reject behaviour is unchanged — all the
-/// strict-canonical + zero/length rejects stay in [`read_scalar_in_range`].
+/// strict-canonical + zero/length rejects stay in `read_scalar_in_range`.
 /// Callers that need the numeric value (e.g. `verify_with_id`'s
 /// `r < n` / `Fn::new` checks) reconstruct `U256::from_be_slice` themselves.
 #[must_use]

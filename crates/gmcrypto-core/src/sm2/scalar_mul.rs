@@ -4,7 +4,7 @@
 //! - [`mul_var`] — variable-base k·P. 4-bit fixed-window, constant-time
 //!   linear-scan table lookup via `subtle`.
 //! - [`mul_g`] — fixed-base k·G. v0.3 uses a precomputed comb table
-//!   (see [`crate::sm2::comb_table`]) for ~5× speedup over v0.2's
+//!   (see `crate::sm2::comb_table`) for ~5× speedup over v0.2's
 //!   delegate-to-`mul_var` path. Constant-time-designed lookup
 //!   preserved.
 
@@ -78,7 +78,7 @@ fn lift_scalar(k: &Fn) -> U256 {
 /// Fixed-base scalar multiplication k·G. Used in signing.
 ///
 /// v0.3 walks a precomputed comb table (64 sub-tables of 16 entries
-/// each, lazily built once per process per [`crate::sm2::comb_table`]).
+/// each, lazily built once per process per `crate::sm2::comb_table`).
 /// Each window's lookup runs a constant-time linear scan over the
 /// 16-entry sub-table; the accumulation across windows uses
 /// projective point addition. Total work per call: 64 sub-table

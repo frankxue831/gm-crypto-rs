@@ -20,7 +20,7 @@
 //! between this crate and `gmcrypto_core::sm4::sbox_bitsliced` rather
 //! than shared via a widened `pub(crate)` visibility. CLAUDE.md
 //! pins "Don't expose the bitsliced helpers publicly" — so the
-//! sibling crate carries its own copy (in [`super::scalar`]) and
+//! sibling crate carries its own copy (in `super::scalar`) and
 //! `tests/lane_equivalence.rs` cross-checks both paths against the
 //! public GB/T 32907-2016 §6.2 S-box table.
 //!
