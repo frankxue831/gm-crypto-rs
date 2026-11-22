@@ -145,6 +145,18 @@
 typedef struct gmcrypto_hmac_sm3_t gmcrypto_hmac_sm3_t;
 
 /*
+ Opaque handle for a streaming GB/T 32918.2 SM2 digest hasher computing
+ `e = SM3(Z_A || M)`. Construct with [`gmcrypto_sm2_hasher_new`] (binds
+ `DEFAULT_SIGNER_ID`) or [`gmcrypto_sm2_hasher_new_with_id`] (explicit ID),
+ absorb message chunks via [`gmcrypto_sm2_hasher_update`], and finish with
+ exactly one terminal call: [`gmcrypto_sm2_hasher_finalize`] (which
+ consumes and frees the handle even on output error) **or**
+ [`gmcrypto_sm2_hasher_free`] (abort path). Do NOT call `_free` after
+ `_finalize`.
+ */
+typedef struct gmcrypto_sm2_hasher_t gmcrypto_sm2_hasher_t;
+
+/*
  Opaque handle for an SM2 key-exchange INITIATOR (party A; GM/T
  0003.3, v1.2). Born already awaiting the responder's reply —
  [`gmcrypto_sm2_kx_initiator_new`] samples the ephemeral internally
@@ -1382,6 +1394,129 @@ int gmcrypto_sm2_encrypt_with_rng(const gmcrypto_sm2_pubkey_t *key,
                                   uint8_t *out_der_ct,
                                   uintptr_t out_capacity,
                                   uintptr_t *out_actual_len)
+;
+
+/*
+ Construct a streaming SM2 hasher bound to `public_key` and
+ [`DEFAULT_SIGNER_ID`] (`"1234567812345678"`, 16 bytes), immediately
+ computing and absorbing `Z_A`.
+
+ Returns `NULL` if `public_key` is null or invalid. Pair a non-null handle
+ with **exactly one** terminal call: [`gmcrypto_sm2_hasher_finalize`] or
+ [`gmcrypto_sm2_hasher_free`].
+ */
+ gmcrypto_sm2_hasher_t *gmcrypto_sm2_hasher_new(const gmcrypto_sm2_pubkey_t *public_key) ;
+
+/*
+ Construct a streaming SM2 hasher bound to `public_key` and an explicit
+ `id` (`id_len` bytes), immediately computing and absorbing `Z_A`.
+
+ **Zero-length ID semantics differ from message-level SM2 C calls:**
+ both `(NULL, 0)` and `(non-null, 0)` hash a literal empty signer ID `""`
+ (`ENTL_A = 0x0000`). In contrast, `gmcrypto_sm2_sign` /
+ `gmcrypto_sm2_verify` treat `signer_id_len == 0` as `DEFAULT_SIGNER_ID`.
+ Use [`gmcrypto_sm2_hasher_new`] when you want `DEFAULT_SIGNER_ID`.
+
+ Returns `NULL` if `public_key` is null/invalid, if `id` is null with
+ `id_len > 0`, or if `id_len > 8191` (`MAX_ID_LEN`). Pair a non-null
+ handle with **exactly one** terminal call:
+ [`gmcrypto_sm2_hasher_finalize`] or [`gmcrypto_sm2_hasher_free`].
+ */
+
+gmcrypto_sm2_hasher_t *gmcrypto_sm2_hasher_new_with_id(const gmcrypto_sm2_pubkey_t *public_key,
+                                                       const uint8_t *id,
+                                                       uintptr_t id_len)
+;
+
+/*
+ Absorb a message chunk (`data`, `data_len` bytes) into a streaming SM2
+ hasher. Empty chunks (`data_len == 0`, including `(NULL, 0)`) are valid
+ no-ops.
+
+ Returns [`GMCRYPTO_OK`] on success, or [`GMCRYPTO_ERR`] if `hasher` is
+ null or `data` is null with `data_len > 0` (leaving `hasher` untouched).
+ */
+
+int gmcrypto_sm2_hasher_update(gmcrypto_sm2_hasher_t *hasher,
+                               const uint8_t *data,
+                               uintptr_t data_len)
+;
+
+/*
+ Consume the streaming SM2 hasher and write the 32-byte GB/T 32918.2
+ digest `e = SM3(Z_A || M)` (`GMCRYPTO_SM3_DIGEST_SIZE`) to `out_digest`.
+
+ **Consumes and frees any non-null `hasher` handle even when `out_digest`
+ is null (`GMCRYPTO_ERR`)** — do NOT call [`gmcrypto_sm2_hasher_free`] on
+ the handle afterwards.
+ */
+ int gmcrypto_sm2_hasher_finalize(gmcrypto_sm2_hasher_t *hasher, uint8_t *out_digest) ;
+
+/*
+ Free a streaming SM2 hasher without finalizing (abort path). Passing
+ `NULL` is a no-op. Do NOT call after [`gmcrypto_sm2_hasher_finalize`].
+ */
+ void gmcrypto_sm2_hasher_free(gmcrypto_sm2_hasher_t *hasher) ;
+
+/*
+ Sign a precomputed 32-byte GB/T 32918.2 digest `digest` (`e = SM3(Z_A || M)`)
+ using `key` and system randomness (`getrandom::SysRng`), writing the
+ DER-encoded `SEQUENCE { r, s }` signature via the
+ `(out_der_sig, out_capacity, out_actual_len)` convention.
+
+ **CRITICAL CONTRACT — `e = SM3(Z_A || M)` REQUIRED:** `digest` MUST be the
+ 32-byte identity- and key-bound GB/T 32918.2 digest `e = SM3(Z_A || M)`
+ (for example produced by [`gmcrypto_sm2_hasher_new`] +
+ [`gmcrypto_sm2_hasher_finalize`]), **NOT** a plain `SM3(M)` digest. A
+ caller passing precomputed bytes owns the signer-ID and public-key (`Z_A`)
+ binding; this entry point cannot infer or verify `Z_A` from 32 raw bytes.
+ */
+
+int gmcrypto_sm2_sign_digest(const gmcrypto_sm2_privkey_t *key,
+                             const uint8_t *digest,
+                             uint8_t *out_der_sig,
+                             uintptr_t out_capacity,
+                             uintptr_t *out_actual_len)
+;
+
+/*
+ `_with_rng` variant of [`gmcrypto_sm2_sign_digest`], drawing signing
+ randomness from `rng_callback` (`rng_context`) instead of
+ `getrandom::SysRng`.
+
+ **CRITICAL CONTRACT — `e = SM3(Z_A || M)` REQUIRED:** `digest` MUST be the
+ fixed 32-byte identity-bound digest `e = SM3(Z_A || M)`, **NOT** raw
+ `SM3(M)`. Callers supplying a precomputed digest own the `(key, signer_id)`
+ `Z_A` binding.
+ */
+
+int gmcrypto_sm2_sign_digest_with_rng(const gmcrypto_sm2_privkey_t *key,
+                                      const uint8_t *digest,
+                                      gmcrypto_rng_callback rng_callback,
+                                      void *rng_context,
+                                      uint8_t *out_der_sig,
+                                      uintptr_t out_capacity,
+                                      uintptr_t *out_actual_len)
+;
+
+/*
+ Verify a DER-encoded `(r, s)` signature against a precomputed 32-byte
+ GB/T 32918.2 digest `digest` (`e = SM3(Z_A || M)`) under public `key`.
+
+ **CRITICAL CONTRACT — `e = SM3(Z_A || M)` REQUIRED:** `digest` MUST be the
+ 32-byte identity-bound digest `e = SM3(Z_A || M)` matching `key` and its
+ signer ID (for example from [`gmcrypto_sm2_hasher_finalize`]), **NOT**
+ plain `SM3(M)`. Callers supplying external bytes own the key and signer-ID
+ (`Z_A`) binding.
+
+ Returns [`GMCRYPTO_OK`] if valid, or [`GMCRYPTO_ERR`] for any failure
+ (signature mismatch, malformed DER, identity public key, or null args).
+ */
+
+int gmcrypto_sm2_verify_digest(const gmcrypto_sm2_pubkey_t *key,
+                               const uint8_t *digest,
+                               const uint8_t *der_sig,
+                               uintptr_t der_sig_len)
 ;
 
 /*

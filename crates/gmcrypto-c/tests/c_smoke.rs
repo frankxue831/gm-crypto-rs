@@ -23,18 +23,22 @@ use core::ptr;
 
 use gmcrypto_c::{
     GMCRYPTO_ERR, GMCRYPTO_OK, GMCRYPTO_SM2_SCALAR_SIZE, GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE,
-    gmcrypto_hkdf_sm3, gmcrypto_hkdf_sm3_expand, gmcrypto_hkdf_sm3_extract, gmcrypto_hmac_sm3,
-    gmcrypto_hmac_sm3_finalize, gmcrypto_hmac_sm3_new, gmcrypto_hmac_sm3_t,
-    gmcrypto_hmac_sm3_update, gmcrypto_hmac_sm3_verify, gmcrypto_pbkdf2_hmac_sm3,
-    gmcrypto_rng_callback, gmcrypto_sm2_decrypt, gmcrypto_sm2_decrypt_c1c2c3_legacy,
-    gmcrypto_sm2_decrypt_c1c3c2, gmcrypto_sm2_encrypt, gmcrypto_sm2_encrypt_c1c3c2,
-    gmcrypto_sm2_encrypt_with_rng, gmcrypto_sm2_privkey_free, gmcrypto_sm2_privkey_from_pkcs8,
-    gmcrypto_sm2_privkey_generate, gmcrypto_sm2_privkey_generate_with_rng,
-    gmcrypto_sm2_privkey_new, gmcrypto_sm2_privkey_public_key, gmcrypto_sm2_privkey_t,
-    gmcrypto_sm2_privkey_to_pkcs8, gmcrypto_sm2_privkey_to_sec1_be, gmcrypto_sm2_pubkey_free,
-    gmcrypto_sm2_pubkey_new, gmcrypto_sm2_pubkey_t, gmcrypto_sm2_pubkey_to_sec1_uncompressed,
-    gmcrypto_sm2_sign, gmcrypto_sm2_sign_with_rng, gmcrypto_sm2_verify, gmcrypto_sm3_finalize,
-    gmcrypto_sm3_free, gmcrypto_sm3_hash, gmcrypto_sm3_new, gmcrypto_sm3_t, gmcrypto_sm3_update,
+    GMCRYPTO_SM3_DIGEST_SIZE, gmcrypto_hkdf_sm3, gmcrypto_hkdf_sm3_expand,
+    gmcrypto_hkdf_sm3_extract, gmcrypto_hmac_sm3, gmcrypto_hmac_sm3_finalize,
+    gmcrypto_hmac_sm3_new, gmcrypto_hmac_sm3_t, gmcrypto_hmac_sm3_update, gmcrypto_hmac_sm3_verify,
+    gmcrypto_pbkdf2_hmac_sm3, gmcrypto_rng_callback, gmcrypto_sm2_decrypt,
+    gmcrypto_sm2_decrypt_c1c2c3_legacy, gmcrypto_sm2_decrypt_c1c3c2, gmcrypto_sm2_encrypt,
+    gmcrypto_sm2_encrypt_c1c3c2, gmcrypto_sm2_encrypt_with_rng, gmcrypto_sm2_hasher_finalize,
+    gmcrypto_sm2_hasher_free, gmcrypto_sm2_hasher_new, gmcrypto_sm2_hasher_new_with_id,
+    gmcrypto_sm2_hasher_t, gmcrypto_sm2_hasher_update, gmcrypto_sm2_privkey_free,
+    gmcrypto_sm2_privkey_from_pkcs8, gmcrypto_sm2_privkey_generate,
+    gmcrypto_sm2_privkey_generate_with_rng, gmcrypto_sm2_privkey_new,
+    gmcrypto_sm2_privkey_public_key, gmcrypto_sm2_privkey_t, gmcrypto_sm2_privkey_to_pkcs8,
+    gmcrypto_sm2_privkey_to_sec1_be, gmcrypto_sm2_pubkey_free, gmcrypto_sm2_pubkey_new,
+    gmcrypto_sm2_pubkey_t, gmcrypto_sm2_pubkey_to_sec1_uncompressed, gmcrypto_sm2_sign,
+    gmcrypto_sm2_sign_digest, gmcrypto_sm2_sign_digest_with_rng, gmcrypto_sm2_sign_with_rng,
+    gmcrypto_sm2_verify, gmcrypto_sm2_verify_digest, gmcrypto_sm3_finalize, gmcrypto_sm3_free,
+    gmcrypto_sm3_hash, gmcrypto_sm3_new, gmcrypto_sm3_t, gmcrypto_sm3_update,
     gmcrypto_sm4_cbc_decrypt, gmcrypto_sm4_cbc_decryptor_finalize, gmcrypto_sm4_cbc_decryptor_free,
     gmcrypto_sm4_cbc_decryptor_new, gmcrypto_sm4_cbc_decryptor_t,
     gmcrypto_sm4_cbc_decryptor_update, gmcrypto_sm4_cbc_encrypt,
@@ -1924,6 +1928,536 @@ fn sm2_privkey_public_key_outlives_private_handle() {
 
     unsafe {
         gmcrypto_sm2_privkey_free(sk2);
+        gmcrypto_sm2_pubkey_free(pk);
+    }
+}
+
+unsafe fn compute_stream_digest_c(
+    pk: *const gmcrypto_sm2_pubkey_t,
+    id: Option<&[u8]>,
+    chunks: &[&[u8]],
+) -> [u8; GMCRYPTO_SM3_DIGEST_SIZE] {
+    let hasher: *mut gmcrypto_sm2_hasher_t = match id {
+        None => unsafe { gmcrypto_sm2_hasher_new(pk) },
+        Some(bytes) => unsafe { gmcrypto_sm2_hasher_new_with_id(pk, bytes.as_ptr(), bytes.len()) },
+    };
+    assert!(!hasher.is_null());
+    let empty: [u8; 0] = [];
+    assert_eq!(
+        unsafe { gmcrypto_sm2_hasher_update(hasher, ptr::null(), 0) },
+        GMCRYPTO_OK
+    );
+    assert_eq!(
+        unsafe { gmcrypto_sm2_hasher_update(hasher, empty.as_ptr(), 0) },
+        GMCRYPTO_OK
+    );
+    for chunk in chunks {
+        assert_eq!(
+            unsafe { gmcrypto_sm2_hasher_update(hasher, chunk.as_ptr(), chunk.len()) },
+            GMCRYPTO_OK
+        );
+    }
+    let mut digest = [0u8; GMCRYPTO_SM3_DIGEST_SIZE];
+    assert_eq!(
+        unsafe { gmcrypto_sm2_hasher_finalize(hasher, digest.as_mut_ptr()) },
+        GMCRYPTO_OK
+    );
+    digest
+}
+
+#[test]
+fn sm2_hasher_and_digest_cross_verify_default_and_custom_id() {
+    let (sk, pk) = fresh_sm2_keys();
+    let msg = b"streaming SM2 digest message across arbitrary chunks";
+    let custom_id = b"custom-signer-id-alice";
+
+    for id in [None, Some(custom_id.as_slice())] {
+        let digest =
+            unsafe { compute_stream_digest_c(pk, id, &[&msg[..11], &msg[11..30], &msg[30..]]) };
+        let mut sig_from_digest = [0u8; 128];
+        let mut sig_from_digest_len = 0usize;
+        assert_eq!(
+            unsafe {
+                gmcrypto_sm2_sign_digest(
+                    sk,
+                    digest.as_ptr(),
+                    sig_from_digest.as_mut_ptr(),
+                    sig_from_digest.len(),
+                    &mut sig_from_digest_len,
+                )
+            },
+            GMCRYPTO_OK
+        );
+        let (id_ptr, id_len) = match id {
+            None => (ptr::null(), 0),
+            Some(bytes) => (bytes.as_ptr(), bytes.len()),
+        };
+        assert_eq!(
+            unsafe {
+                gmcrypto_sm2_verify(
+                    pk,
+                    id_ptr,
+                    id_len,
+                    msg.as_ptr(),
+                    msg.len(),
+                    sig_from_digest.as_ptr(),
+                    sig_from_digest_len,
+                )
+            },
+            GMCRYPTO_OK
+        );
+
+        let mut sig_oneshot = [0u8; 128];
+        let mut sig_oneshot_len = 0usize;
+        assert_eq!(
+            unsafe {
+                gmcrypto_sm2_sign(
+                    sk,
+                    id_ptr,
+                    id_len,
+                    msg.as_ptr(),
+                    msg.len(),
+                    sig_oneshot.as_mut_ptr(),
+                    sig_oneshot.len(),
+                    &mut sig_oneshot_len,
+                )
+            },
+            GMCRYPTO_OK
+        );
+        assert_eq!(
+            unsafe {
+                gmcrypto_sm2_verify_digest(
+                    pk,
+                    digest.as_ptr(),
+                    sig_oneshot.as_ptr(),
+                    sig_oneshot_len,
+                )
+            },
+            GMCRYPTO_OK
+        );
+    }
+
+    unsafe {
+        gmcrypto_sm2_privkey_free(sk);
+        gmcrypto_sm2_pubkey_free(pk);
+    }
+}
+
+#[test]
+fn sm2_sign_digest_with_rng_matches_message_sign_under_fixed_nonce() {
+    let (sk, pk) = fresh_sm2_keys();
+    let msg = b"deterministic nonce equality check";
+    let digest = unsafe { compute_stream_digest_c(pk, None, &[msg]) };
+
+    let mut rng_msg = ByteRng {
+        pool: vec![0x42u8; 512],
+        cursor: 0,
+    };
+    let mut rng_dig = ByteRng {
+        pool: vec![0x42u8; 512],
+        cursor: 0,
+    };
+    let mut sig_msg = [0u8; 128];
+    let mut sig_msg_len = 0usize;
+    let mut sig_dig = [0u8; 128];
+    let mut sig_dig_len = 0usize;
+
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_sign_with_rng(
+                sk,
+                ptr::null(),
+                0,
+                msg.as_ptr(),
+                msg.len(),
+                Some(byte_rng_callback),
+                (&raw mut rng_msg).cast::<core::ffi::c_void>(),
+                sig_msg.as_mut_ptr(),
+                sig_msg.len(),
+                &mut sig_msg_len,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_sign_digest_with_rng(
+                sk,
+                digest.as_ptr(),
+                Some(byte_rng_callback),
+                (&raw mut rng_dig).cast::<core::ffi::c_void>(),
+                sig_dig.as_mut_ptr(),
+                sig_dig.len(),
+                &mut sig_dig_len,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(&sig_msg[..sig_msg_len], &sig_dig[..sig_dig_len]);
+    assert_eq!(rng_msg.cursor, rng_dig.cursor);
+
+    // Undersized output buffer reports required length without mutating buffer.
+    let mut tiny = [0xA5u8; 8];
+    let mut required = 0usize;
+    let mut rng_short = ByteRng {
+        pool: vec![0x42u8; 512],
+        cursor: 0,
+    };
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_sign_digest_with_rng(
+                sk,
+                digest.as_ptr(),
+                Some(byte_rng_callback),
+                (&raw mut rng_short).cast::<core::ffi::c_void>(),
+                tiny.as_mut_ptr(),
+                tiny.len(),
+                &mut required,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(required, sig_dig_len);
+    assert_eq!(tiny, [0xA5u8; 8]);
+
+    unsafe {
+        gmcrypto_sm2_privkey_free(sk);
+        gmcrypto_sm2_pubkey_free(pk);
+    }
+}
+
+#[test]
+fn sm2_sign_digest_with_rng_rejects_bad_callbacks() {
+    let (sk, pk) = fresh_sm2_keys();
+    let digest = unsafe { compute_stream_digest_c(pk, None, &[b"msg"]) };
+    let mut out = [0u8; 128];
+    let mut out_len = 0usize;
+
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_sign_digest_with_rng(
+                sk,
+                digest.as_ptr(),
+                None,
+                ptr::null_mut(),
+                out.as_mut_ptr(),
+                out.len(),
+                &mut out_len,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_sign_digest_with_rng(
+                sk,
+                digest.as_ptr(),
+                Some(always_fail_rng_callback),
+                ptr::null_mut(),
+                out.as_mut_ptr(),
+                out.len(),
+                &mut out_len,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    // Exhaust retry budget (K=2 draws of all-zero invalid scalars).
+    let mut zero_rng = ByteRng {
+        pool: vec![0u8; 64],
+        cursor: 0,
+    };
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_sign_digest_with_rng(
+                sk,
+                digest.as_ptr(),
+                Some(byte_rng_callback),
+                (&raw mut zero_rng).cast::<core::ffi::c_void>(),
+                out.as_mut_ptr(),
+                out.len(),
+                &mut out_len,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+
+    unsafe {
+        gmcrypto_sm2_privkey_free(sk);
+        gmcrypto_sm2_pubkey_free(pk);
+    }
+}
+
+#[test]
+fn sm2_hasher_empty_id_and_id_len_boundary() {
+    let (sk, pk) = fresh_sm2_keys();
+    let mut pub_bytes = [0u8; GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE];
+    assert_eq!(
+        unsafe { gmcrypto_sm2_pubkey_to_sec1_uncompressed(pk, pub_bytes.as_mut_ptr()) },
+        GMCRYPTO_OK
+    );
+    let core_pk = gmcrypto_core::sm2::Sm2PublicKey::from_sec1_bytes(&pub_bytes).expect("pubkey");
+    let msg = b"literal empty signer id test";
+
+    let mut rust_empty = gmcrypto_core::sm2::Sm2Hasher::new(&core_pk, b"").expect("empty id");
+    rust_empty.update(msg);
+    let expected_empty = *rust_empty.finalize().as_bytes();
+
+    let h_null = unsafe { gmcrypto_sm2_hasher_new_with_id(pk, ptr::null(), 0) };
+    let empty_buf: [u8; 0] = [];
+    let h_nonnull = unsafe { gmcrypto_sm2_hasher_new_with_id(pk, empty_buf.as_ptr(), 0) };
+    assert!(!h_null.is_null() && !h_nonnull.is_null());
+    assert_eq!(
+        unsafe { gmcrypto_sm2_hasher_update(h_null, msg.as_ptr(), msg.len()) },
+        GMCRYPTO_OK
+    );
+    assert_eq!(
+        unsafe { gmcrypto_sm2_hasher_update(h_nonnull, msg.as_ptr(), msg.len()) },
+        GMCRYPTO_OK
+    );
+
+    let mut dig_null = [0u8; 32];
+    let mut dig_nonnull = [0u8; 32];
+    assert_eq!(
+        unsafe { gmcrypto_sm2_hasher_finalize(h_null, dig_null.as_mut_ptr()) },
+        GMCRYPTO_OK
+    );
+    assert_eq!(
+        unsafe { gmcrypto_sm2_hasher_finalize(h_nonnull, dig_nonnull.as_mut_ptr()) },
+        GMCRYPTO_OK
+    );
+    assert_eq!(dig_null, expected_empty);
+    assert_eq!(dig_nonnull, expected_empty);
+
+    // Distinct from DEFAULT_SIGNER_ID ("1234567812345678"), and rejected by
+    // message-level verify with (NULL, 0) which maps empty ID to DEFAULT_SIGNER_ID.
+    let dig_default = unsafe { compute_stream_digest_c(pk, None, &[msg]) };
+    assert_ne!(dig_null, dig_default);
+    let mut sig = [0u8; 128];
+    let mut sig_len = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_sign_digest(
+                sk,
+                dig_null.as_ptr(),
+                sig.as_mut_ptr(),
+                sig.len(),
+                &mut sig_len,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert!(gmcrypto_core::sm2::verify_with_id(
+        &core_pk,
+        b"",
+        msg,
+        &sig[..sig_len]
+    ));
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_verify(
+                pk,
+                ptr::null(),
+                0,
+                msg.as_ptr(),
+                msg.len(),
+                sig.as_ptr(),
+                sig_len,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+
+    // MAX_ID_LEN = 8191 accepted; 8192 rejected with NULL.
+    let ok_id = vec![0x5Au8; 8191];
+    let h_ok = unsafe { gmcrypto_sm2_hasher_new_with_id(pk, ok_id.as_ptr(), ok_id.len()) };
+    assert!(!h_ok.is_null());
+    unsafe { gmcrypto_sm2_hasher_free(h_ok) };
+    let bad_id = vec![0x5Au8; 8192];
+    assert!(
+        unsafe { gmcrypto_sm2_hasher_new_with_id(pk, bad_id.as_ptr(), bad_id.len()) }.is_null()
+    );
+
+    unsafe {
+        gmcrypto_sm2_privkey_free(sk);
+        gmcrypto_sm2_pubkey_free(pk);
+    }
+}
+
+#[test]
+fn sm2_digest_rejects_wrong_id_key_plain_sm3_and_malformed_der() {
+    let (sk, pk) = fresh_sm2_keys();
+    let other_d = [0x22u8; GMCRYPTO_SM2_SCALAR_SIZE];
+    let _sk2 = unsafe { gmcrypto_sm2_privkey_new(other_d.as_ptr()) };
+    assert!(!_sk2.is_null());
+    let pk2 = unsafe { gmcrypto_sm2_privkey_public_key(_sk2) };
+    assert!(!pk2.is_null());
+    let msg = b"reject wrong id, key, plain SM3, and malformed DER";
+
+    let d_def = unsafe { compute_stream_digest_c(pk, None, &[msg]) };
+    let d_other_id = unsafe { compute_stream_digest_c(pk, Some(b"other-id"), &[msg]) };
+    let mut sig = [0u8; 128];
+    let mut sig_len = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_sign_digest(
+                sk,
+                d_def.as_ptr(),
+                sig.as_mut_ptr(),
+                sig.len(),
+                &mut sig_len,
+            )
+        },
+        GMCRYPTO_OK
+    );
+
+    assert_eq!(
+        unsafe { gmcrypto_sm2_verify_digest(pk, d_other_id.as_ptr(), sig.as_ptr(), sig_len) },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe { gmcrypto_sm2_verify_digest(pk2, d_def.as_ptr(), sig.as_ptr(), sig_len) },
+        GMCRYPTO_ERR
+    );
+
+    // Signing plain SM3(M) instead of e = SM3(Z_A || M) fails message-level verify.
+    let mut plain_sm3 = [0u8; 32];
+    assert_eq!(
+        unsafe { gmcrypto_sm3_hash(msg.as_ptr(), msg.len(), plain_sm3.as_mut_ptr()) },
+        GMCRYPTO_OK
+    );
+    let mut plain_sig = [0u8; 128];
+    let mut plain_sig_len = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_sign_digest(
+                sk,
+                plain_sm3.as_ptr(),
+                plain_sig.as_mut_ptr(),
+                plain_sig.len(),
+                &mut plain_sig_len,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_verify(
+                pk,
+                ptr::null(),
+                0,
+                msg.as_ptr(),
+                msg.len(),
+                plain_sig.as_ptr(),
+                plain_sig_len,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+
+    // Malformed / truncated DER and bit-flip rejected with GMCRYPTO_ERR.
+    let mut flipped = sig[..sig_len].to_vec();
+    let flip_idx = flipped.len() - 1;
+    flipped[flip_idx] ^= 0x01;
+    assert_eq!(
+        unsafe { gmcrypto_sm2_verify_digest(pk, d_def.as_ptr(), flipped.as_ptr(), flipped.len()) },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe { gmcrypto_sm2_verify_digest(pk, d_def.as_ptr(), sig.as_ptr(), sig_len - 1) },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe { gmcrypto_sm2_verify_digest(pk, d_def.as_ptr(), [].as_ptr(), 0) },
+        GMCRYPTO_ERR
+    );
+
+    unsafe {
+        gmcrypto_sm2_privkey_free(sk);
+        gmcrypto_sm2_pubkey_free(pk);
+        gmcrypto_sm2_privkey_free(_sk2);
+        gmcrypto_sm2_pubkey_free(pk2);
+    }
+}
+
+#[test]
+fn sm2_hasher_and_digest_null_error_finalize_free_contracts() {
+    let (sk, pk) = fresh_sm2_keys();
+    let msg = b"finalize-error frees handle cleanly";
+    let mut out = [0u8; 128];
+    let mut out_len = 0usize;
+    let d = [0u8; 32];
+
+    assert!(unsafe { gmcrypto_sm2_hasher_new(ptr::null()) }.is_null());
+    assert!(unsafe { gmcrypto_sm2_hasher_new_with_id(ptr::null(), b"a".as_ptr(), 1) }.is_null());
+    assert!(unsafe { gmcrypto_sm2_hasher_new_with_id(pk, ptr::null(), 1) }.is_null());
+    assert_eq!(
+        unsafe { gmcrypto_sm2_hasher_update(ptr::null_mut(), msg.as_ptr(), 1) },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe { gmcrypto_sm2_hasher_finalize(ptr::null_mut(), out.as_mut_ptr()) },
+        GMCRYPTO_ERR
+    );
+    unsafe { gmcrypto_sm2_hasher_free(ptr::null_mut()) };
+
+    // Invalid update preserves live state; finalize(h, NULL) returns GMCRYPTO_ERR and frees `h`.
+    let h1 = unsafe { gmcrypto_sm2_hasher_new(pk) };
+    assert!(!h1.is_null());
+    assert_eq!(
+        unsafe { gmcrypto_sm2_hasher_update(h1, ptr::null(), 5) },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe { gmcrypto_sm2_hasher_update(h1, msg.as_ptr(), msg.len()) },
+        GMCRYPTO_OK
+    );
+    assert_eq!(
+        unsafe { gmcrypto_sm2_hasher_finalize(h1, ptr::null_mut()) },
+        GMCRYPTO_ERR
+    );
+
+    // Abort mid-stream with `_free`.
+    let h2 = unsafe { gmcrypto_sm2_hasher_new(pk) };
+    assert!(!h2.is_null());
+    assert_eq!(
+        unsafe { gmcrypto_sm2_hasher_update(h2, msg.as_ptr(), 4) },
+        GMCRYPTO_OK
+    );
+    unsafe { gmcrypto_sm2_hasher_free(h2) };
+
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_sign_digest(
+                ptr::null(),
+                d.as_ptr(),
+                out.as_mut_ptr(),
+                out.len(),
+                &mut out_len,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_sign_digest(sk, ptr::null(), out.as_mut_ptr(), out.len(), &mut out_len)
+        },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe { gmcrypto_sm2_verify_digest(ptr::null(), d.as_ptr(), out.as_ptr(), 1) },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe { gmcrypto_sm2_verify_digest(pk, ptr::null(), out.as_ptr(), 1) },
+        GMCRYPTO_ERR
+    );
+    assert_eq!(
+        unsafe { gmcrypto_sm2_verify_digest(pk, d.as_ptr(), ptr::null(), 1) },
+        GMCRYPTO_ERR
+    );
+
+    unsafe {
+        gmcrypto_sm2_privkey_free(sk);
         gmcrypto_sm2_pubkey_free(pk);
     }
 }

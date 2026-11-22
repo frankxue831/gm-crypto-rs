@@ -37,38 +37,37 @@ int main(void) {
         return 1;
     }
 
-    /* Derive the public-key bytes by exporting the private key's
-       embedded scalar, then ask gmcrypto-core to recompute the
-       public point. We could also pass a precomputed
-       `04||X||Y` here. */
-    unsigned char pub_bytes[GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE] = {0};
-    /* TODO: a `gmcrypto_sm2_privkey_to_pubkey` entry point would
-       be a nice addition in v0.5; for now we rely on the Rust-side
-       reconstruction via PKCS#8 round-trip or by deriving from a
-       known test vector. For brevity, this example pins the
-       public-key bytes from the GB/T 32918.2 sample. */
-    /* X = 09F9DF311E5421A150DD7D161E4BC5C672179FAD1833FC076BB08FF356F35020
+    /* Derive the public key directly from `sk` via gmcrypto_sm2_privkey_public_key
+       and cross-check against the GB/T 32918.2 sample point coordinates. */
+    gmcrypto_sm2_pubkey_t* pk = gmcrypto_sm2_privkey_public_key(sk);
+    if (!pk) {
+        fprintf(stderr, "gmcrypto_sm2_privkey_public_key failed\n");
+        GMCRYPTO_ZEROIZE(d, sizeof d);
+        gmcrypto_sm2_privkey_free(sk);
+        return 1;
+    }
+
+    /* Expected X || Y from the GB/T 32918.2 sample:
+       X = 09F9DF311E5421A150DD7D161E4BC5C672179FAD1833FC076BB08FF356F35020
        Y = CCEA490CE26775A52DC6EA718CC1AA600AED05FBF35E084A6632F6072DA9AD13 */
-    pub_bytes[0] = 0x04;
-    unsigned char x[32] = {
+    unsigned char expected_pub[GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE] = {
+        0x04,
         0x09, 0xF9, 0xDF, 0x31, 0x1E, 0x54, 0x21, 0xA1,
         0x50, 0xDD, 0x7D, 0x16, 0x1E, 0x4B, 0xC5, 0xC6,
         0x72, 0x17, 0x9F, 0xAD, 0x18, 0x33, 0xFC, 0x07,
         0x6B, 0xB0, 0x8F, 0xF3, 0x56, 0xF3, 0x50, 0x20,
-    };
-    unsigned char y[32] = {
         0xCC, 0xEA, 0x49, 0x0C, 0xE2, 0x67, 0x75, 0xA5,
         0x2D, 0xC6, 0xEA, 0x71, 0x8C, 0xC1, 0xAA, 0x60,
         0x0A, 0xED, 0x05, 0xFB, 0xF3, 0x5E, 0x08, 0x4A,
         0x66, 0x32, 0xF6, 0x07, 0x2D, 0xA9, 0xAD, 0x13,
     };
-    memcpy(pub_bytes + 1, x, 32);
-    memcpy(pub_bytes + 33, y, 32);
-
-    gmcrypto_sm2_pubkey_t* pk = gmcrypto_sm2_pubkey_new(pub_bytes);
-    if (!pk) {
-        fprintf(stderr, "gmcrypto_sm2_pubkey_new failed (off-curve?)\n");
+    unsigned char derived_pub[GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE] = {0};
+    if (gmcrypto_sm2_pubkey_to_sec1_uncompressed(pk, derived_pub) != GMCRYPTO_OK ||
+        memcmp(derived_pub, expected_pub, sizeof expected_pub) != 0) {
+        fprintf(stderr, "Derived public point mismatch\n");
+        GMCRYPTO_ZEROIZE(d, sizeof d);
         gmcrypto_sm2_privkey_free(sk);
+        gmcrypto_sm2_pubkey_free(pk);
         return 1;
     }
 
@@ -117,6 +116,34 @@ int main(void) {
     } else {
         fprintf(stderr, "BUG: tampered signature accepted!\n");
         rc = 1;
+        goto cleanup;
+    }
+
+    /* Streaming digest flow: compute e = SM3(Z_A || M) in two chunks and
+       cross-verify against single-shot gmcrypto_sm2_verify. */
+    gmcrypto_sm2_hasher_t* hasher = gmcrypto_sm2_hasher_new(pk);
+    if (!hasher) {
+        fprintf(stderr, "gmcrypto_sm2_hasher_new failed\n");
+        rc = 1;
+        goto cleanup;
+    }
+    unsigned char digest[GMCRYPTO_SM3_DIGEST_SIZE] = {0};
+    if (gmcrypto_sm2_hasher_update(hasher, (const unsigned char*)msg, 10) != GMCRYPTO_OK ||
+        gmcrypto_sm2_hasher_update(hasher, (const unsigned char*)msg + 10, msg_len - 10) != GMCRYPTO_OK ||
+        gmcrypto_sm2_hasher_finalize(hasher, digest) != GMCRYPTO_OK) {
+        fprintf(stderr, "gmcrypto_sm2_hasher streaming failed\n");
+        rc = 1;
+        goto cleanup;
+    }
+    unsigned char digest_sig[128];
+    size_t digest_sig_len = 0;
+    if (gmcrypto_sm2_sign_digest(sk, digest, digest_sig, sizeof digest_sig, &digest_sig_len) != GMCRYPTO_OK ||
+        gmcrypto_sm2_verify_digest(pk, digest, digest_sig, digest_sig_len) != GMCRYPTO_OK ||
+        gmcrypto_sm2_verify(pk, NULL, 0, (const unsigned char*)msg, msg_len, digest_sig, digest_sig_len) != GMCRYPTO_OK) {
+        fprintf(stderr, "Streaming digest sign/verify failed\n");
+        rc = 1;
+    } else {
+        printf("Streaming digest sign + verify cross-check — OK.\n");
     }
 
 cleanup:
