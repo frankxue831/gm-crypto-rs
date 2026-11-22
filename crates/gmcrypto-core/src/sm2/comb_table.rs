@@ -179,11 +179,8 @@ mod tests {
     #[test]
     fn comb_table_zero_columns_are_identity() {
         let table = comb_table();
-        for i in 0..NUM_WINDOWS {
-            assert!(
-                bool::from(table.sub_tables[i][0].is_identity()),
-                "T[{i}][0] not identity"
-            );
+        for (i, sub) in table.sub_tables.iter().enumerate() {
+            assert!(bool::from(sub[0].is_identity()), "T[{i}][0] not identity");
         }
     }
 }
