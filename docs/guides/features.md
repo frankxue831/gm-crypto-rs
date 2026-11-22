@@ -2,8 +2,8 @@
 
 `gmcrypto-core` uses `default = []`. The default build gives you the `no_std + alloc` core with zero optional dependencies:
 
-- **SM2:** sign/verify (`GB/T 32918.2`), encrypt/decrypt (`GB/T 32918.4`, `GM/T 0009` DER and raw `C1‖C3‖C2`)
-- **SM3:** hash (`GB/T 32905`), HMAC-SM3 (`RFC 2104`), PBKDF2-HMAC-SM3 (`RFC 8018`)
+- **SM2:** key generation, one-shot and streaming message hashing for sign/verify (`GB/T 32918.2`), encrypt/decrypt (`GB/T 32918.4`, `GM/T 0009` DER and raw `C1‖C3‖C2`)
+- **SM3:** hash (`GB/T 32905`), HMAC-SM3 (`RFC 2104`), PBKDF2-HMAC-SM3 (`RFC 8018`), HKDF-SM3 (`RFC 5869`)
 - **SM4:** ECB, CBC, CTR (single-shot and streaming, `GB/T 32907`)
 - **Codecs:** DER signatures/ciphertexts, PEM (`RFC 7468`), SEC1 (`RFC 5915`), PKCS#8 + PBES2 (`RFC 5958` / `8018`), SPKI (`RFC 5280`)
 
