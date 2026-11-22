@@ -451,6 +451,7 @@ fn ccm_ctr_xor(cipher: &Sm4Cipher, a0: &[u8; BLOCK_SIZE], input: &[u8], output: 
         let lane = j % BLOCK_SIZE;
         output[j] = input[j] ^ keystream[block_idx][lane];
     }
+    keystream.zeroize();
 }
 
 #[cfg(feature = "aead-traits")]
