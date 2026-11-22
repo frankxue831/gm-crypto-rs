@@ -23,16 +23,18 @@ use core::ptr;
 
 use gmcrypto_c::{
     GMCRYPTO_ERR, GMCRYPTO_OK, GMCRYPTO_SM2_SCALAR_SIZE, GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE,
-    gmcrypto_hmac_sm3, gmcrypto_hmac_sm3_finalize, gmcrypto_hmac_sm3_new, gmcrypto_hmac_sm3_t,
+    gmcrypto_hkdf_sm3, gmcrypto_hkdf_sm3_expand, gmcrypto_hkdf_sm3_extract, gmcrypto_hmac_sm3,
+    gmcrypto_hmac_sm3_finalize, gmcrypto_hmac_sm3_new, gmcrypto_hmac_sm3_t,
     gmcrypto_hmac_sm3_update, gmcrypto_hmac_sm3_verify, gmcrypto_pbkdf2_hmac_sm3,
     gmcrypto_rng_callback, gmcrypto_sm2_decrypt, gmcrypto_sm2_decrypt_c1c2c3_legacy,
     gmcrypto_sm2_decrypt_c1c3c2, gmcrypto_sm2_encrypt, gmcrypto_sm2_encrypt_c1c3c2,
     gmcrypto_sm2_encrypt_with_rng, gmcrypto_sm2_privkey_free, gmcrypto_sm2_privkey_from_pkcs8,
-    gmcrypto_sm2_privkey_new, gmcrypto_sm2_privkey_t, gmcrypto_sm2_privkey_to_pkcs8,
-    gmcrypto_sm2_privkey_to_sec1_be, gmcrypto_sm2_pubkey_free, gmcrypto_sm2_pubkey_new,
-    gmcrypto_sm2_pubkey_t, gmcrypto_sm2_pubkey_to_sec1_uncompressed, gmcrypto_sm2_sign,
-    gmcrypto_sm2_sign_with_rng, gmcrypto_sm2_verify, gmcrypto_sm3_finalize, gmcrypto_sm3_free,
-    gmcrypto_sm3_hash, gmcrypto_sm3_new, gmcrypto_sm3_t, gmcrypto_sm3_update,
+    gmcrypto_sm2_privkey_generate, gmcrypto_sm2_privkey_generate_with_rng,
+    gmcrypto_sm2_privkey_new, gmcrypto_sm2_privkey_public_key, gmcrypto_sm2_privkey_t,
+    gmcrypto_sm2_privkey_to_pkcs8, gmcrypto_sm2_privkey_to_sec1_be, gmcrypto_sm2_pubkey_free,
+    gmcrypto_sm2_pubkey_new, gmcrypto_sm2_pubkey_t, gmcrypto_sm2_pubkey_to_sec1_uncompressed,
+    gmcrypto_sm2_sign, gmcrypto_sm2_sign_with_rng, gmcrypto_sm2_verify, gmcrypto_sm3_finalize,
+    gmcrypto_sm3_free, gmcrypto_sm3_hash, gmcrypto_sm3_new, gmcrypto_sm3_t, gmcrypto_sm3_update,
     gmcrypto_sm4_cbc_decrypt, gmcrypto_sm4_cbc_decryptor_finalize, gmcrypto_sm4_cbc_decryptor_free,
     gmcrypto_sm4_cbc_decryptor_new, gmcrypto_sm4_cbc_decryptor_t,
     gmcrypto_sm4_cbc_decryptor_update, gmcrypto_sm4_cbc_encrypt,
@@ -210,6 +212,488 @@ fn pbkdf2_zero_iters_rejected() {
         )
     };
     assert_eq!(r, GMCRYPTO_ERR);
+}
+
+// ============================================================
+// HKDF-SM3 (v1.19 Q19.1)
+// ============================================================
+
+#[test]
+fn hkdf_sm3_openssl_kats_basic_and_long() {
+    // OpenSSL-validated RFC 5869 A.1 shape.
+    let ikm = [0x0bu8; 22];
+    let salt = hex!("000102030405060708090a0b0c");
+    let info = hex!("f0f1f2f3f4f5f6f7f8f9");
+    let expected_prk = hex!("e0d6f7b0bd056327b7659f1f39ad850561fbcf4fb10fb58e88eafa55cf7cd01e");
+    let expected_okm = hex!(
+        "c69fe91b7aaee2dd5718d72dcaee0cce93f1b8e41f792da51261b6a517e68b36ed2c595572b01dfa359b"
+    );
+
+    let mut prk = [0u8; 32];
+    let rc = unsafe {
+        gmcrypto_hkdf_sm3_extract(
+            salt.as_ptr(),
+            salt.len(),
+            ikm.as_ptr(),
+            ikm.len(),
+            prk.as_mut_ptr(),
+        )
+    };
+    assert_eq!(rc, GMCRYPTO_OK);
+    assert_eq!(prk, expected_prk);
+    assert_eq!(prk, gmcrypto_core::kdf::hkdf_sm3_extract(&salt, &ikm));
+
+    let mut okm_expand = [0u8; 42];
+    let rc = unsafe {
+        gmcrypto_hkdf_sm3_expand(
+            prk.as_ptr(),
+            info.as_ptr(),
+            info.len(),
+            okm_expand.as_mut_ptr(),
+            okm_expand.len(),
+        )
+    };
+    assert_eq!(rc, GMCRYPTO_OK);
+    assert_eq!(okm_expand, expected_okm);
+
+    let mut okm_oneshot = [0u8; 42];
+    let rc = unsafe {
+        gmcrypto_hkdf_sm3(
+            salt.as_ptr(),
+            salt.len(),
+            ikm.as_ptr(),
+            ikm.len(),
+            info.as_ptr(),
+            info.len(),
+            okm_oneshot.as_mut_ptr(),
+            okm_oneshot.len(),
+        )
+    };
+    assert_eq!(rc, GMCRYPTO_OK);
+    assert_eq!(okm_oneshot, expected_okm);
+
+    // OpenSSL-validated RFC 5869 A.2 shape (> 64-byte SM3 block size salt).
+    let long_ikm: Vec<u8> = (0x00u8..=0x4f).collect();
+    let long_salt: Vec<u8> = (0x60u8..=0xaf).collect();
+    let long_info: Vec<u8> = (0xb0u8..=0xff).collect();
+    let expected_long_prk =
+        hex!("1a43a7fedb2d111eb33babd0d256c272aa3262cdb12e6b43d4321ae8888485d5");
+    let expected_long_okm = hex!(
+        "c1226236bbdefa7921f9febe27b864f33e449201b436d8844ea53f58170dd6426defbd22ed1f3c5960f35523e62e3b6c0d657f2c61893436f539013199bfaef25aafd1e7726ede927623a9f5cbb8885c7e5d"
+    );
+    let mut long_prk = [0u8; 32];
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3_extract(
+                long_salt.as_ptr(),
+                long_salt.len(),
+                long_ikm.as_ptr(),
+                long_ikm.len(),
+                long_prk.as_mut_ptr(),
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(long_prk, expected_long_prk);
+    let mut long_okm = [0u8; 82];
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3(
+                long_salt.as_ptr(),
+                long_salt.len(),
+                long_ikm.as_ptr(),
+                long_ikm.len(),
+                long_info.as_ptr(),
+                long_info.len(),
+                long_okm.as_mut_ptr(),
+                long_okm.len(),
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(long_okm, expected_long_okm);
+}
+
+#[test]
+fn hkdf_sm3_openssl_kats_empty_salt_and_info() {
+    // OpenSSL-validated empty salt and info — both (NULL, 0) and (non-null, 0)
+    // must match 32 zero bytes for salt and empty slice for info.
+    let ikm = [0x0bu8; 22];
+    let expected_empty_salt_prk =
+        hex!("004fc37143377d072d74e82ff480e8d7937ec607411bc1ec65dd34401871ff9c");
+    let expected_empty_salt_okm = hex!(
+        "c8c91a38ae2fb3b023a7c38ce9f0748f28230d59b6b950ba3ba949bf0d713a5774815778801741cb2034"
+    );
+    let empty_slice: [u8; 0] = [];
+    let zero_salt = [0u8; 32];
+    let mut prk_null = [0u8; 32];
+    let mut prk_nonnull = [0u8; 32];
+    let mut prk_zeros = [0u8; 32];
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3_extract(
+                ptr::null(),
+                0,
+                ikm.as_ptr(),
+                ikm.len(),
+                prk_null.as_mut_ptr(),
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3_extract(
+                empty_slice.as_ptr(),
+                0,
+                ikm.as_ptr(),
+                ikm.len(),
+                prk_nonnull.as_mut_ptr(),
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3_extract(
+                zero_salt.as_ptr(),
+                zero_salt.len(),
+                ikm.as_ptr(),
+                ikm.len(),
+                prk_zeros.as_mut_ptr(),
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(prk_null, expected_empty_salt_prk);
+    assert_eq!(prk_nonnull, expected_empty_salt_prk);
+    assert_eq!(prk_zeros, expected_empty_salt_prk);
+
+    let mut okm_null = [0u8; 42];
+    let mut okm_nonnull = [0u8; 42];
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3(
+                ptr::null(),
+                0,
+                ikm.as_ptr(),
+                ikm.len(),
+                ptr::null(),
+                0,
+                okm_null.as_mut_ptr(),
+                okm_null.len(),
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3(
+                empty_slice.as_ptr(),
+                0,
+                ikm.as_ptr(),
+                ikm.len(),
+                empty_slice.as_ptr(),
+                0,
+                okm_nonnull.as_mut_ptr(),
+                okm_nonnull.len(),
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(okm_null, expected_empty_salt_okm);
+    assert_eq!(okm_nonnull, expected_empty_salt_okm);
+}
+
+#[test]
+fn hkdf_sm3_openssl_kats_empty_ikm() {
+    // OpenSSL-validated empty IKM and all-empty inputs (NULL and non-null).
+    let empty_slice: [u8; 0] = [];
+    let expected_all_empty_prk =
+        hex!("0d23f72ba15e9c189a879aefc70996b06091de6e64d31b7a84004356dd915261");
+    let expected_all_empty_okm =
+        hex!("6071f9176291908880772c097e692e360c53707af2773c845e123ead3b3fb4d7");
+    let mut prk_all_empty = [0u8; 32];
+    let mut okm_all_empty = [0u8; 32];
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3_extract(ptr::null(), 0, ptr::null(), 0, prk_all_empty.as_mut_ptr())
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(prk_all_empty, expected_all_empty_prk);
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3(
+                empty_slice.as_ptr(),
+                0,
+                empty_slice.as_ptr(),
+                0,
+                ptr::null(),
+                0,
+                okm_all_empty.as_mut_ptr(),
+                okm_all_empty.len(),
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(okm_all_empty, expected_all_empty_okm);
+}
+
+#[test]
+fn hkdf_sm3_length_boundaries_1_and_8160() {
+    let ikm = [0x0bu8; 22];
+    let salt = hex!("000102030405060708090a0b0c");
+    let info = hex!("f0f1f2f3f4f5f6f7f8f9");
+    let mut prk = [0u8; 32];
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3_extract(
+                salt.as_ptr(),
+                salt.len(),
+                ikm.as_ptr(),
+                ikm.len(),
+                prk.as_mut_ptr(),
+            )
+        },
+        GMCRYPTO_OK
+    );
+
+    // Output lengths 1 and 8160 (RFC 5869 maximum: 255 * 32).
+    let mut out1_expand = [0u8; 1];
+    let mut out1_oneshot = [0u8; 1];
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3_expand(
+                prk.as_ptr(),
+                info.as_ptr(),
+                info.len(),
+                out1_expand.as_mut_ptr(),
+                1,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3(
+                salt.as_ptr(),
+                salt.len(),
+                ikm.as_ptr(),
+                ikm.len(),
+                info.as_ptr(),
+                info.len(),
+                out1_oneshot.as_mut_ptr(),
+                1,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(out1_expand, [0xc6]);
+    assert_eq!(out1_oneshot, [0xc6]);
+
+    let mut out_max_oneshot = vec![0u8; 8160];
+    let mut out_max_expand = vec![0u8; 8160];
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3(
+                salt.as_ptr(),
+                salt.len(),
+                ikm.as_ptr(),
+                ikm.len(),
+                info.as_ptr(),
+                info.len(),
+                out_max_oneshot.as_mut_ptr(),
+                out_max_oneshot.len(),
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3_expand(
+                prk.as_ptr(),
+                info.as_ptr(),
+                info.len(),
+                out_max_expand.as_mut_ptr(),
+                out_max_expand.len(),
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(out_max_expand, out_max_oneshot);
+    assert_eq!(
+        gmcrypto_core::sm3::hash(&out_max_oneshot),
+        hex!("d298439103e24c9d568bceb921082c55ae96691a2df2ad5dcc729e2418d26185")
+    );
+}
+
+#[test]
+fn hkdf_sm3_invalid_lengths_leave_sentinel_untouched() {
+    let ikm = [0x0bu8; 22];
+    let salt = hex!("000102030405060708090a0b0c");
+    let info = hex!("f0f1f2f3f4f5f6f7f8f9");
+    let mut prk = [0u8; 32];
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3_extract(
+                salt.as_ptr(),
+                salt.len(),
+                ikm.as_ptr(),
+                ikm.len(),
+                prk.as_mut_ptr(),
+            )
+        },
+        GMCRYPTO_OK
+    );
+
+    // Rejected lengths (0 and 8161) must return GMCRYPTO_ERR and leave valid
+    // caller buffers untouched.
+    let mut sentinel_zero = [0xA5u8; 16];
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3_expand(
+                prk.as_ptr(),
+                info.as_ptr(),
+                info.len(),
+                sentinel_zero.as_mut_ptr(),
+                0,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    assert!(sentinel_zero.iter().all(|&b| b == 0xA5));
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3(
+                salt.as_ptr(),
+                salt.len(),
+                ikm.as_ptr(),
+                ikm.len(),
+                info.as_ptr(),
+                info.len(),
+                sentinel_zero.as_mut_ptr(),
+                0,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    assert!(sentinel_zero.iter().all(|&b| b == 0xA5));
+
+    let mut sentinel_over = vec![0xA5u8; 8161];
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3_expand(
+                prk.as_ptr(),
+                info.as_ptr(),
+                info.len(),
+                sentinel_over.as_mut_ptr(),
+                8161,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    assert!(sentinel_over.iter().all(|&b| b == 0xA5));
+    assert_eq!(
+        unsafe {
+            gmcrypto_hkdf_sm3(
+                salt.as_ptr(),
+                salt.len(),
+                ikm.as_ptr(),
+                ikm.len(),
+                info.as_ptr(),
+                info.len(),
+                sentinel_over.as_mut_ptr(),
+                8161,
+            )
+        },
+        GMCRYPTO_ERR
+    );
+    assert!(sentinel_over.iter().all(|&b| b == 0xA5));
+}
+
+#[test]
+fn hkdf_sm3_null_args_rejected() {
+    let mut prk = [0u8; 32];
+    let mut out = [0u8; 32];
+    unsafe {
+        assert_eq!(
+            gmcrypto_hkdf_sm3_extract(ptr::null(), 1, b"ikm".as_ptr(), 3, prk.as_mut_ptr()),
+            GMCRYPTO_ERR
+        );
+        assert_eq!(
+            gmcrypto_hkdf_sm3_extract(b"salt".as_ptr(), 4, ptr::null(), 1, prk.as_mut_ptr()),
+            GMCRYPTO_ERR
+        );
+        assert_eq!(
+            gmcrypto_hkdf_sm3_extract(b"salt".as_ptr(), 4, b"ikm".as_ptr(), 3, ptr::null_mut()),
+            GMCRYPTO_ERR
+        );
+        assert_eq!(
+            gmcrypto_hkdf_sm3_expand(ptr::null(), b"info".as_ptr(), 4, out.as_mut_ptr(), 32),
+            GMCRYPTO_ERR
+        );
+        assert_eq!(
+            gmcrypto_hkdf_sm3_expand(prk.as_ptr(), ptr::null(), 1, out.as_mut_ptr(), 32),
+            GMCRYPTO_ERR
+        );
+        assert_eq!(
+            gmcrypto_hkdf_sm3_expand(prk.as_ptr(), b"info".as_ptr(), 4, ptr::null_mut(), 32),
+            GMCRYPTO_ERR
+        );
+        assert_eq!(
+            gmcrypto_hkdf_sm3(
+                ptr::null(),
+                1,
+                b"ikm".as_ptr(),
+                3,
+                b"info".as_ptr(),
+                4,
+                out.as_mut_ptr(),
+                32
+            ),
+            GMCRYPTO_ERR
+        );
+        assert_eq!(
+            gmcrypto_hkdf_sm3(
+                b"salt".as_ptr(),
+                4,
+                ptr::null(),
+                1,
+                b"info".as_ptr(),
+                4,
+                out.as_mut_ptr(),
+                32
+            ),
+            GMCRYPTO_ERR
+        );
+        assert_eq!(
+            gmcrypto_hkdf_sm3(
+                b"salt".as_ptr(),
+                4,
+                b"ikm".as_ptr(),
+                3,
+                ptr::null(),
+                1,
+                out.as_mut_ptr(),
+                32
+            ),
+            GMCRYPTO_ERR
+        );
+        assert_eq!(
+            gmcrypto_hkdf_sm3(
+                b"salt".as_ptr(),
+                4,
+                b"ikm".as_ptr(),
+                3,
+                b"info".as_ptr(),
+                4,
+                ptr::null_mut(),
+                32
+            ),
+            GMCRYPTO_ERR
+        );
+    }
 }
 
 // ============================================================
@@ -1145,6 +1629,303 @@ fn sm2_pubkey_malformed_returns_null() {
     bad[0] = 0x05; // non-uncompressed prefix
     let p = unsafe { gmcrypto_sm2_pubkey_new(bad.as_ptr()) };
     assert!(p.is_null());
+}
+
+#[test]
+fn sm2_privkey_generate_sysrng_round_trip() {
+    let sk = gmcrypto_sm2_privkey_generate();
+    assert!(!sk.is_null());
+
+    let mut d_be = [0u8; GMCRYPTO_SM2_SCALAR_SIZE];
+    assert_eq!(
+        unsafe { gmcrypto_sm2_privkey_to_sec1_be(sk, d_be.as_mut_ptr()) },
+        GMCRYPTO_OK
+    );
+    let core_sk = gmcrypto_core::sm2::Sm2PrivateKey::from_bytes_be(&d_be)
+        .into_option()
+        .expect("generated scalar is in [1, n-2]");
+
+    let pk = unsafe { gmcrypto_sm2_privkey_public_key(sk) };
+    assert!(!pk.is_null());
+    let mut pk_bytes = [0u8; GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE];
+    assert_eq!(
+        unsafe { gmcrypto_sm2_pubkey_to_sec1_uncompressed(pk, pk_bytes.as_mut_ptr()) },
+        GMCRYPTO_OK
+    );
+    assert_eq!(pk_bytes, core_sk.public_key().to_sec1_uncompressed());
+
+    let msg = b"sm2 C keygen round-trip";
+    let mut sig = [0u8; 128];
+    let mut sig_len = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_sign(
+                sk,
+                ptr::null(),
+                0,
+                msg.as_ptr(),
+                msg.len(),
+                sig.as_mut_ptr(),
+                sig.len(),
+                &mut sig_len,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_verify(
+                pk,
+                ptr::null(),
+                0,
+                msg.as_ptr(),
+                msg.len(),
+                sig.as_ptr(),
+                sig_len,
+            )
+        },
+        GMCRYPTO_OK
+    );
+
+    let mut ct = [0u8; 256];
+    let mut ct_len = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_encrypt(
+                pk,
+                msg.as_ptr(),
+                msg.len(),
+                ct.as_mut_ptr(),
+                ct.len(),
+                &mut ct_len,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    let mut pt_out = [0u8; 64];
+    let mut pt_len = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_decrypt(
+                sk,
+                ct.as_ptr(),
+                ct_len,
+                pt_out.as_mut_ptr(),
+                pt_out.len(),
+                &mut pt_len,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(&pt_out[..pt_len], msg);
+
+    unsafe {
+        gmcrypto_sm2_pubkey_free(pk);
+        gmcrypto_sm2_privkey_free(sk);
+    }
+}
+
+#[test]
+fn sm2_privkey_generate_with_rng_scripted_known_key() {
+    // Draw 1: 0 (invalid) -> Draw 2: GB/T 32918.2 sample D (selected) -> Draw 3, 4: dummy valid
+    // draws (still consumed to honor the fixed 4-draw constant-time budget).
+    let expected_d = hex!("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
+    let expected_pub = hex!(
+        "0409F9DF311E5421A150DD7D161E4BC5C672179FAD1833FC076BB08FF356F35020CCEA490CE26775A52DC6EA718CC1AA600AED05FBF35E084A6632F6072DA9AD13"
+    );
+
+    let mut pool = Vec::with_capacity(128);
+    pool.extend_from_slice(&[0u8; 32]);
+    pool.extend_from_slice(&expected_d);
+    pool.extend_from_slice(&[0x07u8; 32]);
+    pool.extend_from_slice(&[0x09u8; 32]);
+
+    let mut rng = ByteRng { pool, cursor: 0 };
+    let sk = unsafe {
+        gmcrypto_sm2_privkey_generate_with_rng(
+            Some(byte_rng_callback),
+            (&raw mut rng).cast::<core::ffi::c_void>(),
+        )
+    };
+    assert!(!sk.is_null());
+    assert_eq!(rng.cursor, 128, "fixed 4-draw budget must be consumed");
+
+    let mut d_out = [0u8; GMCRYPTO_SM2_SCALAR_SIZE];
+    assert_eq!(
+        unsafe { gmcrypto_sm2_privkey_to_sec1_be(sk, d_out.as_mut_ptr()) },
+        GMCRYPTO_OK
+    );
+    assert_eq!(d_out, expected_d);
+
+    let pk = unsafe { gmcrypto_sm2_privkey_public_key(sk) };
+    assert!(!pk.is_null());
+    let mut pub_out = [0u8; GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE];
+    assert_eq!(
+        unsafe { gmcrypto_sm2_pubkey_to_sec1_uncompressed(pk, pub_out.as_mut_ptr()) },
+        GMCRYPTO_OK
+    );
+    assert_eq!(pub_out, expected_pub);
+
+    unsafe {
+        gmcrypto_sm2_pubkey_free(pk);
+        gmcrypto_sm2_privkey_free(sk);
+    }
+}
+
+#[test]
+fn sm2_privkey_generate_with_rng_failures_and_all_invalid_draws() {
+    // Missing callback -> NULL.
+    assert!(unsafe { gmcrypto_sm2_privkey_generate_with_rng(None, ptr::null_mut()) }.is_null());
+
+    // Callback failure -> NULL.
+    assert!(
+        unsafe {
+            gmcrypto_sm2_privkey_generate_with_rng(Some(always_fail_rng_callback), ptr::null_mut())
+        }
+        .is_null()
+    );
+
+    // Callback fails on 3rd draw (only 64 bytes in pool) -> NULL.
+    let mut short_rng = ByteRng {
+        pool: vec![0x11u8; 64],
+        cursor: 0,
+    };
+    assert!(
+        unsafe {
+            gmcrypto_sm2_privkey_generate_with_rng(
+                Some(byte_rng_callback),
+                (&raw mut short_rng).cast::<core::ffi::c_void>(),
+            )
+        }
+        .is_null()
+    );
+    assert_eq!(short_rng.cursor, 64);
+
+    // All 4 draws invalid for [1, n-2]: 0, n-1, n, 0xFF..FF.
+    let n: [u8; 32] = hex!("FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFF7203DF6B21C6052B53BBF40939D54123");
+    let n_minus_one: [u8; 32] =
+        hex!("FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFF7203DF6B21C6052B53BBF40939D54122");
+    let mut invalid_pool = Vec::with_capacity(128);
+    invalid_pool.extend_from_slice(&[0u8; 32]);
+    invalid_pool.extend_from_slice(&n_minus_one);
+    invalid_pool.extend_from_slice(&n);
+    invalid_pool.extend_from_slice(&[0xFFu8; 32]);
+
+    let mut invalid_rng = ByteRng {
+        pool: invalid_pool,
+        cursor: 0,
+    };
+    assert!(
+        unsafe {
+            gmcrypto_sm2_privkey_generate_with_rng(
+                Some(byte_rng_callback),
+                (&raw mut invalid_rng).cast::<core::ffi::c_void>(),
+            )
+        }
+        .is_null()
+    );
+    assert_eq!(invalid_rng.cursor, 128);
+}
+
+#[test]
+fn sm2_privkey_public_key_outlives_private_handle() {
+    assert!(unsafe { gmcrypto_sm2_privkey_public_key(ptr::null()) }.is_null());
+
+    let sk = gmcrypto_sm2_privkey_generate();
+    assert!(!sk.is_null());
+
+    let mut d_copy = [0u8; GMCRYPTO_SM2_SCALAR_SIZE];
+    assert_eq!(
+        unsafe { gmcrypto_sm2_privkey_to_sec1_be(sk, d_copy.as_mut_ptr()) },
+        GMCRYPTO_OK
+    );
+
+    let msg = b"public handle survives private free";
+    let mut sig = [0u8; 128];
+    let mut sig_len = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_sign(
+                sk,
+                ptr::null(),
+                0,
+                msg.as_ptr(),
+                msg.len(),
+                sig.as_mut_ptr(),
+                sig.len(),
+                &mut sig_len,
+            )
+        },
+        GMCRYPTO_OK
+    );
+
+    let pk = unsafe { gmcrypto_sm2_privkey_public_key(sk) };
+    assert!(!pk.is_null());
+
+    // Immediately free the private key before using `pk`.
+    unsafe { gmcrypto_sm2_privkey_free(sk) };
+
+    let mut pub_bytes = [0u8; GMCRYPTO_SM2_SEC1_UNCOMPRESSED_SIZE];
+    assert_eq!(
+        unsafe { gmcrypto_sm2_pubkey_to_sec1_uncompressed(pk, pub_bytes.as_mut_ptr()) },
+        GMCRYPTO_OK
+    );
+    assert_eq!(pub_bytes[0], 0x04);
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_verify(
+                pk,
+                ptr::null(),
+                0,
+                msg.as_ptr(),
+                msg.len(),
+                sig.as_ptr(),
+                sig_len,
+            )
+        },
+        GMCRYPTO_OK
+    );
+
+    // Encrypt with `pk` after `sk` was freed and decrypt using a fresh handle
+    // from `d_copy`.
+    let mut ct = [0u8; 256];
+    let mut ct_len = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_encrypt(
+                pk,
+                msg.as_ptr(),
+                msg.len(),
+                ct.as_mut_ptr(),
+                ct.len(),
+                &mut ct_len,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    let sk2 = unsafe { gmcrypto_sm2_privkey_new(d_copy.as_ptr()) };
+    assert!(!sk2.is_null());
+    let mut pt = [0u8; 64];
+    let mut pt_len = 0usize;
+    assert_eq!(
+        unsafe {
+            gmcrypto_sm2_decrypt(
+                sk2,
+                ct.as_ptr(),
+                ct_len,
+                pt.as_mut_ptr(),
+                pt.len(),
+                &mut pt_len,
+            )
+        },
+        GMCRYPTO_OK
+    );
+    assert_eq!(&pt[..pt_len], msg);
+
+    unsafe {
+        gmcrypto_sm2_privkey_free(sk2);
+        gmcrypto_sm2_pubkey_free(pk);
+    }
 }
 
 // ============================================================

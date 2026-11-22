@@ -89,7 +89,7 @@ use gmcrypto_core::asn1::ciphertext::{
     decode as ciphertext_der_decode, encode as ciphertext_der_encode,
 };
 use gmcrypto_core::hmac::{HmacSm3 as InnerHmacSm3, hmac_sm3};
-use gmcrypto_core::kdf::pbkdf2_hmac_sm3;
+use gmcrypto_core::kdf::{hkdf_sm3, hkdf_sm3_expand, hkdf_sm3_extract, pbkdf2_hmac_sm3};
 use gmcrypto_core::sm2::raw_ciphertext::{decode_c1c2c3_legacy, decode_c1c3c2, encode_c1c3c2};
 use gmcrypto_core::sm2::{
     DEFAULT_SIGNER_ID, Sm2PrivateKey, Sm2PublicKey, decrypt as sm2_decrypt, encrypt as sm2_encrypt,
@@ -122,6 +122,7 @@ use gmcrypto_core::sm4::mode_xts;
 use gmcrypto_core::x509::{Certificate, X509Time};
 use gmcrypto_core::{pem, pkcs8};
 use rand_core::TryRng;
+use zeroize::Zeroize;
 
 // ============================================================
 // Constants exported to the C side.
@@ -672,6 +673,144 @@ pub unsafe extern "C" fn gmcrypto_pbkdf2_hmac_sm3(
             None => return GMCRYPTO_ERR,
         };
         match pbkdf2_hmac_sm3(p, s, iterations, o) {
+            Some(()) => GMCRYPTO_OK,
+            None => GMCRYPTO_ERR,
+        }
+    })
+}
+
+// ============================================================
+// HKDF-SM3 (RFC 5869 over HMAC-SM3).
+// ============================================================
+
+/// RFC 5869 §2.3 maximum HKDF-SM3 output length (`255 * 32 = 8160` bytes).
+const HKDF_SM3_MAX_OUTPUT: usize = 255 * GMCRYPTO_SM3_DIGEST_SIZE;
+
+/// RFC 5869 §2.2 **HKDF-Extract** over HMAC-SM3. Writes a fixed 32-byte
+/// pseudorandom key (`PRK`) to `out_prk`.
+///
+/// Empty `salt` and empty `ikm` are valid, including `(NULL, 0)` and
+/// `(non-null, 0)`. An empty `salt` is treated identically to 32 zero bytes.
+/// Input buffers (`salt`, `ikm`) and `out_prk` MUST be disjoint. Callers are
+/// responsible for wiping secret input buffers and `out_prk` when no longer
+/// needed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_hkdf_sm3_extract(
+    salt: *const u8,
+    salt_len: usize,
+    ikm: *const u8,
+    ikm_len: usize,
+    out_prk: *mut u8,
+) -> c_int {
+    ffi_guard(|| {
+        let s = match unsafe { try_slice(salt, salt_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let i = match unsafe { try_slice(ikm, ikm_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let out = match unsafe { try_slice_mut(out_prk, GMCRYPTO_SM3_DIGEST_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let mut prk = hkdf_sm3_extract(s, i);
+        out.copy_from_slice(&prk);
+        prk.zeroize();
+        GMCRYPTO_OK
+    })
+}
+
+/// RFC 5869 §2.3 **HKDF-Expand** over HMAC-SM3.
+///
+/// Expands the fixed 32-byte pseudorandom key `prk` with context `info` into
+/// `out` (`out_len` bytes). Valid output lengths are `1..=8160` (`255 * 32`).
+/// Empty `info` is valid, including `(NULL, 0)` and `(non-null, 0)`.
+///
+/// Invalid output lengths (`0` or `> 8160`) and null pointers are rejected
+/// **before** writing anything to `out` (even when `out` is non-null).
+/// Input buffers (`prk`, `info`) and `out` MUST be disjoint. Callers are
+/// responsible for wiping `prk` and `out`; temporary `PRK` copies in the shim
+/// are wiped before return.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_hkdf_sm3_expand(
+    prk: *const u8,
+    info: *const u8,
+    info_len: usize,
+    out: *mut u8,
+    out_len: usize,
+) -> c_int {
+    ffi_guard(|| {
+        let p = match unsafe { try_slice(prk, GMCRYPTO_SM3_DIGEST_SIZE) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let inf = match unsafe { try_slice(info, info_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        if out.is_null() || out_len == 0 || out_len > HKDF_SM3_MAX_OUTPUT {
+            return GMCRYPTO_ERR;
+        }
+        let dst = match unsafe { try_slice_mut(out, out_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let mut prk_arr = [0u8; GMCRYPTO_SM3_DIGEST_SIZE];
+        prk_arr.copy_from_slice(p);
+        let result = hkdf_sm3_expand(&prk_arr, inf, dst);
+        prk_arr.zeroize();
+        match result {
+            Some(()) => GMCRYPTO_OK,
+            None => GMCRYPTO_ERR,
+        }
+    })
+}
+
+/// Single-shot **HKDF-SM3** (RFC 5869 extract-then-expand over HMAC-SM3).
+///
+/// Derives `out_len` bytes (`1..=8160`) into `out` from `(salt, ikm, info)`.
+/// Empty `salt`, `ikm`, and `info` are valid, including `(NULL, 0)` and
+/// `(non-null, 0)`. An empty `salt` is treated identically to 32 zero bytes.
+///
+/// Invalid output lengths (`0` or `> 8160`) and null pointers are rejected
+/// **before** writing anything to `out`. Input buffers (`salt`, `ikm`,
+/// `info`) and `out` MUST be disjoint. Callers are responsible for wiping
+/// `ikm` and `out`; internal `PRK` and expansion states are wiped before return.
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_hkdf_sm3(
+    salt: *const u8,
+    salt_len: usize,
+    ikm: *const u8,
+    ikm_len: usize,
+    info: *const u8,
+    info_len: usize,
+    out: *mut u8,
+    out_len: usize,
+) -> c_int {
+    ffi_guard(|| {
+        let s = match unsafe { try_slice(salt, salt_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let i = match unsafe { try_slice(ikm, ikm_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        let inf = match unsafe { try_slice(info, info_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        if out.is_null() || out_len == 0 || out_len > HKDF_SM3_MAX_OUTPUT {
+            return GMCRYPTO_ERR;
+        }
+        let dst = match unsafe { try_slice_mut(out, out_len) } {
+            Some(s) => s,
+            None => return GMCRYPTO_ERR,
+        };
+        match hkdf_sm3(s, i, inf, dst) {
             Some(()) => GMCRYPTO_OK,
             None => GMCRYPTO_ERR,
         }
@@ -2204,6 +2343,77 @@ pub unsafe extern "C" fn gmcrypto_sm2_privkey_new(d_be: *const u8) -> *mut gmcry
         // backcompat).
         let key_opt: Option<Sm2PrivateKey> = Sm2PrivateKey::from_bytes_be(arr).into_option();
         key_opt.map(|inner| Box::into_raw(Box::new(gmcrypto_sm2_privkey_t { inner })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// Generate a fresh SM2 private key (`d` in `[1, n-2]`) using the system RNG
+/// (`getrandom::SysRng`).
+///
+/// Delegates to `Sm2PrivateKey::generate`'s fixed-budget constant-time sampler.
+/// Returns an owned [`gmcrypto_sm2_privkey_t`] handle on success, or NULL on
+/// RNG failure or sampler exhaustion. Free with [`gmcrypto_sm2_privkey_free`].
+#[unsafe(no_mangle)]
+pub extern "C" fn gmcrypto_sm2_privkey_generate() -> *mut gmcrypto_sm2_privkey_t {
+    let result = std::panic::catch_unwind(|| {
+        let mut rng = getrandom::SysRng;
+        let inner = Sm2PrivateKey::generate(&mut rng).ok()?;
+        Some(Box::into_raw(Box::new(gmcrypto_sm2_privkey_t { inner })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// `_with_rng` variant of [`gmcrypto_sm2_privkey_generate`]: samples the key
+/// using the caller's `rng_callback` and opaque `rng_context` instead of
+/// `getrandom::SysRng`.
+///
+/// Delegates to `Sm2PrivateKey::generate`'s fixed-budget constant-time sampler
+/// (always draws 4 × 32-byte blocks unless `rng_callback` returns non-zero).
+/// Returns NULL if `rng_callback` is NULL, if `rng_callback` returns non-zero,
+/// or if all 4 draws fall outside `[1, n-2]`. Free with
+/// [`gmcrypto_sm2_privkey_free`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_privkey_generate_with_rng(
+    rng_callback: gmcrypto_rng_callback,
+    rng_context: *mut c_void,
+) -> *mut gmcrypto_sm2_privkey_t {
+    let result = std::panic::catch_unwind(|| {
+        let callback = rng_callback?;
+        let mut rng = CallbackRng {
+            callback,
+            context: rng_context,
+        };
+        let inner = Sm2PrivateKey::generate(&mut rng).ok()?;
+        Some(Box::into_raw(Box::new(gmcrypto_sm2_privkey_t { inner })))
+    });
+    match result {
+        Ok(Some(p)) => p,
+        _ => ptr::null_mut(),
+    }
+}
+
+/// Derive an independently owned SM2 public key handle from a private key.
+///
+/// Borrows `key` only for the duration of the call; the returned handle
+/// remains valid after [`gmcrypto_sm2_privkey_free`] is called on `key`.
+/// Returns NULL if `key` is NULL. Free the returned handle with
+/// [`gmcrypto_sm2_pubkey_free`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmcrypto_sm2_privkey_public_key(
+    key: *const gmcrypto_sm2_privkey_t,
+) -> *mut gmcrypto_sm2_pubkey_t {
+    let result = std::panic::catch_unwind(|| {
+        // SAFETY: `key` is either NULL or a valid `gmcrypto_sm2_privkey_t` handle.
+        let k = unsafe { key.as_ref() }?;
+        Some(Box::into_raw(Box::new(gmcrypto_sm2_pubkey_t {
+            inner: k.inner.public_key(),
+        })))
     });
     match result {
         Ok(Some(p)) => p,

@@ -44,6 +44,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 gmcrypto-core = { path = "../gmcrypto-core", version = "=1.18.0", features = ["sm4-aead", "sm4-xts", "sm2-key-exchange", "x509", "tlcp"] }
 getrandom.workspace = true
 rand_core.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 hex-literal.workspace = true
