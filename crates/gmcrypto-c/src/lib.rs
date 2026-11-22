@@ -1,8 +1,8 @@
-//! C ABI for `gmcrypto-core` (v0.4 W4).
+//! C ABI for `gmcrypto-core`.
 //!
 //! Exposes SM2 (sign/verify, encrypt/decrypt, and — since v1.2 — the
 //! GM/T 0003.3 key exchange with key confirmation) / SM3 / SM4
-//! (ECB/CBC/CTR/GCM/CCM/XTS, with streaming CBC/GCM handles, a
+//! (ECB/CBC/GCM/CCM/XTS, with streaming CBC/GCM handles, a
 //! length-committed streaming CCM encryptor and an incremental-input
 //! buffered CCM decryptor) / HMAC-SM3 / PBKDF2-HMAC-SM3 plus SM2 key
 //! import/export and — since v1.4 — X.509-with-SM2 leaf certificate
@@ -704,8 +704,8 @@ pub unsafe extern "C" fn gmcrypto_sm4_new(key: *const u8) -> *mut gmcrypto_sm4_t
 /// WARNING: this is the raw SM4 block, not a cipher mode. Calling it in a
 /// loop over a multi-block buffer is ECB — it leaks plaintext-block equality
 /// and has no semantic security. To encrypt messages use a mode
-/// (`gmcrypto_sm4_gcm_*` / `_ccm_*` authenticated; or `_cbc_*` / `_ctr_*` /
-/// `_xts_*` confidentiality-only with a unique IV/nonce/tweak).
+/// (`gmcrypto_sm4_gcm_*` / `_ccm_*` authenticated; or `_cbc_*` / `_xts_*`
+/// confidentiality-only with a unique IV/tweak).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_encrypt_block(
     cipher: *const gmcrypto_sm4_t,
@@ -1090,8 +1090,7 @@ pub unsafe extern "C" fn gmcrypto_sm4_cbc_decryptor_free(dec: *mut gmcrypto_sm4_
 // nonce distinction across the C boundary). Variable-length outputs
 // use the (out, out_capacity, out_actual_len) convention; the GCM tag
 // is a fixed-size bare output buffer the caller sizes (16 bytes, or
-// `tag_len` for the truncated variant). Streaming AEAD FFI is deferred
-// to v0.10 (see docs/v0.9-scope.md Q9.6).
+// `tag_len` for the truncated variant). Streaming SM4-GCM and SM4-CCM FFI handles follow below.
 // ============================================================
 
 /// SM4-GCM single-shot encrypt. `ct_out` receives `pt_len` bytes (via
@@ -2235,9 +2234,10 @@ pub unsafe extern "C" fn gmcrypto_sm2_pubkey_new(
 
 /// Export the SM2 private key as a 32-byte big-endian scalar.
 ///
-/// **Caller MUST zeroize the output buffer** after use. Per Q4.19,
-/// this entry point exists as `#[doc(hidden)]`-equivalent on the
-/// Rust side and is NOT SemVer-stable across v0.4.x.
+/// **Caller MUST zeroize the output buffer** after use (e.g., via
+/// `GMCRYPTO_ZEROIZE` or a platform secure-zero primitive). Wraps
+/// `Sm2PrivateKey::to_bytes_be`; the C symbol name keeps the `sec1`
+/// suffix for 1.x C ABI stability.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm2_privkey_to_sec1_be(
     key: *const gmcrypto_sm2_privkey_t,
@@ -2539,15 +2539,14 @@ pub unsafe extern "C" fn gmcrypto_sm2_encrypt(
 //
 // Contract per Q5.6 / Q5.8 / Q5.9:
 //   - Returns 0 on success, non-zero on failure. On failure, the
-//     enclosing `gmcrypto_sm2_*_with_rng` call returns
-//     GMCRYPTO_FAILED.
+//     enclosing `*_with_rng` call returns
+//     `GMCRYPTO_ERR` (or `NULL` for handle constructors).
 //   - The `context` pointer is opaque to gmcrypto-c — callers stash
 //     HSM session handles, SDF/SKF context, whatever is needed.
 //   - Callbacks MUST NOT call back into gmcrypto-c (no re-entrancy).
 //     The Rust `Rng` adapter does not hold any locks across the
 //     callback; re-entrancy is technically safe but policy is "don't"
-//     for clarity. No runtime check in v0.5; may add a debug-build
-//     assertion in v0.6.
+//     for clarity; no runtime re-entrancy check is performed.
 //   - The buffer MUST be fully filled with `buf_len` random bytes
 //     before the callback returns 0. Partial fills are caller error
 //     and will produce incorrect cryptographic output.
@@ -2561,7 +2560,7 @@ pub type gmcrypto_rng_callback =
 
 /// Tiny error type — only used internally for the `TryRng` impl;
 /// never crosses the FFI boundary. The callback's non-zero return is
-/// erased to a single `GMCRYPTO_FAILED` per the failure-mode invariant.
+/// erased to a single `GMCRYPTO_ERR` per the failure-mode invariant.
 #[derive(Debug)]
 struct CallbackRngError;
 
@@ -2578,7 +2577,7 @@ impl core::error::Error for CallbackRngError {}
 /// `UnwrapErr`) to the core `sign_with_id` / `encrypt`, whose public
 /// bound is now the fallible `TryCryptoRng` (v0.23): a callback failure
 /// surfaces as `Err(CallbackRngError)`, the core collapses it to
-/// `Error::Failed`, and the FFI maps that to `GMCRYPTO_FAILED` — a
+/// `Error::Failed`, and the FFI maps that to `GMCRYPTO_ERR` — a
 /// defined, no-panic RNG-failure path (the previous design panicked via
 /// `UnwrapErr` and relied on `ffi_guard` to catch it).
 struct CallbackRng {
@@ -2672,9 +2671,8 @@ pub unsafe extern "C" fn gmcrypto_sm2_decrypt(
 // adding new `_ciphertext`-shaped Rust API entry points. The SM2
 // scalar-multiplication / KDF / SM3-MAC work dominates the cost by
 // 3+ orders of magnitude, so the round-trip is invisible at the
-// caller. Avoiding the round-trip requires public-API additions on
-// gmcrypto-core; deferred to v0.6 if a real workload measures the
-// difference.
+// caller. Avoiding the round-trip is not worth additional public API unless a
+// real workload measures the difference.
 // ============================================================
 
 /// SM2 public-key encrypt; output in the modern raw byte-concat
@@ -2684,8 +2682,8 @@ pub unsafe extern "C" fn gmcrypto_sm2_decrypt(
 /// `65 + 32 + msg_len`.
 ///
 /// RNG is sourced from `getrandom::SysRng` internally (same as
-/// [`gmcrypto_sm2_encrypt`]). The W3 RNG-callback variant lands as a
-/// separate workstream.
+/// [`gmcrypto_sm2_encrypt`]). For caller-supplied RNG, use
+/// [`gmcrypto_sm2_encrypt_with_rng`] (DER output).
 ///
 /// Same failure-mode posture as [`gmcrypto_sm2_encrypt`]: single
 /// [`GMCRYPTO_ERR`] on any failure mode (identity public key, KDF-
@@ -2767,8 +2765,7 @@ pub unsafe extern "C" fn gmcrypto_sm2_decrypt_c1c3c2(
 
 /// SM2 private-key decrypt of a **legacy** raw byte-concat
 /// `C1 || C2 || C3` ciphertext. Decrypt-only — there is no emit path
-/// for the legacy ordering, and there will not be one in any v0.5+
-/// version (per `CLAUDE.md` "Don't" entry).
+/// for the legacy ordering, and none will be added.
 ///
 /// The two raw byte-concat orderings (`C1 || C3 || C2` modern vs
 /// `C1 || C2 || C3` legacy) are NOT auto-detected. The caller MUST
@@ -2891,10 +2888,10 @@ pub unsafe extern "C" fn gmcrypto_sm2_sign_with_rng(
 ///
 /// Output is GM/T 0009-2012 DER (same as `gmcrypto_sm2_encrypt`).
 /// For raw byte-concat output (`C1 || C3 || C2`), use
-/// `gmcrypto_sm2_encrypt_c1c3c2` — v0.5 doesn't ship a
-/// `_c1c3c2_with_rng` combined variant; if needed, callers can
-/// re-encode the DER output via gmcrypto-core's
-/// `asn1::ciphertext::decode` + `raw_ciphertext::encode_c1c3c2`.
+/// `gmcrypto_sm2_encrypt_c1c3c2` — no `_c1c3c2_with_rng` combined
+/// variant is provided; if needed, callers can re-encode the DER
+/// output via gmcrypto-core's `asn1::ciphertext::decode` +
+/// `raw_ciphertext::encode_c1c3c2`.
 ///
 /// Same `GMCRYPTO_ERR`-on-any-failure posture as
 /// `gmcrypto_sm2_sign_with_rng`.

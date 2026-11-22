@@ -5,6 +5,48 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Planned for `1.18.0` (scope: [`docs/v1.18-scope.md`](docs/v1.18-scope.md), #275).
+Strictly additive in `gmcrypto-core`; zero new runtime dependencies; zero C ABI
+changes in `gmcrypto-c`; MSRV 1.87 unchanged.
+
+### Added
+
+- **HKDF-SM3 (RFC 5869)** in `gmcrypto_core::kdf` (#276): `hkdf_sm3_extract`,
+  `hkdf_sm3_expand`, and `hkdf_sm3` over `HmacSm3` with zero heap allocation,
+  intermediate `prk` / rolling `T(i)` zeroization, `None` rejection on empty or
+  `> 8160`-byte outputs without modifying the output buffer, and
+  OpenSSL-validated KATs.
+- **`Sm2PrivateKey::generate`** in `gmcrypto_core::sm2` (#277): constant-time
+  bounded-retry key generation over `[1, n-2]` via a shared
+  `sample_scalar_in_range` helper, collapsing RNG and retry-budget exhaustion to
+  `Error::Failed`; updated SM2 keygen doctests and `docs/guides/sm2-keys.md`.
+- **Streaming SM2 hashing and pre-hashed signatures** in `gmcrypto_core::sm2`
+  (#278): `Sm2Hasher` (`new`, `new_default_id`, `update`, `finalize`),
+  `Sm2Digest` (`as_bytes`, `from_precomputed_z_hash`), `sign_digest`, and
+  `verify_digest`, guarding against identity points and oversized signer IDs
+  while sharing the constant-time `K=2` signing core.
+
+### Changed
+
+- **SM4 SIMD batch fanout and temporary-buffer zeroization** (#279): internal
+  stack-batched (`BATCH = 16`) `Sm4Cipher::{encrypt_blocks,decrypt_blocks}`
+  fanout in `Sm4GcmEncryptor::update` and single-shot `mode_cbc::decrypt`
+  (MSRV 1.87 compliant, zero public API change), plus explicit `zeroize()`
+  wiping of temporary buffers across `gcm_streaming.rs`, `mode_cbc.rs`
+  (including the padding-failure path), `ctr_streaming.rs`, `mode_ctr.rs`,
+  `mode_gcm.rs`, and `mode_ccm.rs`.
+
+### Fixed
+
+- **C ABI documentation hygiene** (`docs/v1.18-scope.md` Q18.6, zero C ABI
+  change): removed nonexistent SM4-CTR (`_ctr_*`) claims from `gmcrypto-c` docs
+  and regenerated `crates/gmcrypto-c/include/gmcrypto.h` (comment-only diff),
+  refreshed stale pre-1.0 prose in `crates/gmcrypto-c/README.md` and
+  `crates/gmcrypto-c/src/lib.rs` (including `_with_rng` RNG callbacks and `1.x`
+  SemVer stability), and aligned `GMCRYPTO_FAILED` references to the exported
+  `GMCRYPTO_ERR` constant across `gmcrypto-c`, `.claude/rules/ffi.md`,
+  `CLAUDE.md`/`AGENTS.md`, and `SECURITY.md`.
+
 ## [1.17.0] - 2026-10-26
 
 ### Changed
