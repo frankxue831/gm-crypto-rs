@@ -5,7 +5,7 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.18.0] - pending publication
+## [1.18.0] - 2026-11-22
 
 The Rust API additions preserve compatibility with 1.17. The C ABI,
 runtime dependencies and Rust 1.87 minimum stay the same. See [the release scope](docs/v1.18-scope.md).
