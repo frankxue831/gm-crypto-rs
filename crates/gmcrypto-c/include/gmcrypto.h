@@ -420,8 +420,8 @@ int gmcrypto_pbkdf2_hmac_sm3(const uint8_t *pwd,
  WARNING: this is the raw SM4 block, not a cipher mode. Calling it in a
  loop over a multi-block buffer is ECB — it leaks plaintext-block equality
  and has no semantic security. To encrypt messages use a mode
- (`gmcrypto_sm4_gcm_*` / `_ccm_*` authenticated; or `_cbc_*` / `_ctr_*` /
- `_xts_*` confidentiality-only with a unique IV/nonce/tweak).
+ (`gmcrypto_sm4_gcm_*` / `_ccm_*` authenticated; or `_cbc_*` / `_xts_*`
+ confidentiality-only with a unique IV/tweak).
  */
  int gmcrypto_sm4_encrypt_block(const gmcrypto_sm4_t *cipher, uint8_t *block) ;
 
@@ -1049,9 +1049,10 @@ int gmcrypto_sm4_ccm_decryptor_finalize_verify(gmcrypto_sm4_ccm_decryptor_t *dec
 /*
  Export the SM2 private key as a 32-byte big-endian scalar.
 
- **Caller MUST zeroize the output buffer** after use. Per Q4.19,
- this entry point exists as `#[doc(hidden)]`-equivalent on the
- Rust side and is NOT SemVer-stable across v0.4.x.
+ **Caller MUST zeroize the output buffer** after use (e.g., via
+ `GMCRYPTO_ZEROIZE` or a platform secure-zero primitive). Wraps
+ `Sm2PrivateKey::to_bytes_be`; the C symbol name keeps the `sec1`
+ suffix for 1.x C ABI stability.
  */
  int gmcrypto_sm2_privkey_to_sec1_be(const gmcrypto_sm2_privkey_t *key, uint8_t *out) ;
 
@@ -1171,8 +1172,8 @@ int gmcrypto_sm2_decrypt(const gmcrypto_sm2_privkey_t *key,
  `65 + 32 + msg_len`.
 
  RNG is sourced from `getrandom::SysRng` internally (same as
- [`gmcrypto_sm2_encrypt`]). The W3 RNG-callback variant lands as a
- separate workstream.
+ [`gmcrypto_sm2_encrypt`]). For caller-supplied RNG, use
+ [`gmcrypto_sm2_encrypt_with_rng`] (DER output).
 
  Same failure-mode posture as [`gmcrypto_sm2_encrypt`]: single
  [`GMCRYPTO_ERR`] on any failure mode (identity public key, KDF-
@@ -1210,8 +1211,7 @@ int gmcrypto_sm2_decrypt_c1c3c2(const gmcrypto_sm2_privkey_t *key,
 /*
  SM2 private-key decrypt of a **legacy** raw byte-concat
  `C1 || C2 || C3` ciphertext. Decrypt-only — there is no emit path
- for the legacy ordering, and there will not be one in any v0.5+
- version (per `CLAUDE.md` "Don't" entry).
+ for the legacy ordering, and none will be added.
 
  The two raw byte-concat orderings (`C1 || C3 || C2` modern vs
  `C1 || C2 || C3` legacy) are NOT auto-detected. The caller MUST
@@ -1267,10 +1267,10 @@ int gmcrypto_sm2_sign_with_rng(const gmcrypto_sm2_privkey_t *key,
 
  Output is GM/T 0009-2012 DER (same as `gmcrypto_sm2_encrypt`).
  For raw byte-concat output (`C1 || C3 || C2`), use
- `gmcrypto_sm2_encrypt_c1c3c2` — v0.5 doesn't ship a
- `_c1c3c2_with_rng` combined variant; if needed, callers can
- re-encode the DER output via gmcrypto-core's
- `asn1::ciphertext::decode` + `raw_ciphertext::encode_c1c3c2`.
+ `gmcrypto_sm2_encrypt_c1c3c2` — no `_c1c3c2_with_rng` combined
+ variant is provided; if needed, callers can re-encode the DER
+ output via gmcrypto-core's `asn1::ciphertext::decode` +
+ `raw_ciphertext::encode_c1c3c2`.
 
  Same `GMCRYPTO_ERR`-on-any-failure posture as
  `gmcrypto_sm2_sign_with_rng`.

@@ -119,7 +119,7 @@ v1.14 F21 result stands (`docs/f21-finalize-result.md`).
 - **Failure-mode invariant.** `verify_with_id` returns `bool`. Every fallible
   `Result` uses `gmcrypto_core::Error` with a single `Failed` variant (module
   aliases point at the same type). DER decode returns `Option`. C ABI returns
-  `GMCRYPTO_FAILED` only. PRs that distinguish failure modes are rejected —
+  `GMCRYPTO_ERR` only. PRs that distinguish failure modes are rejected —
   see `SECURITY.md`.
 - **No logging.** No `log`/`tracing`/`defmt` or any diagnostic output in the
   shipped crates (SECURITY.md "Logging & observability"); dev observability

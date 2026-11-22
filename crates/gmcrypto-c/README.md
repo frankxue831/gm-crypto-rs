@@ -109,7 +109,7 @@ zero-length run is a vacuous success (but the key is still validated).
 ## Header
 
 The committed header at [`include/gmcrypto.h`](include/gmcrypto.h)
-is the v0.4 C ABI contract. To regenerate after editing the FFI
+defines the 1.x C ABI contract. To regenerate after editing the FFI
 surface in [`src/lib.rs`](src/lib.rs):
 
 ```bash
@@ -202,11 +202,23 @@ freed.
 
 ## RNG sourcing
 
-`gmcrypto_sm2_sign`, `gmcrypto_sm2_encrypt`, and
-`gmcrypto_sm2_privkey_to_pkcs8` source randomness from
-`getrandom::SysRng` internally. C consumers do not pass an RNG
-callback in v0.4; a "register custom RNG" entry point may land
-post-v0.4 if a use case surfaces.
+Randomized entry points (`gmcrypto_sm2_sign`, `gmcrypto_sm2_encrypt`,
+`gmcrypto_sm2_encrypt_c1c3c2`, `gmcrypto_sm2_privkey_to_pkcs8`,
+`gmcrypto_sm2_kx_initiator_new`, `gmcrypto_sm2_kx_responder_respond`,
+`gmcrypto_sm2_kx_responder_respond_unconfirmed`, and
+`gmcrypto_tlcp_protect_cbc`) source randomness from `getrandom::SysRng`
+internally.
+
+For caller-supplied randomness (HSMs, deterministic KATs, or custom
+entropy sources), pass a `gmcrypto_rng_callback` plus opaque `void *`
+context to the `_with_rng` variants: `gmcrypto_sm2_sign_with_rng`,
+`gmcrypto_sm2_encrypt_with_rng`,
+`gmcrypto_sm2_kx_initiator_new_with_rng`,
+`gmcrypto_sm2_kx_responder_respond_with_rng`,
+`gmcrypto_sm2_kx_responder_respond_unconfirmed_with_rng`, and
+`gmcrypto_tlcp_protect_cbc_with_rng`. A null or failing callback
+collapses to the single `GMCRYPTO_ERR` (or `NULL` for handle
+constructors).
 
 ## `unsafe_code` posture
 
@@ -219,11 +231,14 @@ core crate [`gmcrypto-core`](../gmcrypto-core) itself stays
 
 ## SemVer
 
-The C ABI is the v0.4 baseline. Signature changes in v0.4.x are
-breaking ABI changes; v0.5 may break the C ABI without a major
-Rust-side bump (since `gmcrypto-c` is a separate crate from
-`gmcrypto-core`).
+`gmcrypto-c` versions in lockstep with `gmcrypto-core` and follows
+[Semantic Versioning](https://semver.org/). Within the `1.x` line,
+exported C symbols, signatures, struct layouts, and constants are
+stable; minor releases are strictly additive, and breaking C ABI
+changes require a `2.0` major bump.
 
-`gmcrypto_sm2_privkey_to_sec1_be` is NOT SemVer-stable across
-v0.4.x per Q4.19 — caller MUST zeroize the returned scalar bytes;
-documented in the header.
+`gmcrypto_sm2_privkey_to_sec1_be` is part of the stable `1.x` C ABI
+(keeping its `sec1` suffix while wrapping Rust's
+`Sm2PrivateKey::to_bytes_be`). The caller **MUST** zeroize the
+returned 32-byte scalar buffer after use (e.g., via `GMCRYPTO_ZEROIZE`
+or a platform secure-zero primitive).

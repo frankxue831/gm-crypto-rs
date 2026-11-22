@@ -13,7 +13,7 @@ c_smoke test count in a comment — update it when you add tests.
 
 - `unsafe_code = "warn"`, never `allow`; every `unsafe` block carries a
   `// SAFETY:` comment. Don't relax core's `forbid` to make a shim easier.
-- Every entry returns `GMCRYPTO_FAILED` only — no C ABI entry distinguishes
+- Every entry returns `GMCRYPTO_ERR` only — no C ABI entry distinguishes
   failure modes (SECURITY.md failure-mode invariant).
 - Handle families (`*_encryptor_t` / `*_decryptor_t`): `_new` →
   `Box::into_raw`; `_update` → `&mut *`; `_finalize*` → `Box::from_raw`
