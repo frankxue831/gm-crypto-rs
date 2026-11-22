@@ -61,6 +61,48 @@
 //! bound; the upper limit is per the W2 risk-trap in
 //! `docs/v0.3-scope.md`). Any other malformed PBES2 parameter
 //! folds into [`Error::Failed`] identically.
+//!
+//! # Example
+//!
+//! ```rust
+//! use gmcrypto_core::{pem, pkcs8, sm2::Sm2PrivateKey};
+//! use zeroize::Zeroize;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut raw = [0u8; 32];
+//! let key = loop {
+//!     getrandom::fill(&mut raw)?;
+//!     if let Some(k) = Sm2PrivateKey::from_bytes_be(&raw).into_option() {
+//!         raw.zeroize();
+//!         break k;
+//!     }
+//! };
+//!
+//! // Unencrypted PKCS#8 DER wrapped in PEM:
+//! let pem_str = pem::encode("PRIVATE KEY", &pkcs8::encode(&key));
+//! let loaded = pkcs8::decode(&pem::decode(&pem_str, "PRIVATE KEY")?)?;
+//! assert_eq!(
+//!     loaded.public_key().to_sec1_uncompressed(),
+//!     key.public_key().to_sec1_uncompressed()
+//! );
+//!
+//! // Password-encrypted PKCS#8 (PBES2 / PBKDF2-HMAC-SM3 / SM4-CBC):
+//! let (mut salt, mut iv) = ([0u8; 16], [0u8; 16]);
+//! getrandom::fill(&mut salt)?;
+//! getrandom::fill(&mut iv)?;
+//! // Use a higher iteration count (for example >= 100_000) in production.
+//! let enc_der = pkcs8::encrypt(&key, b"correct horse", &salt, 1_000, &iv)?;
+//! let enc_pem = pem::encode("ENCRYPTED PRIVATE KEY", &enc_der);
+//! let decrypted = pkcs8::decrypt(
+//!     &pem::decode(&enc_pem, "ENCRYPTED PRIVATE KEY")?,
+//!     b"correct horse",
+//! )?;
+//! assert_eq!(
+//!     decrypted.public_key().to_sec1_uncompressed(),
+//!     key.public_key().to_sec1_uncompressed()
+//! );
+//! # Ok(()) }
+//! ```
 
 use crate::asn1::oid::{ID_EC_PUBLIC_KEY, ID_HMAC_WITH_SM3, ID_PBKDF2, PBES2, SM2P256V1, SM4_CBC};
 use crate::asn1::{reader, writer};

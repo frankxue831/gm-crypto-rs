@@ -53,6 +53,21 @@
 //! Intermediate `K'`, `K' XOR ipad`, and `K' XOR opad` buffers are
 //! wiped before return. The outer hash's input includes the key
 //! (XOR'd with opad), so this matters for callers reusing memory.
+//!
+//! # Example
+//!
+//! ```rust
+//! use gmcrypto_core::hmac::{HmacSm3, hmac_sm3};
+//!
+//! let key = b"example-hmac-key";
+//! let tag = hmac_sm3(key, b"hello sm3");
+//!
+//! // Streaming API produces the identical tag and verifies in constant time.
+//! let mut mac = HmacSm3::new(key);
+//! mac.update(b"hello ");
+//! mac.update(b"sm3");
+//! assert!(mac.verify(&tag));
+//! ```
 
 use crate::sm3::{BLOCK_SIZE, DIGEST_SIZE, Sm3, hash};
 use crate::traits::{Hash as HashTrait, Mac as MacTrait};
