@@ -4,9 +4,16 @@ C ABI for `gmcrypto-core` — pure-Rust SM2 / SM3 / SM4 SDK exposed to
 C / C++ / Python (cffi) / Go (cgo) / Zig / Ruby (FFI) callers via a
 cdylib + staticlib and a cbindgen-generated header.
 
-The library is a thin shim over [`gmcrypto-core`](../gmcrypto-core);
-every cryptographic operation runs in the dudect-gated Rust core,
-not in this crate. The C ABI is the language-binding surface only.
+The library is a thin shim over [`gmcrypto-core`](https://crates.io/crates/gmcrypto-core);
+every cryptographic operation runs in the Rust core, not in this crate. The C
+ABI is the language-binding surface only.
+
+> ⚠️ **Not independently audited.** No third-party / external security audit has
+> been performed. This is a solo-maintained, best-effort open-source project
+> with no support SLA. Review the code and **use at your own risk.** See
+> [`SECURITY.md`](https://github.com/frankxue831/gm-crypto-rs/blob/main/SECURITY.md)
+> for the threat model, constant-time posture, and vulnerability disclosure
+> process.
 
 ## Build
 
