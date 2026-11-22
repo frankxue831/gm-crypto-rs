@@ -21,6 +21,19 @@
 //! [`decode`] returns `Result<Vec<u8>, Error>` with a single
 //! [`Error::Failed`] variant. Distinguishing "wrong label" from "bad
 //! base64" from "missing END line" is forbidden — see `CLAUDE.md`.
+//!
+//! # Example
+//!
+//! ```rust
+//! use gmcrypto_core::pem;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let der = b"\x30\x03\x02\x01\x01";
+//! let armored = pem::encode("PUBLIC KEY", der);
+//! let decoded = pem::decode(&armored, "PUBLIC KEY")?;
+//! assert_eq!(decoded, der);
+//! # Ok(()) }
+//! ```
 
 use alloc::vec::Vec;
 

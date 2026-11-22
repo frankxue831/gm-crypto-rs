@@ -13,6 +13,57 @@
 //! ECDHE suites need — GB/T 38636 confirms via the Finished exchange
 //! instead). The confirmed flow (`confirm`/`finish`) remains the default
 //! recommendation: without tags, key confirmation is the caller's protocol.
+//!
+//! # Enabling
+//!
+//! ```toml
+//! [dependencies]
+//! gmcrypto-core = { version = "1.17", features = ["sm2-key-exchange"] }
+//! ```
+//!
+//! # Example
+//!
+//! ```rust
+//! # #[cfg(feature = "sm2-key-exchange")]
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use getrandom::SysRng;
+//! use gmcrypto_core::sm2::{
+//!     DEFAULT_SIGNER_ID, Sm2PrivateKey,
+//!     key_exchange::{Sm2KxInitiator, Sm2KxResponder},
+//! };
+//!
+//! let alice = Sm2PrivateKey::from_bytes_be(&[0x11u8; 32])
+//!     .into_option()
+//!     .ok_or("invalid scalar")?;
+//! let bob = Sm2PrivateKey::from_bytes_be(&[0x22u8; 32])
+//!     .into_option()
+//!     .ok_or("invalid scalar")?;
+//!
+//! let init = Sm2KxInitiator::new(
+//!     &alice,
+//!     &bob.public_key(),
+//!     DEFAULT_SIGNER_ID,
+//!     DEFAULT_SIGNER_ID,
+//!     32,
+//! )?;
+//! let (r_a, init_wait) = init.produce_ephemeral(&mut SysRng)?;
+//!
+//! let resp = Sm2KxResponder::new(
+//!     &bob,
+//!     &alice.public_key(),
+//!     DEFAULT_SIGNER_ID,
+//!     DEFAULT_SIGNER_ID,
+//!     32,
+//! )?;
+//! let (r_b, s_b, resp_wait) = resp.respond(&r_a, &mut SysRng)?;
+//!
+//! let (alice_key, s_a) = init_wait.confirm(&r_b, &s_b)?;
+//! let bob_key = resp_wait.finish(&s_a)?;
+//! assert_eq!(alice_key.as_bytes(), bob_key.as_bytes());
+//! # Ok(()) }
+//! # #[cfg(not(feature = "sm2-key-exchange"))]
+//! # fn main() {}
+//! ```
 
 use crate::Error;
 use crate::sm2::curve::Fn;

@@ -36,6 +36,36 @@
 //! `sm2-sign-with-sm3` (1.2.156.10197.1.501, parameters absent or NULL,
 //! outer == inner), SPKI `id-ecPublicKey` + `sm2p256v1` (enforced by the
 //! existing [`crate::spki::decode`]). See `docs/v1.3-x509-sm2-design.md`.
+//!
+//! # Enabling
+//!
+//! ```toml
+//! [dependencies]
+//! gmcrypto-core = { version = "1.17", features = ["x509"] }
+//! ```
+//!
+//! # Example
+//!
+//! ```rust
+//! # #[cfg(feature = "x509")]
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use gmcrypto_core::x509::{Certificate, verify_chain};
+//!
+//! # let ca_der: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/x509_ca.der"));
+//! # let leaf_der: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/x509_leaf.der"));
+//! let ca = Certificate::from_der(ca_der).ok_or("invalid CA cert")?;
+//! let leaf = Certificate::from_der(leaf_der).ok_or("invalid leaf cert")?;
+//!
+//! // Single-certificate signature check (no trust decisions):
+//! assert!(leaf.verify_signature(&ca.subject_public_key()));
+//!
+//! // Structural chain check against a caller-trusted anchor (pass
+//! // `Some(now)` to enforce the certificate validity window):
+//! assert!(verify_chain(&[leaf], &[ca], None));
+//! # Ok(()) }
+//! # #[cfg(not(feature = "x509"))]
+//! # fn main() {}
+//! ```
 
 extern crate alloc;
 

@@ -74,6 +74,35 @@
 //!
 //! `Sm2PrivateKey::to_bytes_be` hands back **plaintext secret bytes**; the
 //! caller owns zeroizing that `[u8; 32]`.
+//!
+//! # Generating a key and encrypting
+//!
+//! Generate a fresh SM2 private key by rejection-sampling 32 random bytes
+//! through [`Sm2PrivateKey::from_bytes_be`] (which checks `d ∈ [1, n-2]` in
+//! constant time), then encrypt and decrypt with [`encrypt`](fn@encrypt) and
+//! [`decrypt`](fn@decrypt):
+//!
+//! ```rust
+//! use getrandom::SysRng;
+//! use gmcrypto_core::sm2::{Sm2PrivateKey, decrypt, encrypt};
+//! use zeroize::Zeroize;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut raw = [0u8; 32];
+//! let key = loop {
+//!     getrandom::fill(&mut raw)?;
+//!     if let Some(k) = Sm2PrivateKey::from_bytes_be(&raw).into_option() {
+//!         raw.zeroize();
+//!         break k;
+//!     }
+//! };
+//! let public = key.public_key();
+//!
+//! let ct = encrypt(&public, b"envelope key", &mut SysRng)?;
+//! let pt = decrypt(&key, &ct)?;
+//! assert_eq!(pt, b"envelope key");
+//! # Ok(()) }
+//! ```
 
 pub(crate) mod comb_table;
 // `curve` is internal low-level SM2 field/scalar arithmetic over `crypto-bigint`
