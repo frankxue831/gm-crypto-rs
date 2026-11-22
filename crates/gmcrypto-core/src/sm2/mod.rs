@@ -11,6 +11,7 @@
 //! | | |
 //! |---|---|
 //! | [`sign_with_id`] / [`verify_with_id`] | GB/T 32918.2 signature, DER-encoded `(r, s)` |
+//! | [`Sm2Hasher`] / [`Sm2Digest`] / [`sign_digest`] / [`verify_digest`] | streaming GB/T 32918.2 `SM3(Z_A ‖ M)` hashing and pre-hashed sign / verify |
 //! | [`encrypt`](fn@encrypt) / [`decrypt`](fn@decrypt) | GB/T 32918.4 public-key encryption, GM/T 0009 DER `C1‖C3‖C2` |
 //! | [`Sm2PrivateKey`] / [`Sm2PublicKey`] | key types; generation, SEC1, and raw-scalar constructors |
 //! | [`raw_ciphertext`] | the `C1‖C3‖C2` byte layout, for callers not using DER |
@@ -31,7 +32,7 @@
 //!
 //! Key generation, signing, and encryption all consume a
 //! `rand_core::TryCryptoRng`. This crate pulls no RNG into its dependency
-//! crate pulls no RNG into its dependency graph — pick one in your own
+//! graph — pick one in your own
 //! `Cargo.toml` (`getrandom`'s `SysRng`, an OS-backed CSPRNG, is the usual
 //! answer; on `wasm32` you additionally enable its `wasm_js` feature). An
 //! RNG failure surfaces as the same opaque [`Error`](crate::Error) as any
@@ -39,7 +40,7 @@
 //!
 //! # Failure is deliberately uninformative
 //!
-//! [`verify_with_id`] returns `bool`. [`decrypt`](fn@decrypt) returns one
+//! [`verify_with_id`] and [`verify_digest`] return `bool`. [`decrypt`](fn@decrypt) returns one
 //! [`Error::Failed`](crate::Error::Failed) whether the DER was malformed,
 //! `C1` was off-curve, or the `C3` hash did not match — distinguishing them
 //! would hand an attacker an oracle. This is a designed property, not a
@@ -95,6 +96,36 @@
 //! assert_eq!(pt, b"envelope key");
 //! # Ok(()) }
 //! ```
+//!
+//! # Streaming hashing and pre-hashed signatures
+//!
+//! When the message is streamed in chunks (or when a protocol passes a
+//! precomputed GB/T 32918.2 digest `e = SM3(Z_A ‖ M)`), feed chunks into
+//! [`Sm2Hasher`] and sign or verify the resulting [`Sm2Digest`] with
+//! [`sign_digest`] and [`verify_digest`]:
+//!
+//! ```rust
+//! use getrandom::SysRng;
+//! use gmcrypto_core::sm2::{
+//!     DEFAULT_SIGNER_ID, Sm2Hasher, Sm2PrivateKey, sign_digest, verify_digest,
+//!     verify_with_id,
+//! };
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let key = Sm2PrivateKey::generate(&mut SysRng)?;
+//! let public = key.public_key();
+//!
+//! let mut hasher = Sm2Hasher::new_default_id(&public)
+//!     .ok_or("valid non-identity public key")?;
+//! hasher.update(b"first chunk, ");
+//! hasher.update(b"second chunk");
+//! let digest = hasher.finalize();
+//!
+//! let sig = sign_digest(&key, &digest, &mut SysRng)?;
+//! assert!(verify_digest(&public, &digest, &sig));
+//! assert!(verify_with_id(&public, DEFAULT_SIGNER_ID, b"first chunk, second chunk", &sig));
+//! # Ok(()) }
+//! ```
 
 pub(crate) mod comb_table;
 // `curve` is internal low-level SM2 field/scalar arithmetic over `crypto-bigint`
@@ -147,8 +178,10 @@ pub use public_key::Sm2PublicKey;
 // `mod scalar_mul`).
 #[doc(hidden)]
 pub use scalar_mul::{mul_g, mul_var};
-pub use sign::{DEFAULT_SIGNER_ID, compute_z, sign_raw_with_id, sign_with_id};
-pub use verify::verify_with_id;
+pub use sign::{
+    DEFAULT_SIGNER_ID, Sm2Digest, Sm2Hasher, compute_z, sign_digest, sign_raw_with_id, sign_with_id,
+};
+pub use verify::{verify_digest, verify_with_id};
 
 /// SM2 module error — alias for the workspace-wide [`crate::Error`].
 ///
