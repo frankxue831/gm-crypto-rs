@@ -5,6 +5,38 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Work toward the next release per [`docs/v1.19-scope.md`](docs/v1.19-scope.md) (#284):
+
+### Added
+
+- **HKDF-SM3 and SM2 key lifecycle C ABI** in `gmcrypto-c` (#285):
+  `gmcrypto_hkdf_sm3_extract`, `gmcrypto_hkdf_sm3_expand`, and
+  `gmcrypto_hkdf_sm3` (validating `1..=8160` output lengths before touching
+  caller buffers, accepting empty/null zero-length inputs, and zeroizing
+  temporary `PRK` copies), plus `gmcrypto_sm2_privkey_generate`,
+  `gmcrypto_sm2_privkey_generate_with_rng`, and
+  `gmcrypto_sm2_privkey_public_key` (independent owned `gmcrypto_sm2_pubkey_t *`
+  outliving the private handle).
+- **SM2 streaming hasher and precomputed-digest sign/verify C ABI** in
+  `gmcrypto-c` (#286): `gmcrypto_sm2_hasher_t` with
+  `gmcrypto_sm2_hasher_{new,new_with_id,update,finalize,free}` (explicit
+  `_new_with_id` hashes literal empty signer ID `""` for zero-length inputs and
+  rejects `id_len > 8191`, while `_finalize` consumes and frees a valid handle
+  even on output error) and
+  `gmcrypto_sm2_{sign_digest,sign_digest_with_rng,verify_digest}` over
+  `e = SM3(Z_A || M)`.
+- **SM4-CTR single-shot and streaming C ABI** in `gmcrypto-c` (#287):
+  `gmcrypto_sm4_ctr_{encrypt,decrypt}` and
+  `gmcrypto_sm4_ctr_cipher_{new,update,free}` (`112 → 131` exported C entry
+  points; full 128-bit big-endian counter increment modulo `2^128`; pre-flight
+  validation before mutating Rust stream state so failed updates stay retryable).
+- **Compressed SEC1 bare SM2 public keys** in `gmcrypto_core::sm2` (#288):
+  `Sm2PublicKey::{to_sec1_compressed, from_sec1_compressed}` (`02`/`03 || X`,
+  33 bytes, `(p + 1) / 4` modular square-root decompression with `X < p`,
+  quadratic-residue, parity, and curve validation). `Sm2PublicKey::from_sec1_bytes`,
+  `spki::decode`, `sec1::decode`, and `gmcrypto_sm2_pubkey_new` remain
+  strictly 65-byte uncompressed.
+
 ## [1.18.0] - 2026-11-22
 
 The Rust API additions preserve compatibility with 1.17. The C ABI,
