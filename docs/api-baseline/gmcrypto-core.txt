@@ -36,6 +36,9 @@ pub fn gmcrypto_core::hmac::HmacSm3::update(&mut self, &[u8])
 impl digest::mac::MacMarker for gmcrypto_core::hmac::HmacSm3
 pub fn gmcrypto_core::hmac::hmac_sm3(&[u8], &[u8]) -> [u8; 32]
 pub mod gmcrypto_core::kdf
+pub fn gmcrypto_core::kdf::hkdf_sm3(&[u8], &[u8], &[u8], &mut [u8]) -> core::option::Option<()>
+pub fn gmcrypto_core::kdf::hkdf_sm3_expand(&[u8; 32], &[u8], &mut [u8]) -> core::option::Option<()>
+pub fn gmcrypto_core::kdf::hkdf_sm3_extract(&[u8], &[u8]) -> [u8; 32]
 pub fn gmcrypto_core::kdf::pbkdf2_hmac_sm3(&[u8], &[u8], u32, &mut [u8]) -> core::option::Option<()>
 pub mod gmcrypto_core::pem
 pub fn gmcrypto_core::pem::decode(&str, &str) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::pem::Error>

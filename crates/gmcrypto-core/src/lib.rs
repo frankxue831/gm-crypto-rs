@@ -67,7 +67,7 @@
 //! | [`sm3`] | SM3 hash (GB/T 32905), single-shot and streaming |
 //! | [`sm4`] | SM4 block cipher (GB/T 32907) with ECB / CBC / CTR. With `sm4-aead`: GCM, CCM (RFC 8998), incremental GCM, length-committed streaming CCM. With `sm4-xts`: XTS |
 //! | [`hmac`] | HMAC-SM3 (RFC 2104), single-shot and streaming |
-//! | [`kdf`] | PBKDF2-HMAC-SM3 (RFC 8018 §5.2) |
+//! | [`kdf`] | PBKDF2-HMAC-SM3 (RFC 8018 §5.2) and HKDF-SM3 (RFC 5869) |
 //! | [`asn1`] | Strict-canonical DER for the two SM2 wire structures: RFC 3279 signatures, GM/T 0009-2012 ciphertexts (superseded by GM/T 0009-2023; cf. GB/T 35276-2017) |
 //! | [`pem`], [`spki`], [`sec1`], [`pkcs8`] | RFC 7468 PEM, RFC 5280 `SubjectPublicKeyInfo`, RFC 5915 `ECPrivateKey`, RFC 5958 `OneAsymmetricKey` with PBES2 encryption |
 //! | `x509` | With `x509`: X.509-with-SM2 leaf parse and signature verify, linear chain verify. **No trust decisions** beyond structure |
