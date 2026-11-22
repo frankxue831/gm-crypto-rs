@@ -33,9 +33,9 @@ pub const MAX_ID_LEN: usize = (u16::MAX as usize) / 8;
 ///
 /// Panics if the public key point is not finite (at infinity), or if
 /// `id.len() > MAX_ID_LEN` (8191 bytes — the largest length whose
-/// bit-count fits in `u16`). API-level callers (`sign_with_id`,
-/// `verify_with_id`) reject over-length IDs before reaching this
-/// function, so the assertion only fires on direct misuse.
+/// bit-count fits in `u16`). API-level callers (`Sm2Hasher::new`,
+/// `sign_with_id`, `verify_with_id`) reject over-length IDs before
+/// reaching this function, so the assertion only fires on direct misuse.
 #[must_use]
 pub fn compute_z(public: &Sm2PublicKey, id: &[u8]) -> [u8; DIGEST_SIZE] {
     assert!(
@@ -71,8 +71,155 @@ pub fn compute_z(public: &Sm2PublicKey, id: &[u8]) -> [u8; DIGEST_SIZE] {
     h.finalize()
 }
 
+/// Precomputed GB/T 32918.2 SM2 signing digest `e = SM3(Z_A || M)`.
+///
+/// Produce this type via [`Sm2Hasher`] whenever the message bytes can be
+/// hashed locally, or wrap an externally computed `SM3(Z_A || M)` via
+/// [`Sm2Digest::from_precomputed_z_hash`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Sm2Digest([u8; DIGEST_SIZE]);
+
+impl Sm2Digest {
+    /// Return the 32-byte digest `e = SM3(Z_A || M)`.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    /// Wrap an externally precomputed GB/T 32918.2 digest `e = SM3(Z_A || M)`.
+    ///
+    /// # Security warning
+    ///
+    /// `e` **MUST** be `SM3(Z_A || M)` where `Z_A` is computed via [`compute_z`]
+    /// per GB/T 32918.2 — **never** a raw `SM3(M)` hash. Omitting `Z_A` breaks
+    /// GB/T 32918.2 signer-identity and public-key binding and produces
+    /// non-interoperable signatures.
+    ///
+    /// Prefer [`Sm2Hasher`] whenever the message can be streamed locally; use
+    /// this constructor only at protocol or hardware boundaries that already
+    /// supply `SM3(Z_A || M)`.
+    #[must_use]
+    pub const fn from_precomputed_z_hash(e: [u8; 32]) -> Self {
+        Self(e)
+    }
+}
+
+/// Streaming GB/T 32918.2 `e = SM3(Z_A || M)` hasher for SM2 signing and
+/// verification.
+///
+/// Construct with [`Sm2Hasher::new`] or [`Sm2Hasher::new_default_id`], feed
+/// message chunks with [`Sm2Hasher::update`], and finish with
+/// [`Sm2Hasher::finalize`] to obtain an [`Sm2Digest`] for [`sign_digest`] or
+/// [`crate::sm2::verify_digest`].
+///
+/// Chunking does not affect the output: streaming `M` in any partition
+/// produces the exact same [`Sm2Digest`] as single-shot `SM3(Z_A || M)`.
+///
+/// # Zeroization
+///
+/// Best-effort field-layer zeroization: `Sm2Hasher` wraps an inner [`Sm3`],
+/// whose [`Drop`] impl scrubs its internal compression state and input
+/// buffer on early drop and after [`Sm2Hasher::finalize`] consumes `self`.
+/// Following [`crate::hmac::HmacSm3`], `Sm2Hasher` intentionally has no
+/// outer `Drop` or `ZeroizeOnDrop` impl so `finalize(self)` can move
+/// `self.inner` into [`Sm3::finalize`]. The returned [`Sm2Digest`] is
+/// public and is not wiped.
+#[derive(Clone, Debug)]
+pub struct Sm2Hasher {
+    inner: Sm3,
+}
+
+impl Sm2Hasher {
+    /// Create a streaming SM2 hasher bound to `(public, id)`.
+    ///
+    /// Computes `Z_A` via [`compute_z`] and absorbs it into
+    /// the internal [`Sm3`] state so subsequent [`update`](Self::update)
+    /// calls stream message bytes directly into `SM3(Z_A || M)`.
+    ///
+    /// Returns `None` without panicking if `public` is the point at infinity
+    /// or if `id.len() >` [`MAX_ID_LEN`] (8191 bytes). Any public key from
+    /// [`Sm2PrivateKey::public_key`] or [`Sm2PublicKey::from_sec1_bytes`]
+    /// with `id.len() <= MAX_ID_LEN` returns `Some`.
+    #[must_use]
+    pub fn new(public: &Sm2PublicKey, id: &[u8]) -> Option<Self> {
+        if bool::from(public.point().is_identity()) || id.len() > MAX_ID_LEN {
+            return None;
+        }
+        let z = compute_z(public, id);
+        let mut inner = Sm3::new();
+        inner.update(&z);
+        Some(Self { inner })
+    }
+
+    /// Create a streaming SM2 hasher bound to `(public, DEFAULT_SIGNER_ID)`.
+    ///
+    /// Equivalent to `Self::new(public, DEFAULT_SIGNER_ID)`. Returns `None`
+    /// without panicking if `public` is the point at infinity; any public
+    /// key from [`Sm2PrivateKey::public_key`] or
+    /// [`Sm2PublicKey::from_sec1_bytes`] returns `Some`.
+    #[must_use]
+    pub fn new_default_id(public: &Sm2PublicKey) -> Option<Self> {
+        Self::new(public, DEFAULT_SIGNER_ID)
+    }
+
+    /// Absorb message bytes into `SM3(Z_A || M)`.
+    pub fn update(&mut self, data: &[u8]) {
+        self.inner.update(data);
+    }
+
+    /// Consume the hasher and produce the finalized [`Sm2Digest`].
+    #[must_use]
+    pub fn finalize(self) -> Sm2Digest {
+        Sm2Digest(self.inner.finalize())
+    }
+}
+
 /// Fixed-K signing retry budget. v0.1 = 2.
 pub(crate) const SIGN_RETRY_BUDGET: usize = 2;
+
+/// Sign `digest` (`e = SM3(Z_A || M)`) under `key`.
+///
+/// Typically paired with [`Sm2Hasher`] when streaming a large message or
+/// computing the GB/T 32918.2 digest incrementally before signing.
+///
+/// Returns a DER-encoded `SEQUENCE { r, s }` signature, or
+/// [`crate::Error::Failed`] if the `SIGN_RETRY_BUDGET` was exhausted
+/// (probability ~9·2^-512 with a uniform CSPRNG).
+///
+/// # Security warning
+///
+/// `sign_digest` accepts a precomputed [`Sm2Digest`] and **cannot verify**
+/// that `digest` was computed using the `Z_A` derived from `key.public_key()`
+/// and the intended signer ID (especially if constructed via
+/// [`Sm2Digest::from_precomputed_z_hash`]). Passing a raw `SM3(M)` hash or a
+/// digest bound to a different public key produces signatures that fail
+/// standard GB/T 32918.2 verification under `(key.public_key(), id)`.
+///
+/// # Constant-time contract
+///
+/// Unconditionally runs `SIGN_RETRY_BUDGET` iterations regardless of
+/// which (if any) iteration produced a valid signature.
+///
+/// # Errors
+///
+/// Returns [`crate::Error::Failed`] if the supplied RNG fails (its
+/// `try_fill_bytes` errored — the failure is collapsed to `Failed`,
+/// never propagated as a panic), or if every retry in the budget
+/// produced an invalid candidate (`r == 0`,
+/// `r + k == n`, or `s == 0`). Failure modes are deliberately collapsed
+/// to one variant per the failure-mode-invariant policy; see
+/// `SECURITY.md`.
+pub fn sign_digest<R: TryCryptoRng>(
+    key: &Sm2PrivateKey,
+    digest: &Sm2Digest,
+    rng: &mut R,
+) -> Result<Vec<u8>, crate::Error> {
+    let (r, s) = sign_raw_digest(key, digest.as_bytes(), rng)?;
+    Ok(encode_sig(
+        &crate::u256_to_be32(&r),
+        &crate::u256_to_be32(&s),
+    ))
+}
 
 /// Sign `message` with `id` under `key`.
 ///
@@ -156,7 +303,15 @@ pub fn sign_raw_with_id<R: TryCryptoRng>(
         h.update(message);
         h.finalize()
     };
-    let e_scalar = Fn::new(&U256::from_be_slice(&e_bytes));
+    sign_raw_digest(key, &e_bytes, rng)
+}
+
+pub(crate) fn sign_raw_digest<R: TryCryptoRng>(
+    key: &Sm2PrivateKey,
+    e_bytes: &[u8; DIGEST_SIZE],
+    rng: &mut R,
+) -> Result<(U256, U256), crate::Error> {
+    let e_scalar = Fn::new(&U256::from_be_slice(e_bytes));
 
     let mut chosen: CtOption<RsPair> = CtOption::new(RsPair::default(), Choice::from(0));
     for _ in 0..SIGN_RETRY_BUDGET {
@@ -494,6 +649,202 @@ mod tests {
         assert_eq!(k_range.retrieve(), n_minus_two);
         assert_eq!(rng_range.index, NONCE_SAMPLE_BUDGET);
     }
+
+    /// Streaming `Sm2Hasher` across arbitrary chunk sizes (0-byte, 1-byte,
+    /// 63/64/65-byte boundaries, large multi-KB message) matches manual
+    /// `SM3(compute_z || M)` and cross-verifies between `sign_digest`/
+    /// `verify_digest` and `sign_with_id`/`verify_with_id`.
+    #[test]
+    fn sm2_hasher_chunking_and_cross_verify() {
+        use crate::sm2::verify::{verify_digest, verify_with_id};
+
+        let d =
+            U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
+        let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid scalar");
+        let pk = key.public_key();
+        let id = b"ALICE123@YAHOO.COM";
+        let z = compute_z(&pk, id);
+
+        let mut rng = SysRng;
+        for len in [0usize, 1, 63, 64, 65, 128, 5000] {
+            let mut msg = alloc::vec![0u8; len];
+            for (idx, byte) in msg.iter_mut().enumerate() {
+                *byte = u8::try_from((idx.wrapping_mul(31) ^ (idx >> 8)) % 251)
+                    .expect("mod 251 fits in u8");
+            }
+
+            let expected_e = {
+                let mut sm3 = Sm3::new();
+                sm3.update(&z);
+                sm3.update(&msg);
+                sm3.finalize()
+            };
+
+            // One-shot update (plus empty updates around it).
+            let mut single = Sm2Hasher::new(&pk, id).expect("valid pk/id");
+            single.update(&[]);
+            single.update(&msg);
+            single.update(&[]);
+            let single_digest = single.finalize();
+            assert_eq!(single_digest.as_bytes(), &expected_e, "len={len}");
+
+            // Cross-verify `sign_digest` -> `verify_digest` & `verify_with_id`,
+            // and `sign_with_id` -> `verify_digest`.
+            let sig_from_digest = sign_digest(&key, &single_digest, &mut rng).expect("sign_digest");
+            assert!(verify_digest(&pk, &single_digest, &sig_from_digest));
+            assert!(verify_with_id(&pk, id, &msg, &sig_from_digest));
+
+            let sig_from_id = sign_with_id(&key, id, &msg, &mut rng).expect("sign_with_id");
+            assert!(verify_digest(&pk, &single_digest, &sig_from_id));
+
+            // Arbitrary chunk splits.
+            for chunk_size in [1usize, 7, 31, 63, 64, 65, 127, 128, 129, 1024] {
+                if len > 256 && chunk_size == 1 {
+                    // Skip 5000 1-byte iterations to keep test fast while still
+                    // exercising 1-byte chunking up to 128 bytes.
+                    continue;
+                }
+                let mut h = Sm2Hasher::new(&pk, id).expect("valid pk/id");
+                for chunk in msg.chunks(chunk_size) {
+                    h.update(&[]);
+                    h.update(chunk);
+                }
+                let digest = h.finalize();
+                assert_eq!(digest, single_digest, "len={len}, chunk={chunk_size}");
+            }
+        }
+
+        // `new_default_id` matches `new(..., DEFAULT_SIGNER_ID)` and `Clone`
+        // forks independently mid-stream.
+        let mut h_default = Sm2Hasher::new_default_id(&pk).expect("valid pk");
+        let mut h_explicit = Sm2Hasher::new(&pk, DEFAULT_SIGNER_ID).expect("valid pk");
+        h_default.update(b"part1-");
+        let mut h_fork = h_default.clone();
+        h_default.update(b"part2");
+        h_fork.update(b"other");
+        h_explicit.update(b"part1-part2");
+        let expected_default = h_explicit.finalize();
+        assert_eq!(h_default.finalize(), expected_default);
+        assert_ne!(h_fork.finalize(), expected_default);
+    }
+
+    /// `Sm2Hasher::new` and `Sm2Hasher::new_default_id` return `None` without
+    /// panicking on over-long IDs (`MAX_ID_LEN + 1`) and identity public keys.
+    #[test]
+    fn sm2_hasher_rejects_invalid_inputs_no_panic() {
+        use crate::sm2::point::ProjectivePoint;
+
+        let d =
+            U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
+        let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid scalar");
+        let pk = key.public_key();
+
+        let too_long = alloc::vec![0x5Au8; MAX_ID_LEN + 1];
+        assert!(Sm2Hasher::new(&pk, &too_long).is_none());
+
+        // Exact boundary `MAX_ID_LEN` succeeds and matches `compute_z` + `Sm3`.
+        let max_id = alloc::vec![0x5Au8; MAX_ID_LEN];
+        let mut h_max = Sm2Hasher::new(&pk, &max_id).expect("MAX_ID_LEN accepted");
+        h_max.update(b"boundary");
+        let expected_max = {
+            let z = compute_z(&pk, &max_id);
+            let mut sm3 = Sm3::new();
+            sm3.update(&z);
+            sm3.update(b"boundary");
+            sm3.finalize()
+        };
+        assert_eq!(h_max.finalize().as_bytes(), &expected_max);
+
+        // Identity public key rejected cleanly by both `new` and `new_default_id`.
+        let identity = Sm2PublicKey::from_point(ProjectivePoint::identity());
+        assert!(Sm2Hasher::new(&identity, b"id").is_none());
+        assert!(Sm2Hasher::new(&identity, DEFAULT_SIGNER_ID).is_none());
+        assert!(Sm2Hasher::new_default_id(&identity).is_none());
+    }
+
+    /// `Sm2Digest::from_precomputed_z_hash` round-trips with `Sm2Hasher::finalize`.
+    #[test]
+    fn sm2_digest_from_precomputed_z_hash_round_trip() {
+        use crate::sm2::verify::verify_digest;
+
+        let d =
+            U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
+        let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid scalar");
+        let pk = key.public_key();
+
+        let mut h = Sm2Hasher::new_default_id(&pk).expect("valid pk");
+        h.update(b"precomputed round-trip");
+        let streamed = h.finalize();
+
+        let raw: [u8; 32] = *streamed.as_bytes();
+        let wrapped = Sm2Digest::from_precomputed_z_hash(raw);
+        assert_eq!(wrapped, streamed);
+        assert_eq!(wrapped.as_bytes(), &raw);
+
+        let mut rng = SysRng;
+        let sig = sign_digest(&key, &wrapped, &mut rng).expect("sign_digest");
+        assert!(verify_digest(&pk, &streamed, &sig));
+    }
+
+    /// `sign_digest` returns `Err(Error::Failed)` without panicking when the
+    /// RNG fails or exhausts the nonce-sampling budget.
+    #[test]
+    fn sign_digest_rng_error_and_exhaustion() {
+        struct ErrRng;
+        impl TryRng for ErrRng {
+            type Error = core::fmt::Error;
+            fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+                Err(core::fmt::Error)
+            }
+            fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+                Err(core::fmt::Error)
+            }
+            fn try_fill_bytes(&mut self, _dst: &mut [u8]) -> Result<(), Self::Error> {
+                Err(core::fmt::Error)
+            }
+        }
+        impl TryCryptoRng for ErrRng {}
+
+        struct ExhaustRng {
+            invalid: [u8; 32],
+        }
+        impl TryRng for ExhaustRng {
+            type Error = Infallible;
+            fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+                Ok(0)
+            }
+            fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+                Ok(0)
+            }
+            fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
+                assert_eq!(dst.len(), 32);
+                dst.copy_from_slice(&self.invalid);
+                Ok(())
+            }
+        }
+        impl TryCryptoRng for ExhaustRng {}
+
+        let d =
+            U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
+        let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid scalar");
+        let mut h = Sm2Hasher::new_default_id(&key.public_key()).expect("valid pk");
+        h.update(b"rng failure");
+        let digest = h.finalize();
+
+        assert_eq!(
+            sign_digest(&key, &digest, &mut ErrRng),
+            Err(crate::Error::Failed)
+        );
+
+        let n = *Fn::MODULUS.as_ref();
+        let mut exhaust_rng = ExhaustRng {
+            invalid: crate::u256_to_be32(&n),
+        };
+        assert_eq!(
+            sign_digest(&key, &digest, &mut exhaust_rng),
+            Err(crate::Error::Failed)
+        );
+    }
 }
 
 #[cfg(test)]
@@ -566,5 +917,54 @@ mod sign_tests {
             )),
             "s mismatch"
         );
+    }
+
+    /// GB/T 32918.2 Appendix A.2 fixed-k KAT: streamed `Sm2Hasher` +
+    /// `sign_digest` produces a byte-identical DER signature to `sign_with_id`
+    /// under the same RNG stream, and verifies under both `verify_digest` and
+    /// `verify_with_id`.
+    #[test]
+    fn gbt32918_appendix_a2_fixed_k_digest_matches_sign_with_id() {
+        use crate::sm2::verify::{verify_digest, verify_with_id};
+
+        let d =
+            U256::from_be_hex("3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8");
+        let key = Sm2PrivateKey::from_scalar_inner(d).expect("valid scalar");
+        let pk = key.public_key();
+        let id = b"ALICE123@YAHOO.COM";
+        let message = b"message digest";
+        let k_hex = "59276E27D506861A16680F3AD9C02DCFBFBF904F533DA0AC2EE1C9A45B58FF85";
+
+        let mut hasher = Sm2Hasher::new(&pk, id).expect("valid pk/id");
+        hasher.update(b"message ");
+        hasher.update(b"digest");
+        let digest = hasher.finalize();
+
+        let mut rng_digest = FixedScalarRng::new(k_hex);
+        let mut rng_with_id = FixedScalarRng::new(k_hex);
+        let der_digest = sign_digest(&key, &digest, &mut rng_digest).expect("sign_digest succeeds");
+        let der_with_id =
+            sign_with_id(&key, id, message, &mut rng_with_id).expect("sign_with_id succeeds");
+
+        assert_eq!(der_digest, der_with_id);
+
+        let (r, s) = crate::asn1::sig::decode_sig(&der_digest).expect("our own DER decodes");
+        assert_eq!(
+            r,
+            crate::u256_to_be32(&U256::from_be_hex(
+                "88348A09A3E324C4FE946843123E40C175468F3E36481885844A144D2167EA4C"
+            )),
+            "r mismatch"
+        );
+        assert_eq!(
+            s,
+            crate::u256_to_be32(&U256::from_be_hex(
+                "0AD2CE552FD33EAB792E5A2805E0504D014C96135F8E03891087132ABB24D48D"
+            )),
+            "s mismatch"
+        );
+
+        assert!(verify_digest(&pk, &digest, &der_digest));
+        assert!(verify_with_id(&pk, id, message, &der_digest));
     }
 }

@@ -122,12 +122,34 @@ pub fn gmcrypto_core::sm2::raw_ciphertext::decode_c1c2c3_legacy(&[u8]) -> core::
 pub fn gmcrypto_core::sm2::raw_ciphertext::decode_c1c3c2(&[u8]) -> core::option::Option<gmcrypto_core::asn1::ciphertext::Sm2Ciphertext>
 pub fn gmcrypto_core::sm2::raw_ciphertext::encode_c1c3c2(&gmcrypto_core::asn1::ciphertext::Sm2Ciphertext) -> alloc::vec::Vec<u8>
 pub mod gmcrypto_core::sm2::sign
+pub struct gmcrypto_core::sm2::sign::Sm2Digest(_)
+impl gmcrypto_core::sm2::sign::Sm2Digest
+pub const fn gmcrypto_core::sm2::sign::Sm2Digest::as_bytes(&self) -> &[u8; 32]
+pub const fn gmcrypto_core::sm2::sign::Sm2Digest::from_precomputed_z_hash([u8; 32]) -> Self
+pub struct gmcrypto_core::sm2::sign::Sm2Hasher
+impl gmcrypto_core::sm2::sign::Sm2Hasher
+pub fn gmcrypto_core::sm2::sign::Sm2Hasher::finalize(self) -> gmcrypto_core::sm2::sign::Sm2Digest
+pub fn gmcrypto_core::sm2::sign::Sm2Hasher::new(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8]) -> core::option::Option<Self>
+pub fn gmcrypto_core::sm2::sign::Sm2Hasher::new_default_id(&gmcrypto_core::sm2::public_key::Sm2PublicKey) -> core::option::Option<Self>
+pub fn gmcrypto_core::sm2::sign::Sm2Hasher::update(&mut self, &[u8])
 pub const gmcrypto_core::sm2::sign::DEFAULT_SIGNER_ID: &[u8; 16]
 pub const gmcrypto_core::sm2::sign::MAX_ID_LEN: usize
 pub fn gmcrypto_core::sm2::sign::compute_z(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8]) -> [u8; 32]
+pub fn gmcrypto_core::sm2::sign::sign_digest<R: rand_core::TryCryptoRng>(&gmcrypto_core::sm2::private_key::Sm2PrivateKey, &gmcrypto_core::sm2::sign::Sm2Digest, &mut R) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
 pub fn gmcrypto_core::sm2::sign::sign_with_id<R: rand_core::TryCryptoRng>(&gmcrypto_core::sm2::private_key::Sm2PrivateKey, &[u8], &[u8], &mut R) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
 pub mod gmcrypto_core::sm2::verify
+pub fn gmcrypto_core::sm2::verify::verify_digest(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &gmcrypto_core::sm2::sign::Sm2Digest, &[u8]) -> bool
 pub fn gmcrypto_core::sm2::verify::verify_with_id(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8], &[u8], &[u8]) -> bool
+pub struct gmcrypto_core::sm2::Sm2Digest(_)
+impl gmcrypto_core::sm2::sign::Sm2Digest
+pub const fn gmcrypto_core::sm2::sign::Sm2Digest::as_bytes(&self) -> &[u8; 32]
+pub const fn gmcrypto_core::sm2::sign::Sm2Digest::from_precomputed_z_hash([u8; 32]) -> Self
+pub struct gmcrypto_core::sm2::Sm2Hasher
+impl gmcrypto_core::sm2::sign::Sm2Hasher
+pub fn gmcrypto_core::sm2::sign::Sm2Hasher::finalize(self) -> gmcrypto_core::sm2::sign::Sm2Digest
+pub fn gmcrypto_core::sm2::sign::Sm2Hasher::new(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8]) -> core::option::Option<Self>
+pub fn gmcrypto_core::sm2::sign::Sm2Hasher::new_default_id(&gmcrypto_core::sm2::public_key::Sm2PublicKey) -> core::option::Option<Self>
+pub fn gmcrypto_core::sm2::sign::Sm2Hasher::update(&mut self, &[u8])
 pub struct gmcrypto_core::sm2::Sm2PrivateKey
 impl gmcrypto_core::sm2::private_key::Sm2PrivateKey
 pub fn gmcrypto_core::sm2::private_key::Sm2PrivateKey::from_bytes_be(&[u8; 32]) -> subtle::CtOption<Self>
@@ -149,7 +171,9 @@ pub const gmcrypto_core::sm2::DEFAULT_SIGNER_ID: &[u8; 16]
 pub fn gmcrypto_core::sm2::compute_z(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8]) -> [u8; 32]
 pub fn gmcrypto_core::sm2::decrypt(&gmcrypto_core::sm2::private_key::Sm2PrivateKey, &[u8]) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
 pub fn gmcrypto_core::sm2::encrypt<R: rand_core::TryCryptoRng>(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8], &mut R) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
+pub fn gmcrypto_core::sm2::sign_digest<R: rand_core::TryCryptoRng>(&gmcrypto_core::sm2::private_key::Sm2PrivateKey, &gmcrypto_core::sm2::sign::Sm2Digest, &mut R) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
 pub fn gmcrypto_core::sm2::sign_with_id<R: rand_core::TryCryptoRng>(&gmcrypto_core::sm2::private_key::Sm2PrivateKey, &[u8], &[u8], &mut R) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
+pub fn gmcrypto_core::sm2::verify_digest(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &gmcrypto_core::sm2::sign::Sm2Digest, &[u8]) -> bool
 pub fn gmcrypto_core::sm2::verify_with_id(&gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8], &[u8], &[u8]) -> bool
 pub type gmcrypto_core::sm2::Error = gmcrypto_core::Error
 pub mod gmcrypto_core::sm3
