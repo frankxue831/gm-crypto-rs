@@ -15,11 +15,16 @@ c_smoke test count in a comment — update it when you add tests.
   `// SAFETY:` comment. Don't relax core's `forbid` to make a shim easier.
 - Every entry returns `GMCRYPTO_ERR` only — no C ABI entry distinguishes
   failure modes (SECURITY.md failure-mode invariant).
-- Handle families (`*_encryptor_t` / `*_decryptor_t`): `_new` →
-  `Box::into_raw`; `_update` → `&mut *`; `_finalize*` → `Box::from_raw`
-  (consumes **and frees**, even on error); `_free` is the abort path, no-op on
-  NULL. Output is the `(out, out_capacity, out_actual_len)` triple via
-  `write_output`. Decryptors emit nothing from `_update` (commit-on-verify).
+- Handle families (`*_encryptor_t` / `*_decryptor_t` / `gmcrypto_sm2_hasher_t`
+  / `gmcrypto_sm4_ctr_cipher_t`): `_new` → `Box::into_raw` (fallible
+  constructors — including `gmcrypto_sm2_privkey_generate*`,
+  `gmcrypto_sm2_privkey_public_key`, and `gmcrypto_sm2_hasher_new*` — return
+  owned `*mut` or `NULL`); `_update` → `&mut *`; `_finalize*` → `Box::from_raw`
+  (consumes **and frees**, even on error); `_free` is the abort/completion path,
+  no-op on NULL. Output is the `(out, out_capacity, out_actual_len)` triple via
+  `write_output` (or pre-flight capacity/null checks before `Sm4CtrCipher::update`
+  so failed CTR updates stay retryable). AEAD decryptors emit nothing from
+  `_update` (commit-on-verify).
 - Don't rename `gmcrypto_sm2_privkey_to_sec1_be` (the Rust method is
   `to_bytes_be`).
 - XTS: FFI takes `uint64_t start_sector`. **Copy the 32-byte key into
