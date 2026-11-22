@@ -75,25 +75,39 @@ The in-CI [`dudect-bencher`](https://docs.rs/dudect-bencher/) harness
 + 2 cfg-gated under `sm4-bitsliced-simd` + 3 cfg-gated under `sm4-aead`
 + 1 cfg-gated under `sm4-xts` + 1 cfg-gated under `sm2-key-exchange`
 + 1 cfg-gated under `tlcp`)
-plus a deliberately-leaky `negative_control`. Most real targets gate on
-`|tau| <= 0.20`;
-`negative_control` gates the opposite direction (`|tau| > 1.0` **must**
-fire to prove harness wiring); `ct_sign_k_class`, `ct_hmac_sm3`, and the
-direct `ct_fn_invert` / `ct_fp_invert` invert diagnostics have target-specific
-gate policy after the 2026-05-12 GH Actions runner-image shift — see
-the recalibration note below and `docs/v0.5-dudect-recalibration.md`.
-CLAUDE.md carries the canonical per-target gate table.
+plus a deliberately-leaky `negative_control` and three noise probes (24
+registered benches total). Neither dudect workflow is a required status check
+on `main` or a release gate:
+[`.github/workflows/dudect-pr.yml`](.github/workflows/dudect-pr.yml) runs a
+`10K × 3` smoke on pull requests touching allowlisted crypto, harness, or
+workflow paths (and honors `[skip ci]`), while
+[`.github/workflows/dudect-main.yml`](.github/workflows/dudect-main.yml) runs
+a `100K × 5` nightly check on daily cron and manual dispatch. Sixteen of the
+twenty `ct_*` targets fail the job when their multi-run median `|tau|` exceeds
+`0.20` in both PR smoke and nightly runs — with one SKU-specific exception:
+`ct_sm4_cbc_decrypt_fanout` uses `|tau| <= 0.55` on **AMD EPYC 9V74** runners
+only (`0.20` on all other CPUs, including unknown SKUs). The other four
+(`ct_sign_k_class`, `ct_hmac_sm3`, `ct_fn_invert`, `ct_fp_invert`) are
+**telemetry-only (non-blocking) on PR smoke** and fail **nightly** runs only
+above the `0.55` gross-regression sentinel (`median |tau| > 0.55`) after the
+2026-05-12 GH Actions runner-image shift — see the recalibration note below
+and `docs/v0.5-dudect-recalibration.md`. `negative_control` gates the opposite
+direction (`min |tau| > 1.0` **must** fire on every run to prove harness
+wiring). The authoritative per-target thresholds live in
+[`.github/workflows/dudect-pr.yml`](.github/workflows/dudect-pr.yml) and
+[`.github/workflows/dudect-main.yml`](.github/workflows/dudect-main.yml).
 
 **Real `ct_*` always-on (12):**
 
 - `ct_mul_g`         — fixed-base scalar multiplication `k·G`.
 - `ct_mul_var`       — variable-base scalar multiplication `k·P`.
 - `ct_sign`          — full SM2 sign through `sign_raw_with_id`, class-split by
-  private key `d`.
-- `ct_sign_k_class`  — same, class-split by nonce `k` magnitude with `d` held
-  fixed (W0; closes the v0.1 structural blind spot to nonce-only leaks).
-  Dropped from the PR-smoke 10K allowlist (telemetry-only there); its nightly
-  `|tau| < 0.25` gate was **demoted to the gross-regression sentinel @0.55 on
+  private key `d` only (fresh random nonce `k` from `SysRng` on every sample).
+- `ct_sign_k_class`  — same, class-split by nonce `k` magnitude (both retry
+  nonces class-tied) with `d` held fixed (W0; closes the v0.1 structural blind
+  spot to nonce-only leaks). Dropped from the PR-smoke 10K allowlist
+  (telemetry-only there); its nightly `|tau| < 0.25` gate was **demoted to the
+  gross-regression sentinel @0.55 (`median |tau| > 0.55` fails) on
   2026-06-07** — it shares the two-input class-split image-noise of the invert
   diagnostics (nightly median 0.2570–0.2768 while the direct diagnostics stayed
   quiet → false alarm, not a leak). `ct_fn_invert` / `ct_fp_invert` remain the
@@ -102,8 +116,8 @@ CLAUDE.md carries the canonical per-target gate table.
   passes injected-leak controls. See
   `docs/v0.5-dudect-recalibration.md`.
 - `ct_fn_invert`     — direct `Fn::invert((1+d) mod n)` diagnostic (W0).
-  PR-smoke telemetry-only; nightly gross-regression sentinel at
-  `|tau| ≥ 0.55`.
+  PR-smoke telemetry-only; nightly gross-regression sentinel failing at
+  `median |tau| > 0.55`.
 - `ct_fp_invert`     — direct `Fp::invert(Z)` diagnostic (W0). Same
   policy as `ct_fn_invert`.
 - `ct_sm4_key_schedule` — SM4 key schedule class-split by master key bytes
@@ -164,7 +178,11 @@ them is why the always-on bench vector has 16 entries against 12 `ct_*`:
   On `x86_64`, `sbox_x32` processes 8 blocks × 4 tau bytes = 32 bytes,
   selecting GFNI where `has_gfni_avx2()` holds, otherwise AVX2 if available
   or the scalar fallback. On `aarch64`, `sbox_x16` uses NEON
-  (4 blocks × 4 = 16 bytes).
+  (4 blocks × 4 = 16 bytes). Gated at `|tau| <= 0.20` in both PR smoke and
+  nightly runs on every CPU except **AMD EPYC 9V74**, where the bound is
+  raised to `|tau| <= 0.55` since 2026-09-01 because no-change medians on
+  that SKU reached `0.2904` (every other CPU, including unknown SKUs, keeps
+  `0.20`; see `docs/v0.5-dudect-recalibration.md`).
 
 Both GFNI paths are compiled only with rustc >= 1.89; the cached detector
 requires GFNI, AVX2 and OS-enabled AVX-512 state. Older compilers, including
@@ -383,7 +401,7 @@ After the 2026-05-12 image update to `20260512.134.1` (kernel
 `ct_fp_invert` began producing intermittent `|tau|` values in
 [0.29–0.40] on identical source code, with same-commit pass/fail
 across consecutive nightly runs. Both targets were moved to PR-smoke
-telemetry + a nightly gross-regression sentinel at `|tau| ≥ 0.55` —
+telemetry + a nightly gross-regression sentinel failing at `median |tau| > 0.55` —
 preserving protection against a real cryptographic leak (the v0.1
 `ConstMontyForm::invert` regression at `|tau| ≈ 0.70` would still
 fire) while acknowledging that the 0.20 gate is no longer authoritative
@@ -403,13 +421,14 @@ The three secret-touching invert sites are documented for completeness:
 
 ### `ct_sign_k_class` and the structural blind spot fix
 
-v0.1's harness was class-split by `d` while letting `k` be fresh-random in
-every sample, structurally blind to nonce-only leaks. `ct_sign_k_class`
-(W0) inverts the class assignment: `d` held fixed; class-split by nonce
-magnitude. **Both** retry nonces in the `SIGN_RETRY_BUDGET = 2` loop are
-class-tied — a class label that only controls the first nonce and lets
-the second be fresh-random would contaminate the signal (the second
-nonce becomes a noise source distributing uniformly across both classes).
+`ct_sign` is class-split by `d` only while letting `k` be fresh-random in
+every sample, so the v0.1 harness was structurally blind to nonce-only leaks.
+`ct_sign_k_class` (W0) inverts the class assignment: `d` held fixed;
+class-split by nonce `k` magnitude. **Both** retry nonces in the
+`SIGN_RETRY_BUDGET = 2` loop are class-tied — a class label that only controls
+the first nonce and lets the second be fresh-random would contaminate the
+signal (the second nonce becomes a noise source distributing uniformly across
+both classes).
 
 `ct_sign_k_class` measuring `|tau| = 0.0708` at 100K samples (vs. `ct_sign`'s
 0.0044) suggests the nonce path has slight signal elevation that the
@@ -447,20 +466,26 @@ This is the **settled constant-time gate posture for v1.0**, with narrow,
 explicitly-named revisit criteria (not "permanent/final", not "still an open
 hardening gap"):
 
-- **Composite dudect targets remain release-gated at `|tau| <= 0.20`.** These are
-  the full-operation targets (sign, scalar-mult, SM4 key-schedule / encrypt /
-  CTR / CBC-fanout / GCM / CCM / XTS decrypt, SM2 decrypt, PKCS#8 decrypt);
-  they measure quietly and gate authoritatively.
-- **The two-input class-split targets are retained as telemetry (PR) + a nightly
-  gross-regression sentinel at `|tau| ≥ 0.55`** — *not* the 0.20 gate. This set
-  grew as the `ubuntu-24.04` image-noise reached each: the two single-field-
-  inversion micro-diagnostics (`ct_fn_invert`, `ct_fp_invert`; v0.5),
+- **Composite dudect targets are gated at `|tau| <= 0.20` in the PR smoke
+  (`10K × 3` median) and nightly (`100K × 5` median) runs
+  (`ct_sm4_cbc_decrypt_fanout`: `<= 0.55` on AMD EPYC 9V74 only; `0.20` on all
+  other CPUs, including unknown SKUs) — not a required merge check or release
+  gate.** These are the 16 full-operation targets (SM2 `d`-split sign,
+  scalar-mult, SM4 key-schedule / encrypt / CTR / bitsliced-SIMD / CBC-fanout /
+  GCM / CCM / XTS decrypt, SM2 decrypt, SM2 key exchange, TLCP CBC deprotect,
+  PKCS#8 decrypt).
+- **The four two-input class-split targets are retained as telemetry-only
+  (non-blocking) on PR smoke + a nightly gross-regression sentinel failing at
+  `median |tau| > 0.55`** — *not* the `0.20` gate. This set grew as the
+  `ubuntu-24.04` image-noise reached each: the two single-field-inversion
+  micro-diagnostics (`ct_fn_invert`, `ct_fp_invert`; v0.5),
   `ct_sign_k_class` (2026-06-07), and `ct_hmac_sm3` (2026-06-17 — the only one
   with **no direct non-composite backstop**; see its entry above). Shared
-  GitHub-runner measurements show an empirically unstable **two-input
+  GitHub-runner measurements showed an empirically unstable **two-input
   class-split** floor for these targets (intermittent [0.21–0.47]; the 5-run
-  *median* itself can cross 0.20), while every composite full-operation target
-  stays < 0.01.
+  *median* itself can cross 0.20), whereas the other full-operation targets
+  stayed well below `0.20` on the baseline runners (with the later EPYC 9V74
+  exception for `ct_sm4_cbc_decrypt_fanout` noted above).
 - **Why not a tighter gate.** v0.18 pinned the toolchain/image + added a CI-level
   multi-run median; v0.19 then built two **fix-vs-fix noise probes**
   (`noise_floor_f{n,p}_invert`) and a self-calibrating relative gate to re-promote
