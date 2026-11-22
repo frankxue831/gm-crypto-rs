@@ -264,9 +264,10 @@ fn try_sign_once<R: TryCryptoRng>(
     Some(out)
 }
 
-/// Fixed-budget constant-time nonzero-scalar sampler. Per-draw reject
-/// probability ≈ 2^-32 (n ≈ 2^256 − 2^224), so a 4-draw budget exhausts
-/// (all draws invalid) with probability ≈ 2^-128.
+/// Fixed-budget constant-time scalar sampler in `[1, upper_exclusive - 1]`.
+/// When `upper_exclusive == n` (where `n ≈ 2^256 − 2^224`), per-draw reject
+/// probability is `≈ 2^-32`, so a 4-draw budget exhausts (all draws invalid)
+/// with probability `≈ 2^-128`.
 ///
 /// Returns:
 /// - `None` **only** on RNG failure — a *public* (not secret-derived)
@@ -281,8 +282,10 @@ fn try_sign_once<R: TryCryptoRng>(
 ///   secret-derived bytes.
 pub(crate) const NONCE_SAMPLE_BUDGET: usize = 4;
 
-pub(crate) fn sample_nonzero_scalar<R: TryCryptoRng>(rng: &mut R) -> Option<(Fn, Choice)> {
-    let n = *Fn::MODULUS.as_ref();
+pub(crate) fn sample_scalar_in_range<R: TryCryptoRng>(
+    rng: &mut R,
+    upper_exclusive: &U256,
+) -> Option<(Fn, Choice)> {
     let mut chosen = U256::ONE;
     let mut found = Choice::from(0u8);
     for _ in 0..NONCE_SAMPLE_BUDGET {
@@ -296,11 +299,12 @@ pub(crate) fn sample_nonzero_scalar<R: TryCryptoRng>(rng: &mut R) -> Option<(Fn,
             chosen.zeroize();
             return None;
         }
-        let candidate = U256::from_be_slice(&buf);
-        let valid = !candidate.ct_eq(&U256::ZERO) & candidate.ct_lt(&n);
+        let mut candidate = U256::from_be_slice(&buf);
+        let valid = !candidate.ct_eq(&U256::ZERO) & candidate.ct_lt(upper_exclusive);
         let take = valid & !found; // keep the FIRST valid draw
-        chosen = U256::conditional_select(&chosen, &candidate, take);
+        chosen.conditional_assign(&candidate, take);
         found |= valid;
+        candidate.zeroize();
         buf.zeroize();
     }
     // Always return the (possibly dummy) scalar + the CT validity bit;
@@ -308,6 +312,11 @@ pub(crate) fn sample_nonzero_scalar<R: TryCryptoRng>(rng: &mut R) -> Option<(Fn,
     let k = Fn::new(&chosen);
     chosen.zeroize();
     Some((k, found))
+}
+
+/// Fixed-budget constant-time nonzero-scalar sampler (`[1, n-1]`).
+pub(crate) fn sample_nonzero_scalar<R: TryCryptoRng>(rng: &mut R) -> Option<(Fn, Choice)> {
+    sample_scalar_in_range(rng, Fn::MODULUS.as_ref())
 }
 
 fn ct_or_else<T: ConditionallySelectable + Default>(a: CtOption<T>, b: CtOption<T>) -> CtOption<T> {
@@ -455,6 +464,35 @@ mod tests {
         }
         impl TryCryptoRng for ErrRng {}
         assert!(sample_nonzero_scalar(&mut ErrRng).is_none());
+    }
+
+    /// `sample_nonzero_scalar` samples `[1, n-1]` while
+    /// `sample_scalar_in_range(rng, &(n - 1))` samples `[1, n-2]` and
+    /// rejects `n - 1`.
+    #[test]
+    fn sample_nonzero_scalar_vs_sample_scalar_in_range_upper_bound() {
+        let n = *Fn::MODULUS.as_ref();
+        let n_minus_one = n.wrapping_sub(&U256::ONE);
+        let n_minus_two = n_minus_one.wrapping_sub(&U256::ONE);
+        let values = [
+            n_minus_one,
+            n_minus_two,
+            U256::from_u64(3),
+            U256::from_u64(4),
+        ];
+
+        let mut rng_nonce = SequenceRng { values, index: 0 };
+        let (k_nonce, ok_nonce) = sample_nonzero_scalar(&mut rng_nonce).expect("rng ok");
+        assert!(bool::from(ok_nonce));
+        assert_eq!(k_nonce.retrieve(), n_minus_one);
+        assert_eq!(rng_nonce.index, NONCE_SAMPLE_BUDGET);
+
+        let mut rng_range = SequenceRng { values, index: 0 };
+        let (k_range, ok_range) =
+            sample_scalar_in_range(&mut rng_range, &n_minus_one).expect("rng ok");
+        assert!(bool::from(ok_range));
+        assert_eq!(k_range.retrieve(), n_minus_two);
+        assert_eq!(rng_range.index, NONCE_SAMPLE_BUDGET);
     }
 }
 

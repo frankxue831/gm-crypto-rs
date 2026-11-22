@@ -12,7 +12,7 @@
 //! |---|---|
 //! | [`sign_with_id`] / [`verify_with_id`] | GB/T 32918.2 signature, DER-encoded `(r, s)` |
 //! | [`encrypt`](fn@encrypt) / [`decrypt`](fn@decrypt) | GB/T 32918.4 public-key encryption, GM/T 0009 DER `C1‖C3‖C2` |
-//! | [`Sm2PrivateKey`] / [`Sm2PublicKey`] | key types; SEC1 and raw-scalar constructors |
+//! | [`Sm2PrivateKey`] / [`Sm2PublicKey`] | key types; generation, SEC1, and raw-scalar constructors |
 //! | [`raw_ciphertext`] | the `C1‖C3‖C2` byte layout, for callers not using DER |
 //! | `key_exchange` | GM/T 0003.3 key agreement — behind the `sm2-key-exchange` feature |
 //!
@@ -29,7 +29,8 @@
 //!
 //! # Randomness is the caller's
 //!
-//! Signing and encryption both consume a `rand_core::TryCryptoRng`. This
+//! Key generation, signing, and encryption all consume a
+//! `rand_core::TryCryptoRng`. This crate pulls no RNG into its dependency
 //! crate pulls no RNG into its dependency graph — pick one in your own
 //! `Cargo.toml` (`getrandom`'s `SysRng`, an OS-backed CSPRNG, is the usual
 //! answer; on `wasm32` you additionally enable its `wasm_js` feature). An
@@ -77,25 +78,16 @@
 //!
 //! # Generating a key and encrypting
 //!
-//! Generate a fresh SM2 private key by rejection-sampling 32 random bytes
-//! through [`Sm2PrivateKey::from_bytes_be`] (which checks `d ∈ [1, n-2]` in
-//! constant time), then encrypt and decrypt with [`encrypt`](fn@encrypt) and
-//! [`decrypt`](fn@decrypt):
+//! Generate a fresh SM2 private key (`d ∈ [1, n-2]`) from any
+//! `rand_core::TryCryptoRng` via [`Sm2PrivateKey::generate`], then encrypt
+//! and decrypt with [`encrypt`](fn@encrypt) and [`decrypt`](fn@decrypt):
 //!
 //! ```rust
 //! use getrandom::SysRng;
 //! use gmcrypto_core::sm2::{Sm2PrivateKey, decrypt, encrypt};
-//! use zeroize::Zeroize;
 //!
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let mut raw = [0u8; 32];
-//! let key = loop {
-//!     getrandom::fill(&mut raw)?;
-//!     if let Some(k) = Sm2PrivateKey::from_bytes_be(&raw).into_option() {
-//!         raw.zeroize();
-//!         break k;
-//!     }
-//! };
+//! # fn main() -> Result<(), gmcrypto_core::Error> {
+//! let key = Sm2PrivateKey::generate(&mut SysRng)?;
 //! let public = key.public_key();
 //!
 //! let ct = encrypt(&public, b"envelope key", &mut SysRng)?;
