@@ -98,13 +98,12 @@ fn gcm_trait_matches_mode_gcm_including_empty_edges() {
         (GCM_PT, &b""[..]),
         (&b""[..], &b""[..]),
     ] {
-        let (want_ct, want_tag) =
+        let (mut want, want_tag) =
             mode_gcm::encrypt(&KEY_A, &NONCE_12, aad, pt).expect("native encrypt");
 
         let got = Aead::encrypt(&gcm(), &NONCE_12.into(), Payload { msg: pt, aad })
             .expect("trait encrypt");
 
-        let mut want = want_ct.clone();
         want.extend_from_slice(&want_tag);
         assert_eq!(got, want, "pt={} aad={}", pt.len(), aad.len());
 
