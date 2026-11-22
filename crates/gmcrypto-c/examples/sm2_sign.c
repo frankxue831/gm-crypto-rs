@@ -76,6 +76,7 @@ int main(void) {
 
     unsigned char sig[128];
     size_t sig_len = 0;
+    gmcrypto_sm2_hasher_t* hasher = NULL;
     int rc = gmcrypto_sm2_sign(
         sk,
         NULL, 0,             /* default signer ID "1234567812345678" */
@@ -121,7 +122,7 @@ int main(void) {
 
     /* Streaming digest flow: compute e = SM3(Z_A || M) in two chunks and
        cross-verify against single-shot gmcrypto_sm2_verify. */
-    gmcrypto_sm2_hasher_t* hasher = gmcrypto_sm2_hasher_new(pk);
+    hasher = gmcrypto_sm2_hasher_new(pk);
     if (!hasher) {
         fprintf(stderr, "gmcrypto_sm2_hasher_new failed\n");
         rc = 1;
@@ -129,9 +130,17 @@ int main(void) {
     }
     unsigned char digest[GMCRYPTO_SM3_DIGEST_SIZE] = {0};
     if (gmcrypto_sm2_hasher_update(hasher, (const unsigned char*)msg, 10) != GMCRYPTO_OK ||
-        gmcrypto_sm2_hasher_update(hasher, (const unsigned char*)msg + 10, msg_len - 10) != GMCRYPTO_OK ||
-        gmcrypto_sm2_hasher_finalize(hasher, digest) != GMCRYPTO_OK) {
-        fprintf(stderr, "gmcrypto_sm2_hasher streaming failed\n");
+        gmcrypto_sm2_hasher_update(hasher, (const unsigned char*)msg + 10, msg_len - 10) != GMCRYPTO_OK) {
+        fprintf(stderr, "gmcrypto_sm2_hasher_update failed\n");
+        rc = 1;
+        goto cleanup;
+    }
+    /* `_finalize` always consumes and frees `hasher`, even on error; transfer
+       ownership to `h` and clear `hasher` so `cleanup` never double-frees. */
+    gmcrypto_sm2_hasher_t* h = hasher;
+    hasher = NULL;
+    if (gmcrypto_sm2_hasher_finalize(h, digest) != GMCRYPTO_OK) {
+        fprintf(stderr, "gmcrypto_sm2_hasher_finalize failed\n");
         rc = 1;
         goto cleanup;
     }
@@ -152,6 +161,7 @@ cleanup:
        caller-owned copy is our responsibility — see GMCRYPTO_ZEROIZE in
        gmcrypto.h. (Prefer a platform secure-zero where available.) */
     GMCRYPTO_ZEROIZE(d, sizeof d);
+    gmcrypto_sm2_hasher_free(hasher);
     gmcrypto_sm2_privkey_free(sk);
     gmcrypto_sm2_pubkey_free(pk);
     return rc;
