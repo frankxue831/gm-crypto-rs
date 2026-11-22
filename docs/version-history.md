@@ -41,11 +41,9 @@ class, whose accumulator is the point at infinity for 63 of the 64 windows;
 `ctutils` alone and a scalar with its top bit set were quiet. `mul_var` now
 lifts the scalar to `k + n` or `k + 2n` so no doubling ever acts on the
 identity; the lifted loop reads at the noise floor on the same runner class.
-The default `dudect-main` leg no longer fits its 40-minute budget on the
-7763 (about 11 minutes per 100K pass, five passes plus the build); raising
-that one workflow's timeout is a separate policy-script change, since
-`check_assurance_policy.py` pins the number for the frozen study and the
-main watch together. The release-prep commits
+The default `dudect-main` leg took about 11 minutes per 100K pass on an
+EPYC 7763, so five passes could not fit within the original 40-minute limit.
+The release-prep commits
 ride on #246 itself, which also adopts `is_multiple_of` on public lengths and
 folds in the GFNI line the core crate docs had owed since v1.16. The CI job
 names carry the new MSRV, so the `main` ruleset's two required MSRV checks
@@ -75,7 +73,14 @@ per pass on an EPYC 7763 and at 0.005–0.040 on 9V45 and 9V74, with
 2026-10-25 pre-upgrade nightly under 0.7.5 (0.11–0.38 across 7763 and 9V45
 legs), below the 0.55 sentinel and non-blocking; the 7763 full-feature leg
 hit the 40-minute timeout before its gate step, as the default leg had on
-the #246 branch. Post-publish page checks: docs.rs built all three crates,
+the #246 branch. PR #251 raised the `dudect-main.yml` job limit to 75 minutes
+and updated `check_assurance_policy.py` to enforce it. The frozen v1.15
+study (`dudect-nightly.yml`) retained its separate 40-minute limit.
+On October 27 the default and full-feature jobs completed all five 100K
+passes on EPYC 7763 runners in 42m42s and 40m28s, respectively.
+[Timeout fix](https://github.com/frankxue831/gm-crypto-rs/pull/251) · [Default job](https://github.com/frankxue831/gm-crypto-rs/actions/runs/40453638081/job/122021829852) · [Full-feature job](https://github.com/frankxue831/gm-crypto-rs/actions/runs/40453638081/job/122021830049)
+
+Post-publish page checks: docs.rs built all three crates,
 the `gmcrypto-core` feature-badge counts equal 1.16.0's, each crates.io page
 renders its own README with the `"1.17"` snippets, and the registry shows
 `rust-version` 1.87.
