@@ -8,7 +8,7 @@
 //!   delegate-to-`mul_var` path. Constant-time-designed lookup
 //!   preserved.
 
-use crate::sm2::comb_table::{NUM_WINDOWS, WINDOW_BITS, comb_table};
+use crate::sm2::comb_table::{WINDOW_BITS, comb_table};
 use crate::sm2::curve::Fn;
 use crate::sm2::point::ProjectivePoint;
 use crypto_bigint::{Limb, U256};
@@ -99,7 +99,7 @@ pub fn mul_g(k: &Fn) -> ProjectivePoint {
     // [4i, 4i+4). For each window, look up T[i][nibble_i] via
     // constant-time scan and add to the accumulator.
     let mut acc = ProjectivePoint::identity();
-    for i in 0..NUM_WINDOWS {
+    for (i, sub) in table.sub_tables.iter().enumerate() {
         // Bit position from LSB: bits [4i, 4i+4).
         // Byte index from MSB: 31 - i/2; nibble: (i & 1) == 0 → low nibble.
         let bit = i * WINDOW_BITS;
@@ -112,7 +112,6 @@ pub fn mul_g(k: &Fn) -> ProjectivePoint {
 
         // Constant-time linear scan over T[i][0..16].
         let mut chosen = ProjectivePoint::identity();
-        let sub = &table.sub_tables[i];
         for (j, entry) in sub.iter().enumerate() {
             #[allow(clippy::cast_possible_truncation)]
             let take: Choice = (j as u8).ct_eq(&nibble);
