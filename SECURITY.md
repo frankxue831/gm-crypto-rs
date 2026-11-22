@@ -332,6 +332,25 @@ adds no target either — the v1.9 thin-shim rationale: pointer validation, the
 `Box` lifecycle and a copy-out sized by public lengths over the bodies already
 argued above; `c_smoke` is its gate (`docs/v1.13-scope.md` Q13.9).
 
+**The v1.19 additions (`gmcrypto-c` parity, SM4-CTR FFI, and compressed SEC1
+public keys) add NO dudect target** — the same thin-shim and public-input
+rationales apply directly (`docs/v1.19-scope.md` Q19.1–Q19.6):
+- The 19 new `gmcrypto-c` entry points (`gmcrypto_hkdf_sm3*`,
+  `gmcrypto_sm2_privkey_{generate,generate_with_rng,public_key}`,
+  `gmcrypto_sm2_hasher_*`, `gmcrypto_sm2_{sign,verify}_digest*`, and
+  `gmcrypto_sm4_ctr_*`) are thin pointer/ownership wrappers over
+  already-evaluated `gmcrypto-core` primitives: HKDF-SM3 over `HmacSm3`
+  (with zeroization of temporary `PRK` copies in the shim), bounded key
+  generation over `sample_scalar_in_range` + `ct_mul_g`, streaming SM2 hashing
+  and verification over public `Sm3` + `verify_digest`, digest signing over
+  `ct_sign` / `ct_sign_k_class`, and SM4-CTR over `ct_sm4_ctr_encrypt`, with
+  `c_smoke` and `fuzz_c_abi` covering the C boundary.
+- `Sm2PublicKey::{to_sec1_compressed, from_sec1_compressed}` operate
+  exclusively on **public** curve points (public affine coordinates and
+  public `(p + 1) / 4` field exponentiation; zero secret inputs), while
+  keeping uncompressed decoding contracts unchanged on `from_sec1_bytes`,
+  `spki::decode`, `sec1::decode`, and `gmcrypto_sm2_pubkey_new`.
+
 **Cfg-gated on `sm2-key-exchange` (1):**
 
 - `ct_sm2_key_exchange` — the full SM2 key-exchange initiator side
