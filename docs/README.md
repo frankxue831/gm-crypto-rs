@@ -42,7 +42,7 @@ The receipts the case study leans on most live at the repo root, in the crate tr
 
 - [SECURITY.md](../SECURITY.md) — threat model, constant-time posture, the dudect gate policy, and the v0.1 leak narrative.
 - [CLAUDE.md](../CLAUDE.md) — the project's living memory: hard constraints, the dudect gate table, the architecture map, the *Don't* list.
-- [version-history.md](version-history.md) — the per-cycle narrative (v0.8 → v1.18, newest-first): what each cycle shipped, what it deliberately excluded, and why. Split out of CLAUDE.md, where it had grown to 42% of a file re-read at every session.
+- [version-history.md](version-history.md) — the per-cycle narrative (v0.8 → v1.19, newest-first): what each cycle shipped, what it deliberately excluded, and why. Split out of CLAUDE.md, where it had grown to 42% of a file re-read at every session.
 - [ECOSYSTEM.md](ECOSYSTEM.md) — Rust ecosystem charter: shared version/MSRV obligations and the §8 pre-publish downstream compatibility gate (Gate #1).
 - [disclosure-boundary.md](disclosure-boundary.md) — disclosure-boundary policy and review protocol for public docs and CI scanning.
 - [crates/gmcrypto-core/benches/timing_leaks.rs](../crates/gmcrypto-core/benches/timing_leaks.rs) — the dudect timing harness (24 bench functions: 20 `ct_*` targets, the `negative_control`, and 3 runner-noise probes).
@@ -149,6 +149,7 @@ Multi-model adversarial audits, release review checklists, hardware qualificatio
 - [v1.16.0-gate1-evidence.md](v1.16.0-gate1-evidence.md) — ECOSYSTEM §8 Gate #1 evidence for 1.16.0.
 - [v1.17.0-gate1-evidence.md](v1.17.0-gate1-evidence.md) — ECOSYSTEM §8 Gate #1 evidence for 1.17.0.
 - [v1.18.0-gate1-evidence.md](v1.18.0-gate1-evidence.md) — ECOSYSTEM §8 Gate #1 evidence for 1.18.0.
+- [v1.19.0-gate1-evidence.md](v1.19.0-gate1-evidence.md) — ECOSYSTEM §8 Gate #1 evidence for 1.19.0.
 
 ### KAT sourcing
 

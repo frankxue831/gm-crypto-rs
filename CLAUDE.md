@@ -31,8 +31,8 @@ Release state table below and in `docs/`.
 | | |
 |---|---|
 | Live on crates.io | **`1.18.0`** — all three crates, published 2026-11-22 from `d6a6a9e`. Tag `v1.18.0` on `origin` has a verified ED25519 signature. The previous release was `1.17.0` on 2026-10-26 from `41d54a5`. |
-| Workspace version | `1.18.0` matches crates.io. Bump all three crates and their exact sibling pins together for a publishing cycle. Assurance-only cycles keep the workspace version. |
-| Gate #1 | Passed on 2026-11-22 at `630ee75` against downstream `f79543c`. The evidence applies to the published commit `d6a6a9e`. See [the gate evidence](docs/v1.18.0-gate1-evidence.md). `docs/ECOSYSTEM.md` §8 requires a PASS before each publish. The evidence attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty. Rerun the gate if that diff shows changes. Running the gate script is ordinary agent work. |
+| Workspace version | `1.19.0` release candidate. Bump all three crates and their exact sibling pins together for a publishing cycle. Assurance-only cycles keep the workspace version. |
+| Gate #1 | 1.19.0 passed on 2026-11-23 at `b2a0d6b` against downstream `4299f98`. See [the gate evidence](docs/v1.19.0-gate1-evidence.md). `docs/ECOSYSTEM.md` §8 requires a PASS before each publish. The evidence attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty. Rerun the gate if that diff shows changes. Running the gate script is ordinary agent work. |
 
 The maintainer controls `cargo publish` and SSH tag signing. Agents need
 **explicit delegation for each release and action**. The usual agent path
@@ -40,13 +40,16 @@ is branch + PR. The maintainer
 delegated publication for 1.11.0, 1.12.0 and 1.13.0, and both publication
 and tag signing for 1.18.0.
 
-### v1.18 — core API additions and SM4 batching
+### v1.19 — C ABI parity, SM4-CTR and compressed SEC1 public keys
 
-1.18.0 adds HKDF-SM3, SM2 key generation, streaming SM2
-hashing and prehashed signatures. SM4 streaming GCM encryption and
-single-shot CBC decryption now use the batch cipher paths. The C ABI and
-Rust 1.87 minimum carry forward. See `docs/v1.18-scope.md` for the scope
-and the C APIs deferred to v1.19.
+The release candidate adds 19 C ABI entry points in `gmcrypto-c` (`112 → 131`
+exports) covering HKDF-SM3, SM2 key generation and public-key derivation,
+streaming SM2 hashing and precomputed-digest sign/verify, and single-shot and
+streaming SM4-CTR, plus `Sm2PublicKey::{to_sec1_compressed,
+from_sec1_compressed}` in `gmcrypto-core`. Existing wire parsers
+(`from_sec1_bytes`, `spki::decode`, `sec1::decode`, `gmcrypto_sm2_pubkey_new`)
+stay strictly 65-byte uncompressed, and the Rust 1.87 minimum carries forward.
+See `docs/v1.19-scope.md`.
 
 ### v1.15 — noise-twin calibration (assurance cycle; direction approved 2026-09-27)
 

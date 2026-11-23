@@ -5,7 +5,11 @@ the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Work toward the next release per [`docs/v1.19-scope.md`](docs/v1.19-scope.md) (#284):
+## [1.19.0] - pending publication
+
+The Rust and C API additions preserve compatibility with 1.18. Runtime
+dependencies and the Rust 1.87 minimum stay the same (`zeroize` is now a
+direct dependency in `gmcrypto-c`). See [the release scope](docs/v1.19-scope.md).
 
 ### Added
 
@@ -2821,6 +2825,7 @@ last two in a follow-up pass.
 - **Variable-time-multiplier CPUs are out of scope.**
 
 [Unreleased]: https://github.com/frankxue831/gm-crypto-rs/compare/v1.18.0...HEAD
+[1.19.0]: https://github.com/frankxue831/gm-crypto-rs/compare/v1.18.0...b2a0d6b533ef37f30c15a778b573ab2606c73463
 [1.18.0]: https://github.com/frankxue831/gm-crypto-rs/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/frankxue831/gm-crypto-rs/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/frankxue831/gm-crypto-rs/compare/v1.13.0...v1.16.0

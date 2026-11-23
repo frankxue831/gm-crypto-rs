@@ -19,6 +19,18 @@ only a condensed current-release block — see its `Don't` section.
 
 ## Cycles
 
+**v1.19 — C ABI parity, SM4-CTR and compressed SEC1 public keys (1.19.0
+release candidate).** `gmcrypto-c` exposes the v1.18 Rust KDF, SM2 key
+generation and streaming digest signing APIs alongside single-shot and
+streaming SM4-CTR (`112 → 131` exported symbols; `c_smoke` `109 → 130`).
+`gmcrypto-core` adds `Sm2PublicKey::{to_sec1_compressed,
+from_sec1_compressed}` (`02`/`03 || X`, 33 bytes) for bare public keys while
+keeping `from_sec1_bytes`, `spki::decode`, `sec1::decode`, and
+`gmcrypto_sm2_pubkey_new` strictly 65-byte uncompressed. Runtime
+dependencies (`zeroize` made direct in `gmcrypto-c`), `unsafe_code =
+"forbid"` in `gmcrypto-core`, and MSRV 1.87 stay unchanged. See
+[the v1.19 scope](v1.19-scope.md).
+
 **v1.18 — HKDF-SM3, SM2 key generation and streaming signatures, SM4
 batching.** All three crates shipped as 1.18.0 on 2026-11-22 from `d6a6a9e`.
 Each published archive matched its crates.io checksum and recorded that commit.
