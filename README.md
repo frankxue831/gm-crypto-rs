@@ -66,7 +66,7 @@ cargo add gmcrypto-core
 
 ```toml
 [dependencies]
-gmcrypto-core = "1.18"
+gmcrypto-core = "1.19"
 getrandom = { version = "0.4", default-features = false, features = ["sys_rng"] }
 ```
 
@@ -375,7 +375,7 @@ its default graph. Wasm callers enable it in *their* `Cargo.toml`:
 
 ```toml
 [dependencies]
-gmcrypto-core = "1.18"
+gmcrypto-core = "1.19"
 getrandom = { version = "0.4", default-features = false, features = ["wasm_js"] }
 ```
 

@@ -22,7 +22,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! gmcrypto-core = "1.18"
+//! gmcrypto-core = "1.19"
 //! ```
 //!
 //! `default = []` — the base build is the primitives below with no optional
