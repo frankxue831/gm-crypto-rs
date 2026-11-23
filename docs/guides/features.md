@@ -29,11 +29,11 @@ Everything else is additive and opt-in.
 
 - **General service (signing + authenticated encryption):**
   ```toml
-  gmcrypto-core = { version = "1.18", features = ["sm4-aead", "sm4-bitsliced-simd"] }
+  gmcrypto-core = { version = "1.19", features = ["sm4-aead", "sm4-bitsliced-simd"] }
   ```
 - **TLCP toolkit (all four SM2-family suites + cert pair verification + ECDHE):**
   ```toml
-  gmcrypto-core = { version = "1.18", features = ["tlcp", "x509", "sm4-aead", "sm2-key-exchange"] }
+  gmcrypto-core = { version = "1.19", features = ["tlcp", "x509", "sm4-aead", "sm2-key-exchange"] }
   ```
 - **`wasm32-unknown-unknown`:**
   Enable any pure-core / `no_std` feature set (`sm4-aead`, `sm4-bitsliced-simd`, `sm4-xts`, `sm2-key-exchange`, `x509`, `tlcp`, `*-traits`) and add `getrandom` with its `wasm_js` feature in your own `Cargo.toml` to pass `SysRng` to SM2 operations.

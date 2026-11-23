@@ -41,7 +41,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! gmcrypto-core = { version = "1.18", features = ["x509"] }
+//! gmcrypto-core = { version = "1.19", features = ["x509"] }
 //! ```
 //!
 //! # Example

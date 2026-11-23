@@ -18,7 +18,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! gmcrypto-core = { version = "1.18", features = ["sm2-key-exchange"] }
+//! gmcrypto-core = { version = "1.19", features = ["sm2-key-exchange"] }
 //! ```
 //!
 //! # Example

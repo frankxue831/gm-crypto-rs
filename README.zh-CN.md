@@ -18,7 +18,7 @@ cargo add gmcrypto-core
 
 ```toml
 [dependencies]
-gmcrypto-core = "1.18"
+gmcrypto-core = "1.19"
 getrandom = { version = "0.4", default-features = false, features = ["sys_rng"] }
 ```
 
