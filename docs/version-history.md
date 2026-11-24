@@ -19,8 +19,24 @@ only a condensed current-release block — see its `Don't` section.
 
 ## Cycles
 
-**v1.19 — C ABI parity, SM4-CTR and compressed SEC1 public keys (1.19.0
-release candidate).** `gmcrypto-c` exposes the v1.18 Rust KDF, SM2 key
+**v1.19 — C ABI parity, SM4-CTR and compressed SEC1 public keys; PUBLISHED
+2026-11-24 as 1.19.0.** All three crates shipped from
+[`44b46f797641d52f93badfbb49edc29d805d18a5`](https://github.com/frankxue831/gm-crypto-rs/commit/44b46f797641d52f93badfbb49edc29d805d18a5).
+The SSH-signed [`v1.19.0` tag](https://github.com/frankxue831/gm-crypto-rs/tree/v1.19.0)
+points to that commit and verified with ED25519. Each published archive matched
+its crates.io checksum and recorded the same commit in `.cargo_vcs_info.json`.
+The registry records publication in simd → core → c order (UTC):
+
+| Crate | Published 2026-11-24 (UTC) |
+|---|---|
+| [`gmcrypto-simd` 1.19.0](https://crates.io/crates/gmcrypto-simd/1.19.0) | 03:28:48 |
+| [`gmcrypto-core` 1.19.0](https://crates.io/crates/gmcrypto-core/1.19.0) | 03:29:56 |
+| [`gmcrypto-c` 1.19.0](https://crates.io/crates/gmcrypto-c/1.19.0) | 03:30:25 |
+
+The release commit matches gated candidate `b2a0d6b` across `crates/` and
+`Cargo.toml`; see the [Gate #1 evidence](v1.19.0-gate1-evidence.md).
+
+`gmcrypto-c` exposes the v1.18 Rust KDF, SM2 key
 generation and streaming digest signing APIs alongside single-shot and
 streaming SM4-CTR (`112 → 131` exported symbols; `c_smoke` `109 → 130`).
 `gmcrypto-core` adds `Sm2PublicKey::{to_sec1_compressed,
