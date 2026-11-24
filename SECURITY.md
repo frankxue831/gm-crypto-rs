@@ -28,9 +28,8 @@ published across `gmcrypto-simd`, `gmcrypto-core`, and `gmcrypto-c` together.
 
 | Version | Supported |
 |---|---|
-| `1.19.x` | From publication of 1.19.0 |
-| `1.18.x` | Until publication of 1.19.0 |
-| `< 1.18` | No |
+| `1.19.x` | Yes — published 2026-11-24 |
+| `< 1.19` | No |
 
 Only the latest released minor version receives security fixes. There is no
 LTS branch.

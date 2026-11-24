@@ -30,8 +30,8 @@ Release state table below and in `docs/`.
 
 | | |
 |---|---|
-| Live on crates.io | **`1.18.0`** — all three crates, published 2026-11-22 from `d6a6a9e`. Tag `v1.18.0` on `origin` has a verified ED25519 signature. The previous release was `1.17.0` on 2026-10-26 from `41d54a5`. |
-| Workspace version | `1.19.0` release candidate. Bump all three crates and their exact sibling pins together for a publishing cycle. Assurance-only cycles keep the workspace version. |
+| Live on crates.io | **`1.19.0`** — all three crates, published 2026-11-24 from `44b46f797641d52f93badfbb49edc29d805d18a5`. Tag [`v1.19.0`](https://github.com/frankxue831/gm-crypto-rs/tree/v1.19.0) on `origin` has a verified ED25519 signature. Registry links and publication times: [version history](docs/version-history.md#cycles). The previous release was `1.18.0` on 2026-11-22 from `d6a6a9e`. |
+| Workspace version | `1.19.0` (published). Bump all three crates and their exact sibling pins together for a publishing cycle. Assurance-only cycles keep the workspace version. |
 | Gate #1 | 1.19.0 passed on 2026-11-23 at `b2a0d6b` against downstream `4299f98`. See [the gate evidence](docs/v1.19.0-gate1-evidence.md). `docs/ECOSYSTEM.md` §8 requires a PASS before each publish. The evidence attaches to any tip where `git diff <gated-sha> <tip> --stat -- crates/ Cargo.toml` is empty. Rerun the gate if that diff shows changes. Running the gate script is ordinary agent work. |
 
 The maintainer controls `cargo publish` and SSH tag signing. Agents need
@@ -42,7 +42,7 @@ and tag signing for 1.18.0.
 
 ### v1.19 — C ABI parity, SM4-CTR and compressed SEC1 public keys
 
-The release candidate adds 19 C ABI entry points in `gmcrypto-c` (`112 → 131`
+The 1.19.0 release adds 19 C ABI entry points in `gmcrypto-c` (`112 → 131`
 exports) covering HKDF-SM3, SM2 key generation and public-key derivation,
 streaming SM2 hashing and precomputed-digest sign/verify, and single-shot and
 streaming SM4-CTR, plus `Sm2PublicKey::{to_sec1_compressed,
