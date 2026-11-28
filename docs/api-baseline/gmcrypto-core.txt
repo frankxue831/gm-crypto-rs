@@ -55,6 +55,8 @@ pub mod gmcrypto_core::sec1
 pub struct gmcrypto_core::sec1::EcPrivateKey
 pub gmcrypto_core::sec1::EcPrivateKey::public: core::option::Option<gmcrypto_core::sm2::public_key::Sm2PublicKey>
 pub gmcrypto_core::sec1::EcPrivateKey::scalar_be: [u8; 32]
+impl core::fmt::Debug for gmcrypto_core::sec1::EcPrivateKey
+pub fn gmcrypto_core::sec1::EcPrivateKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::ops::drop::Drop for gmcrypto_core::sec1::EcPrivateKey
 pub fn gmcrypto_core::sec1::EcPrivateKey::drop(&mut self)
 pub fn gmcrypto_core::sec1::decode(&[u8]) -> core::option::Option<gmcrypto_core::sec1::EcPrivateKey>

@@ -195,8 +195,9 @@ pub fn encode(
 ///
 /// Returned by [`decode`]; consumers translate the validated scalar
 /// into an [`crate::sm2::Sm2PrivateKey`] via the constructor on that
-/// type. Holds public bytes only — no Mont-form scalars.
-#[derive(Debug, Clone)]
+/// type. `scalar_be` holds the raw 32-byte secret scalar (zeroized on
+/// drop and redacted in [`core::fmt::Debug`]).
+#[derive(Clone)]
 pub struct EcPrivateKey {
     /// 32-byte big-endian scalar `d`. Not validated against the
     /// curve order here — the caller must reject `d == 0` and
@@ -205,6 +206,15 @@ pub struct EcPrivateKey {
     /// Decoded uncompressed public key, if the optional
     /// `publicKey` field was present and well-formed.
     pub public: Option<crate::sm2::Sm2PublicKey>,
+}
+
+impl core::fmt::Debug for EcPrivateKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("EcPrivateKey")
+            .field("scalar_be", &"<redacted>")
+            .field("public", &self.public)
+            .finish()
+    }
 }
 
 impl Drop for EcPrivateKey {
@@ -250,7 +260,10 @@ pub fn decode(input: &[u8]) -> Option<EcPrivateKey> {
 
     // [0] EXPLICIT parameters (OPTIONAL).
     if let Some((params_inner, after)) = reader::read_context_tagged_explicit(body, 0) {
-        let (oid, params_rest) = reader::read_oid(params_inner)?;
+        let Some((oid, params_rest)) = reader::read_oid(params_inner) else {
+            scalar_be.zeroize();
+            return None;
+        };
         if !params_rest.is_empty() || oid != SM2P256V1 {
             scalar_be.zeroize();
             return None;
@@ -260,7 +273,10 @@ pub fn decode(input: &[u8]) -> Option<EcPrivateKey> {
 
     // [1] EXPLICIT publicKey BIT STRING (OPTIONAL).
     if let Some((pk_inner, after)) = reader::read_context_tagged_explicit(body, 1) {
-        let (unused, pk_bytes, pk_rest) = reader::read_bit_string(pk_inner)?;
+        let Some((unused, pk_bytes, pk_rest)) = reader::read_bit_string(pk_inner) else {
+            scalar_be.zeroize();
+            return None;
+        };
         if unused != 0 || !pk_rest.is_empty() {
             scalar_be.zeroize();
             return None;
@@ -559,5 +575,40 @@ mod tests {
         let mut der = Vec::new();
         writer::write_sequence(&mut der, &body);
         assert!(decode(&der).is_none());
+    }
+
+    #[test]
+    fn ecprivatekey_debug_redacts_scalar() {
+        let key = EcPrivateKey {
+            scalar_be: [0xAB; 32],
+            public: None,
+        };
+        let formatted = alloc::format!("{key:?}");
+        assert!(formatted.contains("<redacted>"));
+        assert!(!formatted.contains("171"));
+    }
+
+    #[test]
+    fn ecprivatekey_decode_rejects_malformed_optional_tags() {
+        // Valid prefix: version = 1, privateKey = 32-byte scalar.
+        let mut base = Vec::new();
+        writer::write_integer(&mut base, &[ECPRIVKEY_VER1]);
+        writer::write_octet_string(&mut base, &[0x42u8; 32]);
+
+        // [0] containing NULL (not an OID).
+        let mut bad_params_body = base.clone();
+        let mut null_tlv = Vec::new();
+        writer::write_null(&mut null_tlv);
+        writer::write_context_tagged_explicit(&mut bad_params_body, 0, &null_tlv);
+        let mut bad_params_der = Vec::new();
+        writer::write_sequence(&mut bad_params_der, &bad_params_body);
+        assert!(decode(&bad_params_der).is_none());
+
+        // [1] containing NULL (not a BIT STRING).
+        let mut bad_pk_body = base;
+        writer::write_context_tagged_explicit(&mut bad_pk_body, 1, &null_tlv);
+        let mut bad_pk_der = Vec::new();
+        writer::write_sequence(&mut bad_pk_der, &bad_pk_body);
+        assert!(decode(&bad_pk_der).is_none());
     }
 }

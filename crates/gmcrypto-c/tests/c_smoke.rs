@@ -177,6 +177,31 @@ fn hmac_sm3_verify_matches_core() {
     }
 }
 
+#[test]
+fn sm3_and_hmac_finalize_verify_consume_handle_on_null_output() {
+    let sm3 = gmcrypto_sm3_new();
+    assert!(!sm3.is_null());
+    assert_eq!(
+        unsafe { gmcrypto_sm3_finalize(sm3, ptr::null_mut()) },
+        GMCRYPTO_ERR
+    );
+
+    let key = [0x11u8; 16];
+    let mac_fin = unsafe { gmcrypto_hmac_sm3_new(key.as_ptr(), key.len()) };
+    assert!(!mac_fin.is_null());
+    assert_eq!(
+        unsafe { gmcrypto_hmac_sm3_finalize(mac_fin, ptr::null_mut()) },
+        GMCRYPTO_ERR
+    );
+
+    let mac_ver = unsafe { gmcrypto_hmac_sm3_new(key.as_ptr(), key.len()) };
+    assert!(!mac_ver.is_null());
+    assert_eq!(
+        unsafe { gmcrypto_hmac_sm3_verify(mac_ver, ptr::null()) },
+        GMCRYPTO_ERR
+    );
+}
+
 // ============================================================
 // PBKDF2-HMAC-SM3
 // ============================================================

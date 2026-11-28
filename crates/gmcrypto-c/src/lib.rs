@@ -500,8 +500,8 @@ pub unsafe extern "C" fn gmcrypto_sm3_update(
 }
 
 /// Consume the streaming SM3 hasher and write the digest to
-/// `out_digest`. The handle is **freed** by this call; do not call
-/// [`gmcrypto_sm3_free`] on it afterwards.
+/// `out_digest`. The handle is **freed** by this call (even on error);
+/// do not call [`gmcrypto_sm3_free`] on it afterwards.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm3_finalize(
     hasher: *mut gmcrypto_sm3_t,
@@ -511,12 +511,14 @@ pub unsafe extern "C" fn gmcrypto_sm3_finalize(
         if hasher.is_null() {
             return GMCRYPTO_ERR;
         }
+        // SAFETY: hasher non-null and came from `Box::into_raw`; take
+        // ownership before validating `out_digest` so the handle is freed
+        // even on output error.
+        let boxed = unsafe { Box::from_raw(hasher) };
         let out = match unsafe { try_slice_mut(out_digest, GMCRYPTO_SM3_DIGEST_SIZE) } {
             Some(s) => s,
             None => return GMCRYPTO_ERR,
         };
-        // SAFETY: hasher non-null; take ownership and drop after finalize.
-        let boxed = unsafe { Box::from_raw(hasher) };
         let digest = boxed.inner.finalize();
         out.copy_from_slice(&digest);
         GMCRYPTO_OK
@@ -526,12 +528,14 @@ pub unsafe extern "C" fn gmcrypto_sm3_finalize(
 /// Free a streaming SM3 hasher. Passing NULL is a no-op.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm3_free(hasher: *mut gmcrypto_sm3_t) {
-    if hasher.is_null() {
-        return;
-    }
-    // SAFETY: hasher came from `Box::into_raw` and the caller has not
-    // freed it before.
-    drop(unsafe { Box::from_raw(hasher) });
+    let _ = std::panic::catch_unwind(|| {
+        if hasher.is_null() {
+            return;
+        }
+        // SAFETY: hasher came from `Box::into_raw` and the caller has not
+        // freed it before.
+        drop(unsafe { Box::from_raw(hasher) });
+    });
 }
 
 // ============================================================
@@ -609,7 +613,7 @@ pub unsafe extern "C" fn gmcrypto_hmac_sm3_update(
 }
 
 /// Consume the streaming HMAC-SM3 instance and write the 32-byte tag
-/// to `out_tag`. The handle is **freed** by this call.
+/// to `out_tag`. The handle is **freed** by this call (even on error).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_hmac_sm3_finalize(
     mac: *mut gmcrypto_hmac_sm3_t,
@@ -619,13 +623,14 @@ pub unsafe extern "C" fn gmcrypto_hmac_sm3_finalize(
         if mac.is_null() {
             return GMCRYPTO_ERR;
         }
+        // SAFETY: `mac` is non-null and came from `Box::into_raw`;
+        // take ownership before validating `out_tag` so the handle is freed
+        // even on output error.
+        let boxed = unsafe { Box::from_raw(mac) };
         let out = match unsafe { try_slice_mut(out_tag, GMCRYPTO_SM3_DIGEST_SIZE) } {
             Some(s) => s,
             None => return GMCRYPTO_ERR,
         };
-        // SAFETY: `mac` is non-null and came from `Box::into_raw`;
-        // take ownership and drop after finalize.
-        let boxed = unsafe { Box::from_raw(mac) };
         let tag = boxed.inner.finalize();
         out.copy_from_slice(&tag);
         GMCRYPTO_OK
@@ -634,14 +639,22 @@ pub unsafe extern "C" fn gmcrypto_hmac_sm3_finalize(
 
 /// Consume the streaming HMAC-SM3 instance and verify the candidate
 /// tag in constant time. Returns [`GMCRYPTO_OK`] on match;
-/// [`GMCRYPTO_ERR`] on mismatch. The handle is **freed** by this call.
+/// [`GMCRYPTO_ERR`] on mismatch. The handle is **freed** by this call
+/// (even on error).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_hmac_sm3_verify(
     mac: *mut gmcrypto_hmac_sm3_t,
     expected_tag: *const u8,
 ) -> c_int {
     ffi_guard(|| {
-        if mac.is_null() || expected_tag.is_null() {
+        if mac.is_null() {
+            return GMCRYPTO_ERR;
+        }
+        // SAFETY: `mac` is non-null and came from `Box::into_raw`;
+        // take ownership before validating `expected_tag` so the handle is
+        // freed even on input error.
+        let boxed = unsafe { Box::from_raw(mac) };
+        if expected_tag.is_null() {
             return GMCRYPTO_ERR;
         }
         let expected = match unsafe { try_slice(expected_tag, GMCRYPTO_SM3_DIGEST_SIZE) } {
@@ -650,9 +663,6 @@ pub unsafe extern "C" fn gmcrypto_hmac_sm3_verify(
         };
         let mut expected_arr = [0u8; GMCRYPTO_SM3_DIGEST_SIZE];
         expected_arr.copy_from_slice(expected);
-        // SAFETY: `mac` is non-null and came from `Box::into_raw`;
-        // take ownership and drop after verify.
-        let boxed = unsafe { Box::from_raw(mac) };
         if boxed.inner.verify(&expected_arr) {
             GMCRYPTO_OK
         } else {
@@ -664,12 +674,14 @@ pub unsafe extern "C" fn gmcrypto_hmac_sm3_verify(
 /// Free a streaming HMAC-SM3 instance. NULL is a no-op.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_hmac_sm3_free(mac: *mut gmcrypto_hmac_sm3_t) {
-    if mac.is_null() {
-        return;
-    }
-    // SAFETY: `mac` came from `Box::into_raw` and has not been
-    // freed (NULL handled above).
-    drop(unsafe { Box::from_raw(mac) });
+    let _ = std::panic::catch_unwind(|| {
+        if mac.is_null() {
+            return;
+        }
+        // SAFETY: `mac` came from `Box::into_raw` and has not been
+        // freed (NULL handled above).
+        drop(unsafe { Box::from_raw(mac) });
+    });
 }
 
 // ============================================================
@@ -933,12 +945,14 @@ pub unsafe extern "C" fn gmcrypto_sm4_decrypt_block(
 /// Free an SM4 cipher. NULL is a no-op.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_free(cipher: *mut gmcrypto_sm4_t) {
-    if cipher.is_null() {
-        return;
-    }
-    // SAFETY: `cipher` came from `Box::into_raw` and has not
-    // been freed (NULL handled above).
-    drop(unsafe { Box::from_raw(cipher) });
+    let _ = std::panic::catch_unwind(|| {
+        if cipher.is_null() {
+            return;
+        }
+        // SAFETY: `cipher` came from `Box::into_raw` and has not
+        // been freed (NULL handled above).
+        drop(unsafe { Box::from_raw(cipher) });
+    });
 }
 
 /// SM4-CBC single-shot encrypt with PKCS#7 padding. IV must be
@@ -1137,11 +1151,13 @@ pub unsafe extern "C" fn gmcrypto_sm4_cbc_encryptor_finalize(
 /// already consumed the handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_cbc_encryptor_free(enc: *mut gmcrypto_sm4_cbc_encryptor_t) {
-    if enc.is_null() {
-        return;
-    }
-    // SAFETY: enc came from Box::into_raw and has not been freed.
-    drop(unsafe { Box::from_raw(enc) });
+    let _ = std::panic::catch_unwind(|| {
+        if enc.is_null() {
+            return;
+        }
+        // SAFETY: enc came from Box::into_raw and has not been freed.
+        drop(unsafe { Box::from_raw(enc) });
+    });
 }
 
 /// Construct a streaming SM4-CBC decryptor. `key` is exactly 16
@@ -1241,11 +1257,13 @@ pub unsafe extern "C" fn gmcrypto_sm4_cbc_decryptor_finalize(
 /// already consumed the handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_cbc_decryptor_free(dec: *mut gmcrypto_sm4_cbc_decryptor_t) {
-    if dec.is_null() {
-        return;
-    }
-    // SAFETY: dec came from Box::into_raw and has not been freed.
-    drop(unsafe { Box::from_raw(dec) });
+    let _ = std::panic::catch_unwind(|| {
+        if dec.is_null() {
+            return;
+        }
+        // SAFETY: dec came from Box::into_raw and has not been freed.
+        drop(unsafe { Box::from_raw(dec) });
+    });
 }
 
 // ============================================================
@@ -1920,7 +1938,11 @@ pub unsafe extern "C" fn gmcrypto_sm4_xts_decrypt(
         };
         match mode_xts::decrypt(k_arr, tw_arr, d) {
             // SAFETY: out valid for out_capacity bytes; out_actual_len valid.
-            Some(pt) => unsafe { write_output(&pt, out, out_capacity, out_actual_len) },
+            Some(mut pt) => {
+                let rc = unsafe { write_output(&pt, out, out_capacity, out_actual_len) };
+                pt.zeroize();
+                rc
+            }
             None => GMCRYPTO_ERR,
         }
     })
@@ -1980,16 +2002,18 @@ pub unsafe extern "C" fn gmcrypto_sm4_xts_encrypt_sectors(
         // (caller-error) `key`/`buf` overlap a benign copy instead of `&`/`&mut`
         // aliasing UB — the in-place path is the only FFI surface that holds a
         // `&mut` over caller memory alongside the key. (W0 codex finding.)
-        let key_owned: [u8; GMCRYPTO_SM4_XTS_KEY_SIZE] = match k.try_into() {
+        let mut key_owned: [u8; GMCRYPTO_SM4_XTS_KEY_SIZE] = match k.try_into() {
             Ok(a) => a,
             Err(_) => return GMCRYPTO_ERR,
         };
         // SAFETY: buf valid for read+write of buf_len bytes, or buf_len == 0.
-        let b = match unsafe { try_slice_mut(buf, buf_len) } {
-            Some(s) => s,
-            None => return GMCRYPTO_ERR,
+        let Some(b) = (unsafe { try_slice_mut(buf, buf_len) }) else {
+            key_owned.zeroize();
+            return GMCRYPTO_ERR;
         };
-        match mode_xts::encrypt_sectors(&key_owned, sector_size, u128::from(start_sector), b) {
+        let res = mode_xts::encrypt_sectors(&key_owned, sector_size, u128::from(start_sector), b);
+        key_owned.zeroize();
+        match res {
             Some(()) => GMCRYPTO_OK,
             None => GMCRYPTO_ERR,
         }
@@ -2017,16 +2041,18 @@ pub unsafe extern "C" fn gmcrypto_sm4_xts_decrypt_sectors(
         // Copy the key into an OWNED array so no shared borrow of the key memory
         // is alive while `buf` is borrowed mutably below (see the encrypt-side
         // note — avoids `&`/`&mut` aliasing UB on a caller `key`/`buf` overlap).
-        let key_owned: [u8; GMCRYPTO_SM4_XTS_KEY_SIZE] = match k.try_into() {
+        let mut key_owned: [u8; GMCRYPTO_SM4_XTS_KEY_SIZE] = match k.try_into() {
             Ok(a) => a,
             Err(_) => return GMCRYPTO_ERR,
         };
         // SAFETY: buf valid for read+write of buf_len bytes, or buf_len == 0.
-        let b = match unsafe { try_slice_mut(buf, buf_len) } {
-            Some(s) => s,
-            None => return GMCRYPTO_ERR,
+        let Some(b) = (unsafe { try_slice_mut(buf, buf_len) }) else {
+            key_owned.zeroize();
+            return GMCRYPTO_ERR;
         };
-        match mode_xts::decrypt_sectors(&key_owned, sector_size, u128::from(start_sector), b) {
+        let res = mode_xts::decrypt_sectors(&key_owned, sector_size, u128::from(start_sector), b);
+        key_owned.zeroize();
+        match res {
             Some(()) => GMCRYPTO_OK,
             None => GMCRYPTO_ERR,
         }
@@ -2179,11 +2205,13 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_finalize_with_tag_len(
 /// already consumed the handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_gcm_encryptor_free(enc: *mut gmcrypto_sm4_gcm_encryptor_t) {
-    if enc.is_null() {
-        return;
-    }
-    // SAFETY: enc came from Box::into_raw and has not been freed.
-    drop(unsafe { Box::from_raw(enc) });
+    let _ = std::panic::catch_unwind(|| {
+        if enc.is_null() {
+            return;
+        }
+        // SAFETY: enc came from Box::into_raw and has not been freed.
+        drop(unsafe { Box::from_raw(enc) });
+    });
 }
 
 /// Construct a streaming SM4-GCM decryptor. Same parameter contract as
@@ -2297,11 +2325,13 @@ pub unsafe extern "C" fn gmcrypto_sm4_gcm_decryptor_finalize_verify(
 /// [`gmcrypto_sm4_gcm_decryptor_finalize_verify`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_gcm_decryptor_free(dec: *mut gmcrypto_sm4_gcm_decryptor_t) {
-    if dec.is_null() {
-        return;
-    }
-    // SAFETY: dec came from Box::into_raw and has not been freed.
-    drop(unsafe { Box::from_raw(dec) });
+    let _ = std::panic::catch_unwind(|| {
+        if dec.is_null() {
+            return;
+        }
+        // SAFETY: dec came from Box::into_raw and has not been freed.
+        drop(unsafe { Box::from_raw(dec) });
+    });
 }
 
 // ============================================================
@@ -2448,11 +2478,13 @@ pub unsafe extern "C" fn gmcrypto_sm4_ccm_encryptor_finalize(
 /// consumed the handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_ccm_encryptor_free(enc: *mut gmcrypto_sm4_ccm_encryptor_t) {
-    if enc.is_null() {
-        return;
-    }
-    // SAFETY: enc came from Box::into_raw and has not been freed.
-    drop(unsafe { Box::from_raw(enc) });
+    let _ = std::panic::catch_unwind(|| {
+        if enc.is_null() {
+            return;
+        }
+        // SAFETY: enc came from Box::into_raw and has not been freed.
+        drop(unsafe { Box::from_raw(enc) });
+    });
 }
 
 /// Construct an incremental-input buffered SM4-CCM decryptor. `key` is
@@ -2568,11 +2600,13 @@ pub unsafe extern "C" fn gmcrypto_sm4_ccm_decryptor_finalize_verify(
 /// NULL is a no-op. Do NOT call after `_finalize_verify`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm4_ccm_decryptor_free(dec: *mut gmcrypto_sm4_ccm_decryptor_t) {
-    if dec.is_null() {
-        return;
-    }
-    // SAFETY: dec came from Box::into_raw and has not been freed.
-    drop(unsafe { Box::from_raw(dec) });
+    let _ = std::panic::catch_unwind(|| {
+        if dec.is_null() {
+            return;
+        }
+        // SAFETY: dec came from Box::into_raw and has not been freed.
+        drop(unsafe { Box::from_raw(dec) });
+    });
 }
 
 // ============================================================
@@ -2755,23 +2789,27 @@ pub unsafe extern "C" fn gmcrypto_sm2_pubkey_to_sec1_uncompressed(
 /// zeroized via `ZeroizeOnDrop` before the heap slot is freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm2_privkey_free(key: *mut gmcrypto_sm2_privkey_t) {
-    if key.is_null() {
-        return;
-    }
-    // SAFETY: `key` came from `Box::into_raw` and has not been
-    // freed (NULL handled above).
-    drop(unsafe { Box::from_raw(key) });
+    let _ = std::panic::catch_unwind(|| {
+        if key.is_null() {
+            return;
+        }
+        // SAFETY: `key` came from `Box::into_raw` and has not been
+        // freed (NULL handled above).
+        drop(unsafe { Box::from_raw(key) });
+    });
 }
 
 /// Free an SM2 public key. NULL is a no-op.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_sm2_pubkey_free(key: *mut gmcrypto_sm2_pubkey_t) {
-    if key.is_null() {
-        return;
-    }
-    // SAFETY: `key` came from `Box::into_raw` and has not been
-    // freed (NULL handled above).
-    drop(unsafe { Box::from_raw(key) });
+    let _ = std::panic::catch_unwind(|| {
+        if key.is_null() {
+            return;
+        }
+        // SAFETY: `key` came from `Box::into_raw` and has not been
+        // freed (NULL handled above).
+        drop(unsafe { Box::from_raw(key) });
+    });
 }
 
 /// Emit a password-encrypted PKCS#8 PEM blob containing the SM2
@@ -3972,11 +4010,13 @@ pub unsafe extern "C" fn gmcrypto_sm2_kx_initiator_confirm(
 pub unsafe extern "C" fn gmcrypto_sm2_kx_initiator_free(
     initiator: *mut gmcrypto_sm2_kx_initiator_t,
 ) {
-    if !initiator.is_null() {
-        // SAFETY: came from Box::into_raw; reclaim + drop (the core's
-        // drop-wipes run on the inner ephemeral state).
-        drop(unsafe { Box::from_raw(initiator) });
-    }
+    let _ = std::panic::catch_unwind(|| {
+        if !initiator.is_null() {
+            // SAFETY: came from Box::into_raw; reclaim + drop (the core's
+            // drop-wipes run on the inner ephemeral state).
+            drop(unsafe { Box::from_raw(initiator) });
+        }
+    });
 }
 
 /// Construct a key-exchange RESPONDER (party B). `local_privkey` is
@@ -4201,11 +4241,13 @@ pub unsafe extern "C" fn gmcrypto_sm2_kx_responder_finish(
 pub unsafe extern "C" fn gmcrypto_sm2_kx_responder_free(
     responder: *mut gmcrypto_sm2_kx_responder_t,
 ) {
-    if !responder.is_null() {
-        // SAFETY: came from Box::into_raw; reclaim + drop (the core's
-        // drop-wipes run on any held key / waiting state).
-        drop(unsafe { Box::from_raw(responder) });
-    }
+    let _ = std::panic::catch_unwind(|| {
+        if !responder.is_null() {
+            // SAFETY: came from Box::into_raw; reclaim + drop (the core's
+            // drop-wipes run on any held key / waiting state).
+            drop(unsafe { Box::from_raw(responder) });
+        }
+    });
 }
 
 // ============================================================
@@ -4293,11 +4335,13 @@ pub unsafe extern "C" fn gmcrypto_x509_certificate_from_der(
 /// `cert` must be a handle from this library, not yet freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmcrypto_x509_certificate_free(cert: *mut gmcrypto_x509_certificate_t) {
-    if cert.is_null() {
-        return;
-    }
-    // SAFETY: came from Box::into_raw in `_from_der`; reclaim + drop.
-    drop(unsafe { Box::from_raw(cert) });
+    let _ = std::panic::catch_unwind(|| {
+        if cert.is_null() {
+            return;
+        }
+        // SAFETY: came from Box::into_raw in `_from_der`; reclaim + drop.
+        drop(unsafe { Box::from_raw(cert) });
+    });
 }
 
 /// Shared copy-out body for the raw-byte accessors.
@@ -4963,10 +5007,12 @@ pub unsafe extern "C" fn gmcrypto_tlcp_record_keys_cbc_new(
 pub unsafe extern "C" fn gmcrypto_tlcp_record_keys_cbc_free(
     keys: *mut gmcrypto_tlcp_record_keys_cbc_t,
 ) {
-    if !keys.is_null() {
-        // SAFETY: from Box::into_raw; reclaim + drop (ZeroizeOnDrop wipes).
-        drop(unsafe { Box::from_raw(keys) });
-    }
+    let _ = std::panic::catch_unwind(|| {
+        if !keys.is_null() {
+            // SAFETY: from Box::into_raw; reclaim + drop (ZeroizeOnDrop wipes).
+            drop(unsafe { Box::from_raw(keys) });
+        }
+    });
 }
 
 /// Carve the SM4-GCM record keys for `role` from a 40-byte
@@ -4997,10 +5043,12 @@ pub unsafe extern "C" fn gmcrypto_tlcp_record_keys_gcm_new(
 pub unsafe extern "C" fn gmcrypto_tlcp_record_keys_gcm_free(
     keys: *mut gmcrypto_tlcp_record_keys_gcm_t,
 ) {
-    if !keys.is_null() {
-        // SAFETY: from Box::into_raw; reclaim + drop (ZeroizeOnDrop wipes).
-        drop(unsafe { Box::from_raw(keys) });
-    }
+    let _ = std::panic::catch_unwind(|| {
+        if !keys.is_null() {
+            // SAFETY: from Box::into_raw; reclaim + drop (ZeroizeOnDrop wipes).
+            drop(unsafe { Box::from_raw(keys) });
+        }
+    });
 }
 
 /// Shared body of the two SM4-CBC protect entry points (copy-out via
@@ -5148,7 +5196,11 @@ pub unsafe extern "C" fn gmcrypto_tlcp_deprotect_cbc(
         let k = unsafe { &(*keys).inner };
         match deprotect_cbc(k, seq, content_type, [ver[0], ver[1]], rec) {
             // SAFETY: write_output validates the caller buffer.
-            Some(pt) => unsafe { write_output(&pt, out, out_capacity, out_actual_len) },
+            Some(mut pt) => {
+                let rc = unsafe { write_output(&pt, out, out_capacity, out_actual_len) };
+                pt.zeroize();
+                rc
+            }
             // Failure path: NO output touched (write_output is Some-only).
             None => GMCRYPTO_ERR,
         }
@@ -5226,7 +5278,11 @@ pub unsafe extern "C" fn gmcrypto_tlcp_deprotect_gcm(
         let k = unsafe { &(*keys).inner };
         match deprotect_gcm(k, seq, content_type, [ver[0], ver[1]], rec) {
             // SAFETY: write_output validates the caller buffer.
-            Some(pt) => unsafe { write_output(&pt, out, out_capacity, out_actual_len) },
+            Some(mut pt) => {
+                let rc = unsafe { write_output(&pt, out, out_capacity, out_actual_len) };
+                pt.zeroize();
+                rc
+            }
             None => GMCRYPTO_ERR,
         }
     })
