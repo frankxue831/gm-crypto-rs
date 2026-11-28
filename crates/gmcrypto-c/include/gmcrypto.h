@@ -370,8 +370,8 @@ typedef struct {
 
 /*
  Consume the streaming SM3 hasher and write the digest to
- `out_digest`. The handle is **freed** by this call; do not call
- [`gmcrypto_sm3_free`] on it afterwards.
+ `out_digest`. The handle is **freed** by this call (even on error);
+ do not call [`gmcrypto_sm3_free`] on it afterwards.
  */
  int gmcrypto_sm3_finalize(gmcrypto_sm3_t *hasher, uint8_t *out_digest) ;
 
@@ -404,14 +404,15 @@ int gmcrypto_hmac_sm3(const uint8_t *key,
 
 /*
  Consume the streaming HMAC-SM3 instance and write the 32-byte tag
- to `out_tag`. The handle is **freed** by this call.
+ to `out_tag`. The handle is **freed** by this call (even on error).
  */
  int gmcrypto_hmac_sm3_finalize(gmcrypto_hmac_sm3_t *mac, uint8_t *out_tag) ;
 
 /*
  Consume the streaming HMAC-SM3 instance and verify the candidate
  tag in constant time. Returns [`GMCRYPTO_OK`] on match;
- [`GMCRYPTO_ERR`] on mismatch. The handle is **freed** by this call.
+ [`GMCRYPTO_ERR`] on mismatch. The handle is **freed** by this call
+ (even on error).
  */
  int gmcrypto_hmac_sm3_verify(gmcrypto_hmac_sm3_t *mac, const uint8_t *expected_tag) ;
 
