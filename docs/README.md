@@ -90,6 +90,7 @@ Per-cycle charters — scope, forks, and sign-offs recorded for each cycle. The 
 - [v1.16-scope.md](v1.16-scope.md) — v1.16 GFNI SM4 S-box behind `sbox_x32` scope (x86_64 runtime detection, rustc ≥ 1.89 `build.rs` cfg).
 - [v1.18-scope.md](v1.18-scope.md) — v1.18 core-first primitives (`kdf::hkdf_sm3*`, `Sm2PrivateKey::generate`, streaming `Sm2Hasher`/`Sm2Digest` + `sign_digest`/`verify_digest`), internal SM4 SIMD fanout + temp-buffer zeroization, and `gmcrypto-c` doc hygiene (zero C ABI change); Q18.1–Q18.7.
 - [v1.19-scope.md](v1.19-scope.md) — maintainer-approved C ABI scope for HKDF-SM3, SM2 key generation and digest signing, and SM4-CTR, plus Rust-only compressed SEC1 public keys (Q19.1–Q19.6).
+- [v1.20-scope.md](v1.20-scope.md) — draft pre-registration for PKCS#10 SM2 Certificate Signing Requests (`x509::csr`, full round-trip build/sign + parse/verify, `SubjectName`, `extensionRequest` KeyUsage/SAN, Rust-core-first; Q20.1–Q20.6).
 
 ### Design & decomposition
 
