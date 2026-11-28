@@ -551,6 +551,42 @@ pub fn gmcrypto_core::tlcp::record::deprotect_gcm(&gmcrypto_core::tlcp::record::
 pub fn gmcrypto_core::tlcp::record::protect_cbc<R: rand_core::TryCryptoRng>(&gmcrypto_core::tlcp::record::RecordKeysCbc, u64, u8, [u8; 2], &[u8], &mut R) -> core::option::Option<alloc::vec::Vec<u8>>
 pub fn gmcrypto_core::tlcp::record::protect_gcm(&gmcrypto_core::tlcp::record::RecordKeysGcm, u64, u8, [u8; 2], &[u8]) -> core::option::Option<alloc::vec::Vec<u8>>
 pub mod gmcrypto_core::x509
+pub mod gmcrypto_core::x509::csr
+pub struct gmcrypto_core::x509::csr::CertificationRequest
+impl gmcrypto_core::x509::csr::CertificationRequest
+pub fn gmcrypto_core::x509::csr::CertificationRequest::attributes_raw(&self) -> &[u8]
+pub fn gmcrypto_core::x509::csr::CertificationRequest::cri_raw(&self) -> &[u8]
+pub fn gmcrypto_core::x509::csr::CertificationRequest::extension_request_raw(&self) -> core::option::Option<&[u8]>
+pub fn gmcrypto_core::x509::csr::CertificationRequest::from_der(&[u8]) -> core::option::Option<Self>
+pub fn gmcrypto_core::x509::csr::CertificationRequest::from_pem(&str) -> core::option::Option<Self>
+pub fn gmcrypto_core::x509::csr::CertificationRequest::key_usage(&self) -> core::option::Option<gmcrypto_core::x509::KeyUsage>
+pub fn gmcrypto_core::x509::csr::CertificationRequest::signature_raw(&self) -> &[u8]
+pub const fn gmcrypto_core::x509::csr::CertificationRequest::subject_public_key(&self) -> gmcrypto_core::sm2::public_key::Sm2PublicKey
+pub fn gmcrypto_core::x509::csr::CertificationRequest::subject_raw(&self) -> &[u8]
+pub fn gmcrypto_core::x509::csr::CertificationRequest::to_der(&self) -> &[u8]
+pub fn gmcrypto_core::x509::csr::CertificationRequest::to_pem(&self) -> alloc::string::String
+pub fn gmcrypto_core::x509::csr::CertificationRequest::verify_signature(&self) -> bool
+pub fn gmcrypto_core::x509::csr::CertificationRequest::verify_signature_with_id(&self, &[u8]) -> bool
+pub struct gmcrypto_core::x509::csr::CsrBuilder
+impl gmcrypto_core::x509::csr::CsrBuilder
+pub fn gmcrypto_core::x509::csr::CsrBuilder::from_subject_raw(&[u8]) -> Self
+pub const fn gmcrypto_core::x509::csr::CsrBuilder::key_usage(self, gmcrypto_core::x509::KeyUsage, bool) -> Self
+pub const fn gmcrypto_core::x509::csr::CsrBuilder::new(gmcrypto_core::x509::csr::SubjectName) -> Self
+pub fn gmcrypto_core::x509::csr::CsrBuilder::san_dns(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn gmcrypto_core::x509::csr::CsrBuilder::san_ip(self, core::net::ip_addr::IpAddr) -> Self
+pub fn gmcrypto_core::x509::csr::CsrBuilder::sign<R: rand_core::TryCryptoRng>(&self, &gmcrypto_core::sm2::private_key::Sm2PrivateKey, &mut R) -> core::result::Result<gmcrypto_core::x509::csr::CertificationRequest, gmcrypto_core::Error>
+pub fn gmcrypto_core::x509::csr::CsrBuilder::sign_with_id<R: rand_core::TryCryptoRng>(&self, &gmcrypto_core::sm2::private_key::Sm2PrivateKey, &[u8], &mut R) -> core::result::Result<gmcrypto_core::x509::csr::CertificationRequest, gmcrypto_core::Error>
+pub struct gmcrypto_core::x509::csr::SubjectName
+impl gmcrypto_core::x509::csr::SubjectName
+pub fn gmcrypto_core::x509::csr::SubjectName::common_name(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn gmcrypto_core::x509::csr::SubjectName::country(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn gmcrypto_core::x509::csr::SubjectName::locality(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub const fn gmcrypto_core::x509::csr::SubjectName::new() -> Self
+pub fn gmcrypto_core::x509::csr::SubjectName::organization(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn gmcrypto_core::x509::csr::SubjectName::organizational_unit(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn gmcrypto_core::x509::csr::SubjectName::state(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn gmcrypto_core::x509::csr::SubjectName::to_der(&self) -> core::result::Result<alloc::vec::Vec<u8>, gmcrypto_core::Error>
+pub const gmcrypto_core::x509::csr::PEM_LABEL: &str
 pub struct gmcrypto_core::x509::BasicConstraints
 pub gmcrypto_core::x509::BasicConstraints::is_ca: bool
 pub gmcrypto_core::x509::BasicConstraints::path_len: core::option::Option<u32>
@@ -572,15 +608,26 @@ pub fn gmcrypto_core::x509::Certificate::verify_signature(&self, &gmcrypto_core:
 pub fn gmcrypto_core::x509::Certificate::verify_signature_with_id(&self, &gmcrypto_core::sm2::public_key::Sm2PublicKey, &[u8]) -> bool
 pub struct gmcrypto_core::x509::KeyUsage
 impl gmcrypto_core::x509::KeyUsage
+pub const gmcrypto_core::x509::KeyUsage::CONTENT_COMMITMENT: Self
+pub const gmcrypto_core::x509::KeyUsage::CRL_SIGN: Self
+pub const gmcrypto_core::x509::KeyUsage::DATA_ENCIPHERMENT: Self
+pub const gmcrypto_core::x509::KeyUsage::DECIPHER_ONLY: Self
+pub const gmcrypto_core::x509::KeyUsage::DIGITAL_SIGNATURE: Self
+pub const gmcrypto_core::x509::KeyUsage::ENCIPHER_ONLY: Self
+pub const gmcrypto_core::x509::KeyUsage::KEY_AGREEMENT: Self
+pub const gmcrypto_core::x509::KeyUsage::KEY_CERT_SIGN: Self
+pub const gmcrypto_core::x509::KeyUsage::KEY_ENCIPHERMENT: Self
 pub const fn gmcrypto_core::x509::KeyUsage::content_commitment(self) -> bool
 pub const fn gmcrypto_core::x509::KeyUsage::crl_sign(self) -> bool
 pub const fn gmcrypto_core::x509::KeyUsage::data_encipherment(self) -> bool
 pub const fn gmcrypto_core::x509::KeyUsage::decipher_only(self) -> bool
 pub const fn gmcrypto_core::x509::KeyUsage::digital_signature(self) -> bool
+pub const fn gmcrypto_core::x509::KeyUsage::empty() -> Self
 pub const fn gmcrypto_core::x509::KeyUsage::encipher_only(self) -> bool
 pub const fn gmcrypto_core::x509::KeyUsage::key_agreement(self) -> bool
 pub const fn gmcrypto_core::x509::KeyUsage::key_cert_sign(self) -> bool
 pub const fn gmcrypto_core::x509::KeyUsage::key_encipherment(self) -> bool
+pub const fn gmcrypto_core::x509::KeyUsage::union(self, Self) -> Self
 pub struct gmcrypto_core::x509::X509Time
 pub gmcrypto_core::x509::X509Time::day: u8
 pub gmcrypto_core::x509::X509Time::hour: u8

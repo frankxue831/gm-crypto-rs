@@ -177,6 +177,68 @@ const ENCODED_BASIC_CONSTRAINTS: [u8; LEN_BASIC_CONSTRAINTS] =
 /// `basicConstraints` sub-identifier bytes.
 pub const BASIC_CONSTRAINTS: &[u8] = &ENCODED_BASIC_CONSTRAINTS;
 
+/// `id-ce-subjectAltName`: 2.5.29.17 (RFC 5280 §4.2.1.6).
+const ARCS_SUBJECT_ALT_NAME: &[u32] = &[2, 5, 29, 17];
+const LEN_SUBJECT_ALT_NAME: usize = encoded_len(ARCS_SUBJECT_ALT_NAME);
+const ENCODED_SUBJECT_ALT_NAME: [u8; LEN_SUBJECT_ALT_NAME] =
+    encode::<LEN_SUBJECT_ALT_NAME>(ARCS_SUBJECT_ALT_NAME);
+/// `subjectAltName` sub-identifier bytes.
+pub const SUBJECT_ALT_NAME: &[u8] = &ENCODED_SUBJECT_ALT_NAME;
+
+/// `pkcs-9-at-extensionRequest`: 1.2.840.113549.1.9.14 (RFC 2985 §5.4.2).
+const ARCS_EXTENSION_REQUEST: &[u32] = &[1, 2, 840, 113_549, 1, 9, 14];
+const LEN_EXTENSION_REQUEST: usize = encoded_len(ARCS_EXTENSION_REQUEST);
+const ENCODED_EXTENSION_REQUEST: [u8; LEN_EXTENSION_REQUEST] =
+    encode::<LEN_EXTENSION_REQUEST>(ARCS_EXTENSION_REQUEST);
+/// `extensionRequest` sub-identifier bytes.
+pub const EXTENSION_REQUEST: &[u8] = &ENCODED_EXTENSION_REQUEST;
+
+/// `id-at-commonName` (`CN`): 2.5.4.3 (X.520 / RFC 5280 Appendix A.1).
+const ARCS_COMMON_NAME: &[u32] = &[2, 5, 4, 3];
+const LEN_COMMON_NAME: usize = encoded_len(ARCS_COMMON_NAME);
+const ENCODED_COMMON_NAME: [u8; LEN_COMMON_NAME] = encode::<LEN_COMMON_NAME>(ARCS_COMMON_NAME);
+/// `commonName` sub-identifier bytes.
+pub const COMMON_NAME: &[u8] = &ENCODED_COMMON_NAME;
+
+/// `id-at-countryName` (`C`): 2.5.4.6 (X.520 / RFC 5280 Appendix A.1).
+const ARCS_COUNTRY_NAME: &[u32] = &[2, 5, 4, 6];
+const LEN_COUNTRY_NAME: usize = encoded_len(ARCS_COUNTRY_NAME);
+const ENCODED_COUNTRY_NAME: [u8; LEN_COUNTRY_NAME] = encode::<LEN_COUNTRY_NAME>(ARCS_COUNTRY_NAME);
+/// `countryName` sub-identifier bytes.
+pub const COUNTRY_NAME: &[u8] = &ENCODED_COUNTRY_NAME;
+
+/// `id-at-localityName` (`L`): 2.5.4.7 (X.520 / RFC 5280 Appendix A.1).
+const ARCS_LOCALITY_NAME: &[u32] = &[2, 5, 4, 7];
+const LEN_LOCALITY_NAME: usize = encoded_len(ARCS_LOCALITY_NAME);
+const ENCODED_LOCALITY_NAME: [u8; LEN_LOCALITY_NAME] =
+    encode::<LEN_LOCALITY_NAME>(ARCS_LOCALITY_NAME);
+/// `localityName` sub-identifier bytes.
+pub const LOCALITY_NAME: &[u8] = &ENCODED_LOCALITY_NAME;
+
+/// `id-at-stateOrProvinceName` (`ST`): 2.5.4.8 (X.520 / RFC 5280 Appendix A.1).
+const ARCS_STATE_OR_PROVINCE_NAME: &[u32] = &[2, 5, 4, 8];
+const LEN_STATE_OR_PROVINCE_NAME: usize = encoded_len(ARCS_STATE_OR_PROVINCE_NAME);
+const ENCODED_STATE_OR_PROVINCE_NAME: [u8; LEN_STATE_OR_PROVINCE_NAME] =
+    encode::<LEN_STATE_OR_PROVINCE_NAME>(ARCS_STATE_OR_PROVINCE_NAME);
+/// `stateOrProvinceName` sub-identifier bytes.
+pub const STATE_OR_PROVINCE_NAME: &[u8] = &ENCODED_STATE_OR_PROVINCE_NAME;
+
+/// `id-at-organizationName` (`O`): 2.5.4.10 (X.520 / RFC 5280 Appendix A.1).
+const ARCS_ORGANIZATION_NAME: &[u32] = &[2, 5, 4, 10];
+const LEN_ORGANIZATION_NAME: usize = encoded_len(ARCS_ORGANIZATION_NAME);
+const ENCODED_ORGANIZATION_NAME: [u8; LEN_ORGANIZATION_NAME] =
+    encode::<LEN_ORGANIZATION_NAME>(ARCS_ORGANIZATION_NAME);
+/// `organizationName` sub-identifier bytes.
+pub const ORGANIZATION_NAME: &[u8] = &ENCODED_ORGANIZATION_NAME;
+
+/// `id-at-organizationalUnitName` (`OU`): 2.5.4.11 (X.520 / RFC 5280 Appendix A.1).
+const ARCS_ORGANIZATIONAL_UNIT_NAME: &[u32] = &[2, 5, 4, 11];
+const LEN_ORGANIZATIONAL_UNIT_NAME: usize = encoded_len(ARCS_ORGANIZATIONAL_UNIT_NAME);
+const ENCODED_ORGANIZATIONAL_UNIT_NAME: [u8; LEN_ORGANIZATIONAL_UNIT_NAME] =
+    encode::<LEN_ORGANIZATIONAL_UNIT_NAME>(ARCS_ORGANIZATIONAL_UNIT_NAME);
+/// `organizationalUnitName` sub-identifier bytes.
+pub const ORGANIZATIONAL_UNIT_NAME: &[u8] = &ENCODED_ORGANIZATIONAL_UNIT_NAME;
+
 #[cfg(test)]
 mod tests {
     use super::*;

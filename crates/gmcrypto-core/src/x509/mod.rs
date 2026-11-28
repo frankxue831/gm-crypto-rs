@@ -69,6 +69,8 @@
 
 extern crate alloc;
 
+pub mod csr;
+
 use crate::asn1::oid;
 use crate::asn1::reader;
 use crate::sm2::{DEFAULT_SIGNER_ID, Sm2PublicKey, verify_with_id};
@@ -250,6 +252,63 @@ pub struct KeyUsage {
 }
 
 impl KeyUsage {
+    /// `digitalSignature` (bit 0).
+    pub const DIGITAL_SIGNATURE: Self = Self { bits: 1 << 0 };
+    /// `nonRepudiation` / `contentCommitment` (bit 1).
+    pub const CONTENT_COMMITMENT: Self = Self { bits: 1 << 1 };
+    /// `keyEncipherment` (bit 2).
+    pub const KEY_ENCIPHERMENT: Self = Self { bits: 1 << 2 };
+    /// `dataEncipherment` (bit 3).
+    pub const DATA_ENCIPHERMENT: Self = Self { bits: 1 << 3 };
+    /// `keyAgreement` (bit 4).
+    pub const KEY_AGREEMENT: Self = Self { bits: 1 << 4 };
+    /// `keyCertSign` (bit 5).
+    pub const KEY_CERT_SIGN: Self = Self { bits: 1 << 5 };
+    /// `cRLSign` (bit 6).
+    pub const CRL_SIGN: Self = Self { bits: 1 << 6 };
+    /// `encipherOnly` (bit 7).
+    pub const ENCIPHER_ONLY: Self = Self { bits: 1 << 7 };
+    /// `decipherOnly` (bit 8).
+    pub const DECIPHER_ONLY: Self = Self { bits: 1 << 8 };
+
+    /// Empty `KeyUsage` bitfield (no bits set).
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self { bits: 0 }
+    }
+
+    /// Combine two `KeyUsage` bitfields (bitwise OR).
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self {
+            bits: self.bits | other.bits,
+        }
+    }
+
+    /// Encode this `KeyUsage` as a canonical minimal DER `BIT STRING` per
+    /// RFC 5280 §4.2.1.3 (trailing zero bits omitted). Returns `None` if no
+    /// bits are set.
+    pub(crate) fn encode_der(self) -> Option<Vec<u8>> {
+        if self.bits == 0 {
+            return None;
+        }
+        let mut b0 = 0u8;
+        for i in 0u16..8 {
+            if self.has(i) {
+                b0 |= 1u8 << (7 - i);
+            }
+        }
+        let mut out = Vec::with_capacity(5);
+        if self.has(8) {
+            crate::asn1::writer::write_bit_string(&mut out, 7, &[b0, 0x80]);
+        } else {
+            #[allow(clippy::cast_possible_truncation)]
+            let unused = b0.trailing_zeros() as u8;
+            crate::asn1::writer::write_bit_string(&mut out, unused, &[b0]);
+        }
+        Some(out)
+    }
+
     /// Parse the DER `BIT STRING` (the `extnValue` content of a `keyUsage`
     /// extension). `None` on malformed input.
     fn parse(bit_string_tlv: &[u8]) -> Option<Self> {
