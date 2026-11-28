@@ -32,6 +32,12 @@ pub const TAG_OID: u8 = 0x06;
 pub const TAG_SEQUENCE: u8 = 0x30;
 /// Universal constructed SET tag.
 pub const TAG_SET: u8 = 0x31;
+/// Universal primitive BOOLEAN tag.
+pub const TAG_BOOLEAN: u8 = 0x01;
+/// Universal primitive `UTF8String` tag.
+pub const TAG_UTF8_STRING: u8 = 0x0C;
+/// Universal primitive `PrintableString` tag.
+pub const TAG_PRINTABLE_STRING: u8 = 0x13;
 
 /// Maximum DER length the reader/writer support: 16 MiB.
 pub const MAX_DER_LEN: usize = 16_777_216;
@@ -200,6 +206,34 @@ pub fn read_bit_string(input: &[u8]) -> Option<(u8, &[u8], &[u8])> {
 #[must_use]
 pub fn read_sequence(input: &[u8]) -> Option<(&[u8], &[u8])> {
     read_tlv(input, TAG_SEQUENCE)
+}
+
+/// Read a DER SET (`0x31`).
+///
+/// Returns the body bytes (borrowed) and the remainder after the set.
+#[must_use]
+pub fn read_set(input: &[u8]) -> Option<(&[u8], &[u8])> {
+    read_tlv(input, TAG_SET)
+}
+
+/// Validate and skip one arbitrary single-byte-tag DER TLV element.
+///
+/// Returns `(full_tlv_span, rest)`. Rejects multi-byte tags (`tag & 0x1F ==
+/// 0x1F`), non-minimal lengths, lengths `>= MAX_DER_LEN`, and truncated
+/// values.
+#[must_use]
+pub fn read_any_tlv(input: &[u8]) -> Option<(&[u8], &[u8])> {
+    let (&tag, after_tag) = input.split_first()?;
+    if tag & 0x1F == 0x1F {
+        return None;
+    }
+    let (len, after_len) = read_length(after_tag)?;
+    if after_len.len() < len {
+        return None;
+    }
+    let (_, rest) = after_len.split_at(len);
+    let span = &input[..input.len() - rest.len()];
+    Some((span, rest))
 }
 
 /// Read a context-tagged `[n] EXPLICIT` field.

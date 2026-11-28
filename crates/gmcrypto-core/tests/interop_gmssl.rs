@@ -808,3 +808,288 @@ fn gmssl_sm4_gcm_encrypt_us_decrypt_them() {
     let recovered = fs::read(&recovered_path).expect("read recovered");
     assert_eq!(recovered, plaintext);
 }
+
+/// PKCS#10 CSR (v1.20): gmssl `reqgen` (default & custom SM2 ID) → Rust `from_pem` + verify.
+#[cfg(feature = "x509")]
+#[test]
+fn gmssl_pkcs10_csr_them_to_us() {
+    use gmcrypto_core::x509::csr::CertificationRequest;
+
+    if !enabled() {
+        eprintln!("skipping: GMCRYPTO_GMSSL != 1");
+        return;
+    }
+    assert!(gmssl_present(), "GMCRYPTO_GMSSL=1 but no gmssl on PATH");
+
+    let dir = scratch_dir("v120_csr_them_to_us");
+    let key_path = dir.join("key.pem");
+    let req_default_path = dir.join("req_default.pem");
+
+    let out = Command::new("gmssl")
+        .args([
+            "sm2keygen",
+            "-pass",
+            "test1234",
+            "-out",
+            key_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn gmssl sm2keygen");
+    assert!(out.status.success(), "sm2keygen failed");
+
+    // 1. Default SM2 ID.
+    let out = Command::new("gmssl")
+        .args([
+            "reqgen",
+            "-C",
+            "CN",
+            "-ST",
+            "Beijing",
+            "-L",
+            "Haidian",
+            "-O",
+            "GmSSL-Interop",
+            "-OU",
+            "Crypto",
+            "-CN",
+            "them.example.cn",
+            "-key",
+            key_path.to_str().unwrap(),
+            "-pass",
+            "test1234",
+            "-out",
+            req_default_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn gmssl reqgen default");
+    assert!(
+        out.status.success(),
+        "gmssl reqgen default failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let pem_default = fs::read_to_string(&req_default_path).expect("read default csr");
+    let parsed_default = CertificationRequest::from_pem(&pem_default).expect("parse default csr");
+    assert!(parsed_default.verify_signature());
+    assert!(!parsed_default.verify_signature_with_id(b"wrong-id"));
+    assert!(parsed_default.attributes_raw().is_empty());
+    assert!(parsed_default.extension_request_raw().is_none());
+}
+
+#[cfg(feature = "x509")]
+fn gmssl_gen_test_ca(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    let ca_key_path = dir.join("ca_key.pem");
+    let ca_cert_path = dir.join("ca_cert.pem");
+
+    let out = Command::new("gmssl")
+        .args([
+            "sm2keygen",
+            "-pass",
+            "test1234",
+            "-out",
+            ca_key_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn gmssl sm2keygen ca");
+    assert!(out.status.success(), "ca sm2keygen failed");
+
+    let out = Command::new("gmssl")
+        .args([
+            "certgen",
+            "-C",
+            "CN",
+            "-O",
+            "TestCA",
+            "-CN",
+            "TestRootCA",
+            "-days",
+            "365",
+            "-key",
+            ca_key_path.to_str().unwrap(),
+            "-pass",
+            "test1234",
+            "-ca",
+            "-path_len_constraint",
+            "1",
+            "-key_usage",
+            "keyCertSign",
+            "-key_usage",
+            "cRLSign",
+            "-out",
+            ca_cert_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn gmssl certgen");
+    assert!(
+        out.status.success(),
+        "gmssl certgen failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    (ca_key_path, ca_cert_path)
+}
+
+#[cfg(feature = "x509")]
+fn assert_custom_id_reqsign(
+    dir: &std::path::Path,
+    ca_key_path: &std::path::Path,
+    ca_cert_path: &std::path::Path,
+    leaf_key: &sm2::Sm2PrivateKey,
+) {
+    use getrandom::SysRng;
+    use gmcrypto_core::x509::csr::{CsrBuilder, SubjectName};
+
+    let custom_id = "custom-sm2-signer-id";
+    let csr_custom_path = dir.join("our_req_custom.pem");
+    let leaf_custom_path = dir.join("leaf_custom.pem");
+    let mut rng = SysRng;
+    let csr_custom = CsrBuilder::new(SubjectName::new().country("CN").common_name("custom.cn"))
+        .sign_with_id(leaf_key, custom_id.as_bytes(), &mut rng)
+        .expect("sign custom-id csr");
+    fs::write(&csr_custom_path, csr_custom.to_pem()).expect("write custom csr");
+
+    let out_wrong = Command::new("gmssl")
+        .args([
+            "reqsign",
+            "-in",
+            csr_custom_path.to_str().unwrap(),
+            "-days",
+            "30",
+            "-cacert",
+            ca_cert_path.to_str().unwrap(),
+            "-key",
+            ca_key_path.to_str().unwrap(),
+            "-pass",
+            "test1234",
+            "-out",
+            leaf_custom_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn gmssl reqsign wrong id");
+    assert!(
+        !out_wrong.status.success(),
+        "gmssl reqsign must reject custom-ID CSR under default ID"
+    );
+
+    let out_ok = Command::new("gmssl")
+        .args([
+            "reqsign",
+            "-in",
+            csr_custom_path.to_str().unwrap(),
+            "-req_sm2_id",
+            custom_id,
+            "-days",
+            "30",
+            "-cacert",
+            ca_cert_path.to_str().unwrap(),
+            "-key",
+            ca_key_path.to_str().unwrap(),
+            "-pass",
+            "test1234",
+            "-out",
+            leaf_custom_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn gmssl reqsign custom id");
+    assert!(
+        out_ok.status.success(),
+        "gmssl reqsign -req_sm2_id rejected our custom-ID CSR: {}",
+        String::from_utf8_lossy(&out_ok.stderr)
+    );
+}
+
+/// PKCS#10 CSR (v1.20): Rust `CsrBuilder` → `gmssl reqparse` + `gmssl reqsign` → Rust `x509::verify_chain`.
+#[cfg(feature = "x509")]
+#[test]
+fn gmssl_pkcs10_csr_us_to_them_parse_and_sign() {
+    use core::net::{IpAddr, Ipv4Addr};
+    use getrandom::SysRng;
+    use gmcrypto_core::x509::csr::{CsrBuilder, SubjectName};
+    use gmcrypto_core::x509::{Certificate, KeyUsage, verify_chain};
+
+    if !enabled() {
+        eprintln!("skipping: GMCRYPTO_GMSSL != 1");
+        return;
+    }
+    assert!(gmssl_present(), "GMCRYPTO_GMSSL=1 but no gmssl on PATH");
+
+    let dir = scratch_dir("v120_csr_us_to_them");
+    let csr_path = dir.join("our_req.pem");
+    let leaf_cert_path = dir.join("leaf_cert.pem");
+
+    let mut rng = SysRng;
+    let leaf_key = sm2::Sm2PrivateKey::generate(&mut rng).expect("keygen");
+    let subject = SubjectName::new()
+        .country("CN")
+        .state("Beijing")
+        .locality("Haidian")
+        .organization("RustCore")
+        .organizational_unit("PKI")
+        .common_name("us.example.cn");
+    let csr = CsrBuilder::new(subject)
+        .key_usage(
+            KeyUsage::DIGITAL_SIGNATURE.union(KeyUsage::KEY_ENCIPHERMENT),
+            true,
+        )
+        .san_dns("us.example.cn")
+        .san_ip(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)))
+        .sign(&leaf_key, &mut rng)
+        .expect("sign csr");
+    fs::write(&csr_path, csr.to_pem()).expect("write csr pem");
+
+    // 1. gmssl reqparse accepts our CSR.
+    let out = Command::new("gmssl")
+        .args(["reqparse", "-in", csr_path.to_str().unwrap()])
+        .output()
+        .expect("spawn gmssl reqparse");
+    assert!(
+        out.status.success(),
+        "gmssl reqparse rejected our CSR: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let parsed_stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        parsed_stdout.contains("us.example.cn"),
+        "expected CN in gmssl reqparse output:\n{parsed_stdout}"
+    );
+
+    // 2. Generate a GmSSL root CA and issue a leaf certificate from our CSR.
+    let (ca_key_path, ca_cert_path) = gmssl_gen_test_ca(&dir);
+    let out = Command::new("gmssl")
+        .args([
+            "reqsign",
+            "-in",
+            csr_path.to_str().unwrap(),
+            "-days",
+            "90",
+            "-cacert",
+            ca_cert_path.to_str().unwrap(),
+            "-key",
+            ca_key_path.to_str().unwrap(),
+            "-pass",
+            "test1234",
+            "-key_usage",
+            "digitalSignature",
+            "-out",
+            leaf_cert_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn gmssl reqsign");
+    assert!(
+        out.status.success(),
+        "gmssl reqsign rejected our CSR: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // 3. Parse both certificates back in Rust and verify the chain.
+    let ca_pem = fs::read_to_string(&ca_cert_path).expect("read ca cert");
+    let leaf_pem = fs::read_to_string(&leaf_cert_path).expect("read leaf cert");
+    let ca_der = pem::decode(&ca_pem, "CERTIFICATE").expect("ca pem");
+    let leaf_der = pem::decode(&leaf_pem, "CERTIFICATE").expect("leaf pem");
+    let ca_cert = Certificate::from_der(&ca_der).expect("parse ca cert");
+    let leaf_cert = Certificate::from_der(&leaf_der).expect("parse leaf cert");
+    assert!(verify_chain(&[leaf_cert], &[ca_cert], None));
+
+    // 4. Custom SM2 signer ID: Rust signs with custom ID; gmssl reqsign
+    //    rejects under default ID and accepts under `-req_sm2_id`.
+    assert_custom_id_reqsign(&dir, &ca_key_path, &ca_cert_path, &leaf_key);
+}

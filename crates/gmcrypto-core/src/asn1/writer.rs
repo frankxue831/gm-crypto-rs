@@ -13,7 +13,8 @@
 use alloc::vec::Vec;
 
 use super::reader::{
-    MAX_DER_LEN, TAG_BIT_STRING, TAG_INTEGER, TAG_NULL, TAG_OCTET_STRING, TAG_OID, TAG_SEQUENCE,
+    MAX_DER_LEN, TAG_BIT_STRING, TAG_BOOLEAN, TAG_INTEGER, TAG_NULL, TAG_OCTET_STRING, TAG_OID,
+    TAG_PRINTABLE_STRING, TAG_SEQUENCE, TAG_SET, TAG_UTF8_STRING,
 };
 
 /// Append a minimal DER length encoding to `out`.
@@ -111,6 +112,34 @@ pub fn write_sequence(out: &mut Vec<u8>, body: &[u8]) {
     out.push(TAG_SEQUENCE);
     write_length(out, body.len());
     out.extend_from_slice(body);
+}
+
+/// Append a DER SET wrapping `body`: `31 LEN body`.
+pub fn write_set(out: &mut Vec<u8>, body: &[u8]) {
+    out.push(TAG_SET);
+    write_length(out, body.len());
+    out.extend_from_slice(body);
+}
+
+/// Append a DER BOOLEAN (`01 01 FF` for `true`, `01 01 00` for `false`).
+pub fn write_boolean(out: &mut Vec<u8>, value: bool) {
+    out.push(TAG_BOOLEAN);
+    out.push(0x01);
+    out.push(if value { 0xFF } else { 0x00 });
+}
+
+/// Append a DER `UTF8String` (`0C LEN bytes`).
+pub fn write_utf8_string(out: &mut Vec<u8>, value: &str) {
+    out.push(TAG_UTF8_STRING);
+    write_length(out, value.len());
+    out.extend_from_slice(value.as_bytes());
+}
+
+/// Append a DER `PrintableString` (`13 LEN bytes`).
+pub fn write_printable_string(out: &mut Vec<u8>, value: &str) {
+    out.push(TAG_PRINTABLE_STRING);
+    write_length(out, value.len());
+    out.extend_from_slice(value.as_bytes());
 }
 
 /// Append a context-tagged `[n] EXPLICIT` field wrapping `inner`.
